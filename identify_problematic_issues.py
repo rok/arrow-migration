@@ -2,6 +2,7 @@ import json
 import os
 import re
 
+# Script to help identify issues related to problems or observations made during import.
 def identify_leading_space_hash_text(issue_dict):
     if has_hash_with_leading_space(issue_dict['fields']['description']):
         print(f"{issue_dict['key']}\tHASH_LEADING_SPACES\tDESCRIPTION")
