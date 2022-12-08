@@ -1,0 +1,24 @@
+{
+    "issue": {
+        "title": "[R] Inconsistent application of type in Datasets via the schema",
+        "body": "***Note**: This issue was originally created as [ARROW-14324](https://issues.apache.org/jira/browse/ARROW-14324). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n\u00a0\r\n\r\nIt looks like at least `filter` is not handling a column type specified by `schema `when specified in `open_dataset. `Reprex:\r\n```java\n\r\noptions(\"max.print\" = 5)\r\nlibrary(arrow, warn.conflicts = FALSE)\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\n## Set up the data\r\ntf <- tempfile()\r\ndir.create(tf)\r\nwrite_dataset(quakes, tf)\r\n## Works as expected\r\nopen_dataset(tf) %>%\r\n filter(stations == 41) %>%\r\n collect()\r\n#> lat long depth mag stations\r\n#> 1 -20.42 181.62 562 4.8 41\r\n#> [ reached 'max' / getOption(\"max.print\") -- omitted 11 rows ]\r\n## errors as expected\r\nopen_dataset(tf) %>%\r\n filter(stations == \"41\") %>%\r\n collect()\r\n#> Error: NotImplemented: Function equal has no kernel matching input types (array[int32], scalar[string])\r\n## Ok let's change a column type\r\ntf_reg <- open_dataset(tf)$schema\r\ntf_reg$stations <- string()\r\n## ok returns a character\r\nopen_dataset(tf, schema = tf_reg) %>%\r\n pull(stations) %>%\r\n typeof()\r\n#> [1] \"character\"\r\n## So if `stations` is character I think this should work?\r\nopen_dataset(tf, schema = tf_reg) %>%\r\n filter(stations == as.character(\"41\")) %>%\r\n collect()\r\n#> Error: Filter expression not supported for Arrow Datasets: stations == as.character(\"41\")\r\n#> Call collect() first to pull data into R.\r\n## previous behaviour no longer works\r\nopen_dataset(tf, schema = tf_reg) %>%\r\n filter(stations == 41) %>%\r\n collect()\r\n#> Error: NotImplemented: Function equal has no kernel matching input types (array[string], scalar[double])\r\n\u00a0\r\n```\r\n\u00a0",
+        "created_at": "2021-10-14T19:56:28.000Z",
+        "updated_at": "2021-10-29T15:53:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-10-29T15:27:14.959Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14324?focusedCommentId=17436035) by Neal Richardson (npr):*\nDoes it work without as.character (since it already is character), like this?\r\n\r\n```Java\n\r\nopen_dataset(tf, schema = tf_reg) %>%\r\n filter(stations == \"41\") %>%\r\n collect()\r\n```\r\n\r\nIf so, then this sounds like ARROW-13118 to me."
+        },
+        {
+            "created_at": "2021-10-29T15:53:40.187Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14324?focusedCommentId=17436045) by Sam Albers (boshek):*\nRight. I should have included that one too. That example does not work for me either:\u00a0\r\n```java\n\r\nopen_dataset(tf, schema = tf_reg) %>%\r\n   filter(stations == \"41\") %>%\r\n   collect()\r\nError: NotImplemented: Function equal has no kernel matching input types (scalar[string], scalar[int32])\r\nBacktrace:\r\n    x\r\n 1. +-[ `%>%`(...) ]\r\n 2. +-[ dplyr::collect(...) ]\r\n 3. \\-arrow:::collect.arrow_dplyr_query(.)\r\n 4.   \\-Scanner$create(x)$ToTable()\r\n 5.     \\-arrow:::dataset___Scanner__ToTable(self)\r\n\r\npackageVersion(\"arrow\")\r\n[1] '5.0.0.2'\r\n```"
+        }
+    ]
+}

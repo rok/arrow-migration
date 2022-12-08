@@ -1,0 +1,38 @@
+{
+    "issue": {
+        "title": "[Rust] [DataFusion] Query fails/incorrect when aggregated + grouped columns don't match the selected columns",
+        "body": "***Note**: This issue was originally created as [ARROW-7480](https://issues.apache.org/jira/browse/ARROW-7480). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThere are two scenarios that cause problems but are related to the queries with aggregate expressions and the SQL planner. The aggregate_test_100 dataset is used for both of the queries.\u00a0\r\n\r\nAt a high level, the issue is basically that queries containing aggregate expressions may generate the wrong schema.\r\n\r\n\u00a0\r\n\r\n**Scenario 1**\r\n\r\nColumns are grouped by but not selected.\r\n\r\nQuery:\r\n```java\n\r\nSELECT c1, MIN(c12) FROM aggregate_test_100 GROUP BY c1, c13\n```\r\nError:\r\n```\n\r\nArrowError(InvalidArgumentError(\"number of columns must match number of fields in schema\"))\n```\r\nWhile the error is an ArrowError, it actually looks like it is because the wrong schema is generated. In the src/sql/planner.rs file the impl for SqlToRel is defined. In the sql_to_rel method, it checks if the query contains aggregate expressions, and if it does it generates the schema from the columns included in group expressions and aggregate expressions.\r\n\r\nThis in turn generates the following schema:\r\n```java\n\r\nSchema {\r\n    fields: [\r\n        Field {\r\n            name: \"c1\",\r\n            data_type: Utf8,\r\n            nullable: false,\r\n        },\r\n        Field {\r\n            name: \"c13\",\r\n            data_type: Utf8,\r\n            nullable: false,\r\n        },\r\n        Field {\r\n            name: \"MIN\",\r\n            data_type: Float64,\r\n            nullable: true,\r\n        },\r\n    ],\r\n    metadata: {},\r\n}\n```\r\nI am not super familiar with how DataFusion works under the hood, but I would assume that this schema is actually correct for the Aggregate logical plan, but isn't projecting the data correctly thus resulting in the wrong query result schema?\u00a0\r\n\r\n\u00a0\r\n\r\n**Senario 2**\r\n\r\nColumns are selected, but not grouped or part of an aggregate function. This query actually will run, but the wrong schema is produced.\r\n\r\nQuery:\u00a0\r\n```java\n\r\nSELECT c1, c13, MIN(c12) FROM aggregate_test_100 GROUP BY c1\n```\r\nSchema generated:\r\n```java\n\r\nSchema {\r\n    fields: [\r\n        Field {\r\n            name: \"c0\",\r\n            data_type: Utf8,\r\n            nullable: true,\r\n        },\r\n        Field {\r\n            name: \"c1\",\r\n            data_type: Float64,\r\n            nullable: true,\r\n        },\r\n        Field {\r\n            name: \"c1\",\r\n            data_type: Float64,\r\n            nullable: true,\r\n        },\r\n    ],\r\n    metadata: {},\r\n}\u00a0\n```\r\nThis should actually be Field(c1, Utf8), Field(c13, Utf8), Field(MAX, Float64).\r\n\r\n\u00a0\r\n----\r\nSchema 2 is questionable since some DBMS will run the query (ex MySQL) but others (Postgres) will require that all the columns must be in the GROUP BY to be used in an aggregate function.",
+        "created_at": "2019-12-30T22:40:09.000Z",
+        "updated_at": "2020-03-19T17:28:10.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Component: Rust - DataFusion",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-03-19T17:28:10.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-01-01T23:35:30.215Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7480?focusedCommentId=17006516) by Kyle McCarthy (kylemccarthy):*\nI can work on a fix for this, I would like some feedback from some of the other contributors on what to do with the second scenario since different DBs handle the case differently. "
+        },
+        {
+            "created_at": "2020-01-19T22:30:44.457Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7480?focusedCommentId=17019047) by Kyle McCarthy (kylemccarthy):*\n@ `[~andygrove]` \u00a0sorry for tagging you directly, but I was looking for some clarification wasn't sure the right way to ask.\r\n\r\nIn the SQL planner, I am a little confused how the column numbers are derived for group by and order by expressions. Using this statement:\r\n\r\n\u00a0`SELECT first_name FROM person ORDER BY first_name`\r\n\r\nIt produces the SQL plan\u00a0\"Sort: #0 ASC\\n Projection: #1\\n TableScan: person projection=None\". I was expecting it to produce \"Sort: #1...\". Are the column numbers for sorts and groups relative to the column position in the projection rather than the table?\r\n\r\nEdit: I am thinking that it should actually be using the column position in the table... At least it looks like the projection push down optimizer is expecting for them to be relative to the table.\u00a0\r\n\r\nWith the aggregate_test_100 data the query\r\n\r\n`SELECT c1, AVG(c12) FROM aggregate_test_100 GROUP BY c1, c2`\r\n\r\nhas a table scan with the projection\u00a0_TableScan: aggregate_test_100 projection=Some([0, 1, 2, 11]_, which generates the wrong table schema.\r\n\r\n\u00a0\r\n\r\nThanks!"
+        },
+        {
+            "created_at": "2020-03-15T17:17:52.508Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7480?focusedCommentId=17059740) by Andy Grove (andygrove):*\nHi `[~kylemccarthy]` Sorry for the late response. There's a good chance that these issues will be resolved by <https://github.com/apache/arrow/pull/6625>\r\n\r\nIf not, would you mind adding some unit tests to demonstrate the bugs?"
+        },
+        {
+            "created_at": "2020-03-15T17:51:43.604Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7480?focusedCommentId=17059756) by Andy Grove (andygrove):*\nActually, I updated <https://github.com/apache/arrow/pull/6625> to include a specific validation check for these use cases. Thanks for the detailed bug report! DataFusion aims to follow the same rules as Postgres for these cases."
+        },
+        {
+            "created_at": "2020-03-19T17:28:10.506Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7480?focusedCommentId=17062792) by Andy Grove (andygrove):*\nFixed by https://github.com/apache/arrow/pull/6625"
+        }
+    ]
+}

@@ -1,0 +1,30 @@
+{
+    "issue": {
+        "title": "[Python] Pandas warning for np.bool is failing nightly builds for wheel-manylinux20xx-cp37-amd64",
+        "body": "***Note**: This issue was originally created as [ARROW-16908](https://issues.apache.org/jira/browse/ARROW-16908). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSome of our nightly test builds are failing:\r\n\r\n<font color=\"#1d1c1d\">-\u00a0</font>[wheel-manylinux2010-cp37-amd64](https://github.com/ursacomputing/crossbow/runs/7059586081?check_suite_focus=true)\r\n<font color=\"#1d1c1d\">-\u00a0</font>[wheel-manylinux2014-cp37-amd64](https://github.com/ursacomputing/crossbow/runs/7059583114?check_suite_focus=true)\r\n\r\nwith the following two errors:\r\n```java\n\r\n=================================== FAILURES ===================================\r\n_______________ TestConvertMetadata.test_rangeindex_doesnt_warn ________________\r\nself = <pyarrow.tests.test_pandas.TestConvertMetadata object at 0x7fe1e6fcc290>\r\n\u00a0 \u00a0 def test_rangeindex_doesnt_warn(self):\r\n# ARROW-5606: pandas 0.25 deprecated private _start/stop/step\r\n# attributes -> can be removed if support < pd 0.25 is dropped\r\n\u00a0 \u00a0 \u00a0 \u00a0 df = pd.DataFrame(np.random.randn(4, 2), columns=['a', 'b'])\r\n\u00a0 \u00a0 \u00a0 \u00a0 with pytest.warns(None) as record:\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 _check_pandas_roundtrip(df, preserve_index=True)\r\n> \u00a0 \u00a0 \u00a0 assert len(record) == 0, [r.message for r in record]\r\nE \u00a0 \u00a0 \u00a0 AssertionError: [DeprecationWarning('`np.bool` is a deprecated alias for the builtin `bool`. To silence this warning, use `bool` by it...cated in NumPy 1.20; for more details and guidance: https://numpy.org/devdocs/release/1.20.0-notes.html#deprecations')]\r\nE \u00a0 \u00a0 \u00a0 assert 4 == 0\r\nE \u00a0 \u00a0 \u00a0 \u00a0+ \u00a0where 4 = len(WarningsChecker(record=True))\r\nusr/local/lib/python3.7/site-packages/pyarrow/tests/test_pandas.py:245: AssertionError\r\n_______________ TestConvertMetadata.test_multiindex_doesnt_warn ________________\r\nself = <pyarrow.tests.test_pandas.TestConvertMetadata object at 0x7fe1e6fccd50>\r\n\u00a0 \u00a0 def test_multiindex_doesnt_warn(self):\r\n# ARROW-3953: pandas 0.24 rename of MultiIndex labels to codes\r\n\u00a0 \u00a0 \u00a0 \u00a0 columns = pd.MultiIndex.from_arrays([['one', 'two'], ['X', 'Y']])\r\n\u00a0 \u00a0 \u00a0 \u00a0 df = pd.DataFrame([(1, 'a'), (2, 'b'), (3, 'c')], columns=columns)\r\n\u00a0 \u00a0 \u00a0 \u00a0 with pytest.warns(None) as record:\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 _check_pandas_roundtrip(df, preserve_index=True)\r\n> \u00a0 \u00a0 \u00a0 assert len(record) == 0, [r.message for r in record]\r\nE \u00a0 \u00a0 \u00a0 AssertionError: [DeprecationWarning('`np.bool` is a deprecated alias for the builtin `bool`. To silence this warning, use `bool` by it...cated in NumPy 1.20; for more details and guidance: https://numpy.org/devdocs/release/1.20.0-notes.html#deprecations')]\r\nE \u00a0 \u00a0 \u00a0 assert 6 == 0\r\nE \u00a0 \u00a0 \u00a0 \u00a0+ \u00a0where 6 = len(WarningsChecker(record=True))\r\nusr/local/lib/python3.7/site-packages/pyarrow/tests/test_pandas.py:296: AssertionError \n```",
+        "created_at": "2022-06-27T10:21:27.000Z",
+        "updated_at": "2022-06-30T08:12:35.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Continuous Integration",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-06-30T08:12:35.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-28T11:07:30.932Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16908?focusedCommentId=17559707) by Ra\u00fal Cumplido (raulcd):*\nIt seems the latest version of numpy that is installed during the wheels installation (numpy-1.21.6-cp37-cp37m-manylinux_2_12_x86_64.manylinux2010_x86_64.whl) is raising a new DeprecationWarning. I have been able to fix the test failures locally by limiting the installed version of numpy on our setup.py, see this diff:\r\n```java\n\r\ndiff --git a/python/setup.py b/python/setup.py\r\nindex b572be1..ac1da95 100755\r\n--- a/python/setup.py\r\n+++ b/python/setup.py\r\n@@ -609,7 +609,7 @@ class BinaryDistribution(Distribution):\r\n\u00a0\r\n\u00a0\r\n\u00a0install_requires = (\r\n- \u00a0 \u00a0'numpy >= 1.16.6',\r\n+ \u00a0 \u00a0'numpy == 1.19.5',\r\n\u00a0)\r\n```\r\nWith that I can build the wheel and run all tests for py3.7 with the following steps:\r\n```java\n\r\n$ ARCH=amd64 PYTHON=3.7 docker-compose run --rm python-wheel-manylinux-2014\r\n$ ARCH=amd64 PYTHON=3.7 docker-compose run --rm python-wheel-manylinux-test-unittests\n```\r\nThe above was reproducing the failure before the change.\r\n\r\nThere was a change introduced here:\r\n<https://github.com/apache/arrow/pull/12763/files#diff-a2c3d2d0c3a36128695e156b63504e1dd91f4167f23afe4fa8bb6e131ef248c1>\r\n\r\nWhich seems to be the culprit."
+        },
+        {
+            "created_at": "2022-06-29T17:03:34.593Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16908?focusedCommentId=17560385) by Antoine Pitrou (apitrou):*\nPerhaps we should filter out those warnings anyway? They are not our fault. See <https://docs.pytest.org/en/7.1.x/how-to/capture-warnings.html#pytest-mark-filterwarnings>"
+        },
+        {
+            "created_at": "2022-06-30T08:12:35.569Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16908?focusedCommentId=17560908) by Kouhei Sutou (kou):*\nIssue resolved by pull request 13449\n<https://github.com/apache/arrow/pull/13449>"
+        }
+    ]
+}

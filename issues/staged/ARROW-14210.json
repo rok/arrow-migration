@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[C++] CMAKE_AR is not passed to bzip2 thirdparty dependency",
+        "body": "***Note**: This issue was originally created as [ARROW-14210](https://issues.apache.org/jira/browse/ARROW-14210). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIt seems like the `AR` or `CMAKE_AR` variables aren't getting passed for the bzip2 build, which causes if to fail if we're doing a `BUNDLED` build and `ar` isn't available in the `$PATH` (e.g. in a conda environment).\r\n\r\nTo replicate:\r\n 1. Download Arrow and start an interactive shell in a container \r\n (docker should be fine if you prefer it to podman)\r\n```sh\n\r\ngit clone --depth 1 git@github.com:apache/arrow.git\r\npodman run -it --rm -v ./arrow:/arrow:Z docker://ursalab/amd64-ubuntu-18.04-conda-python-3.6:worker bash\r\n```\r\n2. Build Arrow by running this in in the container:\r\n```sh\n\r\nexport ARROW_BUILD_TOOLCHAIN=$CONDA_PREFIX\r\nexport ARROW_HOME=$CONDA_PREFIX\r\nexport PARQUET_HOME=$CONDA_PREFIX\r\nexport ARROW_BUILD_TYPE=DEBUG\r\n\r\ncd /arrow\r\nmkdir -p cpp/build\r\npushd cpp/build\r\n\r\ncmake \\\r\n      -DCMAKE_BUILD_TYPE=$ARROW_BUILD_TYPE \\\r\n      -DCMAKE_INSTALL_PREFIX=$ARROW_HOME \\\r\n      -DCMAKE_AR=${AR} \\\r\n      -DCMAKE_RANLIB=${RANLIB} \\\r\n      -DARROW_WITH_BZ2=ON \\\r\n      -DARROW_VERBOSE_THIRDPARTY_BUILD=ON \\\r\n      -DARROW_JEMALLOC=OFF \\\r\n      -DARROW_SIMD_LEVEL=NONE -DARROW_RUNTIME_SIMD_LEVEL=NONE \\\r\n      -DARROW_DEPENDENCY_SOURCE=BUNDLED \\\r\n      ..\r\nmake\r\n# make[3]: ar: No such file or directory\r\n# make[3]: *** [Makefile:48: libbz2.a] Error 127\r\n# make[2]: *** [CMakeFiles/bzip2_ep.dir/build.make:135: bzip2_ep-prefix/src/bzip2_ep-stamp/bzip2_ep-build] Error 2\r\n# make[1]: *** [CMakeFiles/Makefile2:726: CMakeFiles/bzip2_ep.dir/all] Error 2\r\n\r\n```\r\nIn the cmake call above, `ARROW_JEMALLOC` and the SIMD flags are just to skip compiling irrelevant things.\r\n\r\nI think this line in `ThirdpartyToolchain.cmake` needs to be changed to pass `CMAKE_AR`.\r\n <https://github.com/apache/arrow/blob/bad8824d5cda0fd8337c7167729c49af868f93a5/cpp/cmake_modules/ThirdpartyToolchain.cmake#L2211>\r\n\r\nOther related issues have also needed to pass `CMAKE_RANLIB`, in addition to `CMAKE_AR`. I'm not sure if that applies here.\r\n\r\n\u00a0\r\n Related: ARROW-4471, ARROW-4831\r\n\r\nEdit: added `ARROW_BUILD_TYPE` above.",
+        "created_at": "2021-10-03T22:22:55.000Z",
+        "updated_at": "2021-10-06T01:34:05.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-10-06T01:33:53.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-10-04T18:48:09.114Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14210?focusedCommentId=17424108) by Neal Richardson (npr):*\nThanks `[~karldw]`! Would you like to make a PR with this fix? cc `[~kou]`"
+        },
+        {
+            "created_at": "2021-10-04T23:33:42.941Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14210?focusedCommentId=17424229) by Karl Dunkle Werner (karldw):*\nI'm happy to. Two questions:\r\n1. Do we need `CMAKE_RANLIB` here, or is that irrelevant?\n1. Do you want a test for this? If so, could you point me to the file where that test should be added?"
+        },
+        {
+            "created_at": "2021-10-05T00:46:31.324Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14210?focusedCommentId=17424238) by Neal Richardson (npr):*\n> 1. Do we need CMAKE_RANLIB here, or is that irrelevant?\r\n\r\nNot sure, I guess you'll see :)\r\n\r\n> 2. Do you want a test for this? If so, could you point me to the file where that test should be added?\r\n\r\nI'm not sure about this either, we have lots of CI already, what's different about this setup exactly? Maybe there's an existing CI job we can modify rather than adding a new one."
+        },
+        {
+            "created_at": "2021-10-05T00:51:45.263Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14210?focusedCommentId=17424239) by Karl Dunkle Werner (karldw):*\n> what's different about this setup exactly?\r\nThe combination of:\r\n \\* using a `BUNDLED` build and\r\n \\* relying on conda compiler tools, which are [assigned nonstandard names](https://docs.conda.io/projects/conda-build/en/latest/resources/compiler-tools.html)"
+        },
+        {
+            "created_at": "2021-10-05T01:18:45.094Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14210?focusedCommentId=17424247) by Kouhei Sutou (kou):*\nCould you do it for `CMAKE_RANLIB` too like https://github.com/apache/arrow/blob/bad8824d5cda0fd8337c7167729c49af868f93a5/cpp/cmake_modules/ThirdpartyToolchain.cmake#L636-L642 ?\r\n\r\nWe don't need a test for it for now. We will not change bzip2's build code too much. If we make a regression around this, we'll add a test for this case."
+        },
+        {
+            "created_at": "2021-10-05T01:19:45.688Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14210?focusedCommentId=17424248) by Kouhei Sutou (kou):*\nNote that we can use `list(APPEND BZIP2_EXTRA_ARGS ...)` for this."
+        },
+        {
+            "created_at": "2021-10-06T01:33:53.857Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14210?focusedCommentId=17424760) by Kouhei Sutou (kou):*\nIssue resolved by pull request 11334\n<https://github.com/apache/arrow/pull/11334>"
+        }
+    ]
+}

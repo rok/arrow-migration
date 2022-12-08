@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[C++][Python] Converter::Extend gets stuck in infinite loop causing OOM if values don't fit in single chunk",
+        "body": "***Note**: This issue was originally created as [ARROW-12983](https://issues.apache.org/jira/browse/ARROW-12983). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n_Apologies if this is a duplicate, I haven't found anything related_\r\n\r\nWhen creating an arrow table via the python api, the following code runs out of memory after using all the available resources on a box with 512GB of ram. This happens with pyarrow 4.0.0 and 4.0.1. However when running the same code with pyarrow 3.0.0, the memory usage only reaches 5GB (which seems like the appropriate ballpark for the table size).\r\n The code generates a table with a single string column with 1m rows, each string being 3000 characters long.\r\n\r\nNot sure whether the issue is python related or not, I haven't tried replicating it from the C++ api.\r\n\r\n\u00a0\r\n```python\n\r\nimport os, string\r\nimport numpy as np\r\nimport pyarrow as pa\r\n\r\nprint(pa.__version__)\r\nnp.random.seed(42)\r\n\r\nalphabet = list(string.ascii_uppercase)\r\n\r\n_col = []\r\nfor _n in range(1000):\r\n  k = ''.join(np.random.choice(alphabet, 3000))\r\n  _col += [k] * 1000\r\n\r\ntable = pa.Table.from_pydict({'col': _col})\r\n```",
+        "created_at": "2021-06-05T12:37:02.000Z",
+        "updated_at": "2021-07-20T19:38:58.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-06-22T15:47:14.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-07T13:55:33.392Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12983?focusedCommentId=17358619) by David Li (lidavidm):*\nI can confirm this and provide I think an explanation.\r\n\r\nWhen we convert an array, we append values until we get an out-of-capacity error. Then we finish the current chunk and start a new one, recursively. However, we mistakenly don't account for the values already converted! Hence, _if_ the values don't fit in one chunk, we get stuck in an infinite loop of converting the same values over and over, creating an infinitely growing list.\r\n\r\nHere's the code in question: <https://github.com/apache/arrow/blob/maint-4.0.x/cpp/src/arrow/util/converter.h#L305-L318>"
+        },
+        {
+            "created_at": "2021-06-07T14:20:48.080Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12983?focusedCommentId=17358629) by Weston Pace (westonpace):*\nI think it's slightly different.\u00a0 The converter's Extend method might better be named AddRange.\u00a0 It looks like...\r\n1. Reserve space for all values\n1. Go through values and append them\n   \n   In the past there was a python converter and a chunker (which was not a converter).\u00a0 With <https://github.com/apache/arrow/commit/245564c9e01d5587772c54a6ade11cbdcb1893db> the chunker became itself, a converter.\n   \n   \u00a0\n   \n   The chunker's append logic is\n1. Try and append to child\n1. If child hit capacity error then create a chunk with the current values, reset child, continue\n   \n   \u00a0\n   \n   This append logic works.\u00a0 The chunker's extend (add range) logic is...\n   \n   \u00a0\n1. Try and extend child\n1. If child hit capacity error then create a chunk with current values, reset child, continue\n   \n   This extend logic doesn't work.\u00a0 That is because the child fails the first step of extend (Reserve space for all values) and never actually adds any items.\u00a0 So then the chunk that is created is an empty chunk.\u00a0 Repeat until there are enough empty chunks to run out of memory."
+        },
+        {
+            "created_at": "2021-06-07T14:22:28.610Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12983?focusedCommentId=17358631) by Weston Pace (westonpace):*\nPerhaps the child needs an ExtendAsMuchAsPossible method which would require a ReserveAsMuchAsPossible."
+        },
+        {
+            "created_at": "2021-06-07T14:25:32.670Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12983?focusedCommentId=17358632) by David Li (lidavidm):*\nThe Reserve method is another possible bug that needs to be worked around but in this case it's not relevant: the binary builder's reserve is only a guess (because it doesn't know the string lengths) so the allocation error only happens during the actual append. (I confirmed this by adding some logging to the allocator - you can watch it reallocate the data array until it hits the max length, then it fails.) So items are actually appended here.\r\n\r\nThe case you point out should be fixed too, though."
+        },
+        {
+            "created_at": "2021-06-22T15:47:14.688Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12983?focusedCommentId=17367485) by Krisztian Szucs (kszucs):*\nIssue resolved by pull request 10556\n<https://github.com/apache/arrow/pull/10556>"
+        }
+    ]
+}

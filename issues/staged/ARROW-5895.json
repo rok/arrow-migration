@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Python] New version stores timestamps as epoch ms instead of ISO timestamp string",
+        "body": "***Note**: This issue was originally created as [ARROW-5895](https://issues.apache.org/jira/browse/ARROW-5895). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nJust upgraded from pyarrow 0.13 to 0.14.\r\n\r\nColumns of type TimestampType(timestmap[ns]) now get written as epoch ms values:\u00a0\r\n1561939200507\r\nWhere 0.13 wrote TimestampType(timestamp[ns]) as an ISO string:\r\n2019-07-01T00:00:00.507Z\r\nThis broke my implementation.\u00a0 How do I get pyarrow to write ISO strings again in 0.14?\r\n\r\n\u00a0\r\n\r\nHere is my table write:\r\n\r\n` pyarrow.parquet.write_to_dataset(table=tbl, root_path=local_path,`\r\n` partition_cols=['env', 'dt'],`\r\n` coerce_timestamps='ms',`\r\n` allow_truncated_timestamps=True,`\r\n` version='2.0',`\r\n` compression='SNAPPY')`\r\n\r\n\u00a0",
+        "created_at": "2019-07-09T20:24:37.000Z",
+        "updated_at": "2019-07-10T14:05:17.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-07-10T14:05:17.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-07-09T21:07:21.449Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5895?focusedCommentId=16881549) by Joris Van den Bossche (jorisvandenbossche):*\n`[~johwilso1]` Thanks for the report. Can you provide a small reproducible example? \r\n\r\nAlso, what do you mean with \"write ISO strings\". I don't think pyarrow 0.13.0 was actually writing timestamps as strings (rather as integers), so it might be an issue with the representation of the value."
+        },
+        {
+            "created_at": "2019-07-09T21:51:24.272Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5895?focusedCommentId=16881578) by John Wilson (johwilso1):*\nOK, so the problem is with S3.\r\n\r\nI pull data from a postgres DB and upload it to S3 as a parquet file.\r\n\r\nWhen I do an S3 SELECT on the parquet file, i get back an ISO string using 0.13.0:\r\n[\r\n    {\r\n        \"id\": 516,\r\n        \"ts\": \"2019-04-19T00:09:11.226Z\",\r\n        ...\r\n    }\r\n]\r\nWhen I upgrade to 0.14, S3 interprets the field as an int epoch\r\n\r\nThe code is exactly the same, but the pyarrow version has been upgraded:\r\n[\r\n    {\r\n        \"id\": 2383028,\r\n        \"ts\": 1561939200507,\r\n       ...\r\n    }\r\n]\r\n\u00a0\r\n\r\nHere is a snippet of my write:\r\n\r\ntbl = pyarrow.Table.from_pandas(df=df)\r\n\r\n`with tempfile.TemporaryDirectory() as local_path:`\r\n`\u00a0 pyarrow.parquet.write_to_dataset(table=tbl, root_path=local_path,`\r\n`\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0partition_cols=['env', 'dt'],`\r\n`\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0coerce_timestamps='ms',`\r\n`\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0allow_truncated_timestamps=True,`\r\n`\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0version='2.0',`\r\n`\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0compression='SNAPPY')`"
+        },
+        {
+            "created_at": "2019-07-09T22:05:56.773Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5895?focusedCommentId=16881585) by Joris Van den Bossche (jorisvandenbossche):*\nSo what changed in 0.14.0 compared to 0.13 is that timestamp columns are now also annotated with the new LogicalType (eg `TIMESTAMP(unit=MICROS)`) in addition to the older ConvertedType (`TIMESTAMP_MILLIS/MICROS`. However, there are some compatibility problems where the older ConvertedType is omitted for tz-naive data (see ARROW-5878). \r\n\r\nCould you try with timezone aware data to check if you are encountering the same issue? Because it might be that the S3 parquet reader does not yet understand the new LogicalTypes, and thus the absence of the ConvertedType annotation could lead to interpreting it as just integers (as you see in the output)\r\n\r\nI don't think there is an option to **not** write those new LogicalTypes, but the omission of the ConvertedType annotation is a bug that should be fixed for 0.14.1.\r\n"
+        },
+        {
+            "created_at": "2019-07-10T14:05:17.085Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5895?focusedCommentId=16882090) by Wes McKinney (wesm):*\nDuplicate of ARROW-5878"
+        }
+    ]
+}

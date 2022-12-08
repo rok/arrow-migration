@@ -1,0 +1,48 @@
+{
+    "issue": {
+        "title": "[Python] List array conversion to Numpy N-d array",
+        "body": "***Note**: This issue was originally created as [ARROW-14320](https://issues.apache.org/jira/browse/ARROW-14320). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen converting a single-dimensional array to numpy, the dtype is preserved\r\n```java\n\r\nimport pyarrow as pa\r\nx = pa.array([.234,.345,.456])\r\nx.to_numpy().dtype # dtype('float64')\n```\r\nBut when doing the same for a multi-dimensional array, the dtype is lost\u00a0**and cannot be set manually**\r\n```java\n\r\nx = pa.array([[1,2,3],[4,5,6]]).to_numpy(zero_copy_only=False)\r\nprint(x.dtpye) # object\r\nx.astype(np.float64) # ValueError: setting an array element with a sequence.\n```\r\nWhich is to say that numpy believes this array is not uniform. The only way to get it to the proper dtype is to convert it to a python list then back to a numpy array.\r\n\r\nIs there another way to achieve this? Or, at least, can it be fixed such that we can manually set the dtype of the numpy array after conversion?\r\n\r\nI know that pyarrow doesn't support ndarrays with ndim>1 (https://issues.apache.org/jira/browse/ARROW-5645)\u00a0but I was curious if this can be achieved going the other way.",
+        "created_at": "2021-10-14T14:56:59.000Z",
+        "updated_at": "2021-10-15T18:46:26.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-10-14T15:00:35.069Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14320?focusedCommentId=17428849) by Antoine Pitrou (apitrou):*\nIt can't work because you have a PyArrow list array and Arrow lists are variable-sized, so you cannot convert them to a rectangular 2d array.\r\n\r\nHowever, it would be nice if this could work with a fixed-size-list array:\r\n```python\n\r\n>>> pa.array([[1,2,3],[4,5,6]], type=pa.list_(pa.int32(), 3))\r\n<pyarrow.lib.FixedSizeListArray object at 0x7f787e2e8ac0>\r\n[\r\n  [\r\n    1,\r\n    2,\r\n    3\r\n  ],\r\n  [\r\n    4,\r\n    5,\r\n    6\r\n  ]\r\n]\r\n>>> pa.array([[1,2,3],[4,5,6]], type=pa.list_(pa.int32(), 3)).to_numpy()\r\nTraceback (most recent call last):\r\n  [...]\r\nArrowInvalid: Needed to copy 1 chunks with 0 nulls, but zero_copy_only was True\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-10-14T15:00:46.650Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14320?focusedCommentId=17428851) by Antoine Pitrou (apitrou):*\ncc `[~jorisvandenbossche]` `[~amol-]`"
+        },
+        {
+            "created_at": "2021-10-14T15:29:38.875Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14320?focusedCommentId=17428872) by Ben Epstein (benepstein1):*\nEven in that scenario you cannot manually fix the numpy array\u00a0\r\n```java\n\r\npa.array([[1,2,3],[4,5,6]], type=pa.list_(pa.int32(), 3)).to_numpy(zero_copy_only=False).astype(np.int32) # # ValueError: setting an array element with a sequence.\r\n```"
+        },
+        {
+            "created_at": "2021-10-15T16:55:59.670Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14320?focusedCommentId=17429384) by Joris Van den Bossche (jorisvandenbossche):*\nThat's because currently with that code snippet, it is still returning a 1D numpy array that contains numpy arrays as elements (and numpy doesn't have much support for such kind of nested arrays).   \r\nIn theory we could return a zero-copy 2D numpy array if you have a fixed-length list array type (and then having such a 2D array `astype` would work). However, I think we will always default to returning a 1D array (so then that would need an additional keyword?) "
+        },
+        {
+            "created_at": "2021-10-15T18:26:36.055Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14320?focusedCommentId=17429444) by Ben Epstein (benepstein1):*\n`[~jorisvandenbossche]` \u00a0The second example sets a fixed length, right?"
+        },
+        {
+            "created_at": "2021-10-15T18:36:37.088Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14320?focusedCommentId=17429452) by Joris Van den Bossche (jorisvandenbossche):*\nYes, your last example is using a fixed-length list type."
+        },
+        {
+            "created_at": "2021-10-15T18:39:24.056Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14320?focusedCommentId=17429453) by Ben Epstein (benepstein1):*\nThe issue i'm currently facing is that even after converting it to a numpy array, which has dtype=object, I cannot \"convince\" the numpy array that its records are of constant length. If I could do that, I could avoid ever having to put this into a python list. Do you have any ideas/workaround for that?\u00a0"
+        },
+        {
+            "created_at": "2021-10-15T18:46:26.396Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14320?focusedCommentId=17429458) by Antoine Pitrou (apitrou):*\nYou could workaround it in three steps:\r\n- flatten the PyArrow list array\n- convert it to Numpy (this will give a 1D Numpy array)\n- reshape the Numpy array\n  \n  ```python\n  \n  >>> a = pa.array([[1,2,3], [4,5,6]])\n  >>> a.flatten().to_numpy().reshape((-1, 3))\n  array([[1, 2, 3],\n         [4, 5, 6]])\n  >>> a.flatten().to_numpy().reshape((-1, 3)).dtype\n  dtype('int64')\n  ```\n"
+        }
+    ]
+}

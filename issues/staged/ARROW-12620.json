@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[C++] Dataset writing can only include projected columns if input columns are also included",
+        "body": "***Note**: This issue was originally created as [ARROW-12620](https://issues.apache.org/jira/browse/ARROW-12620). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI discovered this while working on https://github.com/apache/arrow/pull/10191. You can project new columns when writing a dataset, but only if they are derived from columns that are included in the output. Here's an R-based example:\r\n\r\n```Java\n\r\n# Simple function to write and re-open the new dataset\r\nwrite_then_open <- function(ds, path, ...) {\r\n  write_dataset(ds, path, ...)\r\n  open_dataset(path)\r\n}\r\n\r\ntab <- Table$create(a = 1:5)\r\n\r\ntab %>% \r\n  write_then_open(ds_dir) %>%\r\n  collect()\r\n\r\n# # A tibble: 5 x 1\r\n#       a\r\n#   <int>\r\n# 1     1\r\n# 2     2\r\n# 3     3\r\n# 4     4\r\n# 5     5\r\n\r\n# If you rename a column, it's all nulls\r\ntab %>%\r\n  select(b = a) %>%\r\n  write_then_open(ds_dir) %>%\r\n  collect()\r\n\r\n# # A tibble: 5 x 1\r\n#       b\r\n#   <int>\r\n# 1    NA\r\n# 2    NA\r\n# 3    NA\r\n# 4    NA\r\n# 5    NA\r\n\r\n# If you derive a new column and keep the original, it works\r\ntab %>%\r\n  mutate(b = a) %>%\r\n  write_then_open(ds_dir) %>%\r\n  collect()\r\n\r\n# # A tibble: 5 x 2\r\n#       a     b\r\n#   <int> <int>\r\n# 1     1     1\r\n# 2     2     2\r\n# 3     3     3\r\n# 4     4     4\r\n# 5     5     5\r\n\r\n# transmute() only keeps the added columns, so it also illustrates the failure\r\ntab %>%\r\n  transmute(b = a) %>%\r\n  write_then_open(ds_dir) %>%\r\n  collect()\r\n\r\n# # A tibble: 5 x 1\r\n#       b\r\n#   <int>\r\n# 1    NA\r\n# 2    NA\r\n# 3    NA\r\n# 4    NA\r\n# 5    NA\r\n```",
+        "created_at": "2021-04-30T23:36:36.000Z",
+        "updated_at": "2021-05-05T12:10:22.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-05-03T19:04:21.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-05-03T13:20:52.071Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12620?focusedCommentId=17338365) by Joris Van den Bossche (jorisvandenbossche):*\nCan confirm this in Python:\r\n\r\n```Java\n\r\nimport pyarrow.dataset as ds\r\nimport pyarrow.parquet as pq\r\n\r\ntable = pa.table({'a': [1, 2, 3]})\r\ndataset = ds.dataset(table)\r\n\r\nprojection = {'b': ds.field('a')}\r\nds.write_dataset(dataset.scanner(columns=projection), \"test_scanner.parquet\", format=\"parquet\")\r\n\r\nIn [9]: pq.read_table(\"test_scanner.parquet\").to_pandas()\r\nOut[9]: \r\n    b\r\n0 NaN\r\n1 NaN\r\n2 NaN\r\n\r\n```"
+        },
+        {
+            "created_at": "2021-05-03T14:47:38.551Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12620?focusedCommentId=17338404) by David Li (lidavidm):*\n~~Ah: the writer executes scan tasks directly, skipping the projection/filtering machinery. So I think you'd also see, for instance, row filters being ignored.~~ spoke too soon"
+        },
+        {
+            "created_at": "2021-05-03T19:04:21.789Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12620?focusedCommentId=17338566) by David Li (lidavidm):*\nIssue resolved by pull request 10229\n<https://github.com/apache/arrow/pull/10229>"
+        },
+        {
+            "created_at": "2021-05-05T07:31:03.221Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12620?focusedCommentId=17339481) by Joris Van den Bossche (jorisvandenbossche):*\n`[~lidavidm]` I see you added but then removed again the 4.0.1 tag. But _if_ we do a bug fix release, this one might be worth including, so let's tag it to keep track of it?"
+        },
+        {
+            "created_at": "2021-05-05T11:57:14.590Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12620?focusedCommentId=17339618) by David Li (lidavidm):*\n`[~jorisvandenbossche]` I flip-flopped since I decided the bug should not have been in 4.0 (the affected code wasn't introduced until ARROW-12392)."
+        },
+        {
+            "created_at": "2021-05-05T12:05:38.039Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12620?focusedCommentId=17339624) by Joris Van den Bossche (jorisvandenbossche):*\nAh, that's a good point. The \"Affects Version/s: 4.0.0\" is wrong then?"
+        },
+        {
+            "created_at": "2021-05-05T12:10:08.835Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12620?focusedCommentId=17339626) by David Li (lidavidm):*\nYeah, I think so - I just tested with R/Arrow 4 and the R snippet errors with `Error: `.x` must be a vector, not a `Table/ArrowTabular/ArrowObject/R6` object`. And of course that Python snippet didn't work until recently either."
+        }
+    ]
+}

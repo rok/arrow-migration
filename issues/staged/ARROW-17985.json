@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Python][C++] Opaque error code ([code: 100]), when not setting region",
+        "body": "***Note**: This issue was originally created as [ARROW-17985](https://issues.apache.org/jira/browse/ARROW-17985). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nA few odd things are going on with the Python bindings:\r\n1. Statefulness. I ran the following code:\n   \n   ```java\n   \n   import os\n   import pyarrow.fs as arrow_fs\n   def fs_():\n   \u00a0 \u00a0 s3_fs = arrow_fs.S3FileSystem(\n   \u00a0 \u00a0 \u00a0 \u00a0 access_key=\"<token>\",\n   \u00a0 \u00a0 \u00a0 \u00a0 secret_key=\"<token>\",\n   \u00a0 \u00a0 \u00a0 \u00a0 endpoint_override=\"<cloudflare r2 url>\",\n   \u00a0 \u00a0 )\n   \u00a0 \u00a0 return s3_fs\n   fs = fs_()\n   print(fs.get_file_info(\"data\"))\n   ```\n   and it worked on one machine but not the other. Only setting\n   ```java\n   \n   region=\"auto\"\n   ```\n    allowed the code to work consistently on both computers.\n   Furthermore, the error message is very opaque:\n   \n   ```java\n   \n   Traceback (most recent call last):\n     File \"cluster_scripts/test_s3.py\", line 51, in <module>\n       print(fs.get_file_info(\"data\"))\n     File \"pyarrow/_fs.pyx\", line 439, in pyarrow._fs.FileSystem.get_file_info\n     File \"pyarrow/error.pxi\", line 143, in pyarrow.lib.pyarrow_internal_check_status\n     File \"pyarrow/error.pxi\", line 114, in pyarrow.lib.check_status\n   OSError: When getting information for bucket 'data': AWS Error [code 100]: No response body.\n   ```\n   \n   Googling this error gives no information whatsoever. I managed to figure out the issue by switching from Cloudflare to S3, and when the issue was still going on, I explicitly set a region, but the experience was pretty painful.",
+        "created_at": "2022-10-11T10:38:15.000Z",
+        "updated_at": "2022-11-18T09:31:59.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-26T11:48:03.886Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17985?focusedCommentId=17624393) by Miles Granger (milesgranger):*\nPretty uncomfortable indeed. :(\u00a0\r\n\r\nIt appears the relevant code here in [s3fs.cc ](https://github.com/apache/arrow/blob/7f6c5aeb5388936709642e48aed6419d1e2144a6/cpp/src/arrow/filesystem/s3fs.cc#L2305) has determined that the bucket exists, but some other error has happened and doesn't appear it does anything to obfuscate it. Infact the ``GetError`` is right from AWS' C++ library: [Outcome.h \\| https://github.com/aws/aws-sdk-cpp/blob/b469499e96b957c478d121086272ea496c9b92e8/aws-cpp-sdk-core/include/aws/core/utils/Outcome.h#L147] Maybe just bad error code from AWS? \r\n\r\nSuggest maybe opening an issue with them, feel free to link to this issue/comment here in case I'm mistaken. :) "
+        },
+        {
+            "created_at": "2022-11-03T14:44:20.716Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17985?focusedCommentId=17628361) by Miles Granger (milesgranger):*\n`[~vroomerify]` I'm a bit curious how `region=\"auto\"` worked for you, or if that's a mistake?\r\n\r\nI don't see it documented anywhere, and when trying locally with that I get the same error as saying `region=\"foobar\"` which is\u00a0\r\n\r\n_AWS Error [code 99]: Couldn't resolve host name_\r\n\r\nI'll make a PR to better document this, but on can use [resolve_s3_region ](https://arrow.apache.org/docs/python/generated/pyarrow.fs.resolve_s3_region.html)\u00a0to figure out the region of the bucket, or [S3FileSystem.from_uri ](https://arrow.apache.org/docs/python/generated/pyarrow.fs.S3FileSystem.html#pyarrow.fs.S3FileSystem.from_uri)\u00a0which is slightly better documented (what the URI can be) in the [R docs ](https://arrow.apache.org/docs/r/articles/fs.html#uris)\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-11-03T14:55:11.355Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17985?focusedCommentId=17628366) by Joris Van den Bossche (jorisvandenbossche):*\nIn addition to better docs (ARROW-18238), we could maybe try to improve the error message by specifically checking for the case of a mismatching bucket when listing the bucket gives an error. \r\nThe current code is basically the following (with my suggestion added in comments):\r\n\r\n```cpp\n\r\n    auto outcome = impl_->client_->HeadBucket(req);\r\n    if (!outcome.IsSuccess()) {\r\n      if (!IsNotFound(outcome.GetError())) {\r\n        // <--- here, if we are going to raise an error, we could check impl_->client_->GetBucketRegion(..) \r\n        //      with impl_->options().region and if not matching, adapt the error message to hint at this?\r\n        return ErrorToStatus(\r\n            std::forward_as_tuple(\"When getting information for bucket '\", path.bucket,\r\n                                  \"': \"),\r\n            \"HeadBucket\", outcome.GetError());\r\n      }\r\n      info.set_type(FileType::NotFound);\r\n      return info;\r\n    }\r\n```"
+        }
+    ]
+}

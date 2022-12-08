@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] TimestampArray.to_pylist() fails with OverflowError: Python int too large to convert to C long",
+        "body": "***Note**: This issue was originally created as [ARROW-5450](https://issues.apache.org/jira/browse/ARROW-5450). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen I attempt to roundtrip from a list of moderately large (beyond what can be represented in nanosecond precision, but within microsecond precision) datetime objects to pyarrow and back, I get an\u00a0OverflowError: Python int too large to convert to C long.\r\n\r\npyarrow version:\r\n```\n\r\n$ pip freeze | grep pyarrow\r\npyarrow==0.13.0\n```\r\n\u00a0\r\n\r\nReproduction:\r\n```java\n\r\nimport datetime\r\n\r\nimport pandas\r\nimport pyarrow\r\nimport pytz\r\n\r\n\r\ntimestamp_rows = [\r\ndatetime.datetime(1, 1, 1, 0, 0, 0, tzinfo=pytz.utc),\r\nNone,\r\ndatetime.datetime(9999, 12, 31, 23, 59, 59, 999999, tzinfo=pytz.utc),\r\ndatetime.datetime(1970, 1, 1, 0, 0, 0, tzinfo=pytz.utc),\r\n]\r\ntimestamp_array = pyarrow.array(timestamp_rows, pyarrow.timestamp(\"us\", tz=\"UTC\"))\r\ntimestamp_roundtrip = timestamp_array.to_pylist()\r\n\r\n\r\n# ---------------------------------------------------------------------------\r\n# OverflowError Traceback (most recent call last)\r\n# <ipython-input-25-4a798e917c20> in <module>\r\n# ----> 1 timestamp_roundtrip = timestamp_array.to_pylist()\r\n#\r\n# ~/.pyenv/versions/3.6.4/envs/scratch/lib/python3.6/site-packages/pyarrow/array.pxi in __iter__()\r\n#\r\n# ~/.pyenv/versions/3.6.4/envs/scratch/lib/python3.6/site-packages/pyarrow/scalar.pxi in pyarrow.lib.TimestampValue.as_py()\r\n#\r\n# ~/.pyenv/versions/3.6.4/envs/scratch/lib/python3.6/site-packages/pyarrow/scalar.pxi in pyarrow.lib._datetime_conversion_functions.lambda5()\r\n#\r\n# pandas/_libs/tslibs/timestamps.pyx in pandas._libs.tslibs.timestamps.Timestamp.__new__()\r\n#\r\n# pandas/_libs/tslibs/conversion.pyx in pandas._libs.tslibs.conversion.convert_to_tsobject()\r\n#\r\n# OverflowError: Python int too large to convert to C long\r\n```\r\nFor good measure, I also tested with timezone-naive timestamps with the same error:\r\n```java\n\r\nnaive_rows = [\r\ndatetime.datetime(1, 1, 1, 0, 0, 0),\r\nNone,\r\ndatetime.datetime(9999, 12, 31, 23, 59, 59, 999999),\r\ndatetime.datetime(1970, 1, 1, 0, 0, 0),\r\n]\r\nnaive_array = pyarrow.array(naive_rows, pyarrow.timestamp(\"us\", tz=None))\r\nnaive_roundtrip = naive_array.to_pylist()\r\n\r\n# ---------------------------------------------------------------------------\r\n# OverflowError Traceback (most recent call last)\r\n# <ipython-input-27-0c32e563d44a> in <module>\r\n# ----> 1 naive_roundtrip = naive_array.to_pylist()\r\n#\r\n# ~/.pyenv/versions/3.6.4/envs/scratch/lib/python3.6/site-packages/pyarrow/array.pxi in __iter__()\r\n#\r\n# ~/.pyenv/versions/3.6.4/envs/scratch/lib/python3.6/site-packages/pyarrow/scalar.pxi in pyarrow.lib.TimestampValue.as_py()\r\n#\r\n# ~/.pyenv/versions/3.6.4/envs/scratch/lib/python3.6/site-packages/pyarrow/scalar.pxi in pyarrow.lib._datetime_conversion_functions.lambda5()\r\n#\r\n# pandas/_libs/tslibs/timestamps.pyx in pandas._libs.tslibs.timestamps.Timestamp.__new__()\r\n#\r\n# pandas/_libs/tslibs/conversion.pyx in pandas._libs.tslibs.conversion.convert_to_tsobject()\r\n#\r\n# OverflowError: Python int too large to convert to C long\r\n```",
+        "created_at": "2019-05-30T17:50:27.000Z",
+        "updated_at": "2019-09-11T14:17:08.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-09-11T14:17:06.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-06-05T09:09:25.574Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5450?focusedCommentId=16856527) by Joris Van den Bossche (jorisvandenbossche):*\nThanks for the report!\r\n\r\nThe problem here is that pyarrow converts to pandas Timestamp objects, if pandas is installed (and otherwise to datetime.datetime objects). And pandas has a the limitation of only supporting timestamps in the limited ns range of 1677 - 2262 (<http://pandas-docs.github.io/pandas-docs-travis/user_guide/timeseries.html#timeseries-timestamp-limits>).\r\n\r\nWe could catch the overflow error and in that case still return a datetime.datetime object. I personally don't really like this data-dependent behaviour, but we already have this pandas-available-dependent behaviour (alternatively, we could also always return datetime.datetime, or put the return of pandas Timestamps behind a keyword).\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-06-05T21:24:03.520Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5450?focusedCommentId=16857049) by Tim Swast (tswast):*\nSince datetime.datetime objects don't support nanosecond precision, pandas Timestamp is a good default with nanosecond precision columns. But with microsecond precision columns, I'd always prefer a datetime.datetime object."
+        },
+        {
+            "created_at": "2019-06-07T07:34:03.841Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5450?focusedCommentId=16858365) by Joris Van den Bossche (jorisvandenbossche):*\nYes, certainly given the time range limitations of pandas.Timestamp, that would be a good option. I am not sure to what extent we can change this, or want to introduce options for this though."
+        },
+        {
+            "created_at": "2019-08-22T22:44:49.297Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5450?focusedCommentId=16913766) by Wes McKinney (wesm):*\nAdded to 0.15.0. I think we should return `datetime.datetime` objects except for nanosecond timestamps, which should use Timestamp but only if pandas is available"
+        },
+        {
+            "created_at": "2019-09-11T14:17:06.137Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5450?focusedCommentId=16927608) by Wes McKinney (wesm):*\nIssue resolved by pull request 5346\n<https://github.com/apache/arrow/pull/5346>"
+        }
+    ]
+}

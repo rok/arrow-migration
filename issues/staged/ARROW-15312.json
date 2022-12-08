@@ -1,0 +1,65 @@
+{
+    "issue": {
+        "title": "[R][C++] filtering a Parquet dataset with is.na() misses some rows",
+        "body": "***Note**: This issue was originally created as [ARROW-15312](https://issues.apache.org/jira/browse/ARROW-15312). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi !\r\n\r\nI just found an issue when querying an Arrow dataset with dplyr, filtering on is.na(...)\r\n\r\nIt seems linked to columns containing only one distinct value and some NA's.\r\n\r\nCan you also reproduce the following?\r\n\r\n\u00a0\r\n```java\n\r\n  library(arrow)\r\n\u00a0 library(dplyr)\r\n\u00a0\u00a0\r\n\u00a0 ds_path = \"test-arrow-na\"\r\n\u00a0 df = tibble(x=1:3, y=c(0L, 0L, NA_integer_), z=c(0L, 1L, NA_integer_))\r\n\u00a0\u00a0\r\n\u00a0 df %>% arrow::write_dataset(ds_path)\r\n\u00a0\u00a0\r\n# OK: Collect then filter: returns row 3, as expected\r\n\u00a0 arrow::open_dataset(ds_path) %>% collect() %>% filter(is.na(y))\r\n\r\n# ERROR: Filter then collect (on y) returns a tibble with no row\r\n\u00a0 arrow::open_dataset(ds_path) %>% filter(is.na(y)) %>% collect()\r\n\u00a0\u00a0\r\n# OK: Filter then collect (on z) returns row 3, as expected\r\n\u00a0 arrow::open_dataset(ds_path) %>% filter(is.na(z)) %>% collect() \n```\r\n\u00a0\r\n\r\nThanks\r\n\r\nPierre",
+        "created_at": "2022-01-12T16:21:27.000Z",
+        "updated_at": "2022-04-25T12:11:10.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-04-22T11:51:44.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-01-26T15:29:43.458Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15312?focusedCommentId=17482567) by Nicola Crane (thisisnic):*\nThanks for reporting this [~Pierre Gramme] !\u00a0\r\n\r\nI am able to reproduce this bug on the dev version of Arrow, and it seems to be something to do with how this is being executed on datasets as I get the correct results if I then run:\r\n```java\n\r\narrow::read_parquet(\"test-arrow-na/part-0.parquet\", as_data_frame = FALSE) %>%\r\n\u00a0 filter(is.na(y)) %>%\r\n\u00a0 collect() \n```\r\nI'll see if anyone else has any idea what's going on here."
+        },
+        {
+            "created_at": "2022-01-26T15:46:22.882Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15312?focusedCommentId=17482584) by Nicola Crane (thisisnic):*\nHere are the results with both code and output:\r\n\r\n```r\n\r\nlibrary(arrow)\r\n#>\u00a0\r\n#> Attaching package: 'arrow'\r\n#> The following object is masked from 'package:utils':\r\n#>\u00a0\r\n#> \u00a0 \u00a0 timestamp\r\n\r\nlibrary(dplyr)\r\n#>\u00a0\r\n#> Attaching package: 'dplyr'\r\n#> The following objects are masked from 'package:stats':\r\n#>\u00a0\r\n#> \u00a0 \u00a0 filter, lag\r\n#> The following objects are masked from 'package:base':\r\n#>\u00a0\r\n#> \u00a0 \u00a0 intersect, setdiff, setequal, unionds_path = \"test-arrow-na\"\r\n\r\ndf = tibble(x=1:3, y=c(0L, 0L, NA_integer_), z=c(0L, 1L, NA_integer_))df %>%\r\n    arrow::write_dataset(ds_path)\r\n\r\n# OK: Collect then filter: returns row 3, as expected\r\narrow::open_dataset(ds_path) %>% collect() %>% filter(is.na(y))\r\n#> # A tibble: 1 \u00d7 3\r\n#> \u00a0 \u00a0 \u00a0 x \u00a0 \u00a0 y \u00a0 \u00a0 z\r\n#> \u00a0 <int> <int> <int>\r\n#> 1 \u00a0 \u00a0 3 \u00a0 \u00a0NA \u00a0 \u00a0NA\r\n\r\n# ERROR: Filter then collect (on y) returns a tibble with no row\r\narrow::open_dataset(ds_path) %>% filter(is.na(y)) %>% collect()\r\n#> # A tibble: 0 \u00d7 3\r\n#> # \u2026 with 3 variables: x <int>, y <int>, z <int>\r\n\r\n# OK: Filter then collect (on z) returns row 3, as expected\r\narrow::open_dataset(ds_path) %>% filter(is.na(z)) %>% collect()\u00a0\r\n#> # A tibble: 1 \u00d7 3\r\n#> \u00a0 \u00a0 \u00a0 x \u00a0 \u00a0 y \u00a0 \u00a0 z\r\n#> \u00a0 <int> <int> <int>\r\n#> 1 \u00a0 \u00a0 3 \u00a0 \u00a0NA \u00a0 \u00a0NA\r\n\r\n# This is as expected\r\narrow::read_parquet(\"test-arrow-na/part-0.parquet\", as_data_frame = FALSE) %>%\r\n\u00a0 filter(is.na(y)) %>%\r\n\u00a0 collect()\r\n#> # A tibble: 1 \u00d7 3\r\n#> \u00a0 \u00a0 \u00a0 x \u00a0 \u00a0 y \u00a0 \u00a0 z\r\n#> \u00a0 <int> <int> <int>\r\n#> 1 \u00a0 \u00a0 3 \u00a0 \u00a0NA \u00a0 \u00a0NA\r\n\r\n \n```"
+        },
+        {
+            "created_at": "2022-01-26T16:20:12.425Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15312?focusedCommentId=17482600) by Nicola Crane (thisisnic):*\nAfter further investigation, it looks a lot like this is to do with the number of unique values in a column; if there is only 1 unique value other than NA, nothing is returned; see the smaller reprex below.\r\n\r\n\r\n```r\n\r\nlibrary(arrow)\r\n#> \r\n#> Attaching package: 'arrow'\r\n#> The following object is masked from 'package:utils':\r\n#> \r\n#>     timestamp\r\nlibrary(dplyr)\r\n#> \r\n#> Attaching package: 'dplyr'\r\n#> The following objects are masked from 'package:stats':\r\n#> \r\n#>     filter, lag\r\n#> The following objects are masked from 'package:base':\r\n#> \r\n#>     intersect, setdiff, setequal, union\r\n\r\nds_path = tempfile()\r\ndir.create(ds_path)\r\n\r\ndf = tibble(y=c(\"hi\", \"hi\", NA_character_))\r\n\r\ndf %>% arrow::write_dataset(ds_path)\r\n\r\narrow::open_dataset(ds_path) %>% collect() %>% filter(is.na(y))\r\n#> # A tibble: 1 \u00d7 1\r\n#>   y    \r\n#>   <chr>\r\n#> 1 <NA>\r\n\r\narrow::open_dataset(ds_path) %>% filter(is.na(y)) %>% collect()\r\n#> # A tibble: 0 \u00d7 1\r\n#> # \u2026 with 1 variable: y <chr>\r\n\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-01-26T17:42:12.483Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15312?focusedCommentId=17482644) by Nicola Crane (thisisnic):*\nThis appears to be restricted to Parquet format as there are no issues with Feather or CSV:\r\n\r\n\r\n```r\n\r\nlibrary(arrow)\r\nlibrary(dplyr)\r\n \r\nds_path <- tempfile()\r\ndir.create(ds_path)\r\n\r\ndf <- tibble(\r\n  y = c(0L, 0L, NA_integer_),\r\n  z = c(0L, 1L, NA_integer_)\r\n)\r\n\r\ndf %>% arrow::write_dataset(ds_path, format = \"feather\")\r\n\r\narrow::open_dataset(ds_path, format = \"feather\") %>% collect() %>% filter(is.na(y))\r\n#> # A tibble: 1 \u00d7 2\r\n#>       y     z\r\n#>   <int> <int>\r\n#> 1    NA    NA\r\n\r\narrow::open_dataset(ds_path, format = \"feather\") %>% filter(is.na(y)) %>% collect()\r\n#> # A tibble: 1 \u00d7 2\r\n#>       y     z\r\n#>   <int> <int>\r\n#> 1    NA    NA\r\n\r\nds_path = tempfile()\r\ndir.create(ds_path)\r\n\r\ndf %>% arrow::write_dataset(ds_path, format = \"csv\")\r\n\r\narrow::open_dataset(ds_path, format = \"csv\") %>% collect() %>% filter(is.na(y))\r\n#> # A tibble: 1 \u00d7 2\r\n#>       y     z\r\n#>   <int> <int>\r\n#> 1    NA    NA\r\n\r\narrow::open_dataset(ds_path, format = \"csv\") %>% filter(is.na(y)) %>% collect()\r\n#> # A tibble: 1 \u00d7 2\r\n#>       y     z\r\n#>   <int> <int>\r\n#> 1    NA    NA\r\n\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-01-31T14:45:39.928Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15312?focusedCommentId=17484718) by Dewey Dunnington (paleolimbot):*\nSeems related to the filter pushdown into the Parquet reader! If we write Parquet with `write_statistics = FALSE` we can trigger this too.\r\n\r\n```R\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\n\r\npath <- tempfile()\r\ndf <- tibble(\r\n  integers = 1:3, \r\n  col_with_na_and_one_val = c(0L, 0L, NA_integer_)\r\n)\r\n\r\n# should return one row\r\nwrite_parquet(df, path, write_statistics = TRUE)\r\nopen_dataset(path) %>% \r\n  filter(is.na(col_with_na_and_one_val))  %>% \r\n  collect()\r\n#> # A tibble: 0 \u00d7 2\r\n#> # \u2026 with 2 variables: integers <int>, col_with_na_and_one_val <int>\r\n\r\nwrite_parquet(df, path, write_statistics = FALSE)\r\nopen_dataset(path) %>% \r\n  filter(is.na(col_with_na_and_one_val))  %>% \r\n  collect()\r\n#> # A tibble: 1 \u00d7 2\r\n#>   integers col_with_na_and_one_val\r\n#>      <int>                   <int>\r\n#> 1        3                      NA\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-02-12T18:13:07.359Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15312?focusedCommentId=17491423) by David Li (lidavidm):*\nI did some debugging for the projection pushdown. With statistics enabled, the row group has the guarantee `(col_with_na_and_one_val == 0)` and the predicate being tested is `is_null(col_with_na_and_one_val, \\{nan_is_null=true})`. The way simplification works is that there's a pass that extracts a map of field-value pairs from equality expressions. Hence, the simplification pass thinks that `col_with_na_and_one_val` can only be zero, i.e. it can't be null, and `is_null(col_with_na_and_one_val)` gets simplified to `false` and the row group is pruned. The main issue is then that we aren't properly accounting for nullability in both generating guarantees based on row group statistics and in simplification.\r\n\r\n(FWIW, this doesn't affect any other formats since we don't have predicate pushdown in the first place.)"
+        },
+        {
+            "created_at": "2022-02-12T18:14:50.204Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15312?focusedCommentId=17491424) by David Li (lidavidm):*\nAlso see https://github.com/apache/arrow/pull/10253#issuecomment-833005335 which is another instance of this problem."
+        },
+        {
+            "created_at": "2022-02-12T18:16:00.590Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15312?focusedCommentId=17491425) by David Li (lidavidm):*\nI think basically we need to pick up and finish https://github.com/apache/arrow/pull/10253. We should also rigorously construct and document how we want to treat guarantees since we're playing fast and loose with them right now and that is leading to wrong results like this.\r\n\r\nCC `[~westonpace]`, `[~bkietz]`"
+        },
+        {
+            "created_at": "2022-02-12T18:16:38.955Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15312?focusedCommentId=17491426) by David Li (lidavidm):*\n(And thanks Nic and Dewey for those reprexes, those helped narrow it down a lot!)"
+        },
+        {
+            "created_at": "2022-02-12T18:19:04.799Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15312?focusedCommentId=17491427) by David Li (lidavidm):*\nARROW-14725 is also somewhat related (https://github.com/apache/arrow/pull/11716) since it refactors how simplification works (though it doesn't address this particular problem)"
+        },
+        {
+            "created_at": "2022-04-14T17:03:58.973Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15312?focusedCommentId=17522434) by David Li (lidavidm):*\nhttps://github.com/apache/arrow/pull/12891 (ARROW-12659) \r\nadds a regression test for this."
+        },
+        {
+            "created_at": "2022-04-22T11:51:44.329Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15312?focusedCommentId=17526348) by Neal Richardson (npr):*\nIssue resolved by pull request 12950\n<https://github.com/apache/arrow/pull/12950>"
+        }
+    ]
+}

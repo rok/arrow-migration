@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[Python] Space leak in  ParquetFile.read_row_group()",
+        "body": "***Note**: This issue was originally created as [ARROW-5086](https://issues.apache.org/jira/browse/ARROW-5086). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI have a code pattern like this:\r\n\r\n\u00a0\r\n\r\nreader = pq.ParquetFile(path)\r\n\r\nfor ix in range(0, reader.num_row_groups):\r\n\u00a0\u00a0\u00a0 table = reader.read_row_group(ix, columns=self._columns)\r\n1. operate on table\n   \n   \u00a0\n   \n   But it leaks memory over time, only releasing it when the reader object is collected. Here's a workaround\n   \n   \u00a0\n   \n   num_row_groups = pq.ParquetFile(path).num_row_groups\n   \n   for ix in range(0, num_row_groups):\n   \u00a0\u00a0\u00a0 table = pq.ParquetFile(path).read_row_group(ix, columns=self._columns)\n1. operate on table\n   \n   \u00a0\n   \n   This puts an upper bound on memory usage and is what I'd\u00a0 expect from the code. I also put gc.collect() to the end of every loop.\n   \n   \u00a0\n   \n   I charted out memory usage for a small benchmark that just copies a file, one row group at a time, converting to pandas and back to arrow on the writer path. Line in black is the first one, using a single reader object. Blue is instantiating a fresh reader in every iteration.",
+        "created_at": "2019-04-01T17:10:50.000Z",
+        "updated_at": "2019-09-19T16:30:44.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-09-19T16:30:44.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-04-01T18:02:59.186Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5086?focusedCommentId=16807038) by Wes McKinney (wesm):*\nCan you provide a reproducible example?"
+        },
+        {
+            "created_at": "2019-04-02T12:21:11.483Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5086?focusedCommentId=16807709) by Jakub Oko\u0144ski (farnoy):*\n`[~wesmckinn]` Here you go, I'm also attaching a profile\u00a0 run between the two:\r\n\r\n\u00a0\r\n\r\n`#!/usr/bin/env python`\r\n\r\n`import numpy as np`\r\n `import gc`\r\n `import pandas as pd`\r\n `import pyarrow as pa`\r\n `import pyarrow.parquet as pq`\r\n\r\n`if __name__ == '__main__':`\r\n `\u00a0\u00a0\u00a0 schema = pa.schema([pa.field('x', pa.float32())])`\r\n `\u00a0\u00a0\u00a0 print('generating')`\r\n `\u00a0\u00a0\u00a0 x = np.random.standard_normal(int(1e9))`\r\n `\u00a0\u00a0\u00a0 print('generated')`\r\n `\u00a0\u00a0\u00a0 df = pd.Series(x).to_frame('x')`\r\n `\u00a0\u00a0\u00a0 table = pa.Table.from_pandas(df, schema=schema, preserve_index=False).replace_schema_metadata(None)`\r\n `\u00a0\u00a0\u00a0 print('writing')`\r\n `\u00a0\u00a0\u00a0 writer = pq.ParquetWriter('/tmp/test.parquet', schema)`\r\n `\u00a0\u00a0\u00a0 writer.write_table(table, row_group_size=int(1e6))`\r\n `\u00a0\u00a0\u00a0 writer.close()`\r\n `\u00a0\u00a0\u00a0 del x, df, table, writer`\r\n `\u00a0\u00a0\u00a0 gc.collect()`\r\n `\u00a0\u00a0\u00a0 reader = pq.ParquetFile('/tmp/test.parquet')`\r\n `\u00a0\u00a0\u00a0 print('reading')`\r\n `\u00a0\u00a0\u00a0 for ix in range(0, reader.num_row_groups):`\r\n `\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 # reader = pq.ParquetFile('/tmp/test.parquet')`\r\n `\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 row_group = reader.read_row_group(ix)`\r\n\r\n\u00a0\r\n\r\n![all.png](https://issues.apache.org/jira/secure/attachment/12964556/all.png)"
+        },
+        {
+            "created_at": "2019-08-22T22:16:23.147Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5086?focusedCommentId=16913737) by Wes McKinney (wesm):*\nAdded to 0.15.0 in case someone can take a closer look"
+        },
+        {
+            "created_at": "2019-09-18T21:48:10.362Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5086?focusedCommentId=16932871) by Wes McKinney (wesm):*\nI've been looking at this for about an hour. This is really strange, here is my example code I'm using to investigate:\r\n\r\nhttps://gist.github.com/wesm/27a1c65aa8329855ff80dd0157553fa5\r\n\r\nhere is the output\r\n\r\nhttps://gist.github.com/wesm/8ad9f224b64862ca31c28183effa82b4\r\n\r\nweirdly on each iteration, RSS goes up by about ~8MB which is the amount of Arrow memory allocated on each iteration, even though the memory pool is claiming that the memory is being released. But then once the file reader object goes out of scope, RSS is released in bulk. \r\n\r\nI suspect that there is a rogue heap allocation someplace but I haven't found it yet. I checked that the destructors in the various C++ objects are firing on each iteration and no dice yet"
+        },
+        {
+            "created_at": "2019-09-18T21:54:48.725Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5086?focusedCommentId=16932875) by Wes McKinney (wesm):*\nOK, I figured it out. I changed the reader call to\r\n\r\n```Java\n\r\nreader = pq.ParquetFile('/tmp/test.parquet', memory_map=False)\r\n```\r\n\r\nand the memory increase goes away. \r\n\r\nIt seems that when we access parts of the memory map, the kernel copies the accessed memory into RSS. "
+        },
+        {
+            "created_at": "2019-09-18T22:03:52.580Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5086?focusedCommentId=16932883) by Antoine Pitrou (apitrou):*\nI would be surprised if the kernel copies the memory into RSS. I think the paged in memory simply accounts into RSS.\r\n\r\nAs long as there is no memory pressure, the kernel probably doesn't feel any need to page out those pages."
+        },
+        {
+            "created_at": "2019-09-18T22:05:47.706Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5086?focusedCommentId=16932884) by Antoine Pitrou (apitrou):*\nAlso, see ARROW-465. Not sure this requires a fix, though it's definitely surprising."
+        },
+        {
+            "created_at": "2019-09-19T16:30:44.907Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5086?focusedCommentId=16933561) by Wes McKinney (wesm):*\nIssue resolved by pull request 5433\n<https://github.com/apache/arrow/pull/5433>"
+        }
+    ]
+}

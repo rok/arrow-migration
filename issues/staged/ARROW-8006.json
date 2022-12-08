@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[C++] Unsafe arrow dictionary recovered from parquet",
+        "body": "***Note**: This issue was originally created as [ARROW-8006](https://issues.apache.org/jira/browse/ARROW-8006). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen an arrow dictionary of values=strings and indices=intx is written to parquet and recovered, the indices that correspond to null positions are not written. This causes two problems:\r\n \\* when transposing the dictionary, the code encounters indices that are out of bounds with the existing dictionary. This does cause crashes.\r\n \\* a potential security risk because it's unclear whether bytes can be read back inadvertently.\r\n\r\nI traced using GDB and found that:\r\n1. My dictionary indices were decoded by RleDecoder::GetBatchSpaced. When the valid bit is unset, that function increments \"out\" but does not set it. I think it should write a 0.\u00a0<https://github.com/apache/arrow/blob/master/cpp/src/arrow/util/rle_encoding.h#L396>\n1. The recovered data \"out\" array is written to the dictionary builder using an AppendIndices which moves the memory as a bulk move without checking for nulls. Hence we end-up with the indices buffer holding the \"out\" from above.\u00a0[https://github.com/apache/arrow/blob/master/cpp/src/parquet/encoding.cc#L1670\u00a0](https://github.com/apache/arrow/blob/master/cpp/src/parquet/encoding.cc#L1670)When transpose runs on this (<https://github.com/apache/arrow/blob/master/cpp/src/arrow/util/int_util.cc#L406>), it may attempt to access memory out of bounds.\n   \n   While is would be possible to fix \"transpose\" and other functions that process dictionary indices (e.g. compare for sorting), it seems safer to initialize to 0. Also that's the default behavior for the arrow dict builder when appending one or more nulls.\n   \n   Incidentally the code recovers the dict with indices int32 instead of the original int8 but I guess that this is covered by another activity.\n   \n   \u00a0",
+        "created_at": "2020-03-05T03:21:01.000Z",
+        "updated_at": "2020-03-06T01:03:56.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-03-06T01:03:56.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-03-05T10:14:12.143Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8006?focusedCommentId=17051979) by Antoine Pitrou (apitrou):*\nThank you for posting this. You're right that this needs to be fixed, especially as it is a potential security issue."
+        },
+        {
+            "created_at": "2020-03-05T15:02:14.586Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8006?focusedCommentId=17052221) by Antoine Pitrou (apitrou):*\n`[~belzilep]` Would you be able to test the attached Pull Request?"
+        },
+        {
+            "created_at": "2020-03-06T01:03:56.385Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8006?focusedCommentId=17052630) by Wes McKinney (wesm):*\nIssue resolved by pull request 6544\n<https://github.com/apache/arrow/pull/6544>"
+        }
+    ]
+}

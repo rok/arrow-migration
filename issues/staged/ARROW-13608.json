@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[R] symbol initialization appears to be depending on undefined behavior",
+        "body": "***Note**: This issue was originally created as [ARROW-13608](https://issues.apache.org/jira/browse/ARROW-13608). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe R bindings for arrow are triggering a segfault when running `library(arrow)`.\r\n\r\nAfter a large amount of investigation by `[~jonkeane]`, `[~npr]`, `[~bkietz]`, `[~apitrou]` and myself, we narrowed the problem down to what appears to be dependence on the order of static initialization.\r\n\r\nThe order of static initialization in C++ is indeterminate (<https://en.cppreference.com/w/cpp/language/initialization>, see the \"Dynamic Initialization\" section), which implies that if a `static A` depends on a `static B` declared and initialized in another translation unit, it is perfectly legal for the compiler to initialize `A` _before_ `B` and thus trigger undefined behavior due to `A` using an uninitialized `B`.\r\n\r\nThis is manifesting as a segmentation fault.\r\n\r\nA \"prose-level\" trace is as follows:\r\n\r\n1. The R bindings construct symbols in <https://github.com/apache/arrow/blob/master/r/src/symbols.cpp#L79>.\r\n 2. Those binding initialize a number of `r_vector` s, with this overload: <https://github.com/r-lib/cpp11/blob/master/inst/include/cpp11/r_vector.hpp#L363-L369>\r\n 3. The overload references the static variable `preserved` and calls its `insert` method.\r\n 4. `insert` dereferences a null pointer here: <https://github.com/r-lib/cpp11/blob/master/inst/include/cpp11/protect.hpp#L316> (`list_` specifically).\r\n\r\nI think the solution lies inside of `cpp11`, and that is to use the [Construct on First Use idiom](https://isocpp.org/wiki/faq/ctors#static-init-order-on-first-use) to initialize `preserved` instead of using `static struct` like it does now (<https://github.com/r-lib/cpp11/blob/master/inst/include/cpp11/protect.hpp#L301>).",
+        "created_at": "2021-08-11T13:57:08.000Z",
+        "updated_at": "2021-08-11T21:39:45.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-08-11T21:39:36.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-11T20:57:39.113Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13608?focusedCommentId=17397638) by Neal Richardson (npr):*\nThe fix here involves cherry-picking https://github.com/r-lib/cpp11/pull/223 onto the released version of cpp11 (there are issues with the dev version) and vendoring it. ARROW-13610 is the issue to unvendor once that change is released.\r\n\r\nFor more clinical history on this issue, see ARROW-13606."
+        },
+        {
+            "created_at": "2021-08-11T21:39:37.054Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13608?focusedCommentId=17397652) by Neal Richardson (npr):*\nIssue resolved by pull request 10908\n<https://github.com/apache/arrow/pull/10908>"
+        }
+    ]
+}

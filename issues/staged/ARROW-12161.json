@@ -1,0 +1,50 @@
+{
+    "issue": {
+        "title": "[C++][R] Async streaming CSV reader deadlocking when being run synchronously from datasets",
+        "body": "***Note**: This issue was originally created as [ARROW-12161](https://issues.apache.org/jira/browse/ARROW-12161). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nARROW-11887 added async to the streaming CSV reader.\u00a0 In order to keep backwards compatibility the old sync API simply calls the async API and waits for it to finish.\u00a0 However, that wait cannot happen safely in a \"nested\" context (e.g. dataset reading).\r\n\r\nFor example, imagine two cores.\u00a0 The dataset read launches two CSV scans.\u00a0 Each scan occupies a core waiting for a future.\u00a0 Those futures are being filled by I/O threads.\u00a0 The I/O threads finish and go to transfer.\u00a0 The transfer cannot happen because the CPU executor is filled.\r\n\r\nThis will be fixed as part of ARROW-7001 but that still some ways away.\u00a0 An easier change might be to take some of the 7001 changes and include them as part of the 11887 feature.",
+        "created_at": "2021-03-31T02:14:04.000Z",
+        "updated_at": "2021-04-14T21:59:23.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-04-09T21:20:34.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-03-31T03:29:42.364Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12161?focusedCommentId=17312026) by Weston Pace (westonpace):*\nSo there are a few choices here.\u00a0 In the meantime, if it is going to take some time to fix, I'd recommend reverting ARROW-11887 while the fix is worked through.\u00a0 I've created <https://github.com/apache/arrow/pull/9859> as a convenience.\r\n\r\nOption #1: Leave 11887 out, include it as part of ARROW-7001\r\n\r\n-Pros: No wasted work\r\n\r\n-Cons: Makes ARROW-7001 an even larger change.\r\n\r\n\u00a0\r\n\r\nOption #2: Bring part of ARROW-7001 in and patch it in.\u00a0 Basically add `supports_async()` and `ExecuteAsync()` to `ScanTask` and then modify `Scanner::ToTable` so that it will create a task group (for synchronous scan tasks) AND collect a set of futures (for async scan tasks).\u00a0 It will then await both of those one after the other.\u00a0 This should avoid the nested dataset issue.\u00a0 I've prototyped this today and it should work but it'll take me a little bit of work to polish it which I could do tomorrow.\r\n\r\n-Pros: Makes ARROW-7001 a smaller change\r\n\r\n-Cons: Potentially delays ARROW-7001 review while this is worked through / Some wasted work."
+        },
+        {
+            "created_at": "2021-03-31T07:53:27.096Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12161?focusedCommentId=17312161) by Antoine Pitrou (apitrou):*\nCan you explain what work would be wasted in option 2?"
+        },
+        {
+            "created_at": "2021-03-31T08:17:38.885Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12161?focusedCommentId=17312180) by Weston Pace (westonpace):*\nMinor things.\u00a0 The concept (in Scanner::ToTable) that some tasks would be async while others are sync (in 7001 they are all async but I can't make that change without pulling a lot more of 7001 in).\u00a0 A lot of the logic in scanner_internal I can't easily pull over from 7001 because I reworked what was in there pretty heavily but I will need it.\u00a0 So this will mean kind of cherry picking bits and pieces from 7001 to put into scanner_internal."
+        },
+        {
+            "created_at": "2021-03-31T08:21:02.100Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12161?focusedCommentId=17312182) by Antoine Pitrou (apitrou):*\nWell, as you prefer, then. But avoiding making ARROW-7001 too large is a worthwhile goal IMHO."
+        },
+        {
+            "created_at": "2021-03-31T08:27:22.261Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12161?focusedCommentId=17312184) by Weston Pace (westonpace):*\nOk, I will take another stab at it after I get the tests for 7001 back into a stable state.\u00a0 But that may not be until tomorrow.\u00a0 I'm not sure if you want to revert 11887 in the meantime or not.\u00a0 The R builds will hang 100% of the time until this is addressed."
+        },
+        {
+            "created_at": "2021-04-02T21:30:38.152Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12161?focusedCommentId=17314094) by David Li (lidavidm):*\nIssue resolved by pull request 9868\n<https://github.com/apache/arrow/pull/9868>"
+        },
+        {
+            "created_at": "2021-04-05T16:17:48.941Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12161?focusedCommentId=17314950) by Weston Pace (westonpace):*\nTagging as a blocker because RTools 3.5 CI builds are failing due to this.\u00a0 Can be addressed by ARROW-12208 or by disabling dataset scanning."
+        },
+        {
+            "created_at": "2021-04-14T21:59:23.795Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12161?focusedCommentId=17321343) by David Li (lidavidm):*\nThe fix here was reverted in <https://github.com/apache/arrow/pull/10019>\u00a0but the original issue is no longer present due to other fixes."
+        }
+    ]
+}

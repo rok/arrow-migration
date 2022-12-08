@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[C++] Make IpcPayload public and add GetPayloadSize",
+        "body": "***Note**: This issue was originally created as [ARROW-5377](https://issues.apache.org/jira/browse/ARROW-5377). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAs discussed in recent mailing list thread\r\n\r\nhttps://lists.apache.org/thread.html/b756209052fecb8c28a5eb37db7aecb82a5f5351fa79a9d86f0dba3e@%3Cuser.arrow.apache.org%3E\r\n\r\nThe only viable process at the moment for getting an accurate report of stream size is to write a simulated stream using `MockOutputStream`. This is suboptimal for a couple of reasons:\r\n\r\n- Flatbuffers metadata must be created twice\n- Record batch disassembly into IpcPayload must be performed twice\n  \n  It seems like an interface with a very constrained public API could be provided to deconstruct a sequence of RecordBatches and report the size of the produced IPC stream (based on metadata sizes, and padding), and then this deconstructed set of IPC payloads can be written out to a stream (e.g. using `FixedSizeBufferWriter`)",
+        "created_at": "2019-05-20T13:23:39.000Z",
+        "updated_at": "2020-06-11T13:04:49.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-06-11T13:04:17.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-05-20T14:57:00.818Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5377?focusedCommentId=16844024) by Miki Tebeka (tebeka):*\nDo we have a shared memory allocator?\u00a0 IMO this might do the trick."
+        },
+        {
+            "created_at": "2019-05-20T18:29:15.114Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5377?focusedCommentId=16844193) by Wes McKinney (wesm):*\nThat seems like an out of scope concern (this JIRA is about writing into a general pre-allocated region \u2013 need not be shared memory)."
+        },
+        {
+            "created_at": "2019-09-17T15:32:21.415Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5377?focusedCommentId=16931566) by Antoine Pitrou (apitrou):*\nDoes `IpcPayloadWriter` address this concern?"
+        },
+        {
+            "created_at": "2019-09-18T20:40:23.416Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5377?focusedCommentId=16932814) by Wes McKinney (wesm):*\nThis is still incomplete \u2013 having `IpcPayload` has gotten us most of the way there. I think we only need to implement a function to return the exact encapsulated message size given an `IpcPayload`, so that an appropriate piece of memory can be allocated. "
+        },
+        {
+            "created_at": "2020-04-16T18:08:35.831Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5377?focusedCommentId=17085144) by David Li (lidavidm):*\nThat would require exposing IpcPayload in the public API, right? Or else, coming up with some set of writer APIs like PrepareWrite/ConfirmWrite to give the application a chance to allocate memory/slice the record batch/etc."
+        },
+        {
+            "created_at": "2020-04-22T18:00:38.184Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5377?focusedCommentId=17089902) by David Li (lidavidm):*\nLooking at this a bit more, would an API roughly like the following work?\r\n```cpp\n\r\nstruct IpcPayloadSequence; // Internally std::vector<std::shared_ptr<IpcPayload>>\r\nResult<std::shared_ptr<IpcPayloadSequence>> RecordBatchToPayload(const RecordBatch&);\r\nResult<std::shared_ptr<IpcPayloadSequence>> SchemaToPayload(const Schema&);\r\nint64_t GetPayloadSize(const IpcPayloadSequence&);\r\n\r\nclass RecordBatchWriter {\r\n  Status WritePayloads(const IpcPayloadSequence&);\r\n};\r\n```\r\nThis avoids exposing IpcPayload directly. (There probably needs to be more state to help RecordBatchWriter know whether the payload is a schema, has all the necessary dictionary batches, etc.)\r\n\r\n(For context, this would be useful to help limit the on-network message sizes in Flight, to avoid tripping limits in gRPC and help manage memory usage by Netty/gRPC.)"
+        },
+        {
+            "created_at": "2020-06-11T13:04:17.862Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5377?focusedCommentId=17133242) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 7387\n<https://github.com/apache/arrow/pull/7387>"
+        }
+    ]
+}

@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[Rust][DataFusion] Add repartition/shuffle plan",
+        "body": "***Note**: This issue was originally created as [ARROW-9420](https://issues.apache.org/jira/browse/ARROW-9420). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSome operations (group by, join, over(window.partition_by)) greatly benefit from hash partitioning.\r\n\r\nThis is a proposal to add hash partitioning (based on a expression) to this library, so that optimizers can be written to optimize the plan based on the required hashing.\r\n",
+        "created_at": "2020-07-12T17:10:25.000Z",
+        "updated_at": "2020-07-14T13:14:02.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust - DataFusion",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-07-14T13:14:02.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-07-12T18:04:39.576Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9420?focusedCommentId=17156361) by Jorge Leit\u00e3o (jorgecarleitao):*\nI started some work in this direction on this branch, https://github.com/jorgecarleitao/arrow/tree/repartition, but I have not added the integration with SQL or logical plan, as I would like to know your opinions on this."
+        },
+        {
+            "created_at": "2020-07-13T14:15:01.409Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9420?focusedCommentId=17156731) by Andy Grove (andygrove):*\nI don't think we would need any integration with SQL or the logical plan. Only the physical plan should be concerned with partitioning. IMO.\r\n\r\nThe way I would see this working is that each operator in the physical plan knows what its output partitioning is, and also knows what the required input partitioning is for its children. Then we can have an optimizer rule that inserts shuffles where needed. This is the model used in Apache Spark and also in Ballista [1].\r\n\r\n\u00a0https://github.com/ballista-compute/ballista/blob/main/rust/ballista/src/distributed/scheduler.rs#L401-L441[1]"
+        },
+        {
+            "created_at": "2020-07-13T14:38:15.950Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9420?focusedCommentId=17156753) by Jorge Leit\u00e3o (jorgecarleitao):*\nYes, that was also my thinking. \r\n\r\nWhat is the relationship of Ballista with datafusion? It seems that they solve the same problem. Why not just stick to one of them?"
+        },
+        {
+            "created_at": "2020-07-13T14:42:17.417Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9420?focusedCommentId=17156756) by Andy Grove (andygrove):*\nDataFusion is an in-memory single process query engine. Ballista is a distributed platform. Ballista uses Arrow and DataFusion.\r\n\r\nBallista is also where I try out many new ideas and contribute the ones that work out back to DataFusion. For example, I've been busy for a few months re-working the physical query plan to use async and I am planning on creating a Jira later this week to discuss making these changes in DataFusion."
+        },
+        {
+            "created_at": "2020-07-13T14:45:06.966Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9420?focusedCommentId=17156757) by Andy Grove (andygrove):*\nMy ultimate goal is for all query evaluation to be in DataFusion, with Ballista just providing necessary additional optimizer rules to run the queries in a distributed manner. DataFusion isn't yet mature enough to support this use case so currently Ballista fully re-uses the DataFusion logical plan and SQL planner, but implements its own physical + execution plans, forked from DataFusion."
+        },
+        {
+            "created_at": "2020-07-14T08:18:24.063Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9420?focusedCommentId=17157211) by Jorge Leit\u00e3o (jorgecarleitao):*\nThanks a lot for the clarification. Makes a lot of sense.\r\n\r\nI am a bit unsure how we are exactly doing all of this, since all the parallelism on DataFusion is thread-based, while in a distributed environment we work at the inter-process level through some communication medium.\r\n\r\nIMO for Ballista to inter-operate with DataFusion, the API should not be based on SQL, but a smaller unit like intra-partition operations.\r\n\r\nAlso, in that case, DataFusion should not have to worry about cross-partition operations as they are normally planned differently in a distributed context.\r\n\r\nLooking forward for the Jira issue - We currently use Vec<BatchRecord> as an iterator, which defeats the purpose of an iterator since we need to fit it all in memory anyway. In theory Record batches can run concurrently up to an exchange, and IMO one way to do this is to replace our `Vec<BatchRecord>` by an iterator of asyncs that are spawn in parallel."
+        },
+        {
+            "created_at": "2020-07-14T13:13:30.931Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9420?focusedCommentId=17157350) by Andy Grove (andygrove):*\nI have created a new Jira to replace this one, since the changes I am proposing go a bit beyond simple changing how we manage threads.\r\n\r\n\u00a0\r\n\r\nhttps://issues.apache.org/jira/browse/ARROW-9464"
+        },
+        {
+            "created_at": "2020-07-14T13:14:02.875Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9420?focusedCommentId=17157351) by Andy Grove (andygrove):*\nDuplicate of https://issues.apache.org/jira/browse/ARROW-9464"
+        }
+    ]
+}

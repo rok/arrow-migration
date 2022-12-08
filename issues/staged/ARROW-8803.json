@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Java] Row count should be set before loading buffers in VectorLoader",
+        "body": "***Note**: This issue was originally created as [ARROW-8803](https://issues.apache.org/jira/browse/ARROW-8803). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi guys! I'm new to the community, and I've been using Arrow for some time. In my use case, I need to read RecordBatch with **compressed** underlying buffers using Java's IPC API, and I'm finally blocked by the VectorLoader's \"load\" method. In this method,\r\n> `root.setRowCount(recordBatch.getLength());`\r\nIt not only set the rowCount for the root, but also set the valueCount for the vectors the root holds, **which have already been set once when load buffers.**\r\n\r\nIt's not a bug... I know. But if I try to load some compressed buffers, I will get the following exceptions:\r\n> java.lang.IndexOutOfBoundsException: index: 0, length: 512 (expected: range(0, 504))\n> at io.netty.buffer.ArrowBuf.checkIndex(ArrowBuf.java:718)\n> at io.netty.buffer.ArrowBuf.setBytes(ArrowBuf.java:965)\n> at org.apache.arrow.vector.BaseFixedWidthVector.reAlloc(BaseFixedWidthVector.java:439)\n> at org.apache.arrow.vector.BaseFixedWidthVector.setValueCount(BaseFixedWidthVector.java:708)\n> at org.apache.arrow.vector.VectorSchemaRoot.setRowCount(VectorSchemaRoot.java:226)\n> at org.apache.arrow.vector.VectorLoader.load(VectorLoader.java:61)\n> at org.apache.arrow.vector.ipc.ArrowReader.loadRecordBatch(ArrowReader.java:205)\n> at org.apache.arrow.vector.ipc.ArrowStreamReader.loadNextBatch(ArrowStreamReader.java:122)\r\nAnd I start to think that if it would be more make sense to call root.setRowCount before loadbuffers?\r\nIn root.setRowCount it also calls each vector's setValueCount, which I think is unnecessary here since the vectors after calling loadbuffers are already formed.\r\n\r\nAnother existing piece of code upstream is similar to this change. [link](https://github.com/apache/arrow/blob/ed1f771dccdde623ce85e212eccb2b573185c461/java/vector/src/main/java/org/apache/arrow/vector/ipc/JsonFileReader.java#L170-L178)",
+        "created_at": "2020-05-14T16:44:05.000Z",
+        "updated_at": "2020-05-15T11:05:45.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-05-15T11:05:45.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-05-15T01:36:46.301Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8803?focusedCommentId=17107826) by Liya Fan (fan_li_ya):*\n`[~rongma]` Thanks for reporting this problem.\r\nI am curious how are you compressing buffers, as our framework does not support compression yet."
+        },
+        {
+            "created_at": "2020-05-15T03:05:43.477Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8803?focusedCommentId=17107881) by Rong Ma (rongma):*\n[~fan_li_ya] Thanks for the comment! In my use case, the input buffers are built in native and compressed by calling c++ buffer compression API."
+        },
+        {
+            "created_at": "2020-05-15T10:46:16.801Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8803?focusedCommentId=17108163) by Liya Fan (fan_li_ya):*\nAs you have indicated, `root.setRowCount` calls `setValueCount` methods for the underlying vectors, and the `setValueCount` methods may involve allocation for the underlying vectors. \r\n\r\nIf we place the `root.setRowCount` call to the front, it will lead to unnecessary vector allocations, as the underlying buffers will be populated shortly.\r\n\r\nIn fact, we are working on the support of data compression in IPC scenarios (ARROW-8672). Hope it will solve your problem. "
+        },
+        {
+            "created_at": "2020-05-15T11:02:45.311Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8803?focusedCommentId=17108172) by Rong Ma (rongma):*\n[~fan_li_ya] Yes, you're right... It indeed is not a nice way to solve the problem. Will close this and wait for the updates. Thanks :)"
+        }
+    ]
+}

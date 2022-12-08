@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[Python] Support reading Parquet datasets with standard partition directory schemes",
+        "body": "***Note**: This issue was originally created as [ARROW-539](https://issues.apache.org/jira/browse/ARROW-539). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently, we only support multi-file directories with a flat structure (non-partitioned). ",
+        "created_at": "2017-02-06T18:50:49.000Z",
+        "updated_at": "2017-04-12T17:05:30.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2017-04-12T17:05:30.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-03-14T10:04:09.967Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-539?focusedCommentId=15923913) by Miki Tebeka (tebeka):*\n`[~wesmckinn]` Do you have an example of such directory with files? If not - easy way to generate one?"
+        },
+        {
+            "created_at": "2017-03-14T15:10:24.027Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-539?focusedCommentId=15924382) by Wes McKinney (wesm):*\nI recommend either using Spark or Impala + Ibis to generate one, here's a docker image you can pull to run Impala:\n\nhttps://github.com/cloudera/ibis/blob/master/circle.yml#L43\n\nHere's some examples of creating partitioned tables in Impala+HDFS with Ibis:\n\nhttps://github.com/cloudera/ibis/blob/master/ibis/impala/tests/test_partition.py#L58\n\nLet me generate a quick example tarball to attach to this JIRA"
+        },
+        {
+            "created_at": "2017-03-14T16:01:51.258Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-539?focusedCommentId=15924468) by Wes McKinney (wesm):*\nMaking partitioned tables with Hive or Impala is pretty difficult, here was the code I used to make one\n\n```Java\nimport ibis\nimport pandas as pd\nimport hdfs\nhdfs = ibis.hdfs_connect('localhost', port=5070)\ncon = ibis.impala.connect('localhost', port=21050, hdfs_client=hdfs)\n\ndf = pd.DataFrame({'year': [2009, 2009, 2009, 2010, 2010, 2010],\n                   'month': ['1', '2', '3', '1', '2', '3'],\n                   'value': [1, 2, 3, 4, 5, 6]})\ndf = pd.concat([df] * 10, ignore_index=True)\n\ncon.create_database('temp_partition', path='/tmp/my_db')\ncon.create_table('unpartitioned', df, database='temp_partition')\n\ndb = con.database('temp_partition')\nunpart_t = db.table('unpartitioned')\npart_keys = ['year', 'month']\nunique_keys = df[part_keys].drop_duplicates()\n\ncon.create_table('partitioned', schema=unpart_t.schema(), \n                 database='temp_partition', partition=part_keys)\npart_t = db.table('partitioned')\n\nfor i, (year, month) in enumerate(unique_keys.itertuples(index=False)):\n    select_stmt = unpart_t[(unpart_t.year == year) &\n                           (unpart_t.month == month)]\n\n    part = {'year': year, 'month': month}\n    part_t.insert(select_stmt, partition=part)\n```\n\nNow we have\n\n```Java\n>>> hdfs.ls('/tmp/my_db/partitioned')\n['_impala_insert_staging', 'year=2009', 'year=2010']\n\n>>> hdfs.ls('/tmp/my_db/partitioned/year=2009')\n['month=1', 'month=2', 'month=3']\n```\n\nFinally I ran\n\n```Java\nhdfs.get('/tmp/my_db/partitioned', 'partitioned_parquet')\n```\n\nto download from HDFS. see attached tarball"
+        },
+        {
+            "created_at": "2017-03-14T18:46:50.656Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-539?focusedCommentId=15924778) by Miki Tebeka (tebeka):*\nThanks `[~wesmckinn]`"
+        },
+        {
+            "created_at": "2017-03-14T19:11:27.929Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-539?focusedCommentId=15924820) by Miki Tebeka (tebeka):*\nWe can either do it in the arrow level and return a table with extra fields generated from the directory structure or we can do it in the Pandas level, read only the values from the parquet files and then generate columns for the DataFrame from the directory structure.\n\nBoth cases we'll need to guess the type of the fields from the directory structure. Unless there are metadata files.\n\nWhich is better?"
+        },
+        {
+            "created_at": "2017-03-14T19:14:55.830Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-539?focusedCommentId=15924828) by Jeff Knupp (jeffknupp):*\nWouldn't we need to do this at the Arrow level so all non-Pandas consumers of `pyarrow` can still read these files?"
+        },
+        {
+            "created_at": "2017-03-15T18:44:31.533Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-539?focusedCommentId=15926744) by Wes McKinney (wesm):*\nYes \u2013 I think the most performant / robust option will be to generate `DictionaryArray` fields from the partition keys. \n\nFor example, if we have 3 partitions with the keys \"a\", \"b\", and \"c\", then we will a pyarrow.Table from each file and add DictionaryArray columns for the partition keys. We have to determine all the partition keys up front so that we can produce correct dictionary metadata, so it might be that\n\n```Java\na -> 0\nb -> 1\nc -> 2\n```\n\nSo in the first table for partition \"a\", the dictionary indices are all 0. But we can concatenate and then convert to pandas.Categorical at the end"
+        },
+        {
+            "created_at": "2017-03-20T08:36:31.562Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-539?focusedCommentId=15932321) by Miki Tebeka (tebeka):*\nMoving an email conversation to here (where it belongs).\n\n`[~tebeka]` said:\n> I'm working on ARROW-539 (see https://github.com/tebeka/arrow/compare/master...ARROW-539)\n> \n> The code is almost done (sans testing). The issue I'm facing is in _add_parts (line 246). The first for loop (line 251) adds Column while the 2nd for loop (line 255) adds Array. This causes Table.from_arrays to complain. I've looks for a way to convert an Array to Column (or the other way around) and didn't find anything obvious. I can of course convert to Python list and back but this is wasteful.\n> \n> Any pointers on how to do this?\n> \n> (Later I'll convert the StringArray to a Dictionary as you suggested, starting simple ...)\n\nAnd `[~wesmckinn]` answered\n> Looks like _schema_from_arrays must be refactored to have the type\n> check inside the for loop like\n> \n> https://github.com/apache/arrow/blob/master/python/pyarrow/table.pyx#L684\n> \n> Unfortunately, I don't think this is going to work (for performance reasons):\n> \n> ```\n> arrays.append(from_pylist([parts[name]] * size))\n> ```\n> \n> https://github.com/tebeka/arrow/compare/master...ARROW-539#diff-211255c3faff2b62de57e1dca9f60e13R256\n> \n> I think you're going to need to create a function (in C++) like\n> \n> ```\n> type = int32()\n> arr = array_from_constant(type, 0)\n> ```\n> \n> You can then use these integers to make a DictionaryArray using\n> something like DictionaryArray.from_arrays\n> https://github.com/apache/arrow/blob/master/python/pyarrow/array.pyx#L406\n> \n> Doesn't look like that handles Arrow arrays as inputs. Probably this\n> deserves a new API that looks like\n> `DictionaryArray.from_indices(indices, type).`\n> \n> New JIRA for this\n> \n> https://issues.apache.org/jira/browse/ARROW-643"
+        },
+        {
+            "created_at": "2017-04-03T14:25:00.557Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-539?focusedCommentId=15953565) by Wes McKinney (wesm):*\nI'm marking this for 0.3 and will try to get a patch up this week"
+        },
+        {
+            "created_at": "2017-04-11T22:43:18.764Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-539?focusedCommentId=15965070) by Wes McKinney (wesm):*\nPR: https://github.com/apache/arrow/pull/529"
+        },
+        {
+            "created_at": "2017-04-12T17:05:30.860Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-539?focusedCommentId=15966217) by Wes McKinney (wesm):*\nIssue resolved by pull request 529\n<https://github.com/apache/arrow/pull/529>"
+        }
+    ]
+}

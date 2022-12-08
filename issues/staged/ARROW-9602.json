@@ -1,0 +1,77 @@
+{
+    "issue": {
+        "title": "[R] Improve cmake detection in Linux build",
+        "body": "***Note**: This issue was originally created as [ARROW-9602](https://issues.apache.org/jira/browse/ARROW-9602). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n\u00a0\r\n```java\n\r\n> arrow::write_parquet(iris, \"~/iris\") \r\n*** caught segfault ***\r\naddress (nil), cause 'memory not mapped' Traceback: 1: Table__from_dots(dots, schema) 2: shared_ptr_is_null(xp) 3: shared_ptr(Table, Table__from_dots(dots, schema)) 4: Table$create(x) 5: arrow::write_parquet(iris, \"~/iris\")\r\n\r\n```\r\nThe segfault is easy to generate trying to write iris data to parquet. I have tried R 4.0.0 and R 4.0.2, I've installed the arrow (R) package from CRAN, source, nightly build, both with and without using the system arrow C++ installation. When using system arrow the installed version is:\r\n```\n\r\nInstalled Packages \r\nName\u00a0 \u00a0 \u00a0 \u00a0 : arrow-devel \r\nArch\u00a0 \u00a0 \u00a0 \u00a0 : x86_64 \r\nVersion \u00a0 \u00a0 : 1.0.0 \r\nRelease \u00a0 \u00a0 : 1.el7 \r\nSize\u00a0 \u00a0 \u00a0 \u00a0 : 32 M \r\nRepo\u00a0 \u00a0 \u00a0 \u00a0 : installed \r\nFrom repo \u00a0 : apache-arrow \r\nSummary \u00a0 \u00a0 : Libraries and header files for Apache Arrow C++ \r\nURL \u00a0 \u00a0 \u00a0 \u00a0 : https://arrow.apache.org/ \r\nLicense \u00a0 \u00a0 : Apache-2.0 \r\nDescription : Libraries and header files for Apache Arrow C++.\r\n\r\n```\r\n\u00a0I realize that this is so basic that it seems improbable that your CI didn't catch something (i.e., that the issue has to do with my local environment) but would appreciate verification that version 1.0 works for others on centOS7",
+        "created_at": "2020-07-30T18:51:57.000Z",
+        "updated_at": "2020-08-12T13:27:47.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-08-11T19:51:00.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-07-30T19:56:56.328Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9602?focusedCommentId=17168185) by Neal Richardson (npr):*\nWe test on every commit on R 4.0 and centos7. Here's a recent run: https://github.com/apache/arrow/runs/927208445?check_suite_focus=true And [until recently](https://github.com/apache/arrow/commit/341c6c546fe1a1b9a01f93e2d3e9d89fa17b6793), we had a number of tests using the iris dataset without issue. So I suspect there's something different about your setup.\r\n\r\nIf you can reproduce this in a Docker image, let us know and we can try to help."
+        },
+        {
+            "created_at": "2020-08-03T14:22:58.570Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9602?focusedCommentId=17170064) by Matt Pollock (mpollock):*\nI don't think I can provide a docker image. I _think_ that this has to do with using devtoolset-8 in my R Makeconf, specifically for CXX11 and CXX14. I tried the suggestion in the installation vignette under known installation issues\r\n```java\n\r\nCC=/usr/bin/gcc\r\nCXX=/usr/bin/g++\r\n```\r\nand did see a change when installing the R package with arrow included (in that mode without those settings `arrow_available() == FALSE` but with the above it changed to true). However I'm still getting the sefgault."
+        },
+        {
+            "created_at": "2020-08-03T15:06:16.741Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9602?focusedCommentId=17170094) by Matt Pollock (mpollock):*\nAnother potentially useful tidbit: after `sudo yum remove arrow-devel` to force `install.packages(\"arrow\")` to compile arrow from source I get the following message (or note) about needing to run `install_arrow()` later on.\r\n```java\n\r\n> install.packages(\"arrow\")\r\nInstalling package into \u2018/my/package/repo/R/centos7/4.0\u2019\r\n(as \u2018lib\u2019 is unspecified)\r\ntrying URL 'https://artifacts.our.mirror.org/cran/src/contrib/arrow_1.0.0.tar.gz'\r\nContent type 'application/x-gzip' length 274139 bytes (267 KB)\r\n==================================================\r\ndownloaded 267 KB\r\n\r\n\r\n* installing *source* package \u2018arrow\u2019 ...\r\n** package \u2018arrow\u2019 successfully unpacked and MD5 sums checked\r\n** using staged installation\r\n*** Successfully retrieved C++ source\r\n*** Building C++ libraries\r\n**** arrow\u00a0\r\n------------------------- NOTE ---------------------------\r\nAfter installation, please run arrow::install_arrow()\r\nfor help installing required runtime libraries\r\n---------------------------------------------------------\r\n```\r\nHowever, immediately after this note I see that the C++ source is being compiled, e.g.,\r\n```java\n\r\n** libs /opt/rh/devtoolset-8/root/bin/g++ -std=gnu++11 -I\"/opt/R/4.0.0/lib/R/include\" -DNDEBUG\u00a0 -I'/opt/R/4.0.0/lib/R/library/Rcpp/include' -I/usr/local/include \u00a0 -fpic\u00a0 -g -O2\u00a0 -c array.cpp -o array.o\r\n```\r\nAfter an apparent successful compilation and installation (of the R package) `arrow_available()` returns false. If I follow the advice of the note I see more compilation messages of the same flavor as above with the main difference (so far as I can tell) being the presence of `-DARROW_R_WITH_ARROW`\u00a0\r\n```java\n\r\n** libs /opt/rh/devtoolset-8/root/bin/g++ -std=gnu++11 -I\"/opt/R/4.0.0/lib/R/include\" -DNDEBUG -I/tmp/Rtmpq1bAon/R.INSTALL57335ab235d1/arrow/libarrow/arrow-1.0.0/include\u00a0 -DARROW_R_WITH_ARROW -I'/opt/R/4.0.0/lib/R/library/Rcpp/include' -I/usr/local/include \u00a0 -fpic\u00a0 -g -O2\u00a0 -c array.cpp -o array.o\n```\r\nAfter this `arrow_available()` returns true but `write_parquet(iris, tempfile())` still causes a segfault"
+        },
+        {
+            "created_at": "2020-08-03T15:10:27.581Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9602?focusedCommentId=17170098) by Neal Richardson (npr):*\n> However, immediately after this note I see that the C++ source is being compiled\r\n\r\nThat's the C++ code in the R bindings, which always compiles when you install the package. The Arrow C++ library compilation output is not shown. \r\n\r\nPlease try reinstalling with `ARROW_R_DEV=true` and attach all installation output that generates so I can help debug further."
+        },
+        {
+            "created_at": "2020-08-03T15:37:40.489Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9602?focusedCommentId=17170118) by Matt Pollock (mpollock):*\nThanks for working through this with me!\r\n\r\nI can't get the code macro in Jira to work with the output messages (it refuses line breaks) but I put the output in this github gist:\u00a0<https://gist.github.com/mattpollock/96c1334229daa1d83ab788c43f6d8c1b>. I think the important part is:\r\n\r\nLooks like cmake may be the issue\r\n\r\n\u00a0\r\n\r\n\r\n```java\n\r\n*** Successfully retrieved C++ source\r\n*** Building C++ libraries\r\nrm: cannot remove \u2018src/*.o\u2019: No such file or directory\r\n*** Building with MAKEFLAGS= -j2\r\n**** arrow with SOURCE_DIR=\"/tmp/RtmpkEUbIw/file5ec566d5e3ab/apache-arrow-1.0.0/cpp\" BUILD_DIR=\"/tmp/RtmpkEUbIw/file5ec517d79a18\" DEST_DIR=\"libarrow/arrow-1.0.0\" CMAKE=\"/usr/bin/cmake\" CC=\"/opt/rh/devtoolset-8/root/bin/gcc\" CXX=\"/opt/rh/devtoolset-8/root/bin/g++ -std=gnu++11\" LDFLAGS=\"-L/usr/local/lib\"\r\n++ pwd\r\n+ : /tmp/RtmpzuNlwZ/R.INSTALL5e9f10e419b9/arrow\r\n+ : /tmp/RtmpkEUbIw/file5ec566d5e3ab/apache-arrow-1.0.0/cpp\r\n+ : /tmp/RtmpkEUbIw/file5ec517d79a18\r\n+ : libarrow/arrow-1.0.0\r\n+ : /usr/bin/cmake\r\n++ cd /tmp/RtmpkEUbIw/file5ec566d5e3ab/apache-arrow-1.0.0/cpp\r\n++ pwd\r\n+ SOURCE_DIR=/tmp/RtmpkEUbIw/file5ec566d5e3ab/apache-arrow-1.0.0/cpp\r\n++ mkdir -p libarrow/arrow-1.0.0\r\n++ cd libarrow/arrow-1.0.0\r\n++ pwd\r\n+ DEST_DIR=/tmp/RtmpzuNlwZ/R.INSTALL5e9f10e419b9/arrow/libarrow/arrow-1.0.0\r\n+ '[' '' = '' ']'\r\n+ which ninja\r\n+ '[' '' = false ']'\r\n+ ARROW_DEFAULT_PARAM=OFF\r\n+ mkdir -p /tmp/RtmpkEUbIw/file5ec517d79a18\r\n+ pushd /tmp/RtmpkEUbIw/file5ec517d79a18\r\n/tmp/RtmpkEUbIw/file5ec517d79a18 /tmp/RtmpzuNlwZ/R.INSTALL5e9f10e419b9/arrow\r\n+ /usr/bin/cmake -DARROW_BOOST_USE_SHARED=OFF -DARROW_BUILD_TESTS=OFF -DARROW_BUILD_SHARED=OFF -DARROW_BUILD_STATIC=ON -DARROW_COMPUTE=ON -DARROW_CSV=ON -DARROW_DATASET=ON -DARROW_DEPENDENCY_SOURCE=BUNDLED -DARROW_FILESYSTEM=ON -DARROW_JEMALLOC=ON -DARROW_JSON=ON -DARROW_PARQUET=ON -DARROW_WITH_BROTLI=OFF -DARROW_WITH_BZ2=OFF -DARROW_WITH_LZ4=OFF -DARROW_WITH_SNAPPY=OFF -DARROW_WITH_UTF8PROC=OFF -DARROW_WITH_ZLIB=OFF -DARROW_WITH_ZSTD=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_INSTALL_PREFIX=/tmp/RtmpzuNlwZ/R.INSTALL5e9f10e419b9/arrow/libarrow/arrow-1.0.0 -DCMAKE_EXPORT_NO_PACKAGE_REGISTRY=ON -DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON -DCMAKE_UNITY_BUILD=ON -DOPENSSL_USE_STATIC_LIBS=ON -G 'Unix Makefiles' /tmp/RtmpkEUbIw/file5ec566d5e3ab/apache-arrow-1.0.0/cpp\r\nCMake Error at CMakeLists.txt:18 (cmake_minimum_required):\r\n CMake 3.2 or higher is required. You are running version 2.8.12.2\r\n\r\n\u00a0\r\n```\r\n"
+        },
+        {
+            "created_at": "2020-08-03T15:55:10.790Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9602?focusedCommentId=17170134) by Neal Richardson (npr):*\nHmm, I added a cmake version check in the 1.0 release but it must not be working: https://github.com/apache/arrow/blob/master/r/tools/linuxlibs.R#L345-L355\r\n\r\nCan you tell me what `cmake --version` says?"
+        },
+        {
+            "created_at": "2020-08-03T16:01:45.985Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9602?focusedCommentId=17170142) by Matt Pollock (mpollock):*\n\r\n```java\n\r\ncmake version 2.8.12.2\r\n```\r\n"
+        },
+        {
+            "created_at": "2020-08-03T16:17:39.690Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9602?focusedCommentId=17170153) by Matt Pollock (mpollock):*\nFWIW, I think my version is expected on centos7, though `cmake3` is available\r\n\r\n\r\n```java\n\r\n[me ~]$ cmake3 --version\r\ncmake3 version 3.17.3\r\n\r\nCMake suite maintained and supported by Kitware (kitware.com/cmake).\r\n```\r\n"
+        },
+        {
+            "created_at": "2020-08-03T17:21:23.939Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9602?focusedCommentId=17170217) by Matt Pollock (mpollock):*\nI also tried\r\n\r\n\r\n```java\n\r\nCMAKE = /usr/bin/cmake3\r\n```\r\n\r\nin my R `Makeconf`, but it has no effect (the older 2.8.12.2 version was still used, resulting in the same failure). Similarly I attempted setting, exporting, and aliasing cmake from the Renviron file. All to no effect."
+        },
+        {
+            "created_at": "2020-08-03T18:42:20.247Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9602?focusedCommentId=17170346) by Neal Richardson (npr):*\nYeah the script isn't configured (yet) to let you specify `CMAKE`, it detects it. Unfortunately, the regex is detecting your cmake version as \"8.12.2\", so it thinks you have a sufficient cmake version.\r\n\r\nSo, among the fixes to do:\r\n\r\n- Take `CMAKE` from the environment if it is set\n- Fix the regex\n- Look for `cmake3` if `cmake` isn't found/sufficiently new\n- Error better if it fails at this step for whatever reason\n  \n  This will at least get your all-source build working. Doesn't address your original report of segfault with some combination of system packages, but hopefully it will unblock you."
+        },
+        {
+            "created_at": "2020-08-03T19:05:33.347Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9602?focusedCommentId=17170357) by Matt Pollock (mpollock):*\nThat sounds great - thanks! Regarding the segfault, perhaps that is a function of not parsing the CMake version correctly and trying to compile things with the too-old version and then run things."
+        },
+        {
+            "created_at": "2020-08-10T15:43:28.077Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9602?focusedCommentId=17174397) by Matt Pollock (mpollock):*\nAs a temporary work-around, I added a symlink called `cmake` pointing to `cmake3` and then put that link on the top of my linux path. The fixes discussed above are still needed I believe, but for anyone else experiencing similar issues this at least unblocked me. The segfault was gone after installing with this system change and\r\n\r\n\r\n```java\n\r\n  Sys.setenv(ARROW_R_DEV=TRUE)\r\n  source(\"https://raw.githubusercontent.com/apache/arrow/master/r/R/install-arrow.R\")\r\n  install_arrow(binary = FALSE, use_system = FALSE)\r\n```\r\n"
+        },
+        {
+            "created_at": "2020-08-10T20:11:35.513Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9602?focusedCommentId=17175039) by Neal Richardson (npr):*\nThanks. Would you mind trying out my patch here and see if it works? https://github.com/apache/arrow/pull/7929\r\n\r\nThis should (1) find cmake3 instead of your too-old cmake and (2) let you set `CMAKE` in the environment. "
+        },
+        {
+            "created_at": "2020-08-11T19:51:00.559Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9602?focusedCommentId=17175811) by Neal Richardson (npr):*\nIssue resolved by pull request 7929\n<https://github.com/apache/arrow/pull/7929>"
+        },
+        {
+            "created_at": "2020-08-12T13:27:47.205Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9602?focusedCommentId=17176336) by Matt Pollock (mpollock):*\nI tested this using `install_arrow(binary = FALSE, use_system = FALSE, nightly=TRUE)` and it worked great. Thanks!"
+        }
+    ]
+}

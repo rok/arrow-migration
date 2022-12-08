@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[Python] Allow configuration of IpcWriterOptions 64Bit from PyArrow",
+        "body": "***Note**: This issue was originally created as [ARROW-11463](https://issues.apache.org/jira/browse/ARROW-11463). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFor tables with many chunks (2M+ rows, 20k+ chunks), `pyarrow.Table.take` will be around 1000x slower compared to the `pyarrow.Table.take` on the table with combined chunks (1 chunk). Unfortunately, if such table contains large list data type, it's easy for the flattened table to contain more than 2\\*\\*31 rows and serialization of the table with combined chunks (eg for Plasma store) will fail due to `pyarrow.lib.ArrowCapacityError: Cannot write arrays larger than 2^31 - 1 in length`\r\n\r\nI couldn't find a way to enable 64bit support for the serialization as called from Python (IpcWriteOptions in Python does not expose the CIpcWriteOptions 64 bit setting; further the Python serialization APIs do not allow specification of IpcWriteOptions)\r\n\r\nI was able to serialize successfully after changing the default and rebuilding\r\n```c++\n\r\nmodified   cpp/src/arrow/ipc/options.h\r\n@@ -42,7 +42,7 @@ struct ARROW_EXPORT IpcWriteOptions {\r\n   /// \\brief If true, allow field lengths that don't fit in a signed 32-bit int.\r\n   ///\r\n   /// Some implementations may not be able to parse streams created with this option.\r\n-  bool allow_64bit = false;\r\n+  bool allow_64bit = true;\r\n \r\n   /// \\brief The maximum permitted schema nesting depth.\r\n   int max_recursion_depth = kMaxNestingDepth;\r\n```",
+        "created_at": "2021-02-01T21:30:39.000Z",
+        "updated_at": "2021-02-05T16:03:44.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2021-02-02T16:16:51.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-02-02T03:05:45.448Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11463?focusedCommentId=17276819) by Tao He (sighingnow):*\nThe `pa.ipc.new_stream` accepts an option: [https://arrow.apache.org/docs/python/generated/pyarrow.ipc.new_stream.html#pyarrow.ipc.new_stream](https://arrow.apache.org/docs/python/generated/pyarrow.ipc.new_stream.html#pyarrow.ipc.new_stream,)\r\n\r\nI think we just need to expose the `allow_64bit` field to python.\r\n\r\nI could make a PR for that."
+        },
+        {
+            "created_at": "2021-02-02T14:50:45.847Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11463?focusedCommentId=17277170) by Leonard Lausen (lausen):*\nThank you Tao! How can we specify the IPC stream writer instance for the `_serialize_pyarrow_table` which is configured to be the `default_serialization_handler` and used by `PlasmaClient.put`? It only supports specifying `SerializationContext` and I'm unsure how to configure the writer instance via `SerializationContext`"
+        },
+        {
+            "created_at": "2021-02-02T16:08:49.910Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11463?focusedCommentId=17277230) by Antoine Pitrou (apitrou):*\n`[~lausen]` I'm not sure your question has a possible answer, but please note that both PyArrow serialization and Plasma are deprecated and unmaintained. For the former, the recommended replacement is pickle with protocol 5. For the latter, you may want to contact the developers of the Ray project (they used to maintain Plasma and decided to fork it)."
+        },
+        {
+            "created_at": "2021-02-02T16:16:51.820Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11463?focusedCommentId=17277246) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 9394\n<https://github.com/apache/arrow/pull/9394>"
+        },
+        {
+            "created_at": "2021-02-02T17:51:47.935Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11463?focusedCommentId=17277348) by Leonard Lausen (lausen):*\nThank you `[~apitrou]` for the background. For Plasma, Tao is developing a fork at https://github.com/alibaba/libvineyard which currently also uses PyArrow serialization and is thus affected from this issue. For PyArrow serialization and Pickle 5, I see that you are the author of the PEP. Thank you for driving that. Is it correct that the out-of-band data support makes it possible to use for zero-copy / shared memory applications? Is there any plan for PyArrow to uses Pickle 5 by default when running on Py3.8+?"
+        },
+        {
+            "created_at": "2021-02-02T18:28:11.242Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11463?focusedCommentId=17277373) by Leonard Lausen (lausen):*\nSpecifically, do you mean that PyArrow serialization is deprecated or that SerializationContext is deprecated? Ie should users use pickle themselves, or will PyArrow just use pickle internally when serializing?"
+        },
+        {
+            "created_at": "2021-02-02T18:47:31.749Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11463?focusedCommentId=17277392) by Antoine Pitrou (apitrou):*\nPyArrow serialization is deprecated, users should use pickle themselves.\r\n\r\nIt is true that out-of-band data provides zero-copy support for buffers embedded in the pickled data. It is tested here:\r\n\r\n<https://github.com/apache/arrow/blob/master/python/pyarrow/tests/test_array.py#L1695>\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-02-02T23:00:55.730Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11463?focusedCommentId=17277515) by Leonard Lausen (lausen):*\nThank you for sharing the tests / example code `[~apitrou]`. Pickle v5 is really useful. For example, the following code can replicate my use-case for the Plasma store based on providing a folder in `/dev/shm` as `path`.\r\n```python\n\r\nimport pickle\r\nimport mmap\r\n\r\ndef shm_pickle(path, tbl):\r\n    idx = 0\r\n    def buffer_callback(buf):\r\n        nonlocal idx\r\n        with open(path / f'{idx}.bin', 'wb') as f:\r\n            f.write(buf)\r\n        idx += 1\r\n    with open(path / 'meta.pkl', 'wb') as f:\r\n        pickle.dump(tbl, f, protocol=5, buffer_callback=buffer_callback)\r\n\r\n\r\ndef shm_unpickle(path):\r\n    num_buffers = len(list(path.iterdir())) - 1  # exclude meta.idx\r\n    buffers = []\r\n    for idx in range(num_buffers):\r\n        f = open(path / f'{idx}.bin', 'rb')\r\n        buffers.append(mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ))\r\n    with open(path / 'meta.pkl', 'rb') as f:\r\n        return pickle.load(f, buffers=buffers)\r\n```"
+        },
+        {
+            "created_at": "2021-02-03T02:43:47.491Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11463?focusedCommentId=17277647) by Tao He (sighingnow):*\nThanks for the background of pickle 5 `[~lausen]` \u00a0.\r\n\r\n`[~lausen]` \u00a0for your case, rather than invoking `pa.serialize`, you could create a stream using `pa.ipc.new_stream` and feed a IpcWriteOption, then use `.write_table()` to write you tables to the stream.\r\n\r\n\u00a0\r\n\r\nc.f.:\r\n\r\n+ <https://arrow.apache.org/docs/python/generated/pyarrow.ipc.new_stream.html#pyarrow.ipc.new_stream>\r\n\r\n+ <https://arrow.apache.org/docs/python/generated/pyarrow.RecordBatchStreamWriter.html#pyarrow.RecordBatchStreamWriter.write_table>\r\n\r\n\u00a0\r\n\r\nHope that could be helpful for you!"
+        }
+    ]
+}

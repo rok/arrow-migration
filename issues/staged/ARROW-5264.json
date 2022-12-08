@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Java] Allow enabling/disabling boundary checking by environmental variable",
+        "body": "***Note**: This issue was originally created as [ARROW-5264](https://issues.apache.org/jira/browse/ARROW-5264). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe flag BoundsChecking#BOUNDS_CHECKING_ENABLED determines if boundary checking is enabled/disabled in vector/arrow buffer APIs. \r\nIt has significant performance implications, since boundary checking is a frequent operation.\r\n\r\nThis issue addresses 2 problems with the flag for boundary checking in Java API:\r\n\r\n1. The flag can be determined by an environmental variable: ARROW_ENABLE_UNSAFE_MEMORY_ACCESS, in addition to the system properties. The system properties have higher priority than the environmental variable.\r\n\r\n2. There is an old and a new system property for this flag. To disable boundary checking, both the old and new properties must be set to true, which is undesirable:\r\n\r\n ![screenshot-1.png](https://issues.apache.org/jira/secure/attachment/12967904/screenshot-1.png) ",
+        "created_at": "2019-05-06T07:53:48.000Z",
+        "updated_at": "2019-05-10T12:55:17.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-05-10T12:55:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-05-06T09:53:17.787Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5264?focusedCommentId=16833663) by Jacques Nadeau (jnadeau):*\nThis was done on purpose to ensure the JVM only has to optimize one version\u00a0of the code, thus increasing the likelihood of JIT optimizations. I don't see a good reason to change this without proof of a similar optimization behavior with an\u00a0alternative approach."
+        },
+        {
+            "created_at": "2019-05-06T11:02:59.179Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5264?focusedCommentId=16833701) by Liya Fan (fan_li_ya):*\nI totally agree with you. Making the flag non-final will miss many optimization opportunities. \r\n\r\nI can see 3 ways to override the flag: \r\n1) provide the system property from the command line. The command line may not be accessible. \r\n2) control the order of class loading so the static initialization for BoundaryChecking class is executed after the system property is set.\r\n3) override the flag by reflection (this may not feasible in some cases)\r\n\r\nIn my opinion, none of the these options are reliable. I think an environmental variable may be a better choice.\r\nWhat do you think? Do you have any other suggestions?\r\n\r\nBest,\r\nLiya Fan"
+        },
+        {
+            "created_at": "2019-05-06T13:21:53.558Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5264?focusedCommentId=16833818) by Jacques Nadeau (jnadeau):*\nI believe #1 and #2 are entirely reliable and cover most cases. #1 solves for most systems. #2 solves for where you're a plugin in another system since as a plugin writer, you can control which operations are run and thus which classes get loaded when."
+        },
+        {
+            "created_at": "2019-05-07T12:04:52.018Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5264?focusedCommentId=16834687) by Liya Fan (fan_li_ya):*\nI agree with you that #1 and #2 solve most cases. However, there are some unfortunate rare cases which can be resolved by neither #1 nor #2. \r\n\r\nFor example, when writing \u201cplugin of plugin\u201c\uff0c #1 and #2 are infeasible. \r\n\r\nTo be specific, let me illustrate by an example of running a Flink job.\r\n1. First, we need to start yarn daemons. We do not have access to the JVM command line of the daemons, because they are started by the cluster administrator, and are long-running.\r\n2. Second, we need to start a Flink session. In particular, we need to start job managers and task managers, which will load Arrow classes in the memory manager. Similarly, we do not have access to the command line, nor can we insert initialization code, because we are not the owner of these components.\r\n3. We submit our job to the session, and we want to disable bound checking in the operators. But it is too late since the flag has been set then starting the session.\r\n\r\nSo can we setup a environmental variable for this? The priority of the environmental variable will be lower than the system property. This will make the process much easier, and will cover the remaining rare cases."
+        },
+        {
+            "created_at": "2019-05-07T12:17:26.549Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5264?focusedCommentId=16834699) by Jacques Nadeau (jnadeau):*\nI'll don't fully understand the problem. If flink is loading the libraries and is leaving these methods on, you probably should avoid turning them off\u00a0bounds checking across the board since Flink may want to depend on them. In this case you should probably be loading inside a classloader with your own copy of the classes and in that situation you can set the config you wish before loading. If Flink isn't using the libraries and you're initializing them, I don't understand why you don't have control over initialization order and can set that first.\r\n\r\nAnyway, I'm fine with adding an environment variable option to set the static final in addition to a system property. I don't understand\u00a0what situations you have access to one or not the other but I'm okay with it even then."
+        },
+        {
+            "created_at": "2019-05-08T03:01:18.259Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5264?focusedCommentId=16835266) by Liya Fan (fan_li_ya):*\n@Jacques Nadeau, thanks for your suggestion. Your solution seems reasonable.\r\n\r\nI guess the fundamental reason lies in our code structure: the code to initialize Arrow and the code that actually use Arrow lie in different components and have different owners. Maybe some significant refactoring will solve the problem. However, for now, an environmental variable can be convenient for us.\r\n\r\nI have updated the JIRA description and submitted new commits in the PR. Would you please help take a look?"
+        },
+        {
+            "created_at": "2019-05-10T12:55:08.827Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5264?focusedCommentId=16837245) by Wes McKinney (wesm):*\nIssue resolved by pull request 4258\n<https://github.com/apache/arrow/pull/4258>"
+        }
+    ]
+}

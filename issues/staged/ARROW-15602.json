@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[R][Docs] Update docs to explain how to read timestamp with timezone columns",
+        "body": "***Note**: This issue was originally created as [ARROW-15602](https://issues.apache.org/jira/browse/ARROW-15602). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe following values in a csv file can be read as timestamp by `pyarrow.csv.read_csv` and `readr::read_csv`, but not by `arrow::read_csv_arrow`.\r\n\r\n```Java\n\r\n\"x\"\r\n\"2004-04-01T12:00+09:00\"\r\n```\r\n\r\n",
+        "created_at": "2022-02-07T15:17:07.000Z",
+        "updated_at": "2022-10-15T14:12:35.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-14T01:00:14.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-08T13:34:06.539Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15602?focusedCommentId=17488846) by Nicola Crane (thisisnic):*\nThanks for reporting this `[~eitsupi]` !\r\n\r\nOutputs from a reprex are below:\r\n```r\n\r\ntf <- tempfile()\r\nwriteLines(\"x \\n 2004-04-01T12:00+09:00\", tf)\r\nreadr::read_csv(tf, col_names = \"x\", skip = 1, col_types = \"T\")\r\n#> # A tibble: 1 \u00d7 1\r\n#>   x                  \r\n#>   <dttm>             \r\n#> 1 2004-04-01 03:00:00\r\narrow::read_csv_arrow(tf, col_names = \"x\", skip = 1,  col_types = \"T\")\r\n#> Error in `handle_csv_read_error()`:\r\n#> ! Invalid: In CSV column #0: CSV conversion error to timestamp[s]: invalid value ' 2004-04-01T12:00+09:00'\r\n#> /home/nic2/arrow/cpp/src/arrow/csv/converter.cc:550  decoder_.Decode(data, size, quoted, &value)\r\n#> /home/nic2/arrow/cpp/src/arrow/csv/parser.h:123  status\r\n#> /home/nic2/arrow/cpp/src/arrow/csv/converter.cc:554  parser.VisitColumn(col_index, visit)\r\n```"
+        },
+        {
+            "created_at": "2022-02-08T13:49:21.639Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15602?focusedCommentId=17488855) by SHIMA Tatsuya (eitsupi):*\nThank you for checking this.\r\n\r\nNote that `readr::read_csv` and `pyarrow.csv.read_csv` can read this without specifying any options.\r\n```r\n\r\ntf <- tempfile()\r\nwriteLines(\"x \\n 2004-04-01T12:00+09:00\", tf)\r\nreadr::read_csv(tf)\r\n#> Rows: 1 Columns: 1\r\n#> \u2500\u2500 Column specification \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\r\n#> Delimiter: \",\"\r\n#> dttm (1): x\r\n#>\r\n#> \u2139 Use `spec()` to retrieve the full column specification for this data.\r\n#> \u2139 Specify the column types or set `show_col_types = FALSE` to quiet this message.\r\n#> # A tibble: 1 \u00d7 1\r\n#>   x\r\n#>   <dttm>\r\n#> 1 2004-04-01 03:00:00\r\narrow::read_csv_arrow(tf)\r\n#> # A tibble: 1 \u00d7 1\r\n#>   `x `\r\n#>   <chr>\r\n#> 1 \" 2004-04-01T12:00+09:00\"\r\n```\r\n```python\n\r\n>>> import pyarrow.csv\r\n>>> pyarrow.csv.read_csv(\"tmp.csv\")\r\npyarrow.Table\r\nx: timestamp[s, tz=UTC]\r\n----\r\nx: [[2004-04-01 03:00:00]]\r\n```"
+        },
+        {
+            "created_at": "2022-02-08T14:30:20.748Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15602?focusedCommentId=17488888) by Nicola Crane (thisisnic):*\nApologies, my previous example had an unnecessary extra space which was causing `x` to be read in as a character column.  Below is a new example without that error.  Here, by explicitly supplying a schema instead of the readr compact specification, the data can be read in:\r\n\r\n```r\n\r\nlibrary(arrow)\r\n#> \r\n#> Attaching package: 'arrow'\r\n#> The following object is masked from 'package:utils':\r\n#> \r\n#>     timestamp\r\ntf <- tempfile()\r\nwriteLines(\"x \\n2004-04-01T12:00+09:00\", tf)\r\nreadr::read_csv(tf, col_names = \"x\", skip = 1, col_types = \"T\")\r\n#> # A tibble: 1 \u00d7 1\r\n#>   x                  \r\n#>   <dttm>             \r\n#> 1 2004-04-01 03:00:00\r\narrow::read_csv_arrow(tf, col_names = \"x\", skip = 1, col_types = \"T\")\r\n#> Error in `handle_csv_read_error()`:\r\n#> ! Invalid: In CSV column #0: CSV conversion error to timestamp[s]: expected no zone offset in '2004-04-01T12:00+09:00'\r\n#> /home/nic2/arrow/cpp/src/arrow/csv/converter.cc:550  decoder_.Decode(data, size, quoted, &value)\r\n#> /home/nic2/arrow/cpp/src/arrow/csv/parser.h:123  status\r\n#> /home/nic2/arrow/cpp/src/arrow/csv/converter.cc:554  parser.VisitColumn(col_index, visit)\r\narrow::read_csv_arrow(tf, skip = 1, schema = schema(x = timestamp(timezone=\"+09:00\")))\r\n#> # A tibble: 1 \u00d7 1\r\n#>   x                  \r\n#>   <dttm>             \r\n#> 1 2004-04-01 03:00:00\r\n```\r\n \r\nThe error is due to the mapping of the readr specification \"T\" to an Arrow `timestamp` object with no timezone offset, whereas the data includes one.  We should look to update this in our docs."
+        },
+        {
+            "created_at": "2022-02-08T15:33:00.595Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15602?focusedCommentId=17488952) by Nicola Crane (thisisnic):*\nLooking more into it, I think this is a not an omission of documentation, but actually a bug whereby we don't hook up our TimeStampParsers properly; in this chunk of code:\r\n\r\nhttps://github.com/apache/arrow/blob/49d2a41280e191bb95f76595e7eb68958cc03990/r/src/csv.cpp#L111-L149 \r\n\r\nIt looks like the Python code does hook these up, which is why it works in pyarrow's read_csv but not R's."
+        },
+        {
+            "created_at": "2022-03-08T09:50:57.873Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15602?focusedCommentId=17502826) by Nicola Crane (thisisnic):*\nCC `[~dragosmg]` as I know you've been looking a lot into code relating to timestamp-based data lately."
+        },
+        {
+            "created_at": "2022-03-08T10:04:45.110Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15602?focusedCommentId=17502834) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nJust to add to your example, reading without any `col_types` specification seems to work fine:\r\n```r\n\r\narrow::read_csv_arrow(tf, col_names = \"x\", skip = 1)\r\n#> # A tibble: 1 \u00d7 1\r\n#>   x                  \r\n#>   <dttm>             \r\n#> 1 2004-04-01 03:00:00\r\n```\r\nI think it might also be related to ARROW-14477. Have you tried with timezone as string? I think support for timezone as offset is a bit trickier."
+        },
+        {
+            "created_at": "2022-03-08T10:23:22.932Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15602?focusedCommentId=17502846) by SHIMA Tatsuya (eitsupi):*\nI believe this is the format defined in ISO8601.\r\nDon't you think libarrow's ISO8601 parser can handle this?\r\nIn fact, it seems to be handled by pyarrow. (Please see my comments above.)"
+        },
+        {
+            "created_at": "2022-08-15T06:04:47.232Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15602?focusedCommentId=17579539) by SHIMA Tatsuya (eitsupi):*\nI may have misunderstood something. So far the following example seems to work. An update to the documentation may be sufficient.\r\n\r\n```r\n\r\ntf <- tempfile()\r\nwriteLines(\"x\\n2004-04-01T12:00+09:00\", tf)\r\narrow::read_csv_arrow(tf)\r\n#> # A tibble: 1 \u00d7 1\r\n#>   x\r\n#>   <dttm>\r\n#> 1 2004-04-01 03:00:00\r\n```"
+        },
+        {
+            "created_at": "2022-10-14T01:00:14.092Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15602?focusedCommentId=17617381) by Neal Richardson (npr):*\nIssue resolved by pull request 13877\n<https://github.com/apache/arrow/pull/13877>"
+        }
+    ]
+}

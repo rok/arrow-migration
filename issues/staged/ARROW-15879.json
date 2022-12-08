@@ -1,0 +1,36 @@
+{
+    "issue": {
+        "title": "[R] passing a schema calls open_dataset to fail on hive-partitioned csv files",
+        "body": "***Note**: This issue was originally created as [ARROW-15879](https://issues.apache.org/jira/browse/ARROW-15879). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nConsider this reprex:\r\n\r\n\u00a0\r\n\r\nCreate a dataset with hive partitions in csv format with write_dataset() (so cool!):\r\n\r\n\u00a0\r\n```java\n\r\nlibrary(arrow)\r\nlibrary(dplyr)\r\npath <- fs::dir_create(\"tmp\")\r\nmtcars %>% group_by(gear) %>% write_dataset(path, format=\"csv\")## works fine, even with 'collect()'\r\nds <- open_dataset(path, format=\"csv\")## but pass a schema, and things fail\r\ndf <- open_dataset(path, format=\"csv\", schema = ds$schema, skip_rows=1)\r\ndf %>% collect()\r\n \n```\r\nIn the first call to open_dataset, we don't pass a schema and things work as expected.\u00a0\r\n\r\nHowever, csv files often need a schema to be read in correctly, particularly with partitioned data where it is easy to 'guess' the wrong type.\u00a0 Passing the schema though confuses open_dataset, because the grouping column (partition column) isn't found on the individual files even though it is mentioned in the schema!\r\n\r\nNor can we just omit the grouping column from the schema, since then it is effectively lost from the data.\u00a0",
+        "created_at": "2022-03-09T04:53:47.000Z",
+        "updated_at": "2022-11-17T19:49:10.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: task"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-14T13:19:35.735Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15879?focusedCommentId=17506233) by Dewey Dunnington (paleolimbot):*\nIt's not all that intuitive, but if you skip the partitioning column I think it works!\r\n\r\n```R\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\npath <- fs::dir_create(\"tmp\")\r\nmtcars %>% group_by(gear) %>% write_dataset(path, format=\"csv\")\r\nds <- open_dataset(path, format=\"csv\")\r\n\r\n# skip the partitioning columns and it works\r\nnon_partitioning_cols <- setdiff(names(ds), \"gear\")\r\nnon_partitioning_schema <- ds$schema[non_partitioning_cols]\r\ndf <- open_dataset(path, format=\"csv\", schema = non_partitioning_schema, skip_rows = 1)\r\ndf %>% collect()\r\n#> # A tibble: 32 \u00d7 10\r\n#> \u00a0 \u00a0 \u00a0mpg \u00a0 cyl \u00a0disp \u00a0 \u00a0hp \u00a0drat \u00a0 \u00a0wt \u00a0qsec \u00a0 \u00a0vs \u00a0 \u00a0am \u00a0carb\r\n#> \u00a0 \u00a0<dbl> <int> <dbl> <int> <dbl> <dbl> <dbl> <int> <int> <int>\r\n#> \u00a01 \u00a026 \u00a0 \u00a0 \u00a0 4 120. \u00a0 \u00a0 91 \u00a04.43 \u00a02.14 \u00a016.7 \u00a0 \u00a0 0 \u00a0 \u00a0 1 \u00a0 \u00a0 2\r\n#> \u00a02 \u00a030.4 \u00a0 \u00a0 4 \u00a095.1 \u00a0 113 \u00a03.77 \u00a01.51 \u00a016.9 \u00a0 \u00a0 1 \u00a0 \u00a0 1 \u00a0 \u00a0 2\r\n#> \u00a03 \u00a015.8 \u00a0 \u00a0 8 351 \u00a0 \u00a0 264 \u00a04.22 \u00a03.17 \u00a014.5 \u00a0 \u00a0 0 \u00a0 \u00a0 1 \u00a0 \u00a0 4\r\n#> \u00a04 \u00a019.7 \u00a0 \u00a0 6 145 \u00a0 \u00a0 175 \u00a03.62 \u00a02.77 \u00a015.5 \u00a0 \u00a0 0 \u00a0 \u00a0 1 \u00a0 \u00a0 6\r\n#> \u00a05 \u00a015 \u00a0 \u00a0 \u00a0 8 301 \u00a0 \u00a0 335 \u00a03.54 \u00a03.57 \u00a014.6 \u00a0 \u00a0 0 \u00a0 \u00a0 1 \u00a0 \u00a0 8\r\n#> \u00a06 \u00a021.4 \u00a0 \u00a0 6 258 \u00a0 \u00a0 110 \u00a03.08 \u00a03.22 \u00a019.4 \u00a0 \u00a0 1 \u00a0 \u00a0 0 \u00a0 \u00a0 1\r\n#> \u00a07 \u00a018.7 \u00a0 \u00a0 8 360 \u00a0 \u00a0 175 \u00a03.15 \u00a03.44 \u00a017.0 \u00a0 \u00a0 0 \u00a0 \u00a0 0 \u00a0 \u00a0 2\r\n#> \u00a08 \u00a018.1 \u00a0 \u00a0 6 225 \u00a0 \u00a0 105 \u00a02.76 \u00a03.46 \u00a020.2 \u00a0 \u00a0 1 \u00a0 \u00a0 0 \u00a0 \u00a0 1\r\n#> \u00a09 \u00a014.3 \u00a0 \u00a0 8 360 \u00a0 \u00a0 245 \u00a03.21 \u00a03.57 \u00a015.8 \u00a0 \u00a0 0 \u00a0 \u00a0 0 \u00a0 \u00a0 4\r\n#> 10 \u00a016.4 \u00a0 \u00a0 8 276. \u00a0 \u00a0180 \u00a03.07 \u00a04.07 \u00a017.4 \u00a0 \u00a0 0 \u00a0 \u00a0 0 \u00a0 \u00a0 3\r\n#> # \u2026 with 22 more rows\r\n```"
+        },
+        {
+            "created_at": "2022-03-14T13:21:13.506Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15879?focusedCommentId=17506235) by Dewey Dunnington (paleolimbot):*\nRight! I see what you mean...we loose 'gear' here. Flagging `[~thisisnic]` again just in case there's something I missed with respect to the CSV reader here."
+        },
+        {
+            "created_at": "2022-03-14T14:15:11.686Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15879?focusedCommentId=17506256) by Carl Boettiger (cboettig):*\nSorry my minimal example was too minimal.\u00a0 Yes, I had noticed dropping the partition works, but I cannot then `filter()` on the partition column _before_ collect.\u00a0 Continuing from your reprex, try:\r\n\r\n\r\n```java\n\r\n> df %>% filter(gear < 3) %>% collect()\r\nError in lapply(args, function(x) { : object 'gear' not found \n```\r\nThe primary incentive to hive-partition I thought was to benefit from `arrow`'s ability not to even need to parse those files excluded by the filter.\u00a0 (though admittedly hive-partition is more of a parquet concept I guess, I was initially very pleasantly surprised that write_dataset() would even partition in this way with format=\"csv\", so very cool!)\u00a0"
+        },
+        {
+            "created_at": "2022-04-11T16:37:11.335Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15879?focusedCommentId=17520706) by Sam Albers (boshek):*\nI did some digging to the extent that I added a test that captured this failures here: <https://github.com/apache/arrow/pull/12831>\r\n\r\nI can confirm that this does not happen when `format = 'parquet'`. The error message is coming from [here](https://github.com/apache/arrow/blob/master/cpp/src/arrow/dataset/file_csv.cc#L212) but that is about as far as I got. I think this is also related to ARROW-14743"
+        },
+        {
+            "created_at": "2022-05-13T18:30:50.805Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15879?focusedCommentId=17536828) by Neal Richardson (npr):*\nConfirmed that this is still an issue in 8.0.0"
+        }
+    ]
+}

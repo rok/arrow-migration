@@ -1,0 +1,69 @@
+{
+    "issue": {
+        "title": "[Python] Table.from_pandas does not create chunked_arrays.",
+        "body": "***Note**: This issue was originally created as [ARROW-2227](https://issues.apache.org/jira/browse/ARROW-2227). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen creating a large enough array, pyarrow raises an exception:\r\n```java\n\r\nimport numpy as np\r\nimport pandas as pd\r\nimport pyarrow as pa\r\n\r\nx = list('1' * 2**31)\r\ny = pd.DataFrame({'x': x})\r\nt = pa.Table.from_pandas(y)\r\n# ArrowInvalid: BinaryArrow cannot contain more than 2147483646 bytes, have 2147483647\n```\r\nThe array should be chunked for the user. As is, data frames with >2 GiB in\u00a0binary data will\u00a0struggle to get into arrow.",
+        "created_at": "2018-02-27T16:02:50.000Z",
+        "updated_at": "2018-03-13T20:46:23.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-03-13T20:46:21.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-02-27T20:08:05.384Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2227?focusedCommentId=16379215) by Left Screen (LeftScreenCorner):*\nhttps://issues.apache.org/jira/browse/ARROW-1167\u00a0appears to have\u00a0added support for this, but something is still overflowing."
+        },
+        {
+            "created_at": "2018-02-27T23:03:42.674Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2227?focusedCommentId=16379446) by Wes McKinney (wesm):*\nThanks, marked for 0.9.0"
+        },
+        {
+            "created_at": "2018-02-28T00:40:23.892Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2227?focusedCommentId=16379574) by Left Screen (LeftScreenCorner):*\nIt looks like parquet.ParquetFile.read() doesn't appropriately combine row groups for binary data either and you get the same exception.\u00a0 If you read each row group and then concat the tables, you're fine though.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-02-28T17:57:27.656Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2227?focusedCommentId=16380759) by Wes McKinney (wesm):*\nThat may be a separate bug, we should investigate"
+        },
+        {
+            "created_at": "2018-03-12T12:38:43.678Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2227?focusedCommentId=16395173) by Antoine Pitrou (apitrou):*\nThe snippet produces a core dump here (\\*\\*). I think it is related to code touched by ARROW-2141 and especially the comment I posted here about an incorrect cast to 32-bit: https://github.com/apache/arrow/pull/1689/files#r173777819 .\r\n\r\n(as a sidenote, I don't know why ARROW-2141 is necessary to allow conversion from Numpy but conversion from Pandas is already implemented. I suspect different paths are taken?)\r\n\r\n(re-sidenote, where does the 2GB limit stem from? the desire to have shorter offset arrays?)\r\n\r\nI would recommend deferring this to 0.10.0 so that we can sanitize the whole situation. There seem to be separate code paths converting Python bytes objects to Arrow data, with slightly different strategies...\r\n\r\n(\\*\\*) gdb backtrace:\r\n```Java\n\r\n#0  __memcpy_avx_unaligned () at ../sysdeps/x86_64/multiarch/memcpy-avx-unaligned.S:245\r\n#1  0x00007fffc23dc5e8 in arrow::BufferBuilder::UnsafeAppend (this=0x7fffffffb538, data=0x7fff3f01d030, length=-2147483648)\r\n    at /home/antoine/arrow/cpp/src/arrow/buffer.h:285\r\n#2  0x00007fffc23dc236 in arrow::BufferBuilder::Append (this=0x7fffffffb538, data=0x7fff3f01d030, length=-2147483648)\r\n    at /home/antoine/arrow/cpp/src/arrow/buffer.h:255\r\n#3  0x00007fffc242b30f in arrow::TypedBufferBuilder<unsigned char>::Append (this=0x7fffffffb538, \r\n    arithmetic_values=0x7fff3f01d030 'x' <se r\\377\\377\\377\\377\\377\\377\\377\\377p\\377\\377\\377\\377\\377\\377\\377\\377te 200 fois>..., \r\n    num_elements=-2147483648) at /home/antoine/arrow/cpp/src/arrow/buffer.h:332\r\n#4  0x00007fffc23d7f3e in arrow::BinaryBuilder::Append (this=0x7fffffffb4a0, \r\n    value=0x7fff3f01d030 'x' <se r\\377\\377\\377\\377\\377\\377\\377\\377p\\377\\377\\377\\377\\377\\377\\377\\377te 200 fois>..., length=-2147483648)\r\n    at /home/antoine/arrow/cpp/src/arrow/builder.cc:1343\r\n#5  0x00007fffc258d4b8 in arrow::BinaryBuilder::Append (this=0x7fffffffb4a0, \r\n    value=0x7fff3f01d030 'x' <se r\\377\\377\\377\\377\\377\\377\\377\\377p\\377\\377\\377\\377\\377\\377\\377\\377te 200 fois>..., length=-2147483648)\r\n    at /home/antoine/arrow/cpp/src/arrow/builder.h:675\r\n#6  0x00007fffc1f84923 in arrow::py::AppendObjectStrings (arr=0x7ffff7ecbee0, mask=0x0, offset=0, builder=0x7fffffffb4a0, \r\n    end_offset=0x7fffffffb480, have_bytes=0x7fffffffb430) at /home/antoine/arrow/cpp/src/arrow/python/numpy_to_arrow.cc:233\r\n#7  0x00007fffc1f88d62 in arrow::py::NumPyConverter::ConvertObjectStrings (this=0x7fffffffbdd0)\r\n    at /home/antoine/arrow/cpp/src/arrow/python/numpy_to_arrow.cc:859\r\n#8  0x00007fffc1f8c22b in arrow::py::NumPyConverter::ConvertObjectsInfer (this=0x7fffffffbdd0)\r\n    at /home/antoine/arrow/cpp/src/arrow/python/numpy_to_arrow.cc:1034\r\n#9  0x00007fffc1f8d99c in arrow::py::NumPyConverter::ConvertObjects (this=0x7fffffffbdd0)\r\n    at /home/antoine/arrow/cpp/src/arrow/python/numpy_to_arrow.cc:1135\r\n#10 0x00007fffc1f85a2a in arrow::py::NumPyConverter::Convert (this=0x7fffffffbdd0)\r\n    at /home/antoine/arrow/cpp/src/arrow/python/numpy_to_arrow.cc:504\r\n#11 0x00007fffc1f9038d in arrow::py::NdarrayToArrow (pool=0x7fffc2a2d680 <arrow::default_memory_pool()::default_memory_pool_>, \r\n    ao=0x7ffff7ecbee0, mo=0x7ffff7d5ce90 <_Py_NoneStruct>, use_pandas_null_sentinels=true, type=..., out=0x7fffffffc0c0)\r\n    at /home/antoine/arrow/cpp/src/arrow/python/numpy_to_arrow.cc:1577\r\n```"
+        },
+        {
+            "created_at": "2018-03-12T13:49:45.816Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2227?focusedCommentId=16395246) by Antoine Pitrou (apitrou):*\nBy the way, is the enhancement requested in this ticket even doable with the current memory layout? If we create a chunked array and split the binary string in chunks, each string chunk will be visible as a separate logical array element, so the user won't see a 2GB string anymore, but for example two 1GB strings..."
+        },
+        {
+            "created_at": "2018-03-12T14:13:43.669Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2227?focusedCommentId=16395288) by Wes McKinney (wesm):*\nOK, moving to 0.10.0.\r\n\r\nWe should raise an exception for a single string exceeding 2GB. We'll need to add a type for large binary / large strings to support this, see ARROW-750"
+        },
+        {
+            "created_at": "2018-03-12T14:38:25.939Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2227?focusedCommentId=16395321) by Left Screen (LeftScreenCorner):*\nJust wanted to mention, in case it was missed, but this example isn't a single large 2 GiB string. Each row in the data frame is a single byte. So it is a large array of small bytes. \n\nIs 0.10.0 far away? Out of the box, using pyarrow for \"big data\" isn't really possible (assuming you have string data) until this is fixed. My hack fix was to make changes to pandas_compat.py:dataframe_to_arrays() so that it accepted a dictionary mapping column names to chunk sizes, and then I manually (and somewhat crudely) create a chunked_array. This is then passed to Table.from_arrays (mimicking what appears in table.pxi)."
+        },
+        {
+            "created_at": "2018-03-12T14:46:09.551Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2227?focusedCommentId=16395334) by Antoine Pitrou (apitrou):*\n> Just wanted to mention, in case it was missed, but this example isn't a single large 2 GiB string. Each row in the data frame is a single byte. So it is a large array of small bytes.\r\n\r\nOh, I see. I had misread the example (and my crash is on a different use case then). It's quite a weird way of storing binary strings, though? Your column is a column of Python objects, which under the hood appear to be numpy.int64 objects... So you're paying a huge overhead because of all those objects.\r\n\r\n(to put in perspective, I have 16 GB RAM, but creating your dataframe swaps out...)"
+        },
+        {
+            "created_at": "2018-03-12T14:49:28.355Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2227?focusedCommentId=16395348) by Left Screen (LeftScreenCorner):*\nYeah it's a contrived example, but think of a large data frame storing street addresses, or usernames, etc."
+        },
+        {
+            "created_at": "2018-03-12T18:12:47.451Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2227?focusedCommentId=16395631) by Wes McKinney (wesm):*\nI want to dig at this issue a bit before we cut the 0.9.0 release ... should have a little time later today"
+        },
+        {
+            "created_at": "2018-03-13T04:46:54.031Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2227?focusedCommentId=16396542) by Wes McKinney (wesm):*\nThis seems to be an off-by-one-error. In builder.cc, we are comparing with `INT32_MAX - 1`, in python/numpy_to_arrow.cc we are comparing with `INT32_MAX`. I made this a blocker for 0.9.0 as I think we can fix this by changing the bound in numpy_to_arrow.cc. Getting late here tonight so I will try to fix tomorrow morning before we cut an RC \u2013 the test case here is pretty swappy, we should be able to construct a better test case with some very large strings followed by some length-1 strings to hit the edge case at INT32_MAX"
+        },
+        {
+            "created_at": "2018-03-13T20:46:21.832Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2227?focusedCommentId=16397625) by Wes McKinney (wesm):*\nIssue resolved by pull request 1740\n<https://github.com/apache/arrow/pull/1740>"
+        }
+    ]
+}

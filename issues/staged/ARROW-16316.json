@@ -1,0 +1,69 @@
+{
+    "issue": {
+        "title": "[R] How to round the timestamps in a mutate statement?",
+        "body": "***Note**: This issue was originally created as [ARROW-16316](https://issues.apache.org/jira/browse/ARROW-16316). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI was trying to aggregate over time using different granularity. Usually I would use the `lubridate::floor_date()` , which is currently not supported for parquet datasets.\r\n\r\nIs there any comprehensive list of supported list of currently supported `{}lubridate (or dplyr{`}) verbs? Maybe, it\u2019s only my fault, but except the changelog I haven\u2019t find any relevant information.\r\n\r\n\u00a0\r\n\r\nLater I found that the `round_temporal()` function is exposed to `{}R{`}.\u00a0\r\nBut I am struggling to find the right syntax inside a mutate statement to apply on a `timestamp[us, tz=UTC]` type column.\r\n```java\n\r\nnew_dataset |>\r\n\u00a0 mutate(time = arrow_round_temporal(time))\r\n#> \u00a0Error: Invalid: Attempted to initialize KernelState from null FunctionOptions\r\n```\r\n\u00a0\r\n\r\nHere are some other attempts:\r\n```java\n\r\nlibrary(arrow)\r\n\r\narrow_now <- Scalar$create(lubridate::now())\r\n(arrow_now)\r\n#> Scalar\r\n#> 2022-04-25 11:44:33.805609\r\ncall_function(\"round_temporal\", arrow_now)\r\n#> Scalar\r\n#> 2022-04-25 00:00:00.000000\r\ncall_function(\"round_temporal\", arrow_now, unit = \"day\")\r\n#> Error: Argument 2 is of class character but it must be one of \"Array\", \"ChunkedArray\", \"RecordBatch\", \"Table\", or \"Scalar\"\r\narrow_unit <- Scalar$create(\"day\")\r\n(arrow_unit)\r\n#> Scalar\r\n#> day\r\ncall_function(\"round_temporal\", arrow_now, unit = arrow_unit)\r\n#> Error: Invalid: Function 'round_temporal' accepts 1 arguments but attempted to look up kernel(s) with 2\r\n```\r\n\u00a0",
+        "created_at": "2022-04-25T12:19:26.000Z",
+        "updated_at": "2022-07-06T14:25:00.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-07-06T14:25:00.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-04-25T13:26:37.929Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16316?focusedCommentId=17527494) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nHi `[~kbzsl]` and thanks for opening this ticket. I'll try to reply to your questions:\r\n \\* you are right, we don't yet have a comprehensive list of the `{}lubridate{`}, `dplyr` and other `tidyverse` verbs supported in arrow (other than the [NEWS](https://github.com/apache/arrow/blob/master/r/NEWS.md)). It is definitely something that might be useful to have. I've just opened ARROW-16319 and I hope to cover that in time for release 9.0.0 (the release following the imminent one)\r\n \\* support for `lubridate` functionality in `arrow` is under active development - see ARROW-15163 and ARROW-16155. However, we haven't been able to close \u00a0`floor_date` ticket yet, and it might not get solved in time for the 8.0.0 release. floor_date turned out to be quite complex and there are currently 2 pull request ([PR 12657](https://github.com/apache/arrow/pull/12657) and [PR 12154](https://github.com/apache/arrow/pull/12154)) under review tackling different aspects of the functionality. Once these PRs get merged `floor_date` will be available in the development version of the package (hopefully soon)."
+        },
+        {
+            "created_at": "2022-04-25T13:38:21.326Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16316?focusedCommentId=17527500) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nIn terms of syntax, I think what you are looking for might be:\r\n```r\n\r\ncall_function(\"round_temporal\", arrow_now, options = list(unit = \"day\"))\r\n```\r\nHow did I figure it out? The error message mentioned that `round_temporal` accepts 1 argument and not 2 arguments. In the Arrow documentation, [on this page](https://arrow.apache.org/docs/cpp/compute.html?highlight=round_temporal) `round_temporal` is listed as a _unary_ function (which means exactly the same thing - it accepts a single argument), but it also states that it is hooked up to the [`RoundTemporalOptions`](https://arrow.apache.org/docs/cpp/api/compute.html#_CPPv4N5arrow7compute20RoundTemporalOptionsE)\u00a0options class. Looking at the `call_function` documentation tells me\u00a0`options`\u00a0can be passed as a list. Have a look at the `?call_function` documentation and get back to us or feel free to suggests improvements if you think they are needed."
+        },
+        {
+            "created_at": "2022-04-25T13:45:32.688Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16316?focusedCommentId=17527504) by Rok Mihevc (rokm):*\nExactly as `[~dragosmg]` said.\r\n\r\nAdditionally:\r\n```java\n\r\ncall_function(\"round_temporal\", arrow_now, options = list(unit = arrow_unit))\n```\r\ncurrently should work but behaves differently than lubridate. Namely rounding origin is set to 1970-01-01 instead of the one unit greater than unit rounded to. That means if you round to 6 hrs it will round to multiple of 6hrs since 1970-01-01 instead of to multiple of 6hrs since the beginning of the day the timestamp falls into.\r\n\r\nIf you're rounding to multiple of 1 unit that the two behaviours would overlap and you would get the same behaviour."
+        },
+        {
+            "created_at": "2022-04-25T14:34:52.653Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16316?focusedCommentId=17527534) by Zsolt Kegyes-Brassai (kbzsl):*\nHi `[~dragosmg]`. Thank you for your suggestion.\r\n\r\nIt looks that the unit is always `day `even though `hour `was specified.\r\n```java\n\r\n#> Scalar\r\n#> 2022-04-25 14:31:14.788641\r\n> call_function(\"round_temporal\", arrow_now, options = list(unit = \"hour\"))\r\n#> Scalar\r\n#> 2022-04-26 00:00:00.000000\n```\r\nWhat I am doing wrong?\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-04-25T14:51:05.680Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16316?focusedCommentId=17527548) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nI don't think you are doing anything wrong. I think `\"day\"` is the default. `[~rokm]` \u00a0do you know what's going on here? It looks like `CalendarUnit` might not actually hooked-up to `unit.`"
+        },
+        {
+            "created_at": "2022-04-25T14:53:20.798Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16316?focusedCommentId=17527550) by Rok Mihevc (rokm):*\nI think only <https://github.com/apache/arrow/pull/12154> introduces passing temporal rounding options. So I'm not sure if anything consumes that options parameter."
+        },
+        {
+            "created_at": "2022-04-25T14:53:54.750Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16316?focusedCommentId=17527551) by Rok Mihevc (rokm):*\nAnd \"day\" is the default so it makes sense it's used here/"
+        },
+        {
+            "created_at": "2022-04-25T14:55:12.692Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16316?focusedCommentId=17527552) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nThat's what I thought. Thanks for confirming `[~rokm]` \u00a0"
+        },
+        {
+            "created_at": "2022-04-25T15:06:03.359Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16316?focusedCommentId=17527557) by Zsolt Kegyes-Brassai (kbzsl):*\nDoes it mean that the default unit (day) cannot be overwritten if required?"
+        },
+        {
+            "created_at": "2022-04-25T15:08:38.725Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16316?focusedCommentId=17527560) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nIt looks like, for the time being, that might be the case.\u00a0"
+        },
+        {
+            "created_at": "2022-04-25T15:34:45.923Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16316?focusedCommentId=17527573) by Rok Mihevc (rokm):*\nYes, effectively options are not passed from R to the C++ kernel in the back so only the default options are applied (rounding to 1 day).\r\nThis will be resolved with the two PRs Dragos mentioned."
+        },
+        {
+            "created_at": "2022-07-06T13:25:17.455Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16316?focusedCommentId=17563227) by Neal Richardson (npr):*\nThis is solved by ARROW-14821 right?"
+        },
+        {
+            "created_at": "2022-07-06T14:15:16.490Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16316?focusedCommentId=17563259) by Rok Mihevc (rokm):*\n`[~npr]` yes"
+        }
+    ]
+}

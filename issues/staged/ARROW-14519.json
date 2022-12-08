@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[C++] joins segfault when data contains list column",
+        "body": "***Note**: This issue was originally created as [ARROW-14519](https://issues.apache.org/jira/browse/ARROW-14519). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen I run the R code below, it results in a segfault if one of the tables contains a list column.\r\n```r\n\r\nlibrary(arrow)\r\nlibrary(dplyr)\r\n\r\nbasic_tbl <- arrow_table(\r\n  tibble::tibble(\r\n    x = 1:3,\r\n    y = c(\"a\", \"b\", \"c\")\r\n  )\r\n)\r\n\r\nbasic_tbl2 <- arrow_table(\r\n  tibble::tibble(\r\n    x = 1:3,\r\n    z = c(T, F, T)\r\n  )\r\n)\r\n\r\nlist_tbl <- arrow_table(\r\n  tibble::tibble(\r\n    z = list(c(\"first\", \"list\", \"col\", \"row\"), c(\"second row \", \"here\")),\r\n    x = 1:2\r\n  )\r\n)\r\n\r\n# works\r\nleft_join(basic_tbl, basic_tbl2) %>%\r\n  collect()\r\n\r\n# segfaults\r\nleft_join(basic_tbl, list_tbl) %>%\r\n  collect()\r\n\r\n```",
+        "created_at": "2021-10-29T16:53:48.000Z",
+        "updated_at": "2022-02-18T20:02:16.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-11-06T13:49:00.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-02T13:06:41.441Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14519?focusedCommentId=17437345) by Jonathan Keane (jonkeane):*\nIt looks like it even segfaults when specifying the join keys with `by = \"x\"` (so it's not _only_ that that list column is trying to be used as a join key!"
+        },
+        {
+            "created_at": "2021-11-05T14:29:51.091Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14519?focusedCommentId=17439307) by David Li (lidavidm):*\nThis is because joining on lists is not supported, but the code path triggers an assertion instead of reporting an error. Also, it looks like the join code needs to pre-process all columns, so the presence of any unsupported type will cause this (as you found). We should at least raise an error instead of crashing, but I'm not familiar enough with the join code to know if we can handle unsupported types when they're not being used as the key."
+        },
+        {
+            "created_at": "2021-11-05T15:15:53.023Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14519?focusedCommentId=17439331) by Neal Richardson (npr):*\nSounds related to ARROW-14181 yeah?"
+        },
+        {
+            "created_at": "2021-11-05T15:18:17.495Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14519?focusedCommentId=17439333) by David Li (lidavidm):*\nARROW-14181 will expand the set of supported types but won't affect things here. (Also, the code path in question here already supported dictionaries.)"
+        },
+        {
+            "created_at": "2021-11-05T19:02:01.766Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14519?focusedCommentId=17439427) by Michal Nowakiewicz (michalno):*\nWe cannot easily support more types in hash join right now. That is because we transform and encode all the input values, key and non-key (row_encoder.h), so it would need another specialization for each additional type.\r\n\r\nBut we can return an error (from\u00a0HashJoinSchema::ValidateSchemas where we check data types from input schemas and keys) instead of asserting."
+        },
+        {
+            "created_at": "2021-11-05T20:27:17.593Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14519?focusedCommentId=17439483) by Neal Richardson (npr):*\nI don't follow, why do we have to transform and encode columns that we aren't joining by? They're just along for the ride."
+        },
+        {
+            "created_at": "2021-11-06T13:49:00.463Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14519?focusedCommentId=17439686) by David Li (lidavidm):*\nIssue resolved by pull request 11625\n<https://github.com/apache/arrow/pull/11625>"
+        }
+    ]
+}

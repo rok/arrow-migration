@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Java] Adding values to VarCharVector beyond 2GB results in IndexOutOfBoundsException",
+        "body": "***Note**: This issue was originally created as [ARROW-10153](https://issues.apache.org/jira/browse/ARROW-10153). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nOn executing the below test case, one can see that on adding the 2049th string of size 1MB, it fails.\u00a0\u00a0\r\n```java\n\r\nint length = 1024 * 1024;\r\nStringBuilder sb = new StringBuilder(length);\r\nfor (int i = 0; i < length; i++) {\r\n sb.append(\"a\");\r\n}\r\nbyte[] str = sb.toString().getBytes();\r\nVarCharVector vector = new VarCharVector(\"v\", new RootAllocator(Long.MAX_VALUE));\r\nvector.allocateNew(3000);\r\nfor (int i = 0; i < 3000; i++) {\r\n vector.setSafe(i, str);\r\n}\n```\r\n\u00a0\r\n```java\n\r\nException in thread \"main\" java.lang.IndexOutOfBoundsException: index: -2147483648, length: 1048576 (expected: range(0, 2147483648))Exception in thread \"main\" java.lang.IndexOutOfBoundsException: index: -2147483648, length: 1048576 (expected: range(0, 2147483648)) at org.apache.arrow.memory.ArrowBuf.checkIndex(ArrowBuf.java:699) at org.apache.arrow.memory.ArrowBuf.setBytes(ArrowBuf.java:762) at org.apache.arrow.vector.BaseVariableWidthVector.setBytes(BaseVariableWidthVector.java:1212) at org.apache.arrow.vector.BaseVariableWidthVector.setSafe(BaseVariableWidthVector.java:1011)\r\n```\r\nStepping through the code,\u00a0\r\n <https://github.com/apache/arrow/blob/master/java/memory/memory-core/src/main/java/org/apache/arrow/memory/ArrowBuf.java#L425>\r\n\r\nreturns the negative index `-2147483648`",
+        "created_at": "2020-10-01T22:37:30.000Z",
+        "updated_at": "2022-08-27T14:42:00.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-10-22T04:21:01.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-10-03T02:52:25.920Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10153?focusedCommentId=17206592) by Micah Kornfield (emkornfield@gmail.com):*\n`[~samarthjain]` this is expected. VarCharVector uses 32-bit integers for offsets.  For columns containing more than 2GB of data you would need to use [LargeVarCharVector](https://arrow.apache.org/docs/java/reference/org/apache/arrow/vector/LargeVarCharVector.html)"
+        },
+        {
+            "created_at": "2020-10-05T18:19:56.359Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10153?focusedCommentId=17208238) by Samarth Jain (samarthjain):*\nAh! Thanks, [~emkornfield@gmail.com]\u00a0! Looks like this was recently added.\r\n\r\n\u00a0\r\n\r\nAre there are any perf implications of using LargeVarCharVector by default? Alternatively, is there a way to detect that a regular VarCharVector has run out of capacity and that we need to copy over contents from a VarCharVector to LargeVarCharVector.\u00a0\r\n\r\n`[~bryanc]`, `[~liyafan]` \u00a0- maybe one of you know?\u00a0"
+        },
+        {
+            "created_at": "2020-10-07T05:51:35.633Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10153?focusedCommentId=17209303) by Micah Kornfield (emkornfield@gmail.com):*\nThe main implications of using LargeVarChatVector by default are:\r\n1.  It has an 8-bytes instead of 4-byte overhead per string value.\r\n2.  It might not be supported in all Arrow implementations (I would need to double check the matrix/integration tests).\r\n\r\nThere isn't anything built into java that will do the conversion automatically.  You could probably determine this yourself via accessors on the vectors (I think getByteCapacity, etc).  Although you would potentially run into other problems trying to copy values that are close to 2GB in size from one vector another (you would have a pretty high peak off-heap memory usage)."
+        },
+        {
+            "created_at": "2020-10-09T02:22:12.060Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10153?focusedCommentId=17210562) by Liya Fan (fan_li_ya):*\n`[~samarthjain]` \u00a0Thanks for reporting the problem.\r\n\r\nAs indicated by [~emkornfield@gmail.com], a\u00a0LargeVarChatVector employs a 8-byte offset buffer, so the data locality can be worse as less data could be loaded to cache.\r\n\r\nYou can check the vector capacity by calling the \\`BaseVariableWidthVector#getValueCapacity` API.\u00a0\r\n\r\nFinally, it could be expensive to copy the data from a VarCharVector to a\u00a0LargeVarCharVector, so if the data size may exceed 2GB, maybe you should consider LargeVarCharVector from the very beginning?"
+        },
+        {
+            "created_at": "2020-10-22T04:21:01.460Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10153?focusedCommentId=17218725) by Micah Kornfield (emkornfield@gmail.com):*\nClosing as this was intended behavior and all questions have been answered."
+        },
+        {
+            "created_at": "2022-08-27T14:42:00.790Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10153?focusedCommentId=17585988) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

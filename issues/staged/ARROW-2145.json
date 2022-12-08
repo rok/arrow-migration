@@ -1,0 +1,54 @@
+{
+    "issue": {
+        "title": "[Python] Decimal conversion not working for NaN values",
+        "body": "***Note**: This issue was originally created as [ARROW-2145](https://issues.apache.org/jira/browse/ARROW-2145). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n```python\n\r\nimport pyarrow as pa\r\nimport pandas as pd\r\nimport decimal\r\n\r\npa.Table.from_pandas(pd.DataFrame({'a': [decimal.Decimal('1.1'), decimal.Decimal('NaN')]}))\r\n```\r\n\r\nthrows following exception:\r\n\r\n```Java\n\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"pyarrow/table.pxi\", line 875, in pyarrow.lib.Table.from_pandas (/arrow/python/build/temp.linux-x86_64-3.6/lib.cxx:44927)\r\n  File \"/lib/python3.6/site-packages/pyarrow/pandas_compat.py\", line 350, in dataframe_to_arrays\r\n    convert_types)]\r\n  File \"/lib/python3.6/site-packages/pyarrow/pandas_compat.py\", line 349, in <listcomp>\r\n    for c, t in zip(columns_to_convert,\r\n  File \"/lib/python3.6/site-packages/pyarrow/pandas_compat.py\", line 345, in convert_column\r\n    return pa.array(col, from_pandas=True, type=ty)\r\n  File \"pyarrow/array.pxi\", line 170, in pyarrow.lib.array (/arrow/python/build/temp.linux-x86_64-3.6/lib.cxx:29224)\r\n  File \"pyarrow/array.pxi\", line 70, in pyarrow.lib._ndarray_to_array (/arrow/python/build/temp.linux-x86_64-3.6/lib.cxx:28465)\r\n  File \"pyarrow/error.pxi\", line 98, in pyarrow.lib.check_status (/arrow/python/build/temp.linux-x86_64-3.6/lib.cxx:9068)\r\npyarrow.lib.ArrowException: Unknown error: an integer is required (got type str)\r\n```\r\n\r\nSame problem with other special decimal values like `infinity`.",
+        "created_at": "2018-02-13T07:19:24.000Z",
+        "updated_at": "2018-03-01T22:27:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-03-01T22:27:21.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-02-13T23:40:21.318Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2145?focusedCommentId=16363233) by Phillip Cloud (cpcloud):*\nThanks for the report, taking a look now."
+        },
+        {
+            "created_at": "2018-02-14T01:20:43.715Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2145?focusedCommentId=16363332) by Phillip Cloud (cpcloud):*\n`[~antonymayi]` Do you have a specific use case for this, or were you tinkering around and trying a few things?"
+        },
+        {
+            "created_at": "2018-02-14T07:05:21.366Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2145?focusedCommentId=16363574) by Antony Mayi (antonymayi):*\nI am trying to use it for a real system where an event with zero value (`decimal.Decimal('0')`) is distinct from no event (`decimal.Decimal('nan')`) while both cases need to be stored. Being able to store decimal `nan` within the same column spares me from introducing another column just to flag the no-event cases.\r\n\r\nThis is the same case like with floats - `nan`/`inf` is valid float value (and supported by pyarrow/parquet) - but here I need to use decimal because of the precision..."
+        },
+        {
+            "created_at": "2018-02-14T15:14:56.597Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2145?focusedCommentId=16364232) by Wes McKinney (wesm):*\nCan you use null instead?"
+        },
+        {
+            "created_at": "2018-02-14T20:55:11.965Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2145?focusedCommentId=16364765) by Antony Mayi (antonymayi):*\n> Can you use null instead?\r\n\r\nI guess the current implementation looks at the first cell of the column, finds instance of `Decimal` and then expects the whole column contains just decimals - so the answer is no, at least based on this observation:\r\n\r\n```Java\n\r\n>>> pa.Table.from_pandas(pd.DataFrame({'a': [decimal.Decimal('1.1'), None]}))\r\n...\r\npyarrow.lib.ArrowException: Unknown error: 'NoneType' object has no attribute 'as_tuple'\r\n```\r\n\r\nor for `numpy.nan`:\r\n\r\n```Java\n\r\n>>> pa.Table.from_pandas(pd.DataFrame({'a': [decimal.Decimal('1.1'), np.nan]}))\r\n...\r\npyarrow.lib.ArrowException: Unknown error: 'float' object has no attribute 'as_tuple'\r\n```"
+        },
+        {
+            "created_at": "2018-02-14T21:24:57.591Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2145?focusedCommentId=16364798) by Wes McKinney (wesm):*\nThose both look like bugs that should be fixed. If those worked (or if `Decimal('NaN')` became null), would that work?"
+        },
+        {
+            "created_at": "2018-02-14T21:55:47.420Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2145?focusedCommentId=16364830) by Phillip Cloud (cpcloud):*\nBoth are definitely bugs, working on a fix."
+        },
+        {
+            "created_at": "2018-02-14T23:37:54.805Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2145?focusedCommentId=16364965) by Antony Mayi (antonymayi):*\nyes, if null was accepted that would solve my usecase perfectly (in the same way `Decimal('NaN')` would but I guess null is even better as arrow is sparse for nulls while NaN takes space...)"
+        },
+        {
+            "created_at": "2018-03-01T22:27:21.954Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2145?focusedCommentId=16382769) by Wes McKinney (wesm):*\nIssue resolved by pull request 1651\n<https://github.com/apache/arrow/pull/1651>"
+        }
+    ]
+}

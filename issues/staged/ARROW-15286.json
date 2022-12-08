@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Python] pyarrow.dataset.FileSystemDataset.take method causes Segmentation Fault",
+        "body": "***Note**: This issue was originally created as [ARROW-15286](https://issues.apache.org/jira/browse/ARROW-15286). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhenever I try calling the `pyarrow.dataset.FileSystemDataset.take` method, I get a segmentation fault.\u00a0\r\n\r\nI first encountered this using a proprietary dataset and recreated it with the UC Davis data below. I can successfully run the pyarrow.dataset.FileSystemDataset.to_batches method but not the take() method.  \r\n\r\nSteps to recreate:\r\n\r\n```java\n\r\n!wget https://anson.ucdavis.edu/~clarkf/pems_parquet.zip\r\n!unzip -q pems_parquet.zip\r\n\r\nimport pyarrow.dataset as ds\r\nfile_path= \"./pems_sorted/station=402264/part-r-00151-ddaee723-f3f6-4f25-a34b-3312172aa6d7.snappy.parquet\"\r\ndataset = ds.dataset(file_path)\r\ndataset.take(1)\r\n>>> 80874 segmentation fault\r\n```\r\nCreating a dataset from a directory as below also results in a segfault.\r\n```java\n\r\ndir_path = \"./pems_sorted/station=402264\"\r\ndataset = ds.dataset(dir_path)\r\ndataset.take(1)\r\n```\r\nEnvironments tried:\r\n \\* Ubuntu 18.04, Python 3.8.6\r\n \\* macOS 11.6.2, Python 3.7.5",
+        "created_at": "2022-01-08T00:26:08.000Z",
+        "updated_at": "2022-01-11T23:02:37.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-01-10T17:24:49.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-01-10T15:46:51.281Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15286?focusedCommentId=17472115) by Joris Van den Bossche (jorisvandenbossche):*\n`[~dzubke]` thanks for the report! \r\n\r\nI can reproduce this, and running it under gdb gives me the following traceback:\r\n\r\n```Java\n\r\nThread 1 \"python\" received signal SIGSEGV, Segmentation fault.\r\n0x00007fb5d0f2b8dc in std::__shared_ptr<arrow::ArrayData, (__gnu_cxx::_Lock_policy)2>::get (this=0x8)\r\n    at /home/joris/miniconda3/envs/arrow-dev/x86_64-conda-linux-gnu/include/c++/9.3.0/bits/shared_ptr_base.h:1310\r\n1310\t      { return _M_ptr; }\r\n(gdb) bt\r\n#0  0x00007fb5d0f2b8dc in std::__shared_ptr<arrow::ArrayData, (__gnu_cxx::_Lock_policy)2>::get (this=0x8)\r\n    at /home/joris/miniconda3/envs/arrow-dev/x86_64-conda-linux-gnu/include/c++/9.3.0/bits/shared_ptr_base.h:1310\r\n#1  0x00007fb5d0f2864b in std::__shared_ptr_access<arrow::ArrayData, (__gnu_cxx::_Lock_policy)2, false, false>::_M_get (this=0x8)\r\n    at /home/joris/miniconda3/envs/arrow-dev/x86_64-conda-linux-gnu/include/c++/9.3.0/bits/shared_ptr_base.h:1021\r\n#2  0x00007fb5d0f25495 in std::__shared_ptr_access<arrow::ArrayData, (__gnu_cxx::_Lock_policy)2, false, false>::operator-> (this=0x8)\r\n    at /home/joris/miniconda3/envs/arrow-dev/x86_64-conda-linux-gnu/include/c++/9.3.0/bits/shared_ptr_base.h:1015\r\n#3  0x00007fb5d0f22387 in arrow::Array::null_count (this=0x0) at ../src/arrow/array/array_base.cc:52\r\n#4  0x00007fb5cd0cd9ea in arrow::dataset::Scanner::TakeRows (this=0x5584436ebbd0, indices=...) at ../src/arrow/dataset/scanner.cc:1036\r\n#5  0x00007fb5cd32cfcc in __pyx_pw_7pyarrow_8_dataset_7Scanner_15take(_object*, _object*) () from /home/joris/scipy/repos/arrow/python/pyarrow/_dataset.cpython-38-x86_64-linux-gnu.so\r\n```"
+        },
+        {
+            "created_at": "2022-01-10T15:50:22.451Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15286?focusedCommentId=17472117) by Joris Van den Bossche (jorisvandenbossche):*\nA simpler observation: passing it as a pyarrow arrow works fine (`dataset.take(pa.array([1]))`, but passing it as a list or scalar not (`dataset.take([1])`\r\n\r\nThis happens because we simply pass the user-passed `indices` to `pyarrow_unwrap_array`, which returns a `shared_ptr[CArray]()` empty array when the object is not a pyarrow.Array. "
+        },
+        {
+            "created_at": "2022-01-10T16:28:53.611Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15286?focusedCommentId=17472145) by Dustin Zubke (dzubke):*\n`[~jorisvandenbossche]` thank you for your prompt response!\r\n\r\nAnd thank you for the observation to use a pyarrow array. I have confirmed that this approach works for me without raising a Segmentation Fault.\r\n\r\nIt may be helpful for future users to specify that the `indices` argument of the `dataset.take` method as needing to be a pyarrow array. The [current documentation](https://arrow.apache.org/docs/python/generated/pyarrow.dataset.FileSystemDataset.html) does not clearly specify the object type of the `indices` argument."
+        },
+        {
+            "created_at": "2022-01-10T16:30:49.597Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15286?focusedCommentId=17472146) by Dustin Zubke (dzubke):*\nI'm not sure how you handle Jira issues. I consider this issue closed but am not sure what field to to select in the Resolution field. Feel free to \"close\" this issue in whatever way you see fit, or provide me with instruction on how to do so.\u00a0\u00a0\r\n\r\nThanks!"
+        },
+        {
+            "created_at": "2022-01-10T16:37:19.494Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15286?focusedCommentId=17472148) by Joris Van den Bossche (jorisvandenbossche):*\nI opened a PR to automatically convert any input to a pyarrow array, to avoid such segfaults. \r\nWhen that PR is merged, this issue will automatically get resolved."
+        },
+        {
+            "created_at": "2022-01-10T16:43:46.567Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15286?focusedCommentId=17472151) by Dustin Zubke (dzubke):*\nAwesome, thanks for taking care of this!\r\n\r\nHappy New Year!"
+        },
+        {
+            "created_at": "2022-01-10T17:24:49.887Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15286?focusedCommentId=17472175) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 12115\n<https://github.com/apache/arrow/pull/12115>"
+        }
+    ]
+}

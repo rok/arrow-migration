@@ -1,0 +1,81 @@
+{
+    "issue": {
+        "title": "[Plasma] plasma_store has runtime dependency on Boost shared libraries when ARROW_BOOST_USE_SHARED=on",
+        "body": "***Note**: This issue was originally created as [ARROW-2193](https://issues.apache.org/jira/browse/ARROW-2193). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI'm not sure why, but when I run the pyarrow test suite (for example `py.test pyarrow/tests/test_plasma.py`), plasma_store forks endlessly:\r\n\r\n```bash\n\r\n\u00a0$ ps fuwww\r\nUSER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND\r\n[...]\r\nantoine  27869 12.0  0.4 863208 68976 pts/7    S    13:41   0:01 /home/antoine/miniconda3/envs/pyarrow/bin/python /home/antoine/arrow/python/pyarrow/plasma_store -s /tmp/plasma_store40209423 -m 100000000\r\nantoine  27885 13.0  0.4 863076 68560 pts/7    S    13:41   0:01  \\_ /home/antoine/miniconda3/envs/pyarrow/bin/python /home/antoine/arrow/python/pyarrow/plasma_store -s /tmp/plasma_store40209423 -m 100000000\r\nantoine  27901 12.1  0.4 863076 68320 pts/7    S    13:41   0:01      \\_ /home/antoine/miniconda3/envs/pyarrow/bin/python /home/antoine/arrow/python/pyarrow/plasma_store -s /tmp/plasma_store40209423 -m 100000000\r\nantoine  27920 13.6  0.4 863208 68868 pts/7    S    13:41   0:01          \\_ /home/antoine/miniconda3/envs/pyarrow/bin/python /home/antoine/arrow/python/pyarrow/plasma_store -s /tmp/plasma_store40209423 -m 100000000\r\n[etc.]\r\n```\r\n",
+        "created_at": "2018-02-21T12:44:32.000Z",
+        "updated_at": "2018-11-04T18:13:08.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++ - Plasma",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-04-11T15:58:50.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-02-21T12:54:04.677Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2193?focusedCommentId=16371363) by Antoine Pitrou (apitrou):*\nAfter rebuilding from scratch, I get another issue:\r\n\r\n```bash\n\r\n$ plasma_store -m 100000\r\nplasma_store: error while loading shared libraries: libboost_system.so.1.66.0: cannot open shared object file: No such file or directory\r\n```\r\n\r\nwhich is quite weird since I have the `boost-cpp` package installed from conda-forge:\r\n\r\n```bash\n\r\n$ which plasma_store \r\n/home/antoine/miniconda3/envs/pyarrow/bin/plasma_store\r\n$ locate libboost_system.so.1.66.0\r\n[...]\r\n/home/antoine/miniconda3/envs/pyarrow/lib/libboost_system.so.1.66.0\r\n```"
+        },
+        {
+            "created_at": "2018-02-21T15:02:17.035Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2193?focusedCommentId=16371514) by Wes McKinney (wesm):*\nI guess libboost_system is not in LD_LIBRARY_PATH. Boost ought to be statically-linked if possible, though"
+        },
+        {
+            "created_at": "2018-02-21T15:47:04.694Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2193?focusedCommentId=16371565) by Antoine Pitrou (apitrou):*\nWhat's weird is that it used to work correctly less than one week ago. Did plasma_store start relying on boost very recently?"
+        },
+        {
+            "created_at": "2018-02-21T16:06:41.311Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2193?focusedCommentId=16371589) by Wes McKinney (wesm):*\nSounds like a regression related to the build toolchain. Are you able to git bisect to find the commit that broke things?"
+        },
+        {
+            "created_at": "2018-02-21T18:29:48.397Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2193?focusedCommentId=16371820) by Antoine Pitrou (apitrou):*\nOk, this is because I recently switched from gcc-4.9 to clang-5.0. With gcc, plasma_store doesn't have a runtime dependency on boost:\r\n```bash\n\r\n$ ldd `which plasma_store`\r\n\tlinux-vdso.so.1 =>  (0x00007ffc8b318000)\r\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007fdc79bbe000)\r\n\tlibstdc++.so.6 => /usr/lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007fdc7983c000)\r\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007fdc79533000)\r\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007fdc7931d000)\r\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fdc78f53000)\r\n\t/lib64/ld-linux-x86-64.so.2 (0x00007fdc79ddb000)\r\n```\r\n\r\nBut with clang I get:\r\n```bash\n\r\n$ ldd `which plasma_store`\r\n\tlinux-vdso.so.1 =>  (0x00007fff21ba4000)\r\n\tlibrt.so.1 => /lib/x86_64-linux-gnu/librt.so.1 (0x00007f0d04d5d000)\r\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f0d04b40000)\r\n\tlibboost_system.so.1.66.0 => not found\r\n\tlibboost_filesystem.so.1.66.0 => not found\r\n\tlibstdc++.so.6 => /usr/lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007f0d047be000)\r\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f0d044b5000)\r\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f0d0429f000)\r\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f0d03ed5000)\r\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f0d04f65000)\r\n```"
+        },
+        {
+            "created_at": "2018-02-21T20:11:49.659Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2193?focusedCommentId=16371938) by Wes McKinney (wesm):*\nOK, this seems buggy. I marked for 0.9.0"
+        },
+        {
+            "created_at": "2018-02-21T20:36:23.192Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2193?focusedCommentId=16371973) by Robert Nishihara (robertnishihara):*\nDo you know that `fork` is being called? Another way this could happen is if the tests fail to kill the plasma store and leave a bunch of them running."
+        },
+        {
+            "created_at": "2018-02-21T20:43:20.634Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2193?focusedCommentId=16371982) by Antoine Pitrou (apitrou):*\n> Do you know that fork is being called?\r\n\r\nI don't know, but the process tree suggests so (see report). That said, after recompiling I don't witness this anymore, rather plasma_store fails launching."
+        },
+        {
+            "created_at": "2018-02-21T22:23:41.680Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2193?focusedCommentId=16372116) by Wes McKinney (wesm):*\nI'm able to reproduce the Boost problem. For some reason the `LINK_PRIVATE` argument to `arrow_static` is not being respected \u2013 the Boost libraries are being passed there. I'm not sure what is going on"
+        },
+        {
+            "created_at": "2018-02-21T22:43:32.491Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2193?focusedCommentId=16372137) by Wes McKinney (wesm):*\nI've spent almost an hour on this and I'm stumped"
+        },
+        {
+            "created_at": "2018-02-21T22:46:24.238Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2193?focusedCommentId=16372141) by Wes McKinney (wesm):*\nFor the record, here is the command line that's being generated for me\r\n\r\n```Java\n\r\n/usr/bin/clang++-5.0  -ggdb -O0  -Weverything -Wno-c++98-compat -Wno-c++98-compat-pedantic -Wno-deprecated -Wno-weak-vtables -Wno-padded -Wno-comma -Wno-unused-parameter -Wno-unused-template -Wno-undef -Wno-shadow -Wno-switch-enum -Wno-exit-time-destructors -Wno-global-constructors -Wno-weak-template-vtables -Wno-undefined-reinterpret-cast -Wno-implicit-fallthrough -Wno-unreachable-code-return -Wno-float-equal -Wno-missing-prototypes -Wno-old-style-cast -Wno-covered-switch-default -Wno-cast-align -Wno-vla-extension -Wno-shift-sign-overflow -Wno-used-but-marked-unused -Wno-missing-variable-declarations -Wno-gnu-zero-variadic-macro-arguments -Wconversion -Wno-sign-conversion -Wno-disabled-macro-expansion -Wno-gnu-folding-constant -Wno-reserved-id-macro -Wno-range-loop-analysis -Wno-double-promotion -Wno-undefined-func-template -Wno-zero-as-null-pointer-constant -Wno-unknown-warning-option -Werror -std=c++11 -msse3 -maltivec -Werror -Qunused-arguments  -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -fPIC -g  -rdynamic src/plasma/CMakeFiles/plasma_store.dir/store.cc.o  -o debug/plasma_store  -Wl,-rpath,/home/wesm/cpp-toolchain/lib: -lrt debug/libplasma.a debug/libarrow.a -lrt orc_ep-install/lib/liborc.a ../thirdparty/protobuf_ep-install/lib/libprotobuf.a /home/wesm/cpp-toolchain/lib/libzstd.a /home/wesm/cpp-toolchain/lib/libz.a /home/wesm/cpp-toolchain/lib/libsnappy.a /home/wesm/cpp-toolchain/lib/liblz4.a /home/wesm/cpp-toolchain/lib/libbrotlidec.a /home/wesm/cpp-toolchain/lib/libbrotlienc.a /home/wesm/cpp-toolchain/lib/libbrotlicommon.a -lpthread /home/wesm/cpp-toolchain/lib/libboost_system.so /home/wesm/cpp-toolchain/lib/libboost_filesystem.so /home/wesm/cpp-toolchain/lib/libflatbuffers.a -lpthread && :\r\n```\r\n\r\nThe linker problem isn't isolated to clang, here it is with gcc-4.9:\r\n\r\n```Java\n\r\n/usr/bin/g++-4.9  -ggdb -O0  -Wall -Wconversion -Wno-sign-conversion -Wno-unknown-warning-option -Werror -std=c++11 -msse3 -Werror -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -fPIC -g  -rdynamic src/plasma/CMakeFiles/plasma_store.dir/store.cc.o  -o debug/plasma_store  -Wl,-rpath,/home/wesm/cpp-toolchain/lib: -lrt debug/libplasma.a debug/libarrow.a -lrt orc_ep-install/lib/liborc.a ../thirdparty/protobuf_ep-install/lib/libprotobuf.a /home/wesm/cpp-toolchain/lib/libzstd.a /home/wesm/cpp-toolchain/lib/libz.a /home/wesm/cpp-toolchain/lib/libsnappy.a /home/wesm/cpp-toolchain/lib/liblz4.a /home/wesm/cpp-toolchain/lib/libbrotlidec.a /home/wesm/cpp-toolchain/lib/libbrotlienc.a /home/wesm/cpp-toolchain/lib/libbrotlicommon.a -lpthread /home/wesm/cpp-toolchain/lib/libboost_system.so /home/wesm/cpp-toolchain/lib/libboost_filesystem.so /home/wesm/cpp-toolchain/lib/libflatbuffers.a -lpthread && :\r\n```\r\n\r\nI guess because no Boost symbols are used that the binary produced by gcc does not have the runtime dependency on the .so files:\r\n\r\n```Java\n\r\n$ ldd debug/plasma_store \r\n\tlinux-vdso.so.1 =>  (0x00007ffd8390b000)\r\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f9ab8354000)\r\n\tlibstdc++.so.6 => /usr/lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007f9ab8041000)\r\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f9ab7d3b000)\r\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f9ab7b24000)\r\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f9ab775b000)\r\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f9ab8572000)\r\n```\r\n\r\nBut the Boost libraries shouldn't be passed to the linker at all"
+        },
+        {
+            "created_at": "2018-02-21T22:50:51.302Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2193?focusedCommentId=16372148) by Wes McKinney (wesm):*\nOK, I found the answer. There is no such thing as `PRIVATE` for static libraries:\r\n\r\nhttps://cmake.org/pipermail/cmake/2016-May/063399.html\r\n\r\nI guess this kind of makes sense. I don't think this is fixable then, but we should document the requirements if the user is using `ARROW_BOOST_USE_SHARED=on`, which is the default.\r\n\r\n`[~pitrou]` you can make this problem go away by passing `-DARROW_BOOST_USE_SHARED=off`. I do all my development with Boost static linking "
+        },
+        {
+            "created_at": "2018-02-21T22:53:16.549Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2193?focusedCommentId=16372149) by Wes McKinney (wesm):*\nI opened https://issues.apache.org/jira/browse/ARROW-2196 about trying to do something about this"
+        },
+        {
+            "created_at": "2018-02-22T08:27:10.266Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2193?focusedCommentId=16372538) by Antoine Pitrou (apitrou):*\n> you can make this problem go away by passing -DARROW_BOOST_USE_SHARED=off\r\n\r\nGreat, thank you!"
+        },
+        {
+            "created_at": "2018-02-22T08:53:29.704Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2193?focusedCommentId=16372545) by Uwe Korn (uwe):*\nThe problem is possibly the different default flags that are passed\u00a0from the compiler to the linker. GCC passes `--as-needed` by default whereas clang does not. Setting `CXXFLAGS` and so to `-Wl,--as-needed` should be the proper fix. We actually don't want to link statically to Boost (I will open a separate issue about the problems I had with this)."
+        },
+        {
+            "created_at": "2018-04-11T15:58:50.313Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2193?focusedCommentId=16434110) by Antoine Pitrou (apitrou):*\nARROW-2224 removed the reliance on boost_regex:\r\n```bash\n\r\n$ ldd `which plasma_store`\r\n\tlinux-vdso.so.1 =>  (0x00007ffeb2974000)\r\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f96cd5b3000)\r\n\tlibstdc++.so.6 => /usr/lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007f96cd22b000)\r\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f96ccf22000)\r\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f96ccd0b000)\r\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f96cc941000)\r\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f96cd7d0000)\r\n```"
+        }
+    ]
+}

@@ -1,0 +1,56 @@
+{
+    "issue": {
+        "title": "[C++]  Optimize the Arrow UTF-8-string-validation",
+        "body": "***Note**: This issue was originally created as [ARROW-6131](https://issues.apache.org/jira/browse/ARROW-6131). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe new Algorithm comes from: https://github.com/cyb70289/utf8 (MIT LICENSE)\r\n\r\nRange base algorithm:\r\n  1. Map each byte of input-string to Range table.\r\n  2. Leverage the Neon 'tbl' instruction to lookup table.\r\n  3. Find the pattern and set correct table index for each input byte\r\n  4. Validate input string.\r\n\r\nThe Algorithm would improve utf8-validation ~1.6x Speedup for LargeNonAscii and SmallNonAscii. But the algorithm would deteriorate the All-Ascii cases (The input data is all ascii string).\r\nThe benchmark API is  \r\n```java\n\r\nValidateUTF8\r\n```\r\n\r\n\r\nAs far as I know, the data that is all-ascii is unusual on the internet.\r\nCould you guys please tell me what's the use case scenario for Apache Arrow? \r\nIs the Arrow's data that need to be validated  all-ascii string?\r\n\r\nIf not, I'd like to submit the patch to accelerate the NonAscii validation.\r\n\r\nAs for All-Ascii  validation,  I would like to propose another optimization solution with SIMD in another jira.\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n",
+        "created_at": "2019-08-05T03:19:22.000Z",
+        "updated_at": "2022-07-12T14:04:30.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2019-08-05T03:22:04.916Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6131?focusedCommentId=16899742) by Yuqi Gu (yqGu):*\nThe origin utf8 benchmark :\r\n\r\n```java\n\r\n----------------------------------------------------------------\r\nBenchmark                         Time           CPU Iterations\r\n----------------------------------------------------------------\r\nValidateTinyAscii                 7 ns          7 ns  107435339   1.42978GB/s\r\nValidateTinyNonAscii             16 ns         16 ns   42655054   639.503MB/s\r\nValidateSmallAscii               29 ns         29 ns   24516945    4.4671GB/s\r\nValidateSmallAlmostAscii         91 ns         91 ns    7677848   1.51182GB/s\r\nValidateSmallNonAscii           175 ns        175 ns    4009837    731.98MB/s\r\nValidateLargeAscii            18821 ns      18814 ns      37194   4.95077GB/s\r\nValidateLargeAlmostAscii      64056 ns      64025 ns      10929   1.45533GB/s\r\nValidateLargeNonAscii        130321 ns     130249 ns       5375   732.909MB/s\r\n```\r\n\r\n\r\nThe new algorithm:\r\n\r\n```java\n\r\n----------------------------------------------------------------\r\nBenchmark                         Time           CPU Iterations\r\n----------------------------------------------------------------\r\nValidateTinyAscii                 6 ns          6 ns  116427650   1.59527GB/s\r\nValidateTinyNonAscii             17 ns         17 ns   41897276   628.046MB/s\r\nValidateSmallAscii              117 ns        117 ns    5964896   1113.14MB/s\r\nValidateSmallAlmostAscii        145 ns        145 ns    4819232    971.76MB/s\r\nValidateSmallNonAscii           118 ns        118 ns    5947924   1085.68MB/s\r\nValidateLargeAscii            82297 ns      82247 ns       8511   1.13246GB/s\r\nValidateLargeAlmostAscii      81145 ns      81138 ns       8627   1.14838GB/s\r\nValidateLargeNonAscii         81221 ns      81202 ns       8621   1.14805GB/s\r\n```\r\n\r\n\r\n\r\n"
+        },
+        {
+            "created_at": "2019-08-05T07:02:48.168Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6131?focusedCommentId=16899825) by Antoine Pitrou (apitrou):*\nI expect all-ASCII data to be very frequent in the kind of data that Arrow processes (e.g. data coming from CSV files).\r\n\r\nI'm also rather wary of maintaining delicate non-trivial SIMD code in Arrow. `[~wesmckinn]`"
+        },
+        {
+            "created_at": "2019-08-05T14:10:11.997Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6131?focusedCommentId=16900111) by Wes McKinney (wesm):*\n`[~yqGu]` in which component of the project is UTF8-validation affecting you? Depending on the case, it might be possible to introduce some option to elect a different validation algorithm. I agree that maintaining the performance of the all-ASCII case, particularly in the context of CSV files, is pretty important. Even in business situations where the primary language is not English, many all-ASCII CSV files relating to analytics are produced"
+        },
+        {
+            "created_at": "2019-08-06T03:34:34.640Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6131?focusedCommentId=16900580) by Yuqi Gu (yqGu):*\nOK, I see. And\u00a0how about to\u00a0introduce a fast non-ASCII validation method with this new\u00a0algorithm into Arrow?\r\n\r\n(It would just offer a API like 'ValidateNonAscii' and give a option to non-ascii case validation.)\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-08-06T21:18:52.662Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6131?focusedCommentId=16901471) by Wes McKinney (wesm):*\nIn principle this seems OK to me. We can discuss further in a PR"
+        },
+        {
+            "created_at": "2021-03-17T14:11:41.295Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6131?focusedCommentId=17303459) by Antoine Pitrou (apitrou):*\nDo you want to revive this using xsimd (assuming that's possible)? Please note that the short string case is still very important to keep fast.\r\n\r\nWe may also want to close this issue unless some use case comes up where UTF8 validation of large strings is performance-critical."
+        },
+        {
+            "created_at": "2021-08-04T09:22:16.762Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6131?focusedCommentId=17392907) by Antoine Pitrou (apitrou):*\ncc `[~yibocai]` What do you think about this issue? Is it worth keeping it open?"
+        },
+        {
+            "created_at": "2021-08-04T09:52:32.583Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6131?focusedCommentId=17392948) by Yuqi Gu (yqGu):*\nHi `[~apitrou]`,\r\n\r\nSome PRs in xsimd are submitted for ARROW-11502\u00a0(<https://github.com/apache/arrow/pull/9424>).\r\n But xsimd was just now switched to new implementation . \r\n So I'm working on refactor the related PRs:\r\n```java\n\r\nhttps://github.com/xtensor-stack/xsimd/pull/490\r\nhttps://github.com/xtensor-stack/xsimd/pull/487\r\nhttps://github.com/xtensor-stack/xsimd/pull/459\r\n```\r\nto adjust new implementation of xsimd.\r\n\r\nFor this tickect, I'd like to revive it to using xsimd as you suggested. How about to keep it open?"
+        },
+        {
+            "created_at": "2021-08-04T10:19:33.069Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6131?focusedCommentId=17392988) by Antoine Pitrou (apitrou):*\nLet's keep it open then!"
+        },
+        {
+            "created_at": "2022-07-12T14:04:30.743Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6131?focusedCommentId=17565670) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

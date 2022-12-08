@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[Python][Parquet] Failure when reading Parquet file from S3 with s3fs",
+        "body": "***Note**: This issue was originally created as [ARROW-6058](https://issues.apache.org/jira/browse/ARROW-6058). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI am reading parquet data from S3 and get\u00a0 ArrowIOError error.\r\n\r\nSize of the data:\u00a032 part files 90 MB each (3GB approx)\r\n\r\nNumber of records: Approx 100M\r\n\r\nCode Snippet:\r\n```java\n\r\nfrom s3fs import S3FileSystem\r\nimport pyarrow.parquet as pq\r\n\r\ns3 = S3FileSystem()\r\n\r\ndataset = pq.ParquetDataset(\"s3://location\", filesystem=s3)\r\n\r\ndf = dataset.read_pandas().to_pandas()\r\n```\r\nStack Trace:\r\n```java\n\r\ndf = dataset.read_pandas().to_pandas()\r\nFile \"/root/.local/lib/python3.6/site-packages/pyarrow/parquet.py\", line 1113, in read_pandas\r\nreturn self.read(use_pandas_metadata=True, **kwargs)\r\nFile \"/root/.local/lib/python3.6/site-packages/pyarrow/parquet.py\", line 1085, in read\r\nuse_pandas_metadata=use_pandas_metadata)\r\nFile \"/root/.local/lib/python3.6/site-packages/pyarrow/parquet.py\", line 583, in read\r\ntable = reader.read(**options)\r\nFile \"/root/.local/lib/python3.6/site-packages/pyarrow/parquet.py\", line 216, in read\r\nuse_threads=use_threads)\r\nFile \"pyarrow/_parquet.pyx\", line 1086, in pyarrow._parquet.ParquetReader.read_all\r\nFile \"pyarrow/error.pxi\", line 87, in pyarrow.lib.check_status\r\npyarrow.lib.ArrowIOError: Unexpected end of stream: Page was smaller (197092) than expected (263929)\r\n```\r\n\u00a0\r\n\r\n**Note: Same code works on relatively smaller dataset (approx < 50M records)**\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2019-07-29T09:31:49.000Z",
+        "updated_at": "2019-08-27T15:28:45.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-21T13:40:29.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-07-29T13:41:20.451Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6058?focusedCommentId=16895262) by Wes McKinney (wesm):*\nSeems like one of the files is corrupted. Have you tried reading the 32 files individually to see which one it is?"
+        },
+        {
+            "created_at": "2019-07-29T15:23:10.670Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6058?focusedCommentId=16895353) by Siddharth (sid88in):*\nhey `[~wesmckinn]` thanks for your prompt reply. I checked each part file and found the part file which gives an error. But the entire partition can be ready by redshift and athena without any errors. I can do a count(\\*) on the partition and it works so I am not sure if the part file is corrupted. But I can dig in to see if there is an issue with the part file. Any idea how we can fix this if part file was produced as expected?\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-08-09T17:55:26.606Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6058?focusedCommentId=16904082) by Andrey Krivonogov (krivonogov):*\nHi `[~wesmckinn]`,\r\n\r\nI have experienced the same issue as `[~sid88in]`\r\n\r\nI also managed to reproduce it with synthetic data:\r\n```java\n\r\nimport numpy as np\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nimport s3fs\r\n\r\ntable = pa.Table.from_arrays([pa.array(np.arange(3 * 10 ** 7), type=pa.int64())], ['col'])\r\npath = 's3://bucket/path/0.parquet'\r\nfs = s3fs.S3FileSystem()\r\npq.write_table(table, path, filesystem=fs, row_group_size=10 ** 7)\r\ntable_read = pq.read_table(path, filesystem=fs)\n```\r\n\u00a0this snippet raises similar\u00a0\r\n```java\n\r\nArrowIOError: Unexpected end of stream: Page was smaller (241959) than expected (524605)\r\n```\r\nThe\u00a0problem\u00a0seemed to be in\u00a0s3fs version. Package versions I have\r\n```java\n\r\npython 3.6.7\r\npackages installed with conda (via conda-forge)\r\n\r\nboto3==1.9.204\r\nbotocore==1.12.204\r\nnumpy==1.16.2\r\npyarrow==0.14.1\r\n```\r\nand it raised with\r\n```java\n\r\ns3fs==0.3.3\n```\r\nbut everything worked fine with\r\n```java\n\r\ns3fs==0.2.2\r\n```\r\n\u00a0\r\n\r\nThank you in advance for your help !\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-08-15T04:43:02.378Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6058?focusedCommentId=16907823) by Wong Chung Hoi (hoi):*\nHi all,\u00a0\r\n\r\nFYI, I witness the same issue on BOTH GCP (with pandas.read_parquet and gcsfs) and AWS (pandas.read_parquet and s3fs).\r\n\r\n\u00a0\r\n\r\nI have also tried running the same code on the same dataset with an older docker build with older version of pyarrow and it works.\r\n\r\n\u00a0\r\n\r\nThis is disabling\u00a0us from using latest pyarrow to handle big parquet files."
+        },
+        {
+            "created_at": "2019-08-15T14:28:43.857Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6058?focusedCommentId=16908138) by Wes McKinney (wesm):*\nSo far we don't have a minimal reproduction of the issue so it's very hard for other developers in this project to help. Since you are encountering the problem, you are the best positioned to reproduce the issue or determine the root cause. "
+        },
+        {
+            "created_at": "2019-08-16T02:00:59.536Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6058?focusedCommentId=16908622) by Wong Chung Hoi (hoi):*\nHi all,\r\n\r\nbelow is a simple piece of code to reproduce the issue using:\r\n\r\n\u00a0\r\n```java\n\r\ns3fs==0.3.3\r\npyarrow==0.14.1\r\npandas==0.24.0\u00a0\r\n```\r\n\u00a0\r\n\r\nThe file generated is roughly 170MB\r\n\r\n\u00a0\r\n```java\n\r\nimport pandas as pd\r\nimport numpy as np\r\npd.DataFrame(np.random.randint(0, 10000, (10000000, 10)), columns=[str(i) for i in range(10)]).to_parquet('s3://path/to/file.snappy.parquet')\r\npd.read_parquet('s3://path/to/file.snappy.parquet')\r\n```\r\n```java\n\r\nTraceback (most recent call last):\r\n File \"<stdin>\", line 1, in <module>\r\n File \"/Users/hoi/.pyenv/versions/3.7.2/lib/python3.7/site-packages/pandas/io/parquet.py\", line 282, in read_parquet\r\n return impl.read(path, columns=columns, **kwargs)\r\n File \"/Users/hoi/.pyenv/versions/3.7.2/lib/python3.7/site-packages/pandas/io/parquet.py\", line 129, in read\r\n **kwargs).to_pandas()\r\n File \"/Users/hoi/.pyenv/versions/3.7.2/lib/python3.7/site-packages/pyarrow/parquet.py\", line 1216, in read_table\r\n use_pandas_metadata=use_pandas_metadata)\r\n File \"/Users/hoi/.pyenv/versions/3.7.2/lib/python3.7/site-packages/pyarrow/parquet.py\", line 216, in read\r\n use_threads=use_threads)\r\n File \"pyarrow/_parquet.pyx\", line 1086, in pyarrow._parquet.ParquetReader.read_all\r\n File \"pyarrow/error.pxi\", line 87, in pyarrow.lib.check_status\r\n pyarrow.lib.ArrowIOError: Unexpected end of stream: Page was smaller (304272) than expected (979599)\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-08-16T02:40:21.543Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6058?focusedCommentId=16908648) by Wes McKinney (wesm):*\nThank you, that's great! I added to the 0.15.0 milestone. I've been working a lot on Parquet stuff lately so if no one looks at it first I'll try to look before the release horizon closes"
+        },
+        {
+            "created_at": "2019-08-20T15:06:24.242Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6058?focusedCommentId=16911443) by Wes McKinney (wesm):*\nI'm able to reproduce the issue. Going to dig in to see if I can find out what's going wrong with s3fs"
+        },
+        {
+            "created_at": "2019-08-20T15:36:58.650Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6058?focusedCommentId=16911468) by Wes McKinney (wesm):*\nIt's a bug in s3fs. I found a minimal reproduction and reported here https://github.com/dask/s3fs/issues/220"
+        },
+        {
+            "created_at": "2019-08-21T13:40:29.164Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6058?focusedCommentId=16912296) by Wes McKinney (wesm):*\nIssue resolved by pull request 5137\n<https://github.com/apache/arrow/pull/5137>"
+        },
+        {
+            "created_at": "2019-08-27T15:28:32.289Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6058?focusedCommentId=16916807) by Wes McKinney (wesm):*\nSeems this can be fixed now by upgrading to `fsspec==0.4.2`"
+        }
+    ]
+}

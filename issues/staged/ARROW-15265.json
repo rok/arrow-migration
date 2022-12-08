@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[C++][Python][Dataset] write_dataset with delete_matching hangs when the number of partitions is too large",
+        "body": "***Note**: This issue was originally created as [ARROW-15265](https://issues.apache.org/jira/browse/ARROW-15265). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI'm attempting to use use the `existing_data_behavior=\"delete_matching\"` option when using `ds.write_dataset` to write a hive partitioned parquet file to S3. This seems to work perfectly fine when the table being written is creating 7 or fewer partitions, but as soon as the partition column in the table has an 8th unique value the write completely hangs.\r\n\r\n\u00a0\r\n```java\n\r\nimport numpy as np\r\nimport pyarrow as pa\r\nfrom pyarrow import fs\r\nimport pyarrow.dataset as ds\r\n\r\nbucket = \"my-bucket\"\r\ns3 = fs.S3FileSystem()\r\n\r\ncols_7 = [\"a\", \"b\", \"c\", \"d\", \"e\", \"f\", \"g\"]\r\ntable_7 = pa.table(\r\n    {\"col1\": cols_7 * 5, \"col2\": np.random.randn(len(cols_7) * 5)}\r\n)\r\n# succeeds\r\nds.write_dataset(\r\n    data=table_7,\r\n    base_dir=f\"{bucket}/test7.parquet\",\r\n    format=\"parquet\",\r\n    partitioning=[\"col1\"],\r\n    partitioning_flavor=\"hive\",\r\n    filesystem=s3,\r\n    existing_data_behavior=\"delete_matching\",\r\n)\r\n\r\ncols_8 = [\"a\", \"b\", \"c\", \"d\", \"e\", \"f\", \"g\", \"h\"]\r\ntable_8 = pa.table(\r\n    {\"col1\": cols_8 * 5, \"col2\": np.random.randn(len(cols_8) * 5)}\r\n)\r\n# this hangs\r\nds.write_dataset(\r\n    data=table_8,\r\n    base_dir=f\"{bucket}/test8.parquet\",\r\n    format=\"parquet\",\r\n    partitioning=[\"col1\"],\r\n    partitioning_flavor=\"hive\",\r\n    filesystem=s3,\r\n    existing_data_behavior=\"delete_matching\",\r\n) \n```\r\nFor the file with 8 partitions, the directory structure is created in S3 but no actual files are written before hanging.\r\n\r\n\u00a0",
+        "created_at": "2022-01-05T23:07:48.000Z",
+        "updated_at": "2022-01-13T20:10:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-01-12T20:32:23.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-01-07T16:17:33.419Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15265?focusedCommentId=17470724) by David Li (lidavidm):*\nThanks for the report. I can reproduce this with 6.0.1 and Minio, including that the directories are created but the write itself hangs. It also occurs on the development branch.\r\n\r\nI haven't dug fully into this yet, but it seems what happens is that DeleteDir is synchronous, but is implemented underneath asynchronously by blocking upon a future. One DeleteDir call is made per partition, and the blocking happens on the IO thread pool. The IO thread pool has 8 threads by default, so with 8 partitions, all 8 threads are now being occupied. But DeleteDir's implementation works by spawning ListObjectsV2 call requests on the same IO thread pool. So no progress can be made."
+        },
+        {
+            "created_at": "2022-01-07T16:18:52.160Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15265?focusedCommentId=17470726) by David Li (lidavidm):*\n`pa.set_io_thread_count(N)` where `N > (# partitions)` unblocks it, though then I see a different error: `{}OSError: Path does not exist 'my-bucket/test8.parquet/col1=c'{`}(where the partition in question changes every time, i.e. it's not deterministic)"
+        },
+        {
+            "created_at": "2022-01-07T18:24:18.683Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15265?focusedCommentId=17470794) by Weston Pace (westonpace):*\nThanks for figuring that out `[~lidavidm]`.  Adding a async version of DeleteDirContents should probably allow us to fix this.  Fortunately, DatasetWriter already expected these calls to become async so it won't be too hard to plug it in.\r\n"
+        },
+        {
+            "created_at": "2022-01-12T20:32:23.902Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15265?focusedCommentId=17474940) by David Li (lidavidm):*\nIssue resolved by pull request 12099\n<https://github.com/apache/arrow/pull/12099>"
+        }
+    ]
+}

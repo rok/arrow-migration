@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[C++] CSV empty quoted string is treated as NULL",
+        "body": "***Note**: This issue was originally created as [ARROW-10115](https://issues.apache.org/jira/browse/ARROW-10115). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen parsing my CSV I have set\r\n<font color=\"#267f99\">ConvertOptions</font>::s<font color=\"#001080\">trings_can_be_null</font> to true.\r\n\r\nNow as I have values:\r\n```java\n\r\n1234,\"\",345\r\n```\r\nthe string value which is an empty string is treated as NULL.\r\nI've checked default valeus of <font color=\"#267f99\">ConvertOptions</font>::<font color=\"#001080\">null_values</font> and there is empty string considered null, but here we have empty quoted string which shouldn't be treated as NULL in my opinion. Similar behavior we have in Postgresql, empty quoted string is not treated as a NULL: https://www.postgresql.org/docs/12/sql-copy.html",
+        "created_at": "2020-09-28T12:18:40.000Z",
+        "updated_at": "2021-06-23T16:14:43.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-06-16T18:05:44.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-28T12:30:49.724Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10115?focusedCommentId=17203193) by Antoine Pitrou (apitrou):*\nThat sounds like a reasonable request.\r\n`[~npr]` do you think this can be unconditional, or should there be a configuration option for it?"
+        },
+        {
+            "created_at": "2020-09-28T14:53:25.197Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10115?focusedCommentId=17203279) by Neal Richardson (npr):*\nIf ParseOptions::quoting is true, then empty quoted string should be interpreted as empty string, and thus null by default, right? \r\n\r\nI'm not sure I understand the expected behavior that can't be achieved with a combination of the existing options. (And full disclosure, I also don't understand what strings_can_be_null is for if you can also specify the strings that mean null.) "
+        },
+        {
+            "created_at": "2020-09-28T14:56:14.803Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10115?focusedCommentId=17203283) by Antoine Pitrou (apitrou):*\n> If ParseOptions::quoting is true, then empty quoted string should be interpreted as empty string, and thus null by default, right? \r\n\r\nYes. The issue is asking for the converse (quoted strings should never be null).\r\n\r\n> (And full disclosure, I also don't understand what strings_can_be_null is for if you can also specify the strings that mean null.) \r\n\r\nYou can have other columns than strings. So you may want to detect nulls in those columns but not in string columns (where even \"N/A\" etc. will be regular strings).\r\n\r\n"
+        },
+        {
+            "created_at": "2020-12-14T15:05:24.751Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10115?focusedCommentId=17249031) by Maciej (mskrzypkowski):*\nWhat is the current state of this issue, do you think it will be fixed?"
+        },
+        {
+            "created_at": "2020-12-14T15:12:43.370Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10115?focusedCommentId=17249034) by Antoine Pitrou (apitrou):*\nIt can definitely be fixed, I was just hoping for feedback from other people."
+        },
+        {
+            "created_at": "2020-12-14T15:14:32.966Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10115?focusedCommentId=17249035) by Maciej (mskrzypkowski):*\nOK, cool. Thanks!"
+        },
+        {
+            "created_at": "2020-12-15T14:42:54.146Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10115?focusedCommentId=17249729) by Antoine Pitrou (apitrou):*\n`[~wesm]` What is your opinion on this?"
+        },
+        {
+            "created_at": "2020-12-16T07:49:06.350Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10115?focusedCommentId=17250151) by Joris Van den Bossche (jorisvandenbossche):*\nFor reference, it doesn't seem that pandas can handle this case. \r\n\r\nBy default, empty strings are considered missing values:\r\n\r\n```python\n\r\nIn [1]: s = \"\"\"a,b,c\r\n   ...: 1,\"string\",2\r\n   ...: ,\"\",4\"\"\"\r\n\r\nIn [2]: pd.read_csv(StringIO(s))\r\nOut[2]: \r\n     a       b  c\r\n0  1.0  string  2\r\n1  NaN     NaN  4\r\n```\r\n\r\nYou can specify a quoting keyword, but that only has influence in this case when indicating there is no quoting (meaning that the quotes become part of the data values):\r\n\r\n```Java\n\r\nIn [3]: import csv\r\n\r\nIn [4]: pd.read_csv(StringIO(s), quoting=csv.QUOTE_NONE)\r\nOut[4]: \r\n     a         b  c\r\n0  1.0  \"string\"  2\r\n1  NaN        \"\"  4\r\n```\r\n\r\nSo this actually \"achieves\" the goal of not interpreting the quoted empty string as missing value, but now you would need to manually strip all quotes after reading to get rid of the quotes again.\r\n\r\nThere is also the option to specify which values to recognize as missing, so we can override the default of interpreting an empty string. But, then also \"empty\" slots for non-string columns get interpreted as an empty string, making that full column string (eg in this case the first numeric column gets interpreted wrongly):\r\n\r\n```Java\n\r\nIn [5]: pd.read_csv(StringIO(s), na_values=[], keep_default_na=False)\r\nOut[5]: \r\n   a       b  c\r\n0  1  string  2\r\n1             4\r\n\r\nIn [6]: pd.read_csv(StringIO(s), na_values=[], keep_default_na=False).values\r\nOut[6]: \r\narray([['1', 'string', 2],\r\n       ['', '', 4]], dtype=object)\r\n```\r\n\r\nSo the goal of specifying _\"don't interpret quoted empty string as missing value, but still interpret any other empty string as such\"_ cannot be directly achieved with pandas. \r\nIt does sound potentially useful to be able to do if you have such a file, but no idea how common this would be."
+        },
+        {
+            "created_at": "2020-12-16T15:37:25.642Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10115?focusedCommentId=17250397) by Wes McKinney (wesm):*\nI agree that it should be possible (and hopefully straightforward) to interpret empty quoted strings as non-null. "
+        },
+        {
+            "created_at": "2021-06-16T18:05:44.243Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10115?focusedCommentId=17364434) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 10503\n<https://github.com/apache/arrow/pull/10503>"
+        }
+    ]
+}

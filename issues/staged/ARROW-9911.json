@@ -1,0 +1,38 @@
+{
+    "issue": {
+        "title": "[Rust][DataFusion] SELECT <expression> with no FROM clause should produce a single row of output",
+        "body": "***Note**: This issue was originally created as [ARROW-9911](https://issues.apache.org/jira/browse/ARROW-9911). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis is somewhat of a special case, but it is useful for demonstration / testing expressions. \r\n\r\nA select expression with no where clause, such as \"select 1\" should produce a single row. Today datafusion accepts the query but produces no rows.\r\n\r\nActual output:\r\n```Java\n\r\narrow/rust$ cargo run --release  --bin datafusion-cli \r\n    Finished release [optimized] target(s) in 0.25s\r\n     Running `target/release/datafusion-cli`\r\n> select 1 ;\r\n0 rows in set. Query took 0 seconds.\r\n```\r\n\r\nExpected output is a single row, with the value 1. Here is an example using SQLLite :\r\n\r\n```Java\n\r\n$ sqlite3 \r\nSQLite version 3.28.0 2019-04-15 14:49:49\r\nEnter \".help\" for usage hints.\r\nConnected to a transient in-memory database.\r\nUse \".open FILENAME\" to reopen on a persistent database.\r\nsqlite> select 1;\r\n1\r\nsqlite> \r\n```",
+        "created_at": "2020-09-03T20:16:27.000Z",
+        "updated_at": "2020-12-27T11:04:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Component: Rust - DataFusion",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-11-15T12:45:24.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-11-13T05:17:13.799Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9911?focusedCommentId=17231166) by Ruihang Xia (Ruihang Xia):*\nHi, AFAIK DataFusion accept this query and generates an `EmptyExec` in the physical plan for \"empty relation\". And this `EmptyExec` is expected to produce no rows, which is corresponding to the current output. This might be a new feature but not a bug.\r\n\r\nIf we want to get some rows from queries like this, I think either the behavior of `EmptyExec` needs to be changed or add a new `ExecutionPlan` impl needs to be added to support these kinds of queries.\r\n\r\nAlso, I think other queries like \"select 1 + 2\" and \"select 1, 2.2\" are the same. Thus executing expression and different data types may need to be taken into consideration either.\r\n\r\nI'm willing to help with this, but not very sure where to start. Any suggestions or discussion is appreciated. Regards."
+        },
+        {
+            "created_at": "2020-11-13T13:48:02.180Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9911?focusedCommentId=17231461) by Andrew Lamb (alamb):*\n[~Ruihang Xia] \u2013 thanks for showing an interest! You are correct that this ticket is better categorized as an Improvement than a Bug, so I have updated it thusly. \r\n\r\n> If we want to get some rows from queries like this, I think either the behavior of `EmptyExec` needs to be changed or add a new `ExecutionPlan` impl needs to be added to support these kinds of queries.\r\n\r\nI agree with that assessment. \r\n\r\nAs you have noted, `EmptyExec` is close to what is needed for this kind of query. The difference is that rather than producing 0 output rows, we need something that produces 1 output row . \r\n\r\nIf I were doing this ticket, I would try and model such queries as a single `LogicalPlan::Projection` node, with no inputs and then make a special case physical operator (modeled after `ProjectionExec` https://github.com/apache/arrow/blob//rust/datafusion/src/physical_plan/projection.rs#L42) that created a single one row output. \r\n"
+        },
+        {
+            "created_at": "2020-11-14T09:13:58.130Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9911?focusedCommentId=17231971) by Ruihang Xia (Ruihang Xia):*\nHi Andrew, I drafted a [PR](https://github.com/apache/arrow/pull/8662).\r\n\r\nI tried to start with the logical plan phase. Changing the Projection node's input to Option<_> .  But it seems to break a lot as `EmptyRelation` might become redundant and confusing.\r\n\r\nThus I decide to achieve this by feeding a placeholder row into `ProjectExec`. Please tell me what do you think about this, thanks for your time."
+        },
+        {
+            "created_at": "2020-11-15T12:44:50.414Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9911?focusedCommentId=17232253) by Andrew Lamb (alamb):*\nI tried to assign thsi ticket to [~Ruihang Xia] but JIRA was giving me trouble..."
+        },
+        {
+            "created_at": "2020-11-15T12:45:24.959Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9911?focusedCommentId=17232254) by Andrew Lamb (alamb):*\nIssue resolved by pull request 8662\n<https://github.com/apache/arrow/pull/8662>"
+        }
+    ]
+}

@@ -1,0 +1,15 @@
+{
+    "issue": {
+        "title": "[C++][Parquet] Inconsistent batch_size usage in parquet GetRecordBatchReader",
+        "body": "***Note**: This issue was originally created as [ARROW-11142](https://issues.apache.org/jira/browse/ARROW-11142). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe RecordBatchReader returned from `parquet::arrow::FileReader::GetRecordBatchReader`, which was originally introduced in ARROW-1012 and now exposed in Python (ARROW-7800), shows some inconsistent behaviour in how the `batch_size` is followed across parquet file row groups. \r\n\r\nSee also comments at https://github.com/apache/arrow/pull/6979#issuecomment-754672429\r\n\r\nSmall example with a parquet file of 300 rows consisting of 3 row groups of 100 rows:\r\n\r\n```Java\n\r\ntable = pa.table({'a': range(300)})\r\npq.write_table(table, \"test.parquet\", row_group_size=100)\r\nf = pq.ParquetFile(\"test.parquet\")\r\n```\r\n\r\nWhen reading this with a batch_size that doesn't align with the size of the row groups, by default batches that cross the row group boundaries are returned:\r\n\r\n```Java\n\r\nIn [5]: [batch.num_rows for batch in f.iter_batches(batch_size=80)]\r\nOut[5]: [80, 80, 80, 60]\r\n```\r\n\r\nHowever, when the file contains a dictionary typed column with string values (integer dictionary values doesn't trigger it), the batches follow row group boundaries:\r\n\r\n```Java\n\r\ntable = pa.table({'a': pd.Categorical([str(x) for x in range(300)])})\r\npq.write_table(table, \"test.parquet\", row_group_size=100)\r\nf = pq.ParquetFile(\"test.parquet\")\r\n\r\nIn [13]: [batch.num_rows for batch in f.iter_batches(batch_size=80)]\r\nOut[13]: [80, 20, 60, 40, 40, 60]\r\n```\r\n\r\nBut it doesn't start to count again for batch_size at the beginning of a row group, so it only splits batches.\r\n\r\nAnd additionally, when reading empty batches (empty column selection), then the row group boundaries are followed, but differently (the batching is done independently for each row group):\r\n\r\n```Java\n\r\nIn [14]: [batch.num_rows for batch in f.iter_batches(batch_size=80, columns=[])]\r\nOut[14]: [80, 20, 80, 20, 80, 20]\r\n```\r\n\r\n(this is explicitly coded here: https://github.com/apache/arrow/blob/e05f032c1e5d590ac56372d13ec637bd28b47a96/cpp/src/parquet/arrow/reader.cc#L899-L921)\r\n\r\n\u2014\r\n\r\nI don't know what the expected behaviour should be, but I would at least expect it to be consistent?",
+        "created_at": "2021-01-06T10:45:03.000Z",
+        "updated_at": "2021-01-06T10:45:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": []
+}

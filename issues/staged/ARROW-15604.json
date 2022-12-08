@@ -1,0 +1,54 @@
+{
+    "issue": {
+        "title": "[C++][CI] Sporadic ThreadSanitizer failure with OpenTracing",
+        "body": "***Note**: This issue was originally created as [ARROW-15604](https://issues.apache.org/jira/browse/ARROW-15604). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe error is a heap-use-after-free and involves an OpenTracing structure that was deleted by an atexit hook.\r\nhttps://github.com/ursacomputing/crossbow/runs/5097362072?check_suite_focus=true#step:5:4843\r\n\r\nSummary:\r\n```Java\n\r\n  Atomic write of size 4 at 0x7b08000136a8 by thread T2:\r\n  [...]\r\n    #10 opentelemetry::v1::context::RuntimeContext::GetRuntimeContextStorage() /build/cpp/opentelemetry_ep-install/include/opentelemetry/context/runtime_context.h:156:12 (libarrow.so.800+0x1e62ef7)\r\n    #11 opentelemetry::v1::context::RuntimeContext::Detach(opentelemetry::v1::context::Token&) /build/cpp/opentelemetry_ep-install/include/opentelemetry/context/runtime_context.h:97:54 (libarrow.so.800+0x1e70178)\r\n    #12 opentelemetry::v1::context::Token::~Token() /build/cpp/opentelemetry_ep-install/include/opentelemetry/context/runtime_context.h:168:3 (libarrow.so.800+0x1e7012f)\r\n  [...]\r\n```\r\n\r\n```Java\n\r\n  Previous write of size 8 at 0x7b08000136a8 by main thread:\r\n    #0 operator delete(void*) <null> (arrow-dataset-scanner-test+0x16a69e)\r\n  [...]\r\n    #7 opentelemetry::v1::nostd::shared_ptr<opentelemetry::v1::context::RuntimeContextStorage>::~shared_ptr() /build/cpp/opentelemetry_ep-install/include/opentelemetry/nostd/shared_ptr.h:98:30 (libarrow.so.800+0x1e62fb3)\r\n    #8 cxa_at_exit_wrapper(void*) <null> (arrow-dataset-scanner-test+0x11866f)\r\n```\r\n",
+        "created_at": "2022-02-07T18:20:22.000Z",
+        "updated_at": "2022-04-14T17:11:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Continuous Integration",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-04-13T20:17:39.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-07T18:24:44.764Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15604?focusedCommentId=17488321) by Antoine Pitrou (apitrou):*\nThe \"atexit hook\" I mentioned simply seems to be a standard C++ exit hook that destroys global/static variables. Here the static singleton that's stored in `RuntimeContext::GetStorage`.\r\n\r\n"
+        },
+        {
+            "created_at": "2022-02-07T18:25:44.213Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15604?focusedCommentId=17488325) by Antoine Pitrou (apitrou):*\nSo, basically, it seems using OpenTracing in an asynchronous setup where code may run after process teardown has started may be quite delicate. `[~lidavidm]` `[~westonpace]`"
+        },
+        {
+            "created_at": "2022-02-07T18:44:22.686Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15604?focusedCommentId=17488347) by David Li (lidavidm):*\nHmm, I think I ran into something similar when I working on my PR. https://github.com/apache/arrow/pull/11964#issuecomment-995043666\r\n\r\nCC `[~mbrobbel]`\r\n\r\nShould we disable OT in CI for now? "
+        },
+        {
+            "created_at": "2022-02-07T18:45:58.033Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15604?focusedCommentId=17488349) by David Li (lidavidm):*\nIt also seems the main thread is being destroyed during/before the thread pools, so maybe this is a static destructor order pitfall\u2026"
+        },
+        {
+            "created_at": "2022-02-08T02:05:25.417Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15604?focusedCommentId=17488548) by Weston Pace (westonpace):*\nI ran into bugs like this before.  I don't think the cause is really OT but it seems to increase the likelihood of failure.  Basically we have async tasks that do something like...\r\n\r\n \\* Run task\r\n \\* Mark future finished with result (at this point the main thread is free to exit and start shutdown)\r\n \\* Cleanup task\r\n\r\nIf anything in the Cleanup task accesses global state we could get this error.  In the past the problem was that a task was accessing the default memory pool in its cleanup (I don't recall why).  A short term fix is to update the test so it isn't using the eternal thread pool or to call WaitForIdle on the CPU thread pool but these feel more like hacks than real fixes as a real customer would still have a segfault at shutdown.\r\n\r\nIn this case it seems the cleanup step is doing something with OT (which makes perfect sense).\r\n\r\nI don't suppose there is any way to block the shutdown until the eternal thread pool is idle?  It could probably be signal safe if we waited with a busy loop but then I think you run the risk of shutdown delays."
+        },
+        {
+            "created_at": "2022-02-08T10:20:14.809Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15604?focusedCommentId=17488727) by Antoine Pitrou (apitrou):*\n> I don't suppose there is any way to block the shutdown until the eternal thread pool is idle?\r\n\r\nWhich shutdown? The problem seems to be (as David diagnosed) that the OT context storage singleton is being destroyed before the Arrow CPU thread pool singleton. I don't know how we can change or workaround that."
+        },
+        {
+            "created_at": "2022-02-08T21:25:06.301Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15604?focusedCommentId=17489126) by Weston Pace (westonpace):*\nWe could work around it with some kind of guarded singleton class:\r\n \\* The constructor instantiates the instance on the heap\r\n \\* The accessor grabs a mutex (or spinlock if we need to be signal safe) and, if instance is null, returns an invalid status\r\n    \\* Note: will require the accessor to return Result<T\\*> instead of T\\* like it does today, not sure if that will be a problem for OT\r\n\r\nThen register an atexit handler that grabs the mutex/spin lock, deletes the instance, and sets the pointer to null\r\n\r\nLooking at the OT code more closely though I am a bit surprised we are encountering this.  The `END_SPAN_ON_FUTURE_COMPLETION` macro uses `Then` and creates a new future.  The new future should only be marked finished after the OT work is done.\r\n\r\nIf no one tackles this in the meantime I will investigate further on Friday."
+        },
+        {
+            "created_at": "2022-02-21T07:30:58.535Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15604?focusedCommentId=17495358) by Yibo Cai (yibocai):*\nSaw arrow-dataset-scanner-test segfault in travis CI today, probably same issue.\r\n[https://app.travis-ci\u00a0due to.com/github/apache/arrow/jobs/560510053#L3228](https://app.travis-ci.com/github/apache/arrow/jobs/560510053#L3228)"
+        },
+        {
+            "created_at": "2022-04-13T20:17:39.366Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15604?focusedCommentId=17521921) by Weston Pace (westonpace):*\nIssue resolved by pull request 12408\n<https://github.com/apache/arrow/pull/12408>"
+        }
+    ]
+}

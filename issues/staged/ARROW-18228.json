@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "AWS Error SLOW_DOWN during PutObject operation",
+        "body": "***Note**: This issue was originally created as [ARROW-18228](https://issues.apache.org/jira/browse/ARROW-18228). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe use Dask to parallelise read/write operations and pyarrow to write dataset from worker nodes.\r\n\r\nAfter pyarrow released version 10.0.0, our data flows automatically switched to the latest version and some of them started to fail with the following error:\r\n```java\n\r\nFile \"/usr/local/lib/python3.10/dist-packages/org/store/storage.py\", line 768, in _write_partition\r\n    ds.write_dataset(\r\n  File \"/usr/local/lib/python3.10/dist-packages/pyarrow/dataset.py\", line 988, in write_dataset\r\n    _filesystemdataset_write(\r\n  File \"pyarrow/_dataset.pyx\", line 2859, in pyarrow._dataset._filesystemdataset_write\r\n    check_status(CFileSystemDataset.Write(c_options, c_scanner))\r\n  File \"pyarrow/error.pxi\", line 115, in pyarrow.lib.check_status\r\n    raise IOError(message)\r\nOSError: When creating key 'equities.us.level2.by_security/' in bucket 'org-prod': AWS Error SLOW_DOWN during PutObject operation: Please reduce your request rate. \n```\r\nIn total flow failed many times: most failed with the error above, but one failed with:\r\n```java\n\r\nFile \"/usr/local/lib/python3.10/dist-packages/chronos/store/storage.py\", line 857, in _load_partition\r\n    table = ds.dataset(\r\n  File \"/usr/local/lib/python3.10/dist-packages/pyarrow/dataset.py\", line 752, in dataset\r\n    return _filesystem_dataset(source, **kwargs)\r\n  File \"/usr/local/lib/python3.10/dist-packages/pyarrow/dataset.py\", line 444, in _filesystem_dataset\r\n    fs, paths_or_selector = _ensure_single_source(source, filesystem)\r\n  File \"/usr/local/lib/python3.10/dist-packages/pyarrow/dataset.py\", line 411, in _ensure_single_source\r\n    file_info = filesystem.get_file_info(path)\r\n  File \"pyarrow/_fs.pyx\", line 564, in pyarrow._fs.FileSystem.get_file_info\r\n    info = GetResultValue(self.fs.GetFileInfo(path))\r\n  File \"pyarrow/error.pxi\", line 144, in pyarrow.lib.pyarrow_internal_check_status\r\n    return check_status(status)\r\n  File \"pyarrow/error.pxi\", line 115, in pyarrow.lib.check_status\r\n    raise IOError(message)\r\nOSError: When getting information for key 'ns/date=2022-10-31/channel=4/feed=A/9f41f928eedc431ca695a7ffe5fc60c2-0.parquet' in bucket 'org-poc': AWS Error NETWORK_CONNECTION during HeadObject operation: curlCode: 28, Timeout was reached \n```\r\n\u00a0\r\n\r\nDo you have any idea what was changed for dataset write between 9.0.0 and 10.0.0 to help us to fix the issue?",
+        "created_at": "2022-11-02T13:36:59.000Z",
+        "updated_at": "2022-11-07T10:02:16.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-11-07T10:02:16.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-11-03T15:44:23.759Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18228?focusedCommentId=17628391) by Will Jones (willjones127):*\nI think this may have been caused by https://issues.apache.org/jira/browse/ARROW-17057\r\n\r\nIn 10.0.0, we exposed the retry strategy in Python, but we set the default number of retries to 3, while I believe in the underlying C++ code it was set to 10 before.\r\n\r\nCould you try setting the `max_attempts=10` in your code:\r\n\r\n```python\n\r\nfrom pyarrow.fs import AwsDefaultS3RetryStrategy, S3FileSystem\r\n\r\nfs = S3FileSystem(retry_strategy=AwsDefaultS3RetryStrategy(max_attempts=10))\r\n```"
+        },
+        {
+            "created_at": "2022-11-04T12:54:33.840Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18228?focusedCommentId=17628957) by Vadym Dytyniak (dytyniak):*\n`[~willjones127]` It helped. Thanks. Do you recommend to use this strategy or it means that we exceed rate limit and should review our implementation?\u00a0\u00a0"
+        },
+        {
+            "created_at": "2022-11-04T14:35:24.004Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18228?focusedCommentId=17629016) by Will Jones (willjones127):*\nIf you are still getting errors, it might be worth reviewing how you slow you app down somewhat to not hit these errors.\r\n\r\n<https://aws.amazon.com/premiumsupport/knowledge-center/http-5xx-errors-s3/>\r\n\r\n<https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance.html>\r\n\r\n<https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-prefixes.html>\r\n\r\nI'm not sure if we have any other settings to limit concurrent requests or tune the backoff strategy, but that might be helpful for cases like this."
+        }
+    ]
+}

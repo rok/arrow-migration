@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Python] ParquetFile.read(use_threads=False) creates ThreadPool anyway",
+        "body": "***Note**: This issue was originally created as [ARROW-4633](https://issues.apache.org/jira/browse/ARROW-4633). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe following code seems to suggest that ParquetFile.read(use_threads=False) still creates a ThreadPool.\u00a0 This is observed in ParquetFile.read_row_group(use_threads=False) as well.\u00a0\r\n\r\nThis does not appear to be a problem in pyarrow.Table.to_pandas(use_threads=False).\r\n\r\nI've tried tracing the error.\u00a0 Starting in python/pyarrow/parquet.py, both ParquetReader.read_all() and ParquetReader.read_row_group() pass the use_threads input along to self.reader which is a ParquetReader imported from _parquet.pyx\r\n\r\nFollowing the calls into python/pyarrow/_parquet.pyx, we see that ParquetReader.read_all() and ParquetReader.read_row_group() have the following code which seems a bit suspicious\r\n> if use_threads:\n> \n> self.set_use_threads(use_threads)\r\nWhy not just always call self.set_use_threads(use_threads)?\r\n\r\nThe ParquetReader.set_use_threads simply calls self.reader.get().set_use_threads(use_threads).\u00a0 This self.reader is assigned as unique_ptr[FileReader].\u00a0 I think this points to cpp/src/parquet/arrow/reader.cc, but I'm not sure about that.\u00a0 The FileReader::Impl::ReadRowGroup logic looks ok, as a call to ::arrow::internal::GetCpuThreadPool() is only called if use_threads is True.\u00a0 The same is true for ReadTable.\r\n\r\nSo when is the ThreadPool getting created?\r\n\r\nExample code:\r\n\r\n--------------------------------------------------\r\n> import pandas as pd\n> import psutil\n> import pyarrow as pa\n> import pyarrow.parquet as pq\n> \n> use_threads=False\n> p=psutil.Process()\n> print('Starting with {} threads'.format(p.num_threads()))\n> \n> \n> df = pd.DataFrame(\\{'x':[0]})\n> table = pa.Table.from_pandas(df)\n> print('After table creation, {} threads'.format(p.num_threads()))\n> \n> df = table.to_pandas(use_threads=use_threads)\n> print('table.to_pandas(use_threads={}), {} threads'.format(use_threads, p.num_threads()))\n> \n> writer = pq.ParquetWriter('tmp.parquet', table.schema)\n> writer.write_table(table)\n> writer.close()\n> print('After writing parquet file, {} threads'.format(p.num_threads()))\n> \n> pf = pq.ParquetFile('tmp.parquet')\n> print('After ParquetFile, {} threads'.format(p.num_threads()))\n> \n> df = pf.read(use_threads=use_threads).to_pandas()\n> print('After pf.read(use_threads={}), {} threads'.format(use_threads, p.num_threads()))\r\n-----------------------------------------------------------------------\r\n$ python pyarrow_test.py\r\n\r\nStarting with 1 threads\r\nAfter table creation, 1 threads\r\ntable.to_pandas(use_threads=False), 1 threads\r\nAfter writing parquet file, 1 threads\r\nAfter ParquetFile, 1 threads\r\nAfter pf.read(use_threads=False), 5 threads",
+        "created_at": "2019-02-20T01:06:47.000Z",
+        "updated_at": "2021-08-04T10:04:04.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-08-04T10:04:04.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-09-18T17:16:13.457Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4633?focusedCommentId=16932685) by Antoine Pitrou (apitrou):*\n`[~jorisvandenbossche]`\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-06-03T06:20:57.156Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4633?focusedCommentId=17124639) by Antoine Pitrou (apitrou):*\nWell... why is this a problem for you?"
+        },
+        {
+            "created_at": "2021-08-04T10:04:04.306Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4633?focusedCommentId=17392969) by Antoine Pitrou (apitrou):*\nThread spawning is now done on demand, closing."
+        }
+    ]
+}

@@ -1,0 +1,21 @@
+{
+    "issue": {
+        "title": "[C++] TPC-H generator cleanup",
+        "body": "***Note**: This issue was originally created as [ARROW-16148](https://issues.apache.org/jira/browse/ARROW-16148). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAn umbrella issue for a number of issues I've run into with our TPC-H generator.\r\n\r\n## We emit fixed_size_binary fields with nuls padding the strings.\r\nIdeally we would either emit these as utf8 strings like the others, or we would have a toggle to emit them as such (though see below about needing to strip nuls)\r\n\r\nWhen I try and run these through the I get a number of seg faults or hangs when running a number of the TPC-H queries.\r\n\r\nAdditionally, even converting these to utf8|string types, I also need to strip out the nuls in order to actually query against them:\r\n\r\n```Java\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\n#> See arrow_info() for available features\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\noptions(arrow.skip_nul = TRUE)\r\n\r\ntab <- read_parquet(\"data_arrow_raw/nation_1.parquet\", as_data_frame = FALSE)\r\ntab\r\n#> Table\r\n#> 25 rows x 4 columns\r\n#> $N_NATIONKEY <int32>\r\n#> $N_NAME <fixed_size_binary[25]>\r\n#> $N_REGIONKEY <int32>\r\n#> $N_COMMENT <string>\r\n\r\n# This will not work (Though is how the TPC-H queries are structured)\r\ntab %>% filter(N_NAME == \"JAPAN\") %>% collect()\r\n#> # A tibble: 0 \u00d7 4\r\n#> # \u2026 with 4 variables: N_NATIONKEY <int>, N_NAME <fixed_size_binary<25>>,\r\n#> #   N_REGIONKEY <int>, N_COMMENT <chr>\r\n\r\n# Instead, we need to create the nul padded string to do the comparison\r\njapan_raw <- as.raw(\r\n  c(0x4a, 0x41, 0x50, 0x41, 0x4e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, \r\n    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)\r\n)\r\n# confirming this is the same thing as in the data \r\njapan_raw == as.vector(tab$N_NAME)[[13]]\r\n#>  [1] TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE\r\n#> [16] TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE\r\n\r\ntab %>% filter(N_NAME == Scalar$create(japan_raw, type = fixed_size_binary(25))) %>% collect()\r\n#> # A tibble: 1 \u00d7 4\r\n#>   N_NATIONKEY\r\n#>         <int>\r\n#> 1          12\r\n#> # \u2026 with 3 more variables: N_NAME <fixed_size_binary<25>>, N_REGIONKEY <int>,\r\n#> #   N_COMMENT <chr>\r\n```\r\n\r\nHere is the code I've been using to cast + strip these out after the fact:\r\n\r\n```Java\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\n\r\noptions(arrow.skip_nul = TRUE)\r\noptions(arrow.use_altrep = FALSE)\r\n\r\ntables <- arrowbench:::tpch_tables\r\n  \r\nfor (table_name in tables) {\r\n  message(\"Working on \", table_name)\r\n  tab <- read_parquet(glue::glue(\"./data_arrow_raw/{table_name}_1.parquet\"), as_data_frame=FALSE)\r\n  \r\n  for (col in tab$schema$fields) {\r\n    if (inherits(col$type, \"FixedSizeBinary\")) {\r\n      message(\"Rewritting \", col$name)\r\n      tab[[col$name]] <- Array$create(as.vector(tab[[col$name]]$cast(string())))\r\n    }\r\n  }\r\n  \r\n  tab <- write_parquet(tab, glue::glue(\"./data/{table_name}_1.parquet\"))\r\n}\r\n```",
+        "created_at": "2022-04-07T20:53:28.000Z",
+        "updated_at": "2022-04-25T08:02:34.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-04-22T04:08:33.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-04-22T04:08:33.075Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16148?focusedCommentId=17526188) by Weston Pace (westonpace):*\nIssue resolved by pull request 12843\n<https://github.com/apache/arrow/pull/12843>"
+        }
+    ]
+}

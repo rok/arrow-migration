@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[R] Disable row-level metadata application on datasets",
+        "body": "***Note**: This issue was originally created as [ARROW-13189](https://issues.apache.org/jira/browse/ARROW-13189). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn order to support things like SF columns, we have added code that handles row-level metadata (https://github.com/apache/arrow/pull/8549 and https://github.com/apache/arrow/pull/9182).\r\n\r\nThese work just fine in a single table or single parquet file circumstance, but when using a dataset (even without filtering!) this can produce some surprising (and wrong) results (see reprex below).\r\n\r\nThere is already some work underway to make it easier to convert the row-element-level attributes to a struct + store it in the column in the ARROW-12542 work, but that's still a bit off. But even once that's done, should we disable this totally? Stop or ignore+warn that with datasets row-level metadata isn't applied (since there's no way for us to get the ordering right)? Something else?\r\n\r\n```r\n\r\nlibrary(arrow)\r\n\r\ndf <- tibble::tibble(\r\n  part = rep(1:2, 13),\r\n  let = letters\r\n)\r\n\r\ndf$embedded_attr <- lapply(seq_len(nrow(df)), function(i) {\r\n  value <- \"nothing\"\r\n  attributes(value) <- list(letter = df[[i, \"let\"]])\r\n  value\r\n})\r\ndf_from_tab <- as.data.frame(Table$create(df))\r\n\r\n# this should be (and is) \"b\"\r\nattributes(df_from_tab[df_from_tab$let == \"b\", \"embedded_attr\"][[1]][[1]])\r\n#> $letter\r\n#> [1] \"b\"\r\n\r\n# the dfs are the same\r\nwaldo::compare(df, df_from_tab)\r\n#> \u2713 No differences\r\n\r\n# now via dataset\r\ndir <- \"ds-dir\"\r\nwrite_dataset(df, path = dir, partitioning = \"part\")\r\n\r\nds <- open_dataset(dir)\r\ndf_from_ds <- dplyr::collect(ds)\r\n\r\n# this should be (and is not) \"b\"\r\nattributes(df_from_ds[df_from_ds$let == \"b\", \"embedded_attr\"][[1]][[1]])\r\n#> $letter\r\n#> [1] \"n\"\r\n\r\n# Even controlling for order, the dfs are not the same\r\nwaldo::compare(dplyr::arrange(df, let), dplyr::arrange(df_from_ds, let))\r\n#> `names(old)`: \"part\" \"let\" \"embedded_attr\"       \r\n#> `names(new)`:        \"let\" \"embedded_attr\" \"part\"\r\n#> \r\n#> `attr(old$embedded_attr[[2]], 'letter')`: \"b\"\r\n#> `attr(new$embedded_attr[[2]], 'letter')`: \"n\"\r\n#> \r\n#> `attr(old$embedded_attr[[3]], 'letter')`: \"c\"\r\n#> `attr(new$embedded_attr[[3]], 'letter')`: \"b\"\r\n#> \r\n#> `attr(old$embedded_attr[[4]], 'letter')`: \"d\"\r\n#> `attr(new$embedded_attr[[4]], 'letter')`: \"o\"\r\n#> \r\n#> `attr(old$embedded_attr[[5]], 'letter')`: \"e\"\r\n#> `attr(new$embedded_attr[[5]], 'letter')`: \"c\"\r\n#> \r\n#> `attr(old$embedded_attr[[6]], 'letter')`: \"f\"\r\n#> `attr(new$embedded_attr[[6]], 'letter')`: \"p\"\r\n#> \r\n#> `attr(old$embedded_attr[[7]], 'letter')`: \"g\"\r\n#> `attr(new$embedded_attr[[7]], 'letter')`: \"d\"\r\n#> \r\n#> `attr(old$embedded_attr[[8]], 'letter')`: \"h\"\r\n#> `attr(new$embedded_attr[[8]], 'letter')`: \"q\"\r\n#> \r\n#> `attr(old$embedded_attr[[9]], 'letter')`: \"i\"\r\n#> `attr(new$embedded_attr[[9]], 'letter')`: \"e\"\r\n#> \r\n#> `attr(old$embedded_attr[[10]], 'letter')`: \"j\"\r\n#> `attr(new$embedded_attr[[10]], 'letter')`: \"r\"\r\n#> \r\n#> And 15 more differences ...\r\n```",
+        "created_at": "2021-06-25T17:32:30.000Z",
+        "updated_at": "2021-10-19T13:19:43.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-07-16T14:45:02.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-25T20:33:39.717Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13189?focusedCommentId=17369703) by Neal Richardson (npr):*\nI think we should ignore row-level metadata in general, and (here lies the bigger task) provide an interface (via S3 methods, most likely) for people to define custom boxing/unboxing of custom data types where our general metadata handling is insufficient or suboptimal. This is essentially allowing R developers to define Extension Types."
+        },
+        {
+            "created_at": "2021-07-16T14:45:02.104Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13189?focusedCommentId=17382115) by Neal Richardson (npr):*\nIssue resolved by pull request 10646\n<https://github.com/apache/arrow/pull/10646>"
+        }
+    ]
+}

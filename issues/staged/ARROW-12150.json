@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Python] Bad type inference of mixed-precision Decimals",
+        "body": "***Note**: This issue was originally created as [ARROW-12150](https://issues.apache.org/jira/browse/ARROW-12150). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nExporting _pyarrow.table_ that contains mixed-precision _Decimals_ using\u00a0 _parquet.write_table_ creates a parquet that contains invalid data/values.\r\n\r\nIn the example below the first value of _data_decimal_ is turned from Decimal('579.11999511718795474735088646411895751953125000000000') in the pyarrow table to Decimal('-378.68971792399258172661600550482428224218070136475136') in the parquet.\r\n\r\n\u00a0\r\n```java\n\r\nimport pyarrow\r\nfrom decimal import Decimal\r\n\r\nvalues_floats = [579.119995117188, 6.40999984741211, 2.0] # floats\r\ndecs_from_values = [Decimal(v) for v in values_floats] # Decimal\r\ndecs_from_float = [Decimal.from_float(v) for v in values_floats]\r\ndecs_str = [Decimal(str(v)) for v in values_floats] # Decimal\r\n\r\ndata_dict = {\"data_decimal\": decs_from_values, # python Decimal\r\n \"data_decimal_from_float\": decs_from_float,\r\n \"data_float\":values_floats, # python floats\r\n \"data_dec_str\": decs_str}\r\n\r\ntable = pyarrow.table(data=data_dict)\r\nprint(table.to_pydict()) # before saving\r\npyarrow.parquet.write_table(table, \"./pyarrow_decimal.parquet\") # saving\r\nprint(pyarrow.parquet.read_table(\"./pyarrow_decimal.parquet\").to_pydict()) # after saving\r\n```\r\n\u00a0",
+        "created_at": "2021-03-30T13:26:21.000Z",
+        "updated_at": "2021-06-10T09:39:30.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-06-10T09:19:52.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-03-30T14:03:00.591Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12150?focusedCommentId=17311541) by Antoine Pitrou (apitrou):*\nActually the problem is that converting from Python Decimals with mixed precision produces the wrong Arrow decimal type:\r\n```python\n\r\n>>> arr = pa.array([Decimal('1.234'), Decimal('456.7')])\r\n>>> arr\r\n<pyarrow.lib.Decimal128Array object at 0x7fd86ef69590>\r\n[\r\n  1.234,\r\n  456.700\r\n]\r\n>>> arr.type\r\nDecimal128Type(decimal128(4, 3))\r\n# BUG: 456.7 doesn't fit in decimal128(4, 3)!\r\n```\r\n\r\nYou can workaround the issue by specifying the column types explicitly when creating your table, for example:\r\n```python\n\r\ndecs_from_values = pa.array([Decimal(v) for v in values_floats], type=pa.decimal256(54, 51))\r\n```\r\n\r\nAs a sidenote, it is a bad practice to instantiate decimals from floating-point numbers, because floating-point numbers can't exactly represent all decimal numbers, which can lead to excessive digits in the results, e.g.:\r\n```python\n\r\n>>> Decimal(579.119995117188)\r\nDecimal('579.11999511718795474735088646411895751953125')\r\n>>> Decimal(\"579.119995117188\")\r\nDecimal('579.119995117188')\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-03-30T14:03:12.407Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12150?focusedCommentId=17311542) by Antoine Pitrou (apitrou):*\n`[~jorisvandenbossche]`"
+        },
+        {
+            "created_at": "2021-04-01T14:34:39.415Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12150?focusedCommentId=17313209) by Joris Van den Bossche (jorisvandenbossche):*\nFor the actual conversion, what behaviour would we prefer? Raise an error if a subsequent Decimal doesn't fit into the type that was inferred from the first value? \r\n(or first find a common scale/precision, but that would require an additional pass over the data?)"
+        },
+        {
+            "created_at": "2021-04-01T14:42:59.028Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12150?focusedCommentId=17313214) by Antoine Pitrou (apitrou):*\nWell, there's already a separate pass in `InferArrowType`, which uses `DecimalMetadata::Update`. It just seems to be incorrect?"
+        },
+        {
+            "created_at": "2021-04-08T13:59:17.100Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12150?focusedCommentId=17317214) by Joris Van den Bossche (jorisvandenbossche):*\n`[~lidavidm]` you might have accidentally assigned yourself, but to be sure: there is already an open PR for this"
+        },
+        {
+            "created_at": "2021-04-08T14:03:16.680Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12150?focusedCommentId=17317216) by David Li (lidavidm):*\nArgh, I didn't refresh the page. Thanks for the heads up."
+        },
+        {
+            "created_at": "2021-06-10T09:19:52.694Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12150?focusedCommentId=17360676) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 9948\n<https://github.com/apache/arrow/pull/9948>"
+        }
+    ]
+}

@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Java] Out of order writes using setSafe",
+        "body": "***Note**: This issue was originally created as [ARROW-8909](https://issues.apache.org/jira/browse/ARROW-8909). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI noticed that calling setSafe on a VarCharVector with indices not in increasing order causes the lastIndex to be set to the index in the last call to setSafe.\r\n\r\nIs this a documented and expected behavior ?\r\n\r\nSample code:\r\n```java\n\r\nimport java.util.Collections;\r\nimport lombok.extern.slf4j.Slf4j;\r\nimport org.apache.arrow.memory.RootAllocator;\r\nimport org.apache.arrow.vector.VarCharVector;\r\nimport org.apache.arrow.vector.VectorSchemaRoot;\r\nimport org.apache.arrow.vector.types.pojo.ArrowType;\r\nimport org.apache.arrow.vector.types.pojo.Field;\r\nimport org.apache.arrow.vector.types.pojo.Schema;\r\nimport org.apache.arrow.vector.util.Text;\r\n\r\n@Slf4j\r\npublic class ATest {\r\n\r\n  public static void main() {\r\n    Schema schema = new Schema(Collections.singletonList(Field.nullable(\"Data\", new ArrowType.Utf8())));\r\n    try (VectorSchemaRoot vroot = VectorSchemaRoot.create(schema, new RootAllocator())) {\r\n      VarCharVector vec = (VarCharVector) vroot.getVector(\"Data\");\r\n\r\n      for (int i = 0; i < 10; i++) {\r\n        vec.setSafe(i, new Text(Integer.toString(i) + \"_mtest\"));\r\n      }\r\n\r\n      vec.setSafe(7, new Text(Integer.toString(7) + \"_new\"));\r\n\r\n      log.info(\"Data at index 8 Before {}\", vec.getObject(8));\r\n      vroot.setRowCount(10);\r\n      log.info(\"Data at index 8 After {}\", vec.getObject(8));\r\n      log.info(vroot.contentToTSVString());\r\n    }\r\n  }\r\n}\r\n```\r\n\u00a0\r\n\r\nIf I don't set the index 7 after the loop, I get all the 0_mtest, 1_mtest, ..., 9_mtest entries.\r\n\r\nIf I set index 7 after the loop, I see 0_mtest, ..., 5_mtest, 6_mtext, 7_new,\r\n\u00a0 \u00a0 Before the setRowCount, the data at index 8 is ->\u00a0**st8_mtest**\u00a0\u00a0; index 9 is\u00a0**9_mtest**\r\n\u00a0 \u00a0After the setRowCount, the data at index 8 is -> \"\" ; index\u00a0 9 is \"\"\r\n\r\nWith a text with more chars instead of 4 with _new, it keeps eating into the data at the following indices.\r\n\r\n\u00a0",
+        "created_at": "2020-05-23T13:47:33.000Z",
+        "updated_at": "2020-06-09T16:37:20.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-06-08T16:53:31.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-05-26T01:45:04.431Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8909?focusedCommentId=17116350) by Liya Fan (fan_li_ya):*\n`[~saurabhm]` Thank you for reporting the problem.\r\nI think the behavior is by design. For variable width vectors, we do not support setting values in random order, as this might cause severe performance penalty. "
+        },
+        {
+            "created_at": "2020-06-05T04:15:02.619Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8909?focusedCommentId=17126371) by Liya Fan (fan_li_ya):*\n`[~saurabhm]` According to your suggestion, we have made it clear in the document that variable width vectors do not support out-of-order writing. Could you please check it (https://github.com/apache/arrow/pull/7354) ?"
+        },
+        {
+            "created_at": "2020-06-05T05:12:15.049Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8909?focusedCommentId=17126397) by Saurabh (saurabhm):*\n[~fan_li_ya]\u00a0Thanks for the response and for updating the documentation."
+        },
+        {
+            "created_at": "2020-06-08T16:53:31.299Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8909?focusedCommentId=17128442) by David Li (lidavidm):*\nIssue resolved by pull request 7354\n<https://github.com/apache/arrow/pull/7354>"
+        }
+    ]
+}

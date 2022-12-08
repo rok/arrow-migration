@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Java] IPC Writers/readers are not always setting validity bits correctly",
+        "body": "***Note**: This issue was originally created as [ARROW-2500](https://issues.apache.org/jira/browse/ARROW-2500). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen writing multiple batches to a Stream/File Writer, the first validity bit can get garbled between writing and reading. I couldn't pinpoint the exact issue, but I was able to re-create it with a fairly simple unit test.\r\n\r\nin TestArrowStream.java:\r\n\r\n```java\n\r\n  @Test\r\n  public void testReadWriteMultipleBatches() throws IOException {\r\n\r\n    ByteArrayOutputStream os = new ByteArrayOutputStream();\r\n\r\n    try (IntVector vector = new IntVector(\"foo\", allocator);) {\r\n      Schema schema = new Schema(Collections.singletonList(vector.getField()), null);\r\n      try (VectorSchemaRoot root = new VectorSchemaRoot(schema, Collections.singletonList((FieldVector) vector), vector.getValueCount());\r\n           ArrowStreamWriter writer = new ArrowStreamWriter(root, new MapDictionaryProvider(), Channels.newChannel(os));) {\r\n        writer.start();\r\n\r\n        vector.setNull(0);\r\n        vector.setSafe(1, 1);\r\n        vector.setSafe(2, 2);\r\n        vector.setNull(3);\r\n        vector.setSafe(4, 1);\r\n        vector.setValueCount(5);\r\n        root.setRowCount(5);\r\n        writer.writeBatch();\r\n\r\n        vector.setNull(0);\r\n        vector.setSafe(1, 1);\r\n        vector.setSafe(2, 2);\r\n        vector.setValueCount(3);\r\n        root.setRowCount(3);\r\n        writer.writeBatch();\r\n      }\r\n    }\r\n\r\n    ByteArrayInputStream in = new ByteArrayInputStream(os.toByteArray());\r\n\r\n    try (ArrowStreamReader reader = new ArrowStreamReader(in, allocator);) {\r\n      IntVector read = (IntVector) reader.getVectorSchemaRoot().getFieldVectors().get(0);\r\n\r\n      reader.loadNextBatch();\r\n\r\n      assertEquals(read.getValueCount(), 5);\r\n      assertNull(read.getObject(0));\r\n      assertEquals(read.getObject(1), Integer.valueOf(1));\r\n      assertEquals(read.getObject(2), Integer.valueOf(2));\r\n      assertNull(read.getObject(3));\r\n      assertEquals(read.getObject(4), Integer.valueOf(1));\r\n\r\n      reader.loadNextBatch();\r\n\r\n      assertEquals(read.getValueCount(), 3);\r\n      assertNull(read.getObject(0));\r\n      assertEquals(read.getObject(1), Integer.valueOf(1));\r\n      assertEquals(read.getObject(2), Integer.valueOf(2));\r\n    }\r\n  }\r\n```\r\n\r\nin TestArrowFile.java:\r\n\r\n```Java\n\r\n @Test\r\n  public void testReadWriteMultipleBatches() throws IOException {\r\n    File file = new File(\"target/mytest_nulls_multibatch.arrow\");\r\n\r\n    try (IntVector vector = new IntVector(\"foo\", allocator);) {\r\n      Schema schema = new Schema(Collections.singletonList(vector.getField()), null);\r\n      try (FileOutputStream fileOutputStream = new FileOutputStream(file);\r\n           VectorSchemaRoot root = new VectorSchemaRoot(schema, Collections.singletonList((FieldVector) vector), vector.getValueCount());\r\n           ArrowFileWriter writer = new ArrowFileWriter(root, new MapDictionaryProvider(), fileOutputStream.getChannel());) {\r\n        writer.start();\r\n\r\n        vector.setNull(0);\r\n        vector.setSafe(1, 1);\r\n        vector.setSafe(2, 2);\r\n        vector.setNull(3);\r\n        vector.setSafe(4, 1);\r\n        vector.setValueCount(5);\r\n        root.setRowCount(5);\r\n        writer.writeBatch();\r\n\r\n        vector.setNull(0);\r\n        vector.setSafe(1, 1);\r\n        vector.setSafe(2, 2);\r\n        vector.setValueCount(3);\r\n        root.setRowCount(3);\r\n        writer.writeBatch();\r\n      }\r\n    }\r\n\r\n    try (FileInputStream fileInputStream = new FileInputStream(file);\r\n         ArrowFileReader reader = new ArrowFileReader(fileInputStream.getChannel(), allocator);) {\r\n      IntVector read = (IntVector) reader.getVectorSchemaRoot().getFieldVectors().get(0);\r\n\r\n      reader.loadNextBatch();\r\n\r\n      assertEquals(read.getValueCount(), 5);\r\n      assertNull(read.getObject(0));\r\n      assertEquals(read.getObject(1), Integer.valueOf(1));\r\n      assertEquals(read.getObject(2), Integer.valueOf(2));\r\n      assertNull(read.getObject(3));\r\n      assertEquals(read.getObject(4), Integer.valueOf(1));\r\n\r\n      reader.loadNextBatch();\r\n\r\n      assertEquals(read.getValueCount(), 3);\r\n      assertNull(read.getObject(0));\r\n      assertEquals(read.getObject(1), Integer.valueOf(1));\r\n      assertEquals(read.getObject(2), Integer.valueOf(2));\r\n    }\r\n  }\r\n```",
+        "created_at": "2018-04-23T21:00:04.000Z",
+        "updated_at": "2018-05-12T07:44:26.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-05-11T17:05:00.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-04-24T12:50:51.302Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2500?focusedCommentId=16449781) by Emilio Lahr-Vivaz (elahrvivaz):*\nNote: this didn't seem to occur in 0.6."
+        },
+        {
+            "created_at": "2018-05-07T20:19:49.291Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2500?focusedCommentId=16466427) by Bo Meng (bomeng):*\nI will be working on this."
+        },
+        {
+            "created_at": "2018-05-11T17:05:00.526Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2500?focusedCommentId=16472279) by Bryan Cutler (bryanc):*\nIssue resolved by pull request 2008\n<https://github.com/apache/arrow/pull/2008>"
+        }
+    ]
+}

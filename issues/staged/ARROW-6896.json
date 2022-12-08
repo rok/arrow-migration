@@ -1,0 +1,73 @@
+{
+    "issue": {
+        "title": "[Java] Vector schema root should not share vectors",
+        "body": "***Note**: This issue was originally created as [ARROW-6896](https://issues.apache.org/jira/browse/ARROW-6896). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nVector schema root should not share vectors. Otherwise, unexpectd behavior would happen. \r\n\r\nPlease note that VectorSchemaRoot is not just a container for vectors, it is also a resource (it implements the AutoClosable interface), and it manages the life cycle of its inner vectors.\r\n\r\nWhen two VectorSchemaRoots share vectors, something unexpected may happen. Consider the following scenario, which is frequently encountered in a SQL engine.\r\n\r\n1. We create a batch:\r\nVectorSchemaRoot oldBatch = ...\r\n\r\n2. We add a vector to it, which results in a new batch\r\nVectorSchemaRoot newBatch = oldBatch.addVector(vector);\r\n\r\n3. We are done with the old batch, and release the resource\r\noldBatch.close();\r\n\r\n4. We continue to use the new batch, but gets an exception, because some inner vectors have been released by the old batch. \r\n\r\n",
+        "created_at": "2019-10-16T02:39:52.000Z",
+        "updated_at": "2020-01-03T23:37:23.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-01-03T23:37:09.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-16T03:23:37.010Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6896?focusedCommentId=16952475) by Jacques Nadeau (jnadeau):*\nI disagree with the issue here. We should probably add a better description of reference count semantics but having the container close it's children makes sense. We depend on this functionality quite a bit.\r\n\r\nGenerally speaking, Vectors are things that shouldn't be handed around, they should be transferred, which has clear reference management semantics. The design was based on the [AttributeSource design pattern\\|[https://lucene.apache.org/core/5_4_0/core/org/apache/lucene/util/AttributeSource.html]] in Lucene where you create an object once and then pass many separate pieces of data through it to minimize heap churn and pointer/reference management. I think if you're hitting the problem you describe, you're misunderstanding the goals of the codebase."
+        },
+        {
+            "created_at": "2019-10-16T04:21:14.971Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6896?focusedCommentId=16952497) by Liya Fan (fan_li_ya):*\n`[~jnadeau]` Thanks for your comments. Reference count solves the problem in the description.\r\n\r\nHowever, I think there are additional problems related to sharing vectors between VectorSchemaRoots. Generally, once a vector is changed in one batch, the change will be reflected in the other batch, which is unexpected for the other batch. \r\n\r\nFor example, all vectors in a batch are supposed to have equal value count. However, by sharing a vector with another batch, this assumption can be broken. "
+        },
+        {
+            "created_at": "2019-10-16T05:22:45.752Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6896?focusedCommentId=16952513) by Jacques Nadeau (jnadeau):*\nYou shouldn't be sharing a vector between two batches. You should have separate vectors in each batch that were created as a transfer pair and then transfer the data from batch to the other when you want to move it.\u00a0"
+        },
+        {
+            "created_at": "2019-10-16T06:52:05.120Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6896?focusedCommentId=16952555) by Liya Fan (fan_li_ya):*\n`[~jnadeau]` Sure. Agreed with you.\r\nThis issue fixes the problem of sharing vectors between VectorSchemaRoots. If this sounds good, would you please take a look at the PR?"
+        },
+        {
+            "created_at": "2019-10-16T15:35:48.520Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6896?focusedCommentId=16952941) by Jacques Nadeau (jnadeau):*\nI don't understand your comments. Since sharing vectors between VectorSchemaRoot is an anti-pattern, why would we try to change code for it?"
+        },
+        {
+            "created_at": "2019-10-17T02:05:12.715Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6896?focusedCommentId=16953322) by Liya Fan (fan_li_ya):*\n`[~jnadeau]` I am sorry. Maybe my description is confusing.\r\n\r\nI mean the current code base has the potential of causing shared vectors between VectorSchemaRoots. In this issue, we solve the problem, so VectorSchemaRoots cannot share vectors.\r\n\r\nIf that is clear to you, would you please take a look at the PR?"
+        },
+        {
+            "created_at": "2019-10-19T03:22:57.566Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6896?focusedCommentId=16955059) by Wes McKinney (wesm):*\nI do not think this should be in 0.15.1 even if it is accepted"
+        },
+        {
+            "created_at": "2019-10-19T08:49:55.464Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6896?focusedCommentId=16955114) by Liya Fan (fan_li_ya):*\n`[~wesm]` Thanks for your comments.\r\nI just feel that the problem can cause serious problems (pls see the discussion above). So I want the patch to be released ASAP. \r\nIf you feel it should not be included in 0.15.1, please feel free to remove it from 0.15.0. Thanks. "
+        },
+        {
+            "created_at": "2019-10-21T03:24:11.688Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6896?focusedCommentId=16955722) by Jacques Nadeau (jnadeau):*\nI think you're mixing up the design of the library. VectorSchemaRoot != a record batch.\r\n\r\nVectorSchemaRoot is a container that can hold batches, not a batch in itself. Think of it more like a pipe than the water in the pipe. Batches flow through vector schema root as part of a pipeline. See how it is used in the flight tests to better understand. A single VectorSchemaRoot is created based on a known schema and then data is populated over and over into the same schema root in a stream of batches. At any one point a VectorSchemaRoot may have data or may have no data (say it was transferred downstream or not yet populated).\r\n\r\nIt's easy to share vectors in Arrow and make mistakes. That's the nature of a system programming that does manual reference counting. I'm exactly understanding how your change improves those dangers in any meaningful way.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-10-21T15:29:29.796Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6896?focusedCommentId=16956199) by Micah Kornfield (emkornfield@gmail.com):*\n> I think you're mixing up the design of the library. VectorSchemaRoot != a record batch.\r\nI think adding clarification on this topic to the javadoc in VectorSchemaRoot (the documentation is a little sparse), at least to me I thought they were synonymous (or at least could be used in both ways).\u00a0 Is the reason not to create new VectorSchemaRoots for performance?\u00a0\u00a0\r\n\r\n\u00a0\r\n\r\nCC `[~tianchen92]` because I think this affects the documentation that he is writing, and probably affects the API for a VectorSchemaRootIterater in JDBC and Avro libraries."
+        },
+        {
+            "created_at": "2019-10-22T02:07:36.762Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6896?focusedCommentId=16956607) by Ji Liu (tianchen92):*\nI was a little confused about VectorSchemaRoot before (why not just call it RecordBatch), and recently I found it was a little different with other implementations when I writing documentation, for example, for IPC, the java reader will always hold the same vector schema root and updates for every call for loadNextBatch, but in python side, it uses different batches in writer/reader. From this perspective, I think\u00a0VectorSchemaRoot != a record batch is reasonable. Just wonder why the implementation is different in Java?\r\n\r\nThe addColumn/removeColumn API was introduced by my recent PR(after 0.15) which I regard is as a \u2018record batch'. If we finally reach consistent and want to make some fix on it, it's better include it into 0.15.1 I think, so the mistake wouldn't exposed to users."
+        },
+        {
+            "created_at": "2019-10-22T02:56:57.439Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6896?focusedCommentId=16956630) by Liya Fan (fan_li_ya):*\n`[~jnadeau]` [~emkornfield@gmail.com] `[~tianchen92]`\r\n\r\nThanks a lot for your comments. \r\n\r\nThe analogy of pipe and water is interesting and to the point. I will take a look at flight tests, and I agree that it is the way it should be used in SQL engines. \r\n\r\nIt is a good suggestion to add more Javadoc to the VectorSchemaRoot. \r\n\r\nNow I think there are two possible solutions to the problem:\r\n\r\n1. Add/remove vectors in-place\r\n2. Create a new VectorSchemaRoot and transfer the vectors to the new VectorSchemaRoot.\r\n \r\nWhat do you think?"
+        },
+        {
+            "created_at": "2019-10-22T16:46:16.559Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6896?focusedCommentId=16957219) by Jacques Nadeau (jnadeau):*\n> Just wonder why the implementation is different in Java?\r\nThat is an interesting question. The Java code is focused on multitenant pipelines. A core tenant of the java library was no batches were allowed to be more than 2^16 records. I actually wish that I had held a stronger line on this in the original format specification (...spilt milk...). The java library doesn't enforce this but we actually do in Dremio. It is done for several reasons: keeping the pipeline moving, minimizing issues of memory fragmentation, allows keeping a full batch within cache, etc. One of the key needs was also to support a pipelined operation using runtime code generation. Having a set of references that you can keep grabbing addresses from as the pipeline progresses is what a vector container's purpose is in the Java library. VectorSchemaRoot is really a poor man's version of what we call [VectorContainer\\|[https://github.com/dremio/dremio-oss/blob/master/sabot/kernel/src/main/java/com/dremio/exec/record/VectorContainer.java]] in the Dremio codebase. One other design consideration: the Java library is focused on minimizing gc churn and small heap sizes so you can get high performance out of a JVM without spending large amounts of time dealing with gc (cpu time or human tuning time).\r\n\r\nI think the other libraries were not as focused on pipelining and multitenancy when initially constructed, thus the differences in implementation. In many cases, I think the initial uses in other languages were frequently single monolithic operations. In those cases, it might make sense to create a single vector to data type rather than a bunch of smaller batches. In that scenario, you don't have to worry about fragmentation and once all the data is loaded, you can do many operations against the same data. It's a very different pattern from a system running many independent operations concurrently.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-01-03T23:37:09.703Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6896?focusedCommentId=17007837) by Jacques Nadeau (jnadeau):*\nPer discussion here, this issue doesn't seem like it is a problem."
+        }
+    ]
+}

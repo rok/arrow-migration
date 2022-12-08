@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[C++] Fast UTF8 validation functions",
+        "body": "***Note**: This issue was originally created as [ARROW-3536](https://issues.apache.org/jira/browse/ARROW-3536). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n`[~lemire]` discusses this topic in https://lemire.me/blog/2018/05/16/validating-utf-8-strings-using-as-little-as-0-7-cycles-per-byte/\r\n\r\nIn Java there is also\r\n\r\nhttps://lemire.me/blog/2018/10/16/validating-utf-8-bytes-java-edition/\r\n",
+        "created_at": "2018-10-17T01:48:56.000Z",
+        "updated_at": "2018-11-09T00:28:06.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2018-11-09T00:28:01.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-10-17T09:50:22.260Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3536?focusedCommentId=16653282) by Antoine Pitrou (apitrou):*\nThe ASCII validation function looks fine (though my experiments show that a non-SIMD version would be as fast).\r\n\r\nThe UTF8 validation function is unreadable, and not battle-tested, so I wouldn't want to integrate it (also, does it accept surrogates? It's not obvious)."
+        },
+        {
+            "created_at": "2018-10-17T10:04:00.153Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3536?focusedCommentId=16653294) by Antoine Pitrou (apitrou):*\nI'll note that in the (probably typical) case where we want to validate many small strings, asymptotic bytes/cycle performance can be less important than the setup overhead. In other words, we may need some kind of \"fast path\" at the beginning for small strings.\r\n\r\nAnother possible approach is to have an AdaptiveStringBuilder that validates at the end and yields either a String array or a Binary array. For the pure ASCII case, we can validate the whole array at once."
+        },
+        {
+            "created_at": "2018-10-17T19:39:53.619Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3536?focusedCommentId=16654094) by Daniel Lemire (lemire):*\n`[~pitrou]` is correct that there is probably no need for explicit vectorization via intrinsic functions for the ASCII checks but as I pointed out elsewhere, that's because the compiler is smart enough to autovectorize. That is maybe unsurprising in the sense that all we need to do is to check one bit per byte. That's something that optimizing compilers can deal with.\r\n\r\nIn fact, you can check that GNU GCC and clang can autovectorize this function...\r\n\r\n\u00a0\r\n```java\n\r\nbool is_ascii(char* cs, size_t len) {\r\n char c = 0;\r\n for(intk = 0; k < len; k++)\r\n   c |= cs[k] & 0x80;\r\n  return c == 0;\r\n}\r\n```\r\n\u00a0\r\n\r\n\u00a0\r\n\r\nSo that's good!\r\n\r\n\u00a0\r\n\r\nBut there is some non-trivial insight involved here: the difference between the code you see there in C and what the compiler produces is enormous. So this code is a **lot** more efficient than you might think at first.\r\n\r\n\u00a0\r\n\r\n _The UTF8 validation function is unreadable_\r\n\r\n\u00a0\r\n\r\nThis hurts!!!\r\n\r\n:)\r\n\r\nKidding aside,\u00a0I am willing to help out.\u00a0\r\n\r\n\u00a0\r\n\r\n(Programming with function intrinsics does tend to produce unreadable code. There are many people, me included, trying to work on this problem to alleviate it.)\r\n\r\n\u00a0\r\n\r\n _does it accept surrogates_\r\n\r\nThey are malformed in UTF-8, so they are rejected. I don't think that this is even debatable.\u00a0\r\n\r\n(Of course, all code can be buggy, so it would be fair to test.)\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-10-29T18:31:49.354Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3536?focusedCommentId=16667574) by Antoine Pitrou (apitrou):*\nThanks for the heads-up `[~lemire]`. Two points:\r\n1. the major interest in \"non-SIMD\" code is for readability and portability. So, the compiler being able to autovectorize it is an advantage in my mind\n1. In the case of the code I posted on <https://github.com/lemire/fastvalidate-utf-8/issues/15> , I did the measurements with `-O2` to try and ensure that no vectorization happened."
+        },
+        {
+            "created_at": "2018-10-29T19:52:13.921Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3536?focusedCommentId=16667659) by Daniel Lemire (lemire):*\nI totally understand and respect your distaste for intrinsic functions and explicit vectorization. There is work to help solve this problem, including work being done at the C++ standard level (and also within Java).\r\n\r\nYour fast ASCII approach, and it is indeed almost as fast as a version using vector instructions, is something I would qualify as being SWAR (SIMD Within A Register) so it is SIMD technically speaking, using a 64-bit word as if it were 8 distinct byte-sized values. I am sure you will agree that it is not optimized for readability... the simple code I just posted is probably better for readability. So I think that the readability issue you object to as to do, specifically, with intrinsic functions. The SWAR approach is indeed more portable, and that's an appealing advantage. I would definitively favor it over an approaching using mysterious-looking intrinsic functions, on portability grounds alone.\r\n\r\nAs for autovectorization... Indeed, I am pretty sure that GNU GCC does not autovectorize with -O2, so that's a good point. But that's also a shame (I prefer -O3 with GCC) because, in this instance, you can write naive code, optimized for simplicity and readability and let the optimizing compiler do the heavy lifting for  you. I think that using modern-day compilers without at least autovectorization leaves performance on the table... but even there, there is ample room for disagreements (e.g., as far as I can tell, the Go compiler does not autovectorize, though Java certainly does). Note that if you do rely on autovectorization, you have to make sure that the target machine supports the prefered instructions."
+        },
+        {
+            "created_at": "2018-10-29T19:57:38.784Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3536?focusedCommentId=16667666) by Antoine Pitrou (apitrou):*\n> Your fast ASCII approach, and it is indeed almost as fast as a version using vector instructions, is something I would qualify as being SWAR (SIMD Within A Register) so it is SIMD technically speaking\r\n\r\nIndeed. But using standard C++ operators instead of clumsily-named intrinsics is what makes it vastly more readable IMHO.\r\n\r\nIn other words, using a dedicated intrinsic-abstracting library (e.g. xsimd or Vc) would probably help. It would also help portability.\r\n"
+        },
+        {
+            "created_at": "2018-10-29T20:25:57.512Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3536?focusedCommentId=16667710) by Daniel Lemire (lemire):*\n_In other words, using a dedicated intrinsic-abstracting library (e.g. xsimd or Vc) would probably help. It would also help portability._\r\n\r\n\u00a0\r\n\r\nI'd be interested in resuming this discussion after you have taken one of these libraries and worked on doing UTF-8 processing with it.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-11-09T00:28:01.782Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3536?focusedCommentId=16680657) by Wes McKinney (wesm):*\nIssue resolved by pull request 2916\n<https://github.com/apache/arrow/pull/2916>"
+        }
+    ]
+}

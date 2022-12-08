@@ -1,0 +1,108 @@
+{
+    "issue": {
+        "title": "[R] Permission error on Windows when deleting file previously accessed with open_dataset",
+        "body": "***Note**: This issue was originally created as [ARROW-16421](https://issues.apache.org/jira/browse/ARROW-16421). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nOn Windows this fails:\r\n```R\n\r\nlibrary(arrow)\r\n\r\nwrite_dataset(iris, \"test_dataset\")\r\n\r\n# Original example was with DuckDB, but that's not necessarily the issue\r\n# con <- open_dataset(\"test_dataset\") |> to_duckdb()\r\ncon <- open_dataset(\"test_dataset\")$NewScan()$Finish()$ToRecordBatchReader()\r\n\r\nfile.remove(\"test_dataset/part-0.parquet\")\r\n#> Warning in file.remove(\"test_dataset/part-0.parquet\"): cannot remove file\r\n#> 'test_dataset/part-0.parquet', reason 'Permission denied'\r\n#> [1] FALSE\r\n```\r\nBut on MacOS it does not:\r\n```r\n\r\nlibrary(arrow)\r\n\r\nwrite_dataset(iris, \"test_dataset\")\r\n\r\n# Original example was with DuckDB, but that's not necessarily the issue\r\n# con <- open_dataset(\"test_dataset\") |> to_duckdb()\r\ncon <- open_dataset(\"test_dataset\")$NewScan()$Finish()$ToRecordBatchReader()\r\n\r\nfile.remove(\"test_dataset/part-0.parquet\")\r\n#> [1] TRUE\r\n```",
+        "created_at": "2022-04-29T18:24:18.000Z",
+        "updated_at": "2022-11-17T17:51:46.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-04-29T18:43:53.210Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17530187) by Will Jones (willjones127):*\nPossibly related"
+        },
+        {
+            "created_at": "2022-04-29T18:51:35.923Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17530196) by Will Jones (willjones127):*\nActually, if I call `gc()` prior to `file.remove`, this works fine."
+        },
+        {
+            "created_at": "2022-04-29T20:10:37.218Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17530225) by Weston Pace (westonpace):*\nWindows is notoriously stubborn about deleting files that have any kind of open handle so that makes sense.  Another possibility that is often frustrating when deleting recently created files is that the file is picked up by a search indexer or an antivirus scanner of some sort.  I suspect that is why MinIO/S3 tests sporadically fail on Windows as well."
+        },
+        {
+            "created_at": "2022-05-03T12:20:45.041Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17531169) by Dewey Dunnington (paleolimbot):*\nThere doesn't seem to be a `close_dataset()` or `dataset$close()` (or maybe it's the Scanner object?). The deleters for the C++ objects behind the R6 objects usually (but not always) get run on `gc()`, so we may be relying on some implicit cleanup where we should be encouraging explicit closing (e.g., R warns when you forget to `close()` a connection to a file; DBI warns when you forget to close a database connection)."
+        },
+        {
+            "created_at": "2022-05-03T18:05:48.060Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17531338) by Weston Pace (westonpace):*\nThe scanner does need to close its files.  It takes care of this itself as it finishes scanning.  One issue we have today (which may be related) is that the scanner reports that it is finished (and the exec plan too if you are using one) before it has completely finished all close/cleanup tasks so there is some possibility that the close happens after the scanner is finished.  That behavior will change in a month or two as part of ARROW-15732"
+        },
+        {
+            "created_at": "2022-05-03T18:52:17.878Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17531364) by Will Jones (willjones127):*\nYeah this was inspired by an issue I was told about in a private channel; but the above reproduction doesn't seem to match the issue they are seeing, so I'm waiting to see if they can make a reproducible example."
+        },
+        {
+            "created_at": "2022-05-03T20:29:37.293Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17531402) by Will Jones (willjones127):*\nIt seems like this issue isn't resolved by `rm()` and `gc()` if there is a large number of partitions:\r\n```r\n\r\nlibrary(arrow)\r\n#> Warning: package 'arrow' was built under R version 4.1.3\r\n#> \r\n#> Attaching package: 'arrow'\r\n#> The following object is masked from 'package:utils':\r\n#> \r\n#>     timestamp\r\nlibrary(readr)\r\n\r\n# warning: 5 MB\r\ntest_data <- read_csv(\"https://cn.dataone.org/cn/v2/resolve/knb.92098.1\")\r\n#> Rows: 104497 Columns: 9\r\n#> -- Column specification --------------------------------------------------------\r\n#> Delimiter: \",\"\r\n#> chr (7): Y_CNAREA, CITY, A_RESID, local, Y_Rural, P_FSHY, P_TYPE\r\n#> dbl (2): YEAR, Permit_Count\r\n#> \r\n#> i Use `spec()` to retrieve the full column specification for this data.\r\n#> i Specify the column types or set `show_col_types = FALSE` to quiet this message.\r\n\r\nwrite_dataset(test_data, \"test_data\", partitioning = \"CITY\")\r\n\r\n# Original example was with DuckDB, but that's not necessarily the issue\r\n# con <- open_dataset(\"test_dataset\") |> to_duckdb()\r\ncon <- open_dataset(\"test_data\")$NewScan()$Finish()$ToRecordBatchReader()\r\n\r\nfiles <- dir(\"test_data\", full.names = TRUE, recursive = TRUE)\r\n\r\nrm(con)\r\ngc()\r\n#>           used (Mb) gc trigger (Mb) max used (Mb)\r\n#> Ncells 1052314 56.2    2227298  119  1220182 65.2\r\n#> Vcells 2795421 21.4    8388608   64  3736313 28.6\r\n\r\nlapply(files, file.remove)\r\n#> Warning in FUN(X[[i]], ...): cannot remove file 'test_data/CITY=CORNER BAY/\r\n#> part-0.parquet', reason 'Permission denied'\r\n#> Warning in FUN(X[[i]], ...): cannot remove file 'test_data/CITY=COUNCIL/\r\n#> part-0.parquet', reason 'Permission denied'\r\n#> Warning in FUN(X[[i]], ...): cannot remove file 'test_data/CITY=CRAIG/\r\n#> part-0.parquet', reason 'Permission denied'\r\n#> Warning in FUN(X[[i]], ...): cannot remove file 'test_data/CITY=CROOKED CREEK/\r\n#> part-0.parquet', reason 'Permission denied'\r\n#> Warning in FUN(X[[i]], ...): cannot remove file 'test_data/CITY=DEEP BAY/\r\n#> part-0.parquet', reason 'Permission denied'\r\n#> Warning in FUN(X[[i]], ...): cannot remove file 'test_data/CITY=DEERING/\r\n#> part-0.parquet', reason 'Permission denied'\r\n#> Warning in FUN(X[[i]], ...): cannot remove file 'test_data/CITY=DELTA JUNCTION/\r\n#> part-0.parquet', reason 'Permission denied'\r\n#> Warning in FUN(X[[i]], ...): cannot remove file 'test_data/CITY=DENALI PARK/\r\n#> part-0.parquet', reason 'Permission denied'\r\n#> [[1]]\r\n#> [1] TRUE\r\n#> \r\n#> [[2]]\r\n#> [1] TRUE\r\n#> \r\n#> [[3]]\r\n#> [1] TRUE\r\n#> \r\n#> ...\r\n#> \r\n#> [[343]]\r\n#> [1] TRUE\r\n#> \r\n#> [[344]]\r\n#> [1] TRUE\r\n```"
+        },
+        {
+            "created_at": "2022-05-03T20:52:25.640Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17531409) by Will Jones (willjones127):*\n> Windows is notoriously stubborn about deleting files that have any kind of open handle so that makes sense. Another possibility that is often frustrating when deleting recently created files is that the file is picked up by a search indexer or an antivirus scanner of some sort. I suspect that is why MinIO/S3 tests sporadically fail on Windows as well.\r\nI tested the above with a 20 second sleep in between garbage collection and the deletion, and got the exact same result, so I don't think it's this.\r\n> The scanner does need to close its files. It takes care of this itself as it finishes scanning.\r\n`[~westonpace]` Could you point me to the code where that happens? I'm having trouble finding it."
+        },
+        {
+            "created_at": "2022-05-03T21:02:24.258Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17531410) by Weston Pace (westonpace):*\nIt's rather spread out and not at all obvious.  For example, if we are scanning parquet files, then we will call `parquet::arrow::FileReader::GetRecordBatchGenerator` in `file_parquet.cc`.  This creates a generator which is an instance of `parquet::arrow::RowGroupGenerator`.  When `parquet::arrow::RowGroupGenerator` is destroyed its members are destroyed.  One of them is a `shared_ptr<parquet::arrow::<unnamed>::FileReaderImpl>`.  This in turn has an owned reference to a `parquet::ParquetFileReader` and the destructor of `parquet::ParquetFileReader` closes the file."
+        },
+        {
+            "created_at": "2022-05-03T21:04:00.650Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17531411) by Weston Pace (westonpace):*\nRight now the destruction of the record batch generator likely happens on a CPU thread task and the exec plan is not (yet) configured to wait for that CPU thread task.  Changing that is the heart of ARROW-15732. "
+        },
+        {
+            "created_at": "2022-08-15T09:43:49.133Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17579614) by Miles Granger (milesgranger):*\n`[~westonpace]` while working on ARROW-13763, it appears that closing files on C++ side doesn't occur in places one might initially expect. For example file_ipc.cc [IpcFileFormat::Inspect](https://github.com/apache/arrow/blob/bc1a16cd0eceeffe67893a7e8000d2dd28dcf3f1/cpp/src/arrow/dataset/file_ipc.cc#L134) could close the `reader` then return the schema, but doesn't.\u00a0 Also in [SerializedFile::Close](https://github.com/apache/arrow/blob/bc1a16cd0eceeffe67893a7e8000d2dd28dcf3f1/cpp/src/parquet/file_reader.cc#L293)\u00a0(ParquetFileReader::Contents)\u00a0doesn't close the file, but deals with decryption keys. It is possible to add a `~source_.get()->Close()~` immediately after however to close the RandomAccessFile.\r\n\r\nIs my understanding correct? If so, it seems like it could be related to this issue, but suppose there are reasons for not doing such?"
+        },
+        {
+            "created_at": "2022-08-15T18:22:22.440Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17579848) by Weston Pace (westonpace):*\n`[~milesgranger]` `reader` should go out of scope when that method returns.  I would expect the destructor of `reader` to close any open files.\r\n\r\n(I'm specifically referring to IpcFileFormat::Inspect here)"
+        },
+        {
+            "created_at": "2022-08-17T11:56:33.345Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17580753) by Joris Van den Bossche (jorisvandenbossche):*\nSo in general in C++ we rely on objects going out of scope to ensure files are closed (in contrast to explicitly calling `Close()` on the InputStream) ? \r\n\r\nBut given the reported issues on Windows, that might not work sufficiently in all cases? \r\n( `[~milesgranger]` from testing on Linux, I think you couldn't observe any files being kept open after a `pq.read_table` or `ds.dataset(..)`?)"
+        },
+        {
+            "created_at": "2022-08-17T12:57:01.415Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17580774) by Miles Granger (milesgranger):*\nThat's right, couldn't see that any files were left open when using those methods. Doing a loop and watching `lsof` I can spot the file being opened and closed immediately during `ds.dataset(...).read()`, and assigning to a variable also will not leave the file open from what I could see."
+        },
+        {
+            "created_at": "2022-08-17T13:35:58.673Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17580794) by Antoine Pitrou (apitrou):*\n(deleted the comment I just posted because that was a slightly erroneous take IMHO)"
+        },
+        {
+            "created_at": "2022-08-18T16:07:07.754Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17581418) by Weston Pace (westonpace):*\n> So in general in C++ we rely on objects going out of scope to ensure files are closed (in contrast to explicitly calling Close() on the InputStream) ?\r\n\r\nYes.  In C++ there is no \"with\" or \"using\" statement like there is in other languages so relying on scope is the safe alternative.  Explicitly calling close usually leaves open the risk of missing a close on a failure path or especially if an exception is thrown.\r\n\r\n> But given the reported issues on Windows, that might not work sufficiently in all cases?\r\n\r\nI'm not convinced this is the case.  I'm pretty sure we are calling close on Windows too.  How are we confirming the file is open?"
+        },
+        {
+            "created_at": "2022-08-18T16:13:41.740Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17581423) by Weston Pace (westonpace):*\nMy belief is that, on Windows, closing a file handle does not guarantee that file can immediately be deleted.  For example, consider this page: https://docs.microsoft.com/en-us/windows-hardware/drivers/ifs/irp-mj-cleanup\r\n\r\n> It is important to note that when all handles to a file object have been closed, this does not necessarily mean that the file object is no longer being used. System components, such as the Cache Manager and the Memory Manager, might hold outstanding references to the file object. These components can still read to or write from a file, even after an IRP_MJ_CLEANUP request is received.\r\n"
+        },
+        {
+            "created_at": "2022-08-18T16:20:30.338Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17581426) by Weston Pace (westonpace):*\nAlso related: https://stackoverflow.com/questions/1753209/deletefile-fails-on-recently-closed-file"
+        },
+        {
+            "created_at": "2022-08-18T17:45:02.235Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17581464) by Joris Van den Bossche (jorisvandenbossche):*\nSo if that's the case, this issue is basically a \"can't fix\" ?\r\n\r\nAnd the workaround we can give to users: put some kind of try-except around the delete, and try again after some pause?"
+        },
+        {
+            "created_at": "2022-08-18T17:58:00.945Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17581469) by Antoine Pitrou (apitrou):*\nWe should first ensure we understand what exactly is happening here."
+        },
+        {
+            "created_at": "2022-08-18T18:00:27.295Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17581473) by Antoine Pitrou (apitrou):*\nFile deletion is usually quite reliable on Windows as long as you don't have aggressive virus scanners etc. running in the background.\r\n\r\nFor example, our filesystem tests create, write and delete files and we don't seem to get spurious deletion errors on them.\r\n"
+        },
+        {
+            "created_at": "2022-08-18T18:01:52.818Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17581474) by Antoine Pitrou (apitrou):*\nAnd at least it should be easy for a R developer to dump logs on C++ file opens and closes, and see what happens exactly here."
+        },
+        {
+            "created_at": "2022-11-17T17:51:46.574Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16421?focusedCommentId=17635478) by Apache Arrow JIRA Bot (arrowjira):*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned per [project policy](https://arrow.apache.org/docs/dev/developers/bug_reports.html#issue-assignment). Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

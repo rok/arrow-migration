@@ -1,0 +1,77 @@
+{
+    "issue": {
+        "title": "[Python] Can read but not write parquet partitioned on large ints",
+        "body": "***Note**: This issue was originally created as [ARROW-5430](https://issues.apache.org/jira/browse/ARROW-5430). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHere's a contrived example that reproduces this issue using pandas:\r\n```java\n\r\nimport numpy as np\r\nimport pandas as pd\r\n\r\nreal_usernames = np.array(['anonymize', 'me'])\r\nusernames = pd.util.hash_array(real_usernames)\r\nlogin_count = [13, 9]\r\ndf = pd.DataFrame({'user': usernames, 'logins': login_count})\r\ndf.to_parquet('can_write.parq', partition_cols=['user'])\r\n# But not read\r\npd.read_parquet('can_write.parq')\n```\r\nExpected behaviour:\r\n \\* Either the write fails\r\n \\* Or the read succeeds\r\n\r\nActual behaviour: The read fails with the following error:\r\n```java\n\r\nTraceback (most recent call last):\r\n\u00a0 File \"<stdin>\", line 2, in <module>\r\n\u00a0 File \"/Users/robinkh/code/venvs/datamunge/lib/python3.7/site-packages/pandas/io/parquet.py\", line 282, in read_parquet\r\n\u00a0\u00a0\u00a0 return impl.read(path, columns=columns, **kwargs)\r\n\u00a0 File \"/Users/robinkh/code/venvs/datamunge/lib/python3.7/site-packages/pandas/io/parquet.py\", line 129, in read\r\n\u00a0\u00a0\u00a0 **kwargs).to_pandas()\r\n\u00a0 File \"/Users/robinkh/code/venvs/datamunge/lib/python3.7/site-packages/pyarrow/parquet.py\", line 1152, in read_table\r\n\u00a0\u00a0\u00a0 use_pandas_metadata=use_pandas_metadata)\r\n\u00a0 File \"/Users/robinkh/code/venvs/datamunge/lib/python3.7/site-packages/pyarrow/filesystem.py\", line 181, in read_parquet\r\n\u00a0\u00a0\u00a0 use_pandas_metadata=use_pandas_metadata)\r\n\u00a0 File \"/Users/robinkh/code/venvs/datamunge/lib/python3.7/site-packages/pyarrow/parquet.py\", line 1014, in read\r\n\u00a0\u00a0\u00a0 use_pandas_metadata=use_pandas_metadata)\r\n\u00a0 File \"/Users/robinkh/code/venvs/datamunge/lib/python3.7/site-packages/pyarrow/parquet.py\", line 587, in read\r\n\u00a0\u00a0\u00a0 dictionary = partitions.levels[i].dictionary\r\n\u00a0 File \"/Users/robinkh/code/venvs/datamunge/lib/python3.7/site-packages/pyarrow/parquet.py\", line 642, in dictionary\r\n\u00a0\u00a0\u00a0 dictionary = lib.array(integer_keys)\r\n\u00a0 File \"pyarrow/array.pxi\", line 173, in pyarrow.lib.array\r\n\u00a0 File \"pyarrow/array.pxi\", line 36, in pyarrow.lib._sequence_to_array\r\n\u00a0 File \"pyarrow/error.pxi\", line 104, in pyarrow.lib.check_status\r\npyarrow.lib.ArrowException: Unknown error: Python int too large to convert to C long\n```\r\nI set the priority to minor here because it's easy enough to work around this in user code unless you really need the 64 bit hash (and you probably shouldn't be partitioning on that anyway).\r\n\r\nI could take a stab at writing a patch for this if there's interest?",
+        "created_at": "2019-05-28T07:36:20.000Z",
+        "updated_at": "2019-06-03T14:12:45.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-06-03T14:12:30.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-05-28T08:45:13.950Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5430?focusedCommentId=16849483) by Joris Van den Bossche (jorisvandenbossche):*\nThanks for the report! The error is actually not really related to the parquet code, but due to pyarrow trying to convert the large integers into a pyarrow Array. \r\nSo a smaller example that reproduces the issue:\r\n\r\n```python\n\r\nIn [21]: pa.array([14989096668145380166, 15869664087396458664])                                                                                                                 \r\n...\r\nArrowException: Unknown error: Python int too large to convert to C long\r\n\r\nIn [22]: pa.array([14989096668145380166, 15869664087396458664], type=pa.uint64())                                                                                               \r\nOut[22]: \r\n<pyarrow.lib.UInt64Array object at 0x7fab58d28cc8>\r\n[\r\n  -3457647405564171450,\r\n  -2577079986313092952\r\n]\r\n```\r\n\r\nSo when specifying the type, pyarrow can correctly convert it, but there is apparently not yet an automatic inference for uint64.\r\n\r\nI think a patch that tries uint64 in case the integers are too big is certainly welcome!"
+        },
+        {
+            "created_at": "2019-05-28T08:46:41.847Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5430?focusedCommentId=16849485) by Joris Van den Bossche (jorisvandenbossche):*\nActually, I see we had ARROW-2972 about this, where we decided to not do this automatic inference for unsigned integers (cc `[~pitrou]`)"
+        },
+        {
+            "created_at": "2019-05-28T08:52:18.062Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5430?focusedCommentId=16849489) by Robin K\u00e5veland (kaaveland):*\nIs it an option to make the write fail, in that case? I think it's unfortunate that I can write a dataset that I can't read \u2013 I actually encountered this after having a fairly long-running computation, so it was fairly frustrating to only find out after I killed my process. A fail-fast with an error message saying unsigned ints need to be explicitly converted to signed would've saved my bacon. :)"
+        },
+        {
+            "created_at": "2019-05-28T08:55:35.671Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5430?focusedCommentId=16849491) by Joris Van den Bossche (jorisvandenbossche):*\nI agree that ideally we should either fix it (in pa.array(), so reconsider the \"wont fix\" in ARROW-2972, or do an extra try/except in the parquet code specifically for this), or either disallow it. "
+        },
+        {
+            "created_at": "2019-05-28T08:57:21.575Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5430?focusedCommentId=16849495) by Antoine Pitrou (apitrou):*\nThis is about reading Parquet files, right? ARROW-2972 is unrelated: it's about inferring Arrow datatypes from a list of Python objects."
+        },
+        {
+            "created_at": "2019-05-28T09:01:42.077Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5430?focusedCommentId=16849499) by Joris Van den Bossche (jorisvandenbossche):*\nNot fully, see my first comment with a smaller example (without any parquet), giving the same error. \r\n\r\nIn the parquet code, we do\r\n\r\n```Java\n\r\ninteger_keys = [int(x) for x in self.keys]\r\ndictionary = lib.array(integer_keys)\r\n```\r\n\r\nwhere `integer_keys` will actually be a list of python ints, where we do automatic inference on."
+        },
+        {
+            "created_at": "2019-05-28T09:15:28.839Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5430?focusedCommentId=16849512) by Antoine Pitrou (apitrou):*\nAren't there any requirements on the key type? I know nothing about Parquet."
+        },
+        {
+            "created_at": "2019-05-28T09:44:55.757Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5430?focusedCommentId=16849539) by Joris Van den Bossche (jorisvandenbossche):*\nThe keys come from the directory names, so are essentially strings. But we try to recover the original data type somewhat (in case of ints, the snippet above), but this is of course not very robust in general.\r\n\r\nI think we should at least fallback to leaving it as strings, if the conversion fails (that's an easy fix in the code, we only need to expand the exceptions in the except clause around the snippet above). "
+        },
+        {
+            "created_at": "2019-05-28T09:49:34.776Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5430?focusedCommentId=16849543) by Antoine Pitrou (apitrou):*\nWell, I think the \"unknown error\" also needs fixing. It should be a ValueError (a ArrowInvalid) or something."
+        },
+        {
+            "created_at": "2019-05-28T14:43:02.323Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5430?focusedCommentId=16849796) by Wes McKinney (wesm):*\nThe partition keys are not a Parquet thing, they are more a Hive-style partitioning thing (the `key=value` directory names come from Hive AFAIK)"
+        },
+        {
+            "created_at": "2019-05-28T20:44:54.615Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5430?focusedCommentId=16850139) by Robin K\u00e5veland (kaaveland):*\nWould the following be ergonomic/ok with everybody?\r\n1. We change the traceback to a better error (such as the suggested `ValueError`)\n1. Other than that, we leave the pyarrow.array code untouched\n1. We try catching the ValueError when making the parquet dictionary for parquet partitioning and fall back to strings\n   \n   That doesn't introduce any scary guessing in the array-case, but allows pyarrow to read these datasets.\n   \n   I'd be happy to take a stab at this at work tomorrow!"
+        },
+        {
+            "created_at": "2019-05-28T21:13:42.497Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5430?focusedCommentId=16850158) by Joris Van den Bossche (jorisvandenbossche):*\nRobin: yes, a fix for the error type + message would be welcome.\r\nBy doing that, that will automatically also fix the fallback to strings in the parquet code (your point 3), as the snippet that I showed above that failed on the array() call, is already in a try/except block. The error was only not catched because it was the wrong error type.\r\n"
+        },
+        {
+            "created_at": "2019-05-31T11:47:53.876Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5430?focusedCommentId=16852939) by Robin K\u00e5veland (kaaveland):*\nEdit: Very sorry about the formatting here, I haven't used Jira for many years and apparently it shows, I can't manage to insert links correctly. :(\r\n\r\nOkay, I must admit to being a bit stumped here. I followed the trail from\u00a0`_sequence_to_array` to find out where the\u00a0`ArrowUnknown` is coming from. And I'm quite sure it must be CIntFromPythonImpl: <https://github.com/apache/arrow/blob/master/cpp/src/arrow/python/helpers.cc#L179>\r\n\r\nHere, we call some CPython APIs, namely PyLong_AsLong: <https://docs.python.org/3/c-api/long.html#c.PyLong_AsLong>\r\n\r\nand PyLong_AsLongLong, both of which return `-1` for overflows. Then, we call `RETURN_IF_PYERROR` in the case where we get `-1`. [This](https://github.com/apache/arrow/blob/master/cpp/src/arrow/python/common.h#L36-L51) block of code looks like it could be the right place to make the change. But now I'm very much on thin ice as I don't know much C++ at all and I'm also not very familiar with the CPython C API.\r\n\r\nIt was easy enough to add a testcase in pure-python. I'm guessing the right \"fix\" would be something like adding a branch to\u00a0`ConvertPyError` that checks `PyErr_ExceptionMatches(``PyExc_OverflowError``)``?`"
+        },
+        {
+            "created_at": "2019-05-31T11:57:27.145Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5430?focusedCommentId=16852944) by Robin K\u00e5veland (kaaveland):*\nAha, it looks like maybe we can just this macro instead: <https://github.com/apache/arrow/blob/master/cpp/src/arrow/python/common.h#L53> \u2013 I'll check if that does the trick."
+        },
+        {
+            "created_at": "2019-06-03T14:12:30.196Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5430?focusedCommentId=16854635) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 4440\n<https://github.com/apache/arrow/pull/4440>"
+        }
+    ]
+}

@@ -1,0 +1,21 @@
+{
+    "issue": {
+        "title": "[Java] MapBinder to bind Arrow Map type to DB column ",
+        "body": "***Note**: This issue was originally created as [ARROW-17431](https://issues.apache.org/jira/browse/ARROW-17431). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nTypical real life Arrow datasets contain Map type vectors of string key->string value. Looks logically implement default JDBC parameter binders for such vector type or implement some kind on binder code extensibility of core framework via MetaINF/ServiceLocator\r\n\r\nCurrent implementation just [throws UnsupportedOperationException](https://github.com/apache/arrow/blob/master/java/adapter/jdbc/src/main/java/org/apache/arrow/adapter/jdbc/binder/ColumnBinderArrowTypeVisitor.java#L100)]\r\n\r\n\u00a0\r\n```java\n\r\n  @Override\r\n        \r\n        \r\n            public ColumnBinder visit(ArrowType.Map type) {\r\n        \r\n        \r\n              throw new UnsupportedOperationException(\"No column binder implemented for type \" + type);\r\n        \r\n        \r\n            } \n```\r\n\u00a0\r\nMy current implementation patch ColumnBinderArrowTypeVisitor in classpath to return MapBinder\r\n\r\n```java\n\r\n    @Override\r\n    public ColumnBinder visit(ArrowType.Map type) {\r\n        return  new MapBinder((MapVector) vector);\r\n    }\r\n```\r\n\r\nand following code works for me with H2 database and in java stored PostgreSQL function in PL/Java to bind Map(string,string) parameter to JDBC:\r\n\r\n```java\n\r\npackage org.apache.arrow.adapter.jdbc.binder;\r\n\r\nimport org.apache.arrow.vector.complex.MapVector;\r\nimport org.apache.arrow.vector.complex.impl.UnionMapReader;\r\nimport org.apache.arrow.vector.util.JsonStringHashMap;\r\n\r\nimport java.sql.PreparedStatement;\r\nimport java.sql.SQLException;\r\nimport java.sql.Types;\r\nimport java.util.LinkedHashMap;\r\n\r\npublic class MapBinder extends BaseColumnBinder<MapVector> {\r\n\r\n    private UnionMapReader reader;\r\n\r\n    public MapBinder(MapVector vector) {\r\n        this(vector, Types.VARCHAR);\r\n    }\r\n\r\n    public MapBinder(MapVector vector, int jdbcType) {\r\n        super(vector, jdbcType);\r\n        reader = vector.getReader();\r\n    }\r\n\r\n    @Override\r\n    public void bind(PreparedStatement statement, int parameterIndex, int rowIndex) throws SQLException {\r\n        reader.setPosition(rowIndex);\r\n        LinkedHashMap<String, String> tags = new JsonStringHashMap<>();\r\n        while (reader.next()){\r\n            tags.put(reader.key().readText().toString(), reader.value().readText().toString());\r\n        }\r\n        statement.setString(parameterIndex, tags.toString());\r\n    }\r\n}\r\n```\r\n\r\n\u00a0",
+        "created_at": "2022-08-16T11:24:58.000Z",
+        "updated_at": "2022-08-24T15:32:27.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-08-24T11:44:43.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-08-24T11:44:43.036Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17431?focusedCommentId=17584206) by David Li (lidavidm):*\nIssue resolved by pull request 13941\n<https://github.com/apache/arrow/pull/13941>"
+        }
+    ]
+}

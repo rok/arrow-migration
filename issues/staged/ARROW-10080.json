@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[R] Arrow does not release unused memory",
+        "body": "***Note**: This issue was originally created as [ARROW-10080](https://issues.apache.org/jira/browse/ARROW-10080). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI\u2019m having problems when `collect()`-ing Arrow data sources into data frames that are close in size to the available memory on the machine. Consider the following workflow. I have a dataset which I want to query so that at some point in needs to be `collect()`-ed but at the same I\u2019m also reducing the result. During the intermediate step the entire data frame fits into memory, and the following code runs without any problems.\r\n```r\n\r\ntest_ds <- \"memory_test\"\r\n\r\nds1 <- open_dataset(test_ds) %>%\r\n  collect() %>%\r\n  dim()\r\n```\r\nHowever, running the same code in the same R session again fails with R running out of memory.\r\n```r\n\r\nds1 <- open_dataset(test_ds) %>%\r\n  collect() %>%\r\n  dim()\r\n```\r\nThe example might be a but contrived but you can easily imagine a workflow where different queries are ran on a dataset and the reduced results are stored.\r\n\r\nAs far as I understand, R is a garbage collected language, and in this case there aren\u2019t any references left to large objects in memory. And indeed, the second query succeeds when manually forcing a garbage collection.\r\n\r\nIs this the expected behaviour from Arrow?\r\n\r\nI know, this is quite hard to reproduce, as the exact dataset size required to trigger this behaviour depends on the particular machine but I prepared a reproducible example in [this gist](https://gist.github.com/svraka/c63fca51c6cc50020551e2319ff652b7), that should give the same result on Ubuntu 20.04 with 1GB RAM and no swap. See attachment for `sessionInfo()` output. I ran it on a Digitalocean `s-1vcpu-1gb` droplet.\r\n\r\nFirst, let\u2019s create a a partitioned Arrow dataset:\r\n```java\n\r\n$ Rscript ds_prep.R 1000000 5\r\n```\r\nThe first command line argument gives the number of rows in each partition, and second gives the number of partitions. The parameters are set so that the entire dataset should fit into memory.\r\n\r\nThen running the two queries fails:\r\n```java\n\r\n$ Rscript ds_read.R\r\nRunning query, 1st try...\r\nds size, 1st run: 56\r\nRunning query, 2nd try...\r\n[1]    11151 killed     Rscript ds_read.R\r\n```\r\nHowever, when forcing a `gc()` (which I\u2019m controlling here with a command line argument), it succeeds:\r\n```java\n\r\n$ Rscript ds_read.R 1\r\nRunning query, 1st try...\r\nds size, 1st run: 56\r\nrunning gc() ...\r\n          used (Mb) gc trigger  (Mb) max used  (Mb)\r\nNcells  703052 37.6    1571691  84.0  1038494  55.5\r\nVcells 1179578  9.0   36405636 277.8 41188956 314.3\r\nRunning query, 2nd try...\r\nds size, 2nd run: 56\r\n```\r\nIn general, [one shouldn\u2019t have to use `gc()` manually](https://adv-r.hadley.nz/names-values.html#gc). Interestingly, setting R\u2019s garbage collection more aggressive (see `?Memory`) doesn\u2019t help either:\r\n```java\n\r\n$ R_GC_MEM_GROW=0 Rscript ds_read.R\r\nRunning query, 1st try...\r\nds size, 1st run: 56\r\nRunning query, 2nd try...\r\n[1]    11422 killed     Rscript ds_read.R\r\n```\r\nI didn\u2019t try to reproduce this problem on macOS, as my Mac would probably start swapping furiously but I managed to reproduce it on a Windows 7 machine with practically no swap. Of course the parameters are different, and the error messages are presumably system specific.\r\n```java\n\r\n$ Rscript ds_prep.R 1000000 40\r\n$ Rscript ds_read.R\r\nRunning query, 1st try...\r\nds size, 1st run: 56\r\nRunning query, 2nd try...\r\nError in dataset___Scanner__ToTable(self) :\r\n  IOError: Out of memory: malloc of size 524288 failed\r\nCalls: collect ... shared_ptr -> shared_ptr_is_null -> dataset___Scanner__ToTable\r\nExecution halted\r\n$ Rscript ds_read.R 1\r\nRunning query, 1st try...\r\nds size, 1st run: 56\r\nrunning gc() ...\r\n          used (Mb) gc trigger   (Mb)  max used (Mb)\r\nNcells  688789 36.8    1198030   64.0   1198030   64\r\nVcells 1109451  8.5  271538343 2071.7 321118845 2450\r\nRunning query, 2nd try...\r\nds size, 2nd run: 56\r\n$ R_GC_MEM_GROW=0 Rscript ds_read.R\r\nRunning query, 1st try...\r\nds size, 1st run: 56\r\nRunning query, 2nd try...\r\nError in dataset___Scanner__ToTable(self) :\r\n  IOError: Out of memory: malloc of size 524288 failed\r\nCalls: collect ... shared_ptr -> shared_ptr_is_null -> dataset___Scanner__ToTable\r\nExecution halted\r\n```",
+        "created_at": "2020-09-24T10:11:07.000Z",
+        "updated_at": "2021-08-20T13:05:52.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-10-30T01:05:22.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-24T22:51:10.905Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10080?focusedCommentId=17201805) by Neal Richardson (npr):*\nThanks for the detailed report. Wonder if ARROW-9903 is experiencing the same thing (that is, with swap enabled, it appears to just \"hang\").\r\n\r\nAny ideas `[~bkietz]` `[~romainfrancois]`? "
+        },
+        {
+            "created_at": "2020-09-30T15:19:19.090Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10080?focusedCommentId=17204802) by Ben Kietzman (bkietz):*\nI think this is an issue with the laziness of R's garbage collection. When running R functions memory is freed as needed, but inside a C++ function the R garbage collector will not be invoked. This means that even though unused memory is available, in C++ the MemoryPool has no way of signaling that it should be freed. We could solve this by calling `gc()` before any potentially memory-intensive C++ function or more robustly by providing a custom implementation of MemoryPool which calls `gc()` if allocation fails, then tries again."
+        },
+        {
+            "created_at": "2020-09-30T20:04:56.003Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10080?focusedCommentId=17204994) by Neal Richardson (npr):*\nHi `[~svraka]`, could you please try reproducing this on a nightly version of the package? `install.packages(\"arrow\", \"https://arrow-r-nightly.s3.amazonaws.com\")`"
+        },
+        {
+            "created_at": "2020-10-05T14:26:44.000Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10080?focusedCommentId=17208107) by Andr\u00e1s Svraka (svraka):*\nThe problem still exists on `arrow_1.0.1.20201004`."
+        },
+        {
+            "created_at": "2020-10-30T01:05:22.318Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10080?focusedCommentId=17223297) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 8533\n<https://github.com/apache/arrow/pull/8533>"
+        },
+        {
+            "created_at": "2021-08-20T02:48:17.458Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10080?focusedCommentId=17401982) by Brandon Bertelsen (bbertelsen):*\nThis Jira issue is marked as resolved but the problem still exists. Can confirm that manual garbage collection is still required after any type of query which frequently leads to OOMKills. Only a manual call to `gc()` or a session restart releases memory.\u00a0\u00a0"
+        },
+        {
+            "created_at": "2021-08-20T13:05:52.110Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10080?focusedCommentId=17402199) by Neal Richardson (npr):*\nHi `[~bbertelsen]`, if you're still seeing an issue like this, please open a new jira with details on how to reproduce."
+        }
+    ]
+}

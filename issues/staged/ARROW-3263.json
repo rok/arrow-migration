@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[R] Use R sentinel values for missingness in addition to bitmask",
+        "body": "***Note**: This issue was originally created as [ARROW-3263](https://issues.apache.org/jira/browse/ARROW-3263). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nR uses sentinal values to indicate missingness within Atomic vectors (read arrays in Arrow parlance, AFAIK).\u00a0\r\n\r\nCurrently according to `[~wesmckinn]`, the current value in the array in memory is undefined if the bitmap indicating missingness is set to 1.\u00a0\r\n\r\nThis will force R to copy and modify data whenever adopting Arrow data which has missingness present as a native vector.\r\n\r\nIf the value were written to the relevant sentinal values (INT_MIN for 32 bit integers, and NaN with payload 1954 for double precision floats)\u00a0_in addition to_ the bit mask, then R would be able to use Arrow as intended while not breaking any other systems.",
+        "created_at": "2018-09-18T17:29:55.000Z",
+        "updated_at": "2021-12-06T13:00:04.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Format",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2018-09-18T18:21:17.282Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3263?focusedCommentId=16619516) by Wes McKinney (wesm):*\nI would suggest defining optional metadata to indicate that a field's null values use the R sentinel value conventions. That way an R consumer, if they see the custom metadata, do not have to examine the valid bits and simply memcpy the values buffer for numbers. R, for its part, could roundtrip data to Arrow format with less serialization work\r\n\r\nI don't think that using a specific value for null value slots is a good idea, since it would introduce brittleness into implementations, as there are many ways that a value could end up null. If you had to make a pass over the memory to \"sanitize\" the null slots to use a particular value, then that would require extra computing work in many cases. "
+        },
+        {
+            "created_at": "2018-09-18T18:47:52.368Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3263?focusedCommentId=16619562) by Gabriel Becker (gmbecker):*\n> I would suggest defining optional metadata to indicate that a field's null values use the R sentinel value conventions.\r\n\r\nThis could be ok, see below.\r\n\r\n> That way an R consumer, if they see the custom metadata, do not have to examine the valid bits and simply memcpy the values buffer for numbers. R, for its part, could roundtrip data to Arrow format with less serialization work\r\n\r\nSmall clarifcation here, with ALTREP, R would able to operate in a read-only manner on Arrow data with\u00a0**zero** copies, not with a single copy. That is what we want, I think.\r\n\r\n> I don't think that using a specific value for null value slots is a good idea, since it would introduce brittleness into implementations, as there are many ways that a value could end up null. If you had to make a pass over the memory to \"sanitize\" the null slots to use a particular value, then that would require extra computing work in many cases.\r\n\r\nWell if it is optional, the question then becomes twofold in my mind:\r\n1. What is the default. Is Arrow going to produce R-compatible data unless an option is turned off in cases where people don't care about R and want the extra speed, or is it going to be incompatible by default.\n1. Will the core machinery either automate or offer tools to do this sanitizing pass or will people be forced to write their own.\n   \n   If the answer to 2. is that that is left to application owners, the result of that in practice would be that the vast majority of arrow data would not be R compatible, which I suspect would dramatically curtail R-user's interest in and ability to use the Arrow ecosystem."
+        },
+        {
+            "created_at": "2018-09-18T19:02:52.840Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3263?focusedCommentId=16619586) by Wes McKinney (wesm):*\n> Will the core machinery either automate or offer tools to do this sanitizing pass or will people be forced to write their own.\r\n\r\nI think it'd be reasonable to have code to prepare data for consumption with R in the common libraries, so a user of the common libraries (e.g. Java/Python/C++/Ruby) could emit the R metadata in IPC payloads so that the R receiver could do less work.\r\n\r\nAFAICT this would only apply to numeric and integer/factor vectors, and possibly also boolean. Strings would have to be put into / looked up in the global string hash table\r\n\r\ncc `[~romainfrancois]`"
+        },
+        {
+            "created_at": "2019-08-21T22:48:17.055Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3263?focusedCommentId=16912749) by Wes McKinney (wesm):*\nCircling back on this discussion from a year ago.\r\n\r\nNow that we have `arrow::ExtensionType` in C++, technically we could introduce containers for R data that has not been serialized to one of the built-in Arrow types. I'm not sure what you would do with such data, but technically it is now possible to faithfully transport unmodified R data end to end through Arrow's IPC / RPC machinery"
+        },
+        {
+            "created_at": "2019-09-17T20:59:12.273Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3263?focusedCommentId=16931812) by Wes McKinney (wesm):*\nIn Python, note that we don't require any memory copying when converting between null-as-sentinels from pandas to Arrow format. Only a validity/null bitmap has to be allocated. \r\n\r\nHere's an example\r\n\r\n```Java\n\r\nIn [1]: arr = np.random.randn(1000000)                                                                                                   \r\n\r\nIn [2]: arr[::2] = np.nan                                                                                                                \r\n\r\nIn [3]: arrow_arr = pa.array(arr, from_pandas=True)                                                                                      \r\n\r\nIn [4]: arrow_arr.null_count                                                                                                             \r\nOut[4]: 500000\r\n\r\nIn [5]: pa.total_allocated_bytes()                                                                                                       \r\nOut[5]: 125056\r\n```\r\n\r\nHere `arrow_arr` has two buffers for its memory layout: \r\n\r\n- validity bitmap\n- values buffer\n  \n  the values buffer is a zero-copy reference to the from-pandas NumPy array. The validity bitmap must be allocated and populated according to the Arrow format, hence only ~125K memory has to be allocated rather than ~8+MB as with creating a new double array with 1e6 values"
+        },
+        {
+            "created_at": "2019-09-17T20:59:39.397Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3263?focusedCommentId=16931813) by Wes McKinney (wesm):*\n`[~romainfrancois]` do you know if it's possible to achieve this in R?"
+        }
+    ]
+}

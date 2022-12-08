@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Python] write csv decimal cast error",
+        "body": "***Note**: This issue was originally created as [ARROW-17774](https://issues.apache.org/jira/browse/ARROW-17774). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi, when try to write table with any field in `Decimal128` type, arrow raises with this message:\r\n```java\n\r\nIn [136]: ds.write_dataset(table, \"data\", format=\"csv\")\r\n---------------------------------------------------------------------------\r\nArrowNotImplementedError \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0Traceback (most recent call last)\r\nCell In [136], line 1\r\n----> 1 ds.write_dataset(table, \"data\", format=\"csv\")\r\n\r\nFile c:\\users\\documents\\projects\\.venv\\lib\\site-packages\\pyarrow\\dataset.py:930, in write_dataset(data, base_dir, basename_template, format, partitioning, partitioning_flavor, schema, filesystem, file_options, use_threads, max_partitions, max_open_files, max_rows_per_file, min_rows_per_group, max_rows_per_group, file_visitor, existing_data_behavior, create_dir)\r\n\u00a0 \u00a0 927 \u00a0 \u00a0 \u00a0 \u00a0 raise ValueError(\"Cannot specify a schema when writing a Scanner\")\r\n\u00a0 \u00a0 928 \u00a0 \u00a0 scanner = data\r\n--> 930 _filesystemdataset_write(\r\n\u00a0 \u00a0 931 \u00a0 \u00a0 scanner, base_dir, basename_template, filesystem, partitioning,\r\n\u00a0 \u00a0 932 \u00a0 \u00a0 file_options, max_partitions, file_visitor, existing_data_behavior,\r\n\u00a0 \u00a0 933 \u00a0 \u00a0 max_open_files, max_rows_per_file,\r\n\u00a0 \u00a0 934 \u00a0 \u00a0 min_rows_per_group, max_rows_per_group, create_dir\r\n\u00a0 \u00a0 935 )\r\n\r\nFile c:\\users\\documents\\projects\\.venv\\lib\\site-packages\\pyarrow\\_dataset.pyx:2737, in pyarrow._dataset._filesystemdataset_write()\r\n\r\nFile c:\\users\\documents\\projects\\.venv\\lib\\site-packages\\pyarrow\\error.pxi:121, in pyarrow.lib.check_status()\r\n\r\nArrowNotImplementedError: Unsupported cast from decimal128(21, 15) to utf8 using function cast_string\n```\r\nmy data is:\r\n```\n\r\nIn [137]: table\r\nOut[137]:\u00a0\r\npyarrow.Table\r\ncol1: int64\r\ncol2: double\r\ncol3: decimal128(21, 15)\r\ncol4: string\r\n----\r\ncol1: [[1,2,3,0]]\r\ncol2: [[2.7,0,3.24,3]]\r\ncol3: [[-304236.460000000000000,0.E-15,0.E-15,0.E-15]]\r\ncol4: [[\"primera\",\"segunda\",\"tercera\",\"cuarta\"]]\n```\r\n\u00a0\r\n\r\nThanks in advance.",
+        "created_at": "2022-09-19T18:13:20.000Z",
+        "updated_at": "2022-10-29T09:51:47.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-27T09:41:36.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-26T11:08:17.169Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17774?focusedCommentId=17624370) by Miles Granger (milesgranger):*\nIndeed and unfortunate. :( \r\nBasically a duplicate of ARROW-17458 (as experienced in C++) but of course experienced here in Python.\r\n\r\nSmall reproducible example:\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.dataset as ds\r\n\r\ntable = pa.table({'col1': pa.array([1, 2], pa.decimal128(21, 15))})\r\nds.write_dataset(table, \"data.csv\", format=\"csv\")\r\n...\r\nArrowNotImplementedError: Unsupported cast from decimal128(21, 15) to utf8 using function cast_string\r\n```"
+        },
+        {
+            "created_at": "2022-10-26T18:22:45.008Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17774?focusedCommentId=17624677) by Weston Pace (westonpace):*\nThe underlying issues appears to have been solved.  I just checked that this indeed works with the CSV writer:\r\n\r\n```\n\r\nimport decimal\r\n\r\nimport pyarrow as pa\r\nimport pyarrow.compute as pc\r\nimport pyarrow.csv as csv\r\n\r\ndecimals = pa.array([decimal.Decimal(1), decimal.Decimal(0.3)])\r\nsmall_decimals = pc.cast(decimals, pa.decimal256(12, 6), safe=False)\r\ntable = pa.Table.from_pydict({\"rownum\": [1, 2], \"decimal\": small_decimals})\r\ncsv.write_csv(table, '/tmp/foo.csv')\r\n\r\nwith open('/tmp/foo.csv') as f:\r\n    print(f.read())\r\n# \"rownum\",\"decimal\"\r\n# 1,1.000000\r\n# 2,0.299999\r\n```\r\n\r\nDo we want to add any pyarrow tests?  Or just close this."
+        },
+        {
+            "created_at": "2022-10-27T03:28:08.678Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17774?focusedCommentId=17624838) by Miles Granger (milesgranger):*\nThanks `[~westonpace]`, good timing. :) \r\nI added a PR [#14525 ](https://github.com/apache/arrow/pull/14525) with some simple checks, let me know if you have suggestions there or if you don't think it's worth it I'm fine just closing this and the PR. (y)"
+        },
+        {
+            "created_at": "2022-10-27T09:41:36.710Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17774?focusedCommentId=17624989) by Joris Van den Bossche (jorisvandenbossche):*\nIssue resolved by pull request 14525\n<https://github.com/apache/arrow/pull/14525>"
+        }
+    ]
+}

@@ -1,0 +1,52 @@
+{
+    "issue": {
+        "title": "No more default ARROW_CSV=ON in libarrow build breaks R arrow",
+        "body": "***Note**: This issue was originally created as [ARROW-12802](https://issues.apache.org/jira/browse/ARROW-12802). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nlibarrow build succeeds, but\u00a0include/arrow/csv/type_fwd.h isn't installed since 4.0.0. This causes R install.packages('arrow') to fail with:\r\n```java\n\r\nmake: *** [/opt/local/Library/Frameworks/R.framework/Resources/etc/Makeconf:179: array.o] Error 1\r\nIn file included from recordbatch.cpp:18:\r\n././arrow_types.h:37:10: fatal error: 'arrow/csv/type_fwd.h' file not found\n```\r\nReproduced with Ubuntu 18.04 and with macOS 10.13.6 MacPorts with both apache-arrow-4.0.0 and current HEAD\u00a0f959141ece4d660bce5f7fa545befc0116a7db79.\r\n\r\nNo other\u00a0type_fwd.h are missing:\r\n```java\n\r\nfind .../arrow/cpp/src -name type_fwd.h | wc -l\r\n10\r\nfind .../include -name type_fwd.h | wc -l\r\n9\n```\r\nBest guess: default value of cmake ARROW_CSV changed and R arrow requires\u00a0ARROW_CSV=ON.",
+        "created_at": "2021-05-16T18:16:24.000Z",
+        "updated_at": "2022-08-27T14:42:01.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-05-17T15:38:56.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-05-16T19:06:31.328Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12802?focusedCommentId=17345777) by Webb Phillips (webbp):*\nConfirmed that this is resolved with\u00a0ARROW_CSV=ON. Any chance of changing the default back? I think a lot of arrow users are R arrow users."
+        },
+        {
+            "created_at": "2021-05-16T21:54:34.090Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12802?focusedCommentId=17345796) by Neal Richardson (npr):*\nARROW_CSV has been OFF by default since late 2019: https://github.com/apache/arrow/commit/d6caca311356d557507b8d03526655f8184fa16c#diff-34adecfdec8ae9425b857466e28d53799dcb43299699ec9da4815333a61336d1R146"
+        },
+        {
+            "created_at": "2021-05-17T01:33:20.074Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12802?focusedCommentId=17345816) by Webb Phillips (webbp):*\nOops you're right. I was using apache-arrow-1.0.1, not 3.0.0. I am using apache-arrow-3.0.0 (js) in a separate project and confused the two. WIth further testing, I find that:\r\n\r\n\u2022 R apache-arrow-3.0.0 builds and works on Ubuntu 18.04, R 4.0.3, devtools:\r\n```java\n\r\ninstall_github('apache/arrow',subdir='r',ref='apache-arrow-3.0.0',clean=T,force=T)\u00a0\n```\r\n\u2022 R apache-arrow-4.0.0 and current HEAD builds but crashes on use on\u00a0Ubuntu 18.04, e.g.:\r\n```java\n\r\n> x=read_feather('test.ftr')\r\nError in io___MemoryMappedFile__Open(path, mode) :\r\n Cannot call io___MemoryMappedFile__Open(). See https://arrow.apache.org/docs/r/articles/install.html for help installing Arrow C++ libraries.\u00a0\r\n```\r\n\u2022 R apache-arrow-1.0.1 builds and works on macOS 10.13.6, R 4.0.4, devtools:\r\n```java\n\r\ninstall_github('apache/arrow',subdir='r',ref='apache-arrow-1.0.1',clean=T,force=T)\n```\r\n\u2022 R HEAD, apache-arrow-4.0.0, 3.0.0 (and probably 2.0.0) don't build on macOS\u00a010.13.6, R 4.0.4, devtools because of\u00a0ARROW_CSV=OFF\r\n\r\n\u2022 If I build and install libarrow apache-arrow-4.0.0\u00a0with ARROW_CSV=ON first, then R\u00a0apache-arrow-4.0.0 builds and works (because it uses already installed libarrow) on macOS 10.13.6, R 4.0.4, devtools\r\n\r\nBy hypothesis, I could also skip libarrow and manually build only R arrow with ARROW_CSV=ON.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-05-17T15:02:08.391Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12802?focusedCommentId=17346216) by Neal Richardson (npr):*\nWe don't recommend `install_github`, though with the right env vars it works on most platforms. \r\n\r\nMoreover, you don't need to install the arrow C++ library separately from the R package, the R package installation will take care of everything for you. So you may be making things harder for yourself than you need. See https://arrow.apache.org/docs/r/#installation as well as the longer installation vignette linked there for details. "
+        },
+        {
+            "created_at": "2021-05-17T15:10:30.869Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12802?focusedCommentId=17346221) by Webb Phillips (webbp):*\nUsing install.packages as in the docs would be ideal. but does not work for me:\r\n```java\n\r\nmac$ R --vanilla\r\n...\r\n> install.packages('arrow')\r\n...\r\n* installing *source* package \u2018arrow\u2019 ...\r\n** package \u2018arrow\u2019 successfully unpacked and MD5 sums checked\r\n** using staged installation\r\n*** Using Homebrew apache-arrow\r\nPKG_CFLAGS=-I/usr/local/opt/apache-arrow/include -DARROW_R_WITH_ARROW -DARROW_R_WITH_PARQUET -DARROW_R_WITH_DATASET\r\nPKG_LIBS=-L/usr/local/opt/apache-arrow/lib -larrow_dataset -lparquet -larrow -larrow_bundled_dependencies\r\n** libs\r\n/opt/local/bin/clang++-mp-9.0 -std=gnu++11 -I\"/opt/local/Library/Frameworks/R.framework/Resources/include\" -DNDEBUG -I/usr/local/opt/apache-arrow/include -DARROW_R_WITH_ARROW -DARROW_R_WITH_PARQUET -DARROW_R_WITH_DATASET -I'/Users/webb/Library/R/4.0/library/cpp11/include' -I/opt/local/include -isysroot/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk -fPIC -pipe -Os -stdlib=libc++ -isysroot/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk -arch x86_64 -c array.cpp -o array.o\r\nIn file included from array.cpp:18:\r\n././arrow_types.h:37:10: fatal error: 'arrow/csv/type_fwd.h' file not found\r\n```\r\nThis is with no other arrow installed.\r\n\r\nCould be install.packages works using Apple /usr/bin/clang++ instead of MacPorts /opt/local/bin/clang++-mp-9.0"
+        },
+        {
+            "created_at": "2021-05-17T15:28:41.092Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12802?focusedCommentId=17346231) by Neal Richardson (npr):*\nThe `*** Using Homebrew apache-arrow` in the output suggests that it has found arrow installed by Homebrew ([specifically](https://github.com/apache/arrow/blob/master/r/configure#L108), `brew ls --versions apache-arrow` returned something). Judging from the compile error, you may have a very old version of apache-arrow installed by brew.\r\n\r\nYou can set either of `FORCE_AUTOBREW` or `FORCE_BUNDLED_BUILD` environment variables to `true` to ignore the homebrew apache-arrow."
+        },
+        {
+            "created_at": "2021-05-17T15:37:05.215Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12802?focusedCommentId=17346236) by Webb Phillips (webbp):*\nYou are totally correct! Uninstalled all traces of homebrew and install.packages works fine now :D"
+        },
+        {
+            "created_at": "2021-05-17T15:38:56.701Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12802?focusedCommentId=17346237) by Webb Phillips (webbp):*\nThanks for helping me resolve the problem with my build environment!"
+        },
+        {
+            "created_at": "2022-08-27T14:42:01.839Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12802?focusedCommentId=17585998) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

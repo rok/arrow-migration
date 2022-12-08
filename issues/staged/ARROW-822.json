@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] StreamWriter fails to open with socket as sink",
+        "body": "***Note**: This issue was originally created as [ARROW-822](https://issues.apache.org/jira/browse/ARROW-822). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nTrying to use pyarrow StreamWriter to write to a socket fails.  I've tried the following:\n\n- Use socket directly and get \"TypeError: Unable to read from object of type: <class 'socket._socketobject'>\"\n    looks like pyarrow expects the object to have a \"write\" attribute\n\n- Using as a file object with: \"sock.makefile(\"wb\", 65536)\" get the error \"pyarrow.error.ArrowIOError: IOError: '_fileobject' object has no attribute 'tell'\"\n    Not sure why exactly \"tell\" is required.\n\n- using \"os.fdopen(sock.fileno(), \"wb\", 65536)\" get a rather cryptic error that I've been unable to track down:\n    \"terminate called after throwing an instance of 'std::logic_error' what():  basic_string::_M_construct null not valid\"\n    Seems to indicate some kind of std::string construction with a NULL, but I can't find that anywhere",
+        "created_at": "2017-04-14T17:04:42.000Z",
+        "updated_at": "2019-06-03T13:06:41.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-04-21T01:43:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-04-14T17:05:48.358Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-822?focusedCommentId=15969255) by Bryan Cutler (bryanc):*\nSome code to reproduce, if needed\n\n```\n    import pyarrow as pa\n    import socket, os, io\n\n    port = 8080\n\n    for res in socket.getaddrinfo(\"localhost\", port, socket.AF_UNSPEC, socket.SOCK_STREAM):\n        af, socktype, proto, canonname, sa = res\n        sock = socket.socket(af, socktype, proto)\n        try:\n            sock.settimeout(3)\n            sock.connect(sa)\n        except socket.error:\n            sock.close()\n            sock = None\n            continue\n        break\n    if not sock:\n        raise Exception(\"could not open socket\")\n    \n    #sink = socket\n    sink = sock.makefile(\"wb\", 65536)\n    #sink = os.fdopen(sock.fileno(), \"wb\", 65536)\n    #sink = os.fdopen(os.dup(sock.fileno()), \"wb\", 65536)\n\n    field = pa.Field.from_py(\"f1\", pa.float32())\n    schema = pa.Schema.from_fields([field])\n\n    writer = pa.StreamWriter(sink, schema)\n```"
+        },
+        {
+            "created_at": "2017-04-14T17:10:15.594Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-822?focusedCommentId=15969264) by Bryan Cutler (bryanc):*\n`[~wesmckinn]` not sure if there is something I'm doing or not, but if this is an issue, it would be great to get into 0.3.  I'm happy to work on this too if you are swamped with other things."
+        },
+        {
+            "created_at": "2017-04-14T17:31:08.173Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-822?focusedCommentId=15969297) by Wes McKinney (wesm):*\nI agree this should work and go into 0.3. It looks like you'll need to add a compatibility class for Python file-ish objects (that you can write to, but don't implement the full Python file API, like the tell method) \u2013 the `arrow::io::OutputStream` API expects to be able to report the stream position, so you can have it start at 0 and keep track of how many bytes have been written. "
+        },
+        {
+            "created_at": "2017-04-14T17:32:50.950Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-822?focusedCommentId=15969302) by Wes McKinney (wesm):*\nsee https://github.com/apache/arrow/blob/master/cpp/src/arrow/python/io.cc#L192"
+        },
+        {
+            "created_at": "2017-04-14T17:38:38.566Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-822?focusedCommentId=15969310) by Bryan Cutler (bryanc):*\nThanks `[~wesmckinn]`, I'll start working on it today then"
+        },
+        {
+            "created_at": "2017-04-21T01:43:08.158Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-822?focusedCommentId=15977926) by Wes McKinney (wesm):*\nIssue resolved by pull request 569\n<https://github.com/apache/arrow/pull/569>"
+        }
+    ]
+}

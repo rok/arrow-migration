@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Rust] [DataFusion] Physical plan refactor to support optimization rules and more efficient use of threads",
+        "body": "***Note**: This issue was originally created as [ARROW-9464](https://issues.apache.org/jira/browse/ARROW-9464). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI would like to propose a refactor of the physical/execution planning based on the experience I have had in implementing distributed execution in Ballista.\r\n\r\nThis will likely need subtasks but here is an overview of the changes I am proposing.\r\n### **Introduce physical plan optimization rule to insert \"shuffle\" operators**\r\n\r\nWe should extend the ExecutionPlan trait so that each operator can specify its input and output partitioning needs, and then have an optimization rule that can insert any repartitioning or reordering steps required.\r\n\r\nFor example, these are the methods to be added to ExecutionPlan. This design is based on Apache Spark.\r\n\r\n\u00a0\r\n```java\n\r\n/// Specifies how data is partitioned across different nodes in the cluster\r\nfn output_partitioning(&self) -> Partitioning {\r\n    Partitioning::UnknownPartitioning(0)\r\n}\r\n\r\n/// Specifies the data distribution requirements of all the children for this operator\r\nfn required_child_distribution(&self) -> Distribution {\r\n    Distribution::UnspecifiedDistribution\r\n}\r\n\r\n/// Specifies how data is ordered in each partition\r\nfn output_ordering(&self) -> Option<Vec<SortOrder>> {\r\n    None\r\n}\r\n\r\n/// Specifies the data distribution requirements of all the children for this operator\r\nfn required_child_ordering(&self) -> Option<Vec<Vec<SortOrder>>> {\r\n    None\r\n}\r\n \n```\r\nA good example of applying this rule would be in the case of hash aggregates where we perform a partial aggregate in parallel across partitions and then coalesce the results and apply a final hash aggregate.\r\n\r\nAnother example would be a SortMergeExec specifying the sort order required for its children.\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2020-07-14T13:10:14.000Z",
+        "updated_at": "2021-04-26T13:18:24.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust - DataFusion",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-04-26T13:18:24.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-08-12T15:19:33.316Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9464?focusedCommentId=17176414) by Andy Grove (andygrove):*\nBased on recent experience testing query execution with async, I no longer feel that async makes sense for DataFusion. Async is good for network io but not for file io. It is better to have a single thread per partition when executing queries.\r\n\r\nAlso, we can't use async with Parquet currently without launching a dedicated thread per partition which pretty much defeats the point of using async in the first place.\r\n\r\nI believe that we do need the concept of executors and a scheduler in DataFusion, where each executor would run on a dedicated thread. Other projects would then be able to extend this for distributed execution for example."
+        },
+        {
+            "created_at": "2020-08-12T15:33:01.481Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9464?focusedCommentId=17176423) by Adam Lippai (alippai):*\nI think using sync file io is a good compromise, Arrow or Datafusion doesn't perform low-latency or highly concurrent file io, at least not yet.\u00a0\u00a0\r\n\r\nDoes \"It is better to have a single thread per partition when executing queries.\" contradict \"we do need the concept of executors and a scheduler in DataFusion\"?\r\nWhat do you think about my initial concern regarding the number of max threads?\r\nDoes limiting the concurrency or using a threadpool make sense?\r\n\r\nIf I have a partitioned dataset (let's say 1000 or 10k files), each with 1000 columns I should be able to read and process it without spawning this amount of threads _at once_."
+        },
+        {
+            "created_at": "2020-08-12T15:58:30.506Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9464?focusedCommentId=17176442) by Andy Grove (andygrove):*\nI did a slightly better job of explaining this in https://issues.apache.org/jira/browse/ARROW-9707\r\n\r\n\"The current threading model is very simple and does not scale. We currently use 1-2 dedicated threads per partition and they all run simultaneously, which is a huge problem if you have more partitions than logical or physical cores.\r\nThis task is to re-implement the threading model so that query execution uses a fixed (configurable) number of threads. Work will be broken down into stages and tasks and each in-process executor (running on a dedicated thread) will process its queue of tasks.\r\n\r\nThis process will be driven by a scheduler.\""
+        },
+        {
+            "created_at": "2020-08-23T15:06:44.701Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9464?focusedCommentId=17182717) by Andy Grove (andygrove):*\nIssue resolved by pull request 8029\n<https://github.com/apache/arrow/pull/8029>"
+        },
+        {
+            "created_at": "2020-08-26T02:14:08.199Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9464?focusedCommentId=17184854) by Andy Grove (andygrove):*\nIssue resolved by pull request 8034\n<https://github.com/apache/arrow/pull/8034>"
+        },
+        {
+            "created_at": "2020-10-03T18:25:46.419Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9464?focusedCommentId=17206837) by Andy Grove (andygrove):*\nThere are subtasks that are not complete yet. Reopening this for 3.0.0"
+        },
+        {
+            "created_at": "2021-04-26T13:18:22.102Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9464?focusedCommentId=17332286) by Andrew Lamb (alamb):*\nMigrated to github: https://github.com/apache/arrow-datafusion/issues/92"
+        }
+    ]
+}

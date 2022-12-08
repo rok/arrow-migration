@@ -1,0 +1,24 @@
+{
+    "issue": {
+        "title": "[Python] Parquet table schema missing columns when created from Pandas DataFrame with List data column",
+        "body": "***Note**: This issue was originally created as [ARROW-9686](https://issues.apache.org/jira/browse/ARROW-9686). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn the example below, I create a Parquet table from a Pandas DataFrame containing a single column of lists. The table can be written and read back correctly, but when I try to examine the schema, the column is missing. Is this intentional behavior?\u00a0\r\n\r\n\u00a0\r\n```java\n\r\nimport pandas as pd \r\nimport pyarrow as pa \r\nimport pyarrow.parquet as pq \r\n\r\n# Version check \r\nassert pa.__version__ == '1.0.0'\r\n\r\n# Create a dataframe with one column where each row is a list \r\nbad_data_df = pd.DataFrame({\"data\": [[j**i for i in range(10)] for j in range(10)]})\r\n\r\n# Convert to pyarrow table and save as parquet \r\npath = \"/tmp/pyarrow_bug_poc_bad_index\" \r\npa_table = pa.Table.from_pandas(bad_data_df) \r\npa.parquet.write_table(pa_table, path)\r\n\r\n# Now read it back \r\nds = pq.ParquetDataset(path) \r\ntable = ds.read() \r\nread_df = table.to_pandas()\r\n\r\n# This assertion passes; the dataframe has the correct columns\r\nassert 'data' in read_df.columns\r\n\r\n# This assertion fails; the schema was apparently not updated! \r\nassert \"data\" in ds.schema.names\r\n```\r\n\u00a0",
+        "created_at": "2020-08-10T21:24:21.000Z",
+        "updated_at": "2020-08-13T08:20:39.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-08-13T07:40:27.161Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9686?focusedCommentId=17176818) by Joris Van den Bossche (jorisvandenbossche):*\nSo it is the _Parquet_ schema where the \"data\" column name is missing.\r\n\r\nInspecting the variables after running your script above:\r\n```python\n\r\n# the read Arrow Table itself has the correct \"data\" column\r\n>>> table                                                                                                                                                                                                     \r\npyarrow.Table\r\ndata: list<item: int64>\r\n  child 0, item: int64\r\n\r\n# this returns the schema of the Parquet file (\"data\" is still in there)\r\n>>> ds.schema                                                                                                                                                                                                 \r\n<pyarrow._parquet.ParquetSchema object at 0x7f0232cf6588>\r\nrequired group field_id=0 schema {\r\n  optional group field_id=1 data (List) {\r\n    repeated group field_id=2 list {\r\n      optional int64 field_id=3 item;\r\n    }\r\n  }\r\n}\r\n\r\n# but here it is not ['data']\r\n>>> ds.schema.names                                                                                                                                                                                           \r\n['item']\r\n\r\n# accessing the first column of the ParquetSchema\r\n>>> ds.schema[0]                                                                                                                                                                                              \r\n<ParquetColumnSchema>\r\n  name: item\r\n  path: data.list.item\r\n  max_definition_level: 3\r\n  max_repetition_level: 1\r\n  physical_type: INT64\r\n  logical_type: None\r\n  converted_type (legacy): NONE\r\n```\r\n\r\nSo in the ParquetSchema, the full \"path\" of the nested column is `data.list.item`, but as name for that column it seems to use the last value (\"item\") and not the first (\"data\"). \r\nThis feels a bit strange to me, but I don't know if this is expected according to the Parquet specification or not. But in any case, when converting the Parquet schema to an Arrow schema, we use the correct name for the nested column."
+        },
+        {
+            "created_at": "2020-08-13T08:20:39.735Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9686?focusedCommentId=17176831) by Joris Van den Bossche (jorisvandenbossche):*\nThe description of nested types in the Parquet specification is here: https://github.com/apache/parquet-format/blob/master/LogicalTypes.md#nested-types"
+        }
+    ]
+}

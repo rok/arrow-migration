@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[C++] min/max not deterministic if Parquet files have multiple row groups",
+        "body": "***Note**: This issue was originally created as [ARROW-16904](https://issues.apache.org/jira/browse/ARROW-16904). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe following code produces non-deterministic result for getting the minimum value of a sequence of 1e5 and 1e6 integers.\r\n```r\n\r\nsapply(1:100, function(x) {\r\n# create parquet file with a val column with numbers 1 to 100,000\r\n\u00a0 arrow::write_parquet(\r\n\u00a0 \u00a0 data.frame(val = 1:1e5), \"test.parquet\")\r\n# find minimum value\r\n  arrow::open_dataset(\"test.parquet\") %>%\r\n\u00a0 \u00a0 dplyr::summarise(min_val = min(val)) %>%\r\n\u00a0 \u00a0 dplyr::collect() %>% dplyr::pull(min_val)\r\n}) %>% table()\r\n\r\nsapply(1:100, function(x) {\r\n# create parquet file with a val column with numbers 1 to 1,000,000\r\n\u00a0 arrow::write_parquet(\r\n\u00a0 \u00a0 data.frame(val = 1:1e6), \"test.parquet\")\r\n# find minimum value\r\n\u00a0 arrow::open_dataset(\"test.parquet\") %>%\r\n\u00a0 \u00a0 dplyr::summarise(min_val = min(val)) %>%\r\n\u00a0 \u00a0 dplyr::collect() %>% dplyr::pull(min_val)\r\n}) %>% table()\r\n```\r\nThe first 100 simulations using numbers 1 to 1e5 is able to find the minimum number (1) all 100 times.\r\n\r\nThe second 100 simulations using numbers 1 to 1e6 only finds the minimum number (1) 65 out of 100 times. It finds near multiples of 131073, 25, 8, and 2 times respectively.\r\n```r\n\r\n. 1\r\n100 \r\n. 1 131073 262145 393217 \r\n 65     25      8      2 \n```\r\n\u00a0",
+        "created_at": "2022-06-25T17:36:04.000Z",
+        "updated_at": "2022-07-12T16:28:56.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-07-11T13:15:29.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-25T21:13:12.953Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16904?focusedCommentId=17558825) by Neal Richardson (npr):*\nThat's not good. I am pretty sure this is the same issue as ARROW-16807. I can reproduce it with the starwars data example used there: \r\n\r\n```Java\n\r\n> replicate(100, ds %>% summarize(min(height, na.rm = TRUE)) %>% pull())\r\n  [1] 79 79 66 66 79 79 66 79 66 66 66 66 66 79 66 66 66 66 79 94 88 79 66 79 79\r\n [26] 66 66 79 66 66 66 66 66 66 66 79 79 66 79 79 66 88 79 66 66 94 66 66 66 79\r\n [51] 66 66 66 66 79 66 66 66 79 66 94 79 79 79 66 79 66 79 79 66 79 66 79 66 88\r\n [76] 88 66 66 66 66 66 66 66 66 66 66 66 79 79 66 66 79 66 66 66 66 66 66 66 66\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-06-28T19:50:41.729Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16904?focusedCommentId=17559940) by Aldrin Montana (octalene):*\nI'll pick this up for now and update based on progress on ARROW-16807. It certainly sounds likely to be the same issue, but I'll update when I find out."
+        },
+        {
+            "created_at": "2022-07-05T11:54:12.923Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16904?focusedCommentId=17562627) by Jeroen van Straten (jvanstraten):*\nI probably fixed this as part of <https://issues.apache.org/jira/projects/ARROW/issues/ARROW-16700> / <https://github.com/apache/arrow/pull/13509>. min/max wasn't working correctly when multiple Consume calls would be chained for the same ScalarAggregator instance; only the last call would affect the state. I'm not deep enough into Acero to understand under what circumstances it follows this pattern (which was broken and isn't tested) and under what circumstances it will only call Consume once per instance and then Merge the instances (which works correctly and is tested), though."
+        },
+        {
+            "created_at": "2022-07-07T22:21:59.856Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16904?focusedCommentId=17564000) by Aldrin Montana (octalene):*\nCreated a PR to add to `[~jvanstraten]` 's PR:\r\n\u00a0 \u00a0 <https://github.com/jvanstraten/arrow/pull/5>\r\n\r\nI mainly add tests, but I am also trying to include some minor re-organization of the kernels themselves where the fixes were added. Currently, the additional tests only capture this specific bug, and don't exercise the other fixes in the same source file (`aggregate_basic_internal.h`)."
+        },
+        {
+            "created_at": "2022-07-08T00:30:27.463Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16904?focusedCommentId=17564033) by Aldrin Montana (octalene):*\nprevious PR was merged into Jeroen's branch, so just waiting on PR#13509's approval."
+        },
+        {
+            "created_at": "2022-07-11T13:15:29.805Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16904?focusedCommentId=17564997) by David Li (lidavidm):*\nIssue resolved by pull request 13509\n<https://github.com/apache/arrow/pull/13509>"
+        },
+        {
+            "created_at": "2022-07-12T16:26:19.193Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16904?focusedCommentId=17565922) by Robert On (roboton):*\nConfirmed that nightly build of arrow (v8.0.0.20220712) computes the correct minimums 100 out of 100 times:\r\n```java\n\r\n> sapply(1:100, function {\r\n+ # create parquet file with a single column with numbers 1 to 1,000,000\r\n+   arrow::write_parquet(\r\n+     data.frame(val = 1:1e6), \"test.parquet\")\r\n+ \r\n+   arrow::open_dataset(\"test.parquet\") %>%\r\n+   dplyr::summarise(min_val = min(val)) %>%\r\n+   dplyr::collect() %>% dplyr::pull(min_val)\r\n+ }) %>% table().\r\n1 \r\n100\n```"
+        }
+    ]
+}

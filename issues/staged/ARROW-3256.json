@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[JS] File footer and message metadata is inconsistent",
+        "body": "***Note**: This issue was originally created as [ARROW-3256](https://issues.apache.org/jira/browse/ARROW-3256). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI added some assertions to the C++ library and found that the body length in the file footer and the IPC message were different\r\n\r\n```Java\n\r\n##########################################################\r\nJS producing, C++ consuming\r\n##########################################################\r\n==========================================================\r\nTesting file /home/travis/build/apache/arrow/integration/data/struct_example.json\r\n==========================================================\r\n-- Creating binary inputs\r\nnode --no-warnings /home/travis/build/apache/arrow/js/bin/json-to-arrow.js -a /tmp/tmplbm3vbwz/3d2269c960f148b6b94e5f881c0bf9ca_struct_example.json_to_arrow -j /home/travis/build/apache/arrow/integration/data/struct_example.json\r\n-- Validating file\r\n/home/travis/build/apache/arrow/cpp-build/debug/json-integration-test --integration --arrow=/tmp/tmplbm3vbwz/3d2269c960f148b6b94e5f881c0bf9ca_struct_example.json_to_arrow --json=/home/travis/build/apache/arrow/integration/data/struct_example.json --mode=VALIDATE\r\nCommand failed: /home/travis/build/apache/arrow/cpp-build/debug/json-integration-test --integration --arrow=/tmp/tmplbm3vbwz/3d2269c960f148b6b94e5f881c0bf9ca_struct_example.json_to_arrow --json=/home/travis/build/apache/arrow/integration/data/struct_example.json --mode=VALIDATE\r\nWith output:\r\n--------------\r\n/home/travis/build/apache/arrow/cpp/src/arrow/ipc/reader.cc:581 Check failed: (message->body_length()) == (block.body_length)\r\n```\r\n\r\nI'm not sure what's wrong. I'll remove the assertions for now",
+        "created_at": "2018-09-17T22:59:47.000Z",
+        "updated_at": "2018-09-27T09:46:07.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: JavaScript",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-09-27T09:45:54.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-09-24T04:18:32.622Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3256?focusedCommentId=16625361) by Paul Taylor (paul.e.taylor):*\n`[~wesmckinn]` It looks like this line[1] sets the FileBlock's bodyLength to the length of the serialized RecordBatch buffer. Should it be `buffer.byteLength - metadataLength` instead?\r\n\r\n1. https://github.com/apache/arrow/blob/391516df8ce084c279e854cf52c8beb4a4fc444a/js/src/ipc/writer/binary.ts#L77"
+        },
+        {
+            "created_at": "2018-09-24T07:59:53.134Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3256?focusedCommentId=16625494) by Wes McKinney (wesm):*\nYeah, the sum of metadata length and body length should be the total size of the block"
+        },
+        {
+            "created_at": "2018-09-25T00:43:57.512Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3256?focusedCommentId=16626629) by Paul Taylor (paul.e.taylor):*\n`[~wesmckinn]` -The current  behavior is metadata length + body length, aligned to the next-highest multiple of 8. This includes the 4 bytes used to store the metadata length. Do you recall the difference between the expected total size and the total size JS is creating? If so I can work backwards from that to figure out what to add or subtract.-\r\n\r\nEdit: I misunderstood the original bug \u2013 I now understand you mean the body_length of the Message that the JS writer creates is different from the body_length of the FileBlock it lives in. I thought you meant there was a difference between JS and CPP. I can take a look soon."
+        },
+        {
+            "created_at": "2018-09-25T07:57:36.686Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3256?focusedCommentId=16626962) by Wes McKinney (wesm):*\nSo the bug is that the body length reported in the record batch header is different than the one in the file footer. So we should have:\r\n\r\n```Java\n\r\n4 bytes length\r\nflatbuffer header\r\npadding\r\nbody\r\n```\r\n\r\nIt's possible that one of the body lengths is rounded up to multiple or 8 but the other not. I can post one of the offending files if that helps"
+        },
+        {
+            "created_at": "2018-09-25T18:17:53.351Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3256?focusedCommentId=16627755) by Paul Taylor (paul.e.taylor):*\nYeah, looking at it now it makes sense why they're different. The JS is setting the FileBlock's body_length to the size of the entire serialized IPC message, not just the size of the data buffers.\r\n\r\nThe body_length in the RecordBatch header currently is the total aligned sizes of the buffers in the batch, which I copied from here: https://github.com/apache/arrow/blob/516750216bfd48489b20988ad181e61823ecbb2f/cpp/src/arrow/ipc/writer.cc#L179\r\n\r\nAlso looking at where the body_length from a FileBlock is used, I see this: https://github.com/apache/arrow/blob/516750216bfd48489b20988ad181e61823ecbb2f/cpp/src/arrow/ipc/writer.cc#L866 \r\n\r\nThat looks like the body_length field in the message header is the sum size of all the buffers. The size of the IPC message is then metadata_length + body_length + padding, and is written to the first 4 bytes of the ipc message. Have I misunderstood how the the C++ writer is computing the body_length?"
+        },
+        {
+            "created_at": "2018-09-25T22:23:58.677Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3256?focusedCommentId=16628002) by Wes McKinney (wesm):*\nThe first 4 bytes of the IPC message contain only the size of the metadata plus padding to the desired alignment. So if we wanted 64-byte alignment, and the metadata is 200 bytes, then we write 52 bytes of padding, and the first 4 bytes has the integer 252. So 4 + 252 + body"
+        },
+        {
+            "created_at": "2018-09-26T00:28:28.040Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3256?focusedCommentId=16628085) by Paul Taylor (paul.e.taylor):*\nSorry for the confusion Wes, I got distracted while rewriting that sentence and forgot to remove the last half when I came back to it.\r\n\r\nDoes this change look like a fix? https://github.com/apache/arrow/pull/2616/commits/2095e4ebffeb9f51f04d1b9500c958dbbca9bedd#diff-64a9bfd33e2b9cdeaf61082d9fde8a0dR77"
+        },
+        {
+            "created_at": "2018-09-27T09:45:54.893Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3256?focusedCommentId=16630076) by Wes McKinney (wesm):*\nIssue resolved by pull request 2616\n<https://github.com/apache/arrow/pull/2616>"
+        }
+    ]
+}

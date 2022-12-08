@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "[C++][Compute] Support KEEP_NULL option for compute::Filter",
+        "body": "***Note**: This issue was originally created as [ARROW-18185](https://issues.apache.org/jira/browse/ARROW-18185). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe current Filter implementation always drops the filtered values. In some use cases, it's desirable for the output array to have the same size as the inut array. So I added a new option FilterOptions::KEEP_NULL where the filtered values are kept as nulls.\r\n\r\nFor example, with input [1, 2, 3] and filter [true, false, true], the current implementation will output [1, 3] and with the new option it will output [1, null, 3]\r\n\r\nThis option is simpler to implement since we only need to construct a new validity bitmap and reuse the input buffers and child arrays. Except for dense union arrays which don't have validity bitmaps.\r\n\r\nIt is also faster to filter with FilterOptions::KEEP_NULL according to the benchmark result in most cases. So users can choose this option for better performance when dropping filtered values is not required.",
+        "created_at": "2022-10-28T03:45:32.000Z",
+        "updated_at": "2022-11-07T04:02:47.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-11-03T08:50:11.908Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18185?focusedCommentId=17628191) by Joris Van den Bossche (jorisvandenbossche):*\nWe could maybe also consider this as a different kernel, instead of an option to the existing Filter kernel? \r\nIt changes the behaviour quite fundamentally, I would say, and in addition a dedicated kernel could also clearly be a scalar kernel (guaranteeing working element-wise and returning the same shape output).\r\n\r\nAnd maybe this actually already exists, as you can achieve this with the \"if_else\" kernel:\r\n\r\n```Java\n\r\nIn [70]: arr = pa.array([1, 2, 3])\r\n\r\nIn [71]: filter = pa.array([True, False, True])\r\n\r\nIn [74]: pc.if_else(filter, arr, None)\r\nOut[74]: \r\n<pyarrow.lib.Int64Array object at 0x7f4f37b4b700>\r\n[\r\n  1,\r\n  null,\r\n  3\r\n]\r\n```\r\n\r\nOr a bit more verbosely with `pc.replace_with_mask(arr, pc.invert(filter), pa.scalar(None, arr.type))`\r\n\r\nSo I am not sure if it is worth adding another kernel for this, given \"if_else\" can already do this. Although I suppose a specialized kernel for \"if_else\" where the third argument is always a null could be faster since it knows it only needs to update the validity bitmap?"
+        },
+        {
+            "created_at": "2022-11-04T02:57:53.345Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18185?focusedCommentId=17628638) by Jin Shang (jinshang):*\n`[~jorisvandenbossche]` Ah, I didn't know about the if_else kernel. It indeed does what I wanted to implement. I think adding a new kernel would be an overkill here. What about implementing this as an specialized optimization for if_else AAS case, i.e. if arg 3 is a null scalar, reuse the data buffer of arg 2 and construct a new bitmap buffer accordingly?"
+        },
+        {
+            "created_at": "2022-11-04T07:48:37.062Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18185?focusedCommentId=17628751) by Joris Van den Bossche (jorisvandenbossche):*\n> What about implementing this as an specialized optimization for if_else AAS case,\r\n\r\nThat sounds good to me"
+        }
+    ]
+}

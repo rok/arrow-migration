@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Python] Data inconsistency with read and write",
+        "body": "***Note**: This issue was originally created as [ARROW-11057](https://issues.apache.org/jira/browse/ARROW-11057). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI have been reading and writing some tables to parquet and I found some inconsistencies.\r\n```java\n\r\n# create a table with some data\r\na = pa.Table.from_pydict({'x': [1]*100,'y': [2]*100,'z': [3]*100,})\r\n# write it to file\r\npq.write_table(a, 'test.parquet')\r\n# read the same file\r\nb = pq.read_table('test.parquet')\r\n# a == b is True, that's good\r\n# write table b to file\r\npq.write_table(b, 'test2.parquet')\r\n# test is different from test2\n```\r\nBasically it is:\r\n \\* Create table in memory\r\n \\* Write it to file\r\n \\* Read it again\r\n \\* Write it to a different file\r\n\r\nThe files are not the same. The second one contains extra information.\r\n\r\nThe differences are consistent across different compressions (I tried snappy and zstd).\r\n\r\nAlso, reading the second file and and writing it again, produces the same file.\r\n\r\nIs this a bug or an expected behavior?\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2020-12-29T00:40:22.000Z",
+        "updated_at": "2021-10-08T19:08:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-10-08T19:08:40.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-12-29T03:27:22.151Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11057?focusedCommentId=17255789) by Weston Pace (westonpace):*\nLooks like the root cause is https://issues.apache.org/jira/browse/PARQUET-1798"
+        },
+        {
+            "created_at": "2020-12-29T03:42:42.507Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11057?focusedCommentId=17255791) by Weston Pace (westonpace):*\nActually, I take that back.\u00a0 The two are similar but different.\u00a0 PARQUET-1798 is referring to setting the parquet \"field_id\".\u00a0 This is not actually happening.\u00a0 Instead, when the file is read back, the field_ids are automatically generated and ARROW then exposes this as \"PARQUET:field_id\" in the field metadata in the pyarrow Table.\u00a0 This field metadata is then getting written back out when the file is saved.\r\n\r\nSo, unlike PARQUET-1798, the field_id field in parquet's SchemaElement is not being set.\r\n\r\nInstead, the \"PARQUET:field_id\" key is present in the Arrow schema that gets thrift encoded and attached to the parquet file's file-wide metadata as ARROW:schema.\r\n\r\nThe only differences between the two files are completely contained in the ARROW:schema value."
+        },
+        {
+            "created_at": "2021-01-04T12:09:38.714Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11057?focusedCommentId=17258168) by Joris Van den Bossche (jorisvandenbossche):*\nYou can indeed also see in pyarrow that the only difference between `a` and `b` is the metadata of the schema:\r\n\r\n```Java\n\r\nIn [20]: a.equals(b)\r\nOut[20]: True\r\n\r\nIn [21]: a.equals(b, check_metadata=True)\r\nOut[21]: False\r\n\r\nIn [22]: a.schema\r\nOut[22]: \r\nx: int64\r\ny: int64\r\nz: int64\r\n\r\nIn [23]: b.schema\r\nOut[23]: \r\nx: int64\r\n  -- field metadata --\r\n  PARQUET:field_id: '1'\r\ny: int64\r\n  -- field metadata --\r\n  PARQUET:field_id: '2'\r\nz: int64\r\n  -- field metadata --\r\n  PARQUET:field_id: '3'\r\n```"
+        },
+        {
+            "created_at": "2021-01-04T12:10:24.378Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11057?focusedCommentId=17258169) by Joris Van den Bossche (jorisvandenbossche):*\nSo I think we can close this as \"expected behaviour\" ?"
+        },
+        {
+            "created_at": "2021-01-05T08:07:17.970Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11057?focusedCommentId=17258740) by David Quijano (david-quijano):*\nIt may be \"expected behaviour\", but shouldn't it be consistent?\r\n\r\nFor example, if I try to use hashes to verify whether the files are the same or not, it wouldn't work due to inconsistent data.\r\n\r\nI don't know why one version needs field_id and the other one doesn't."
+        },
+        {
+            "created_at": "2021-03-26T20:49:55.331Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11057?focusedCommentId=17309721) by Micah Kornfield (emkornfield):*\nThe extra metadata is for traceability purposes (it seems less useful without additional metadata on the source file) but maybe we should consider stripping it out when writing back to parquet (it isn't clear what happens to me if you try writing and reading the table one more time)."
+        },
+        {
+            "created_at": "2021-10-08T19:08:27.912Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11057?focusedCommentId=17426339) by Joris Van den Bossche (jorisvandenbossche):*\nThis logic was changed in PARQUET-1798 / https://github.com/apache/arrow/pull/10289, and now those PARQUET:field_id fields are only preserved if already present, and not automatically generated. \r\n\r\nIf you re-run the example above with recent released pyarrow, you actually get identical files now, and the schemas also don't contains the field_ids anymore."
+        }
+    ]
+}

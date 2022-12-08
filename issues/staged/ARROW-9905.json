@@ -1,0 +1,38 @@
+{
+    "issue": {
+        "title": "[C++][Flight] Evaluate FlightRPC performance",
+        "body": "***Note**: This issue was originally created as [ARROW-9905](https://issues.apache.org/jira/browse/ARROW-9905). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe did some benchmmark tests about flight throughput, latency and scalability. Would like to share our test results and steps. Comments welcomed.",
+        "created_at": "2020-09-03T06:40:25.000Z",
+        "updated_at": "2022-08-29T14:15:19.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: FlightRPC",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2022-08-29T14:13:59.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-03T06:43:20.404Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9905?focusedCommentId=17189875) by Yibo Cai (yibocai):*\n# Evaluate Flight performance on **single** server\r\n\r\nBenchmark Flight throughput, latency and scalability on a 64 core skylake server.\r\n## Hardware\r\n - Intel(R) Xeon(R) Gold 5218 CPU @ 2.30GHz\r\n - 64 CPUs (2 sockets x 16 cores x 2 threads)\r\n - 128G RAM\r\n\r\n## Software\r\n - records-per-batch = 4096 (batch size = 128K)\r\n - increasing num-threads = 1,2,4,8,16,24\r\n - num-streams = num-threads\r\n - arrow source code version: git commit 7b2307f8a\r\n\r\n## Benchmark steps\r\n\r\nTest server has two numa nodes, with 32 CPUs and 64G memory on each node.\r\n To avoid cross node memory access latency, flight server is bounded to node#1, and flight client bounded to node#0.\r\n### Start flight server\r\n```bash\n\r\nHOST=localhost\r\nnumactl --membind=1 --cpunodebind=1 ./arrow-flight-perf-server --server-host ${HOST}\r\n```\r\n### Run flight benchmark\r\n\r\nBenchmark with increasing number of threads/streams.\r\n```bash\n\r\nHOST=localhost\r\n\r\n# Number of threads/streams\r\nT=\"1 2 4 8 16 24\"\r\n\r\necho TEST GET\r\nfor THREADS in ${T}; do\r\n  echo ==================================================\r\n  echo threads = ${THREADS}\r\n  numactl --membind=0 --cpunodebind=0 ./arrow-flight-benchmark --num-streams ${THREADS} --num-threads ${THREADS} --server-host ${HOST} --records-per-batch 4096 --records-per-stream 345676543\r\ndone\r\n\r\necho TEST PUT\r\nfor THREADS in ${T}; do\r\n  echo ==================================================\r\n  echo threads = ${THREADS}\r\n  numactl --membind=0 --cpunodebind=0 ./arrow-flight-benchmark --num-streams ${THREADS} --num-threads ${THREADS} --server-host ${HOST} --records-per-batch 4096 --records-per-stream 345676543 --test-put\r\ndone\r\n```\r\n## Benchmark result\r\nFrom below graph, Flight has good scalability.\r\n![flight-skylake.png](https://issues.apache.org/jira/secure/attachment/13010937/flight-skylake.png) "
+        },
+        {
+            "created_at": "2020-09-03T09:21:47.763Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9905?focusedCommentId=17189990) by Antoine Pitrou (apitrou):*\ncc `[~lidavidm]`"
+        },
+        {
+            "created_at": "2020-09-03T13:42:53.718Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9905?focusedCommentId=17190163) by David Li (lidavidm):*\nThanks for these results. I wonder why Get/Put seem to differ in performance by a significant margin. I also wonder how results would look with larger batch sizes (e.g. 1-4 MiB instead of 128KiB), and how TLS affects these numbers.\r\n\r\n`[~yibocai]` I'm curious - are there specific targets you're hoping for Flight to hit? IIRC it's been a while since we've last profiled things and there are a couple TODOs about potential further optimizations."
+        },
+        {
+            "created_at": "2020-09-04T02:06:20.853Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9905?focusedCommentId=17190481) by Yibo Cai (yibocai):*\nTested with batch size = 2M and 4K. Latency changes as expected, and 4K significantly hurts throughput.\r\n Interestingly, 2M doesn't improve throughput, actually lower than 128K.\r\nPerf shows most CPU time spent in kernel mode copying data to/from user space. Too large batch size doesn't help.\r\n\r\n![flight-skylake-2M.png](https://issues.apache.org/jira/secure/attachment/13011021/flight-skylake-2M.png)\r\n\r\n![flight-skylake-4k.png](https://issues.apache.org/jira/secure/attachment/13011022/flight-skylake-4k.png)"
+        },
+        {
+            "created_at": "2020-09-04T13:00:05.597Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9905?focusedCommentId=17190709) by David Li (lidavidm):*\nInteresting, thanks. I think the gRPC authors have stated before they optimize for relatively small messages (~64K), so this seems to line up with that."
+        }
+    ]
+}

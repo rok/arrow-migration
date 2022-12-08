@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[R] Use DuckDB to query an Arrow Dataset",
+        "body": "***Note**: This issue was originally created as [ARROW-12688](https://issues.apache.org/jira/browse/ARROW-12688). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nDuckDB can read data from an Arrow C-interface stream. Once we can provide that struct from R, presumably DuckDB could query on that stream. \r\n\r\nA first step is just connecting the pieces. A second step would be to handle parts of the DuckDB query and push down filtering/projection to Arrow. \r\n\r\nWe need a function something like this:\r\n\r\n```Java\n\r\n#' Run a DuckDB query on Arrow data\r\n#'\r\n#' @param .data An `arrow` data object: `Dataset`, `Table`, `RecordBatch`, or \r\n#' an `arrow_dplyr_query` containing filter/mutate/etc. expressions\r\n#' @return A `duckdb::duckdb_connection`\r\nto_duckdb <- function(.data) {\r\n# ARROW-12687: [C++][Python][Dataset] Convert Scanner into a RecordBatchReader \r\n  reader <- Scanner$create(.data)$ToRecordBatchReader()\r\n\r\n# ARROW-12689: [R] Implement ArrowArrayStream C interface\r\n  stream_ptr <- allocate_arrow_array_stream()\r\n  on.exit(delete_arrow_array_stream(stream_ptr))\r\n  ExportRecordBatchReader(x, stream_ptr)\r\n\r\n# TODO: DuckDB method to create table/connection from ArrowArrayStream ptr\r\n  duckdb::duck_connection_from_arrow_stream(stream_ptr)\r\n}\r\n```\r\n\r\nAssuming this existed, we could do something like (a variation of https://arrow.apache.org/docs/r/articles/dataset.html):\r\n\r\n```Java\n\r\nds <- open_dataset(\"nyc-taxi\", partitioning = c(\"year\", \"month\"))\r\nds %>%\r\n  filter(total_amount > 100, year == 2015) %>%\r\n  select(tip_amount, total_amount, passenger_count) %>%\r\n  mutate(tip_pct = 100 * tip_amount / total_amount) %>%\r\n  to_duckdb() %>%\r\n  group_by(passenger_count) %>%\r\n  summarise(\r\n    median_tip_pct = median(tip_pct),\r\n    n = n()\r\n  )\r\n```\r\n\r\nand duckdb would do the aggregation while the data reading, predicate pushdown, filtering, and projection would happen in Arrow. Or you could do `dbGetQuery(ds, \"SOME SQL\")` and that would evaluate on arrow data. ",
+        "created_at": "2021-05-07T17:04:05.000Z",
+        "updated_at": "2022-07-12T19:31:35.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-07-26T20:25:40.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-07-15T18:38:17.323Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12688?focusedCommentId=17381539) by Neal Richardson (npr):*\nBuilding from the code at https://github.com/pdet/duckdb-benchmark/blob/master/arrow/group_by_with_duckdb.R, I've worked up a slightly different interface, something we could add to the arrow package (adding duckdb and DBI to Suggests):\r\n\r\n```Java\n\r\n\r\nsummarise.arrow_dplyr_query <- function(.data, ..., .engine = c(\"arrow\", \"duckdb\")) {\r\n  if (match.arg(.engine) == \"duckdb\") {\r\n    summarize_duck(.data, ...)\r\n  } else {\r\n# Continue with the current contents of summarise.arrow_dplyr_query\r\n# ...\r\n  }\r\n}\r\n\r\nsummarise_duck <- function(.data, ...) {\r\n# TODO better translation of aggregate functions, parse tree traversal\r\n  aggregates <- vapply(enquos(...), rlang::quo_name, \"character\")\r\n  tbl_name <- paste0(replicate(10, sample(LETTERS, 1, TRUE)), collapse = \"\")\r\n\r\n  con <- arrow_duck_connection()\r\n  duckdb::duckdb_register_arrow(con, tbl_name, .data$data)\r\n  on.exit(duckdb::duckdb_unregister_arrow(con, tbl_name))\r\n\r\n  groups_str <- paste(.data$groups, collapse = \", \")\r\n  aggr_str <- paste(aggregates, collapse = \", \")\r\n# TODO use relational API instead of SQL string construction\r\n  DBI::dbGetQuery(con, sprintf(\"SELECT %s, %s FROM %s GROUP BY %s\", \r\n    groups_str, aggr_str, tbl_name, groups_str ))\r\n}\r\n\r\narrow_duck_connection <- function() {\r\n  con <- getOption(\"arrow_duck_con\")\r\n  if (is.null(con)) {\r\n    con <- dbConnect(duckdb::duckdb())\r\n# Use the same CPU count that the arrow library is set to\r\n    DBI::dbExecute(con, paste0(\"PRAGMA threads=\", cpu_count()))\r\n    options(arrow_duck_con = con)\r\n  }\r\n  con\r\n}\r\n```\r\n\r\nThoughts?"
+        },
+        {
+            "created_at": "2021-07-15T18:52:15.014Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12688?focusedCommentId=17381546) by Jonathan Keane (jonkeane):*\nHmm, I wonder if we (also?) want a `collect(..., .to = c(\"arrow\", \"duckdb\")` that returns either a dataframe/arrowtable or a duckdb based `tbl` reference respectively such that pipelines like the following work:\r\n\r\n```Java\n\r\nds %>%\r\n  select(...) %>%\r\n  filter(...) %>%\r\n  mutate(...) %>% \r\n  collect(.to = \"duckdb\") %>% \r\n  group_by(...) %>% \r\n  summarise(...) %>% \r\n  collect()\r\n```\r\n\r\n\r\n"
+        },
+        {
+            "created_at": "2021-07-15T18:56:44.111Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12688?focusedCommentId=17381548) by Jonathan Keane (jonkeane):*\nOr probably `compute()` would be better for this (c.f. ARROW-11754 and ARROW-12282)"
+        },
+        {
+            "created_at": "2021-07-26T20:25:40.418Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12688?focusedCommentId=17387612) by Jonathan Keane (jonkeane):*\nIssue resolved by pull request 10780\n<https://github.com/apache/arrow/pull/10780>"
+        },
+        {
+            "created_at": "2021-07-28T01:12:26.784Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12688?focusedCommentId=17388385) by Ian Cook (icook):*\nSee\u00a0ARROW-13472 for reconsideration of the user interaction design for querying with the DuckDB engine."
+        }
+    ]
+}

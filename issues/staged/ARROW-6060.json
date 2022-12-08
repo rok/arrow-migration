@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[Python] too large memory cost using pyarrow.parquet.read_table with use_threads=True",
+        "body": "***Note**: This issue was originally created as [ARROW-6060](https://issues.apache.org/jira/browse/ARROW-6060). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n\u00a0I tried to load a parquet file of about 1.8Gb using the following code. It crashed due to out of memory issue.\r\n```java\n\r\nimport pyarrow.parquet as pq\r\npq.read_table('/tmp/test.parquet')\n```\r\n\u00a0However, it worked well with use_threads=True as follows\r\n```java\n\r\npq.read_table('/tmp/test.parquet', use_threads=False)\n```\r\nIf pyarrow is downgraded to 0.12.1, there is no such problem.",
+        "created_at": "2019-07-29T11:49:18.000Z",
+        "updated_at": "2019-08-30T14:02:42.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-07T10:31:22.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-07-29T14:38:03.249Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6060?focusedCommentId=16895308) by Wes McKinney (wesm):*\nCan you provide an example file that we can use to try to find what's wrong?"
+        },
+        {
+            "created_at": "2019-07-29T15:09:03.861Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6060?focusedCommentId=16895331) by Kun Liu (kwunlyou):*\nThanks for the response, `[~wesmckinn]`.\r\n\r\nI am trying to generate a sample file and reproduce the error as the original file is not possible to disclose. The pandas types of\u00a0columns\u00a0in the parquet file are just unicode, bytes, and int64."
+        },
+        {
+            "created_at": "2019-07-29T15:52:39.809Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6060?focusedCommentId=16895387) by Kun Liu (kwunlyou):*\n`[~wesmckinn]` I used the following code to generate a sample parquet.\u00a0\r\n```java\n\r\nimport pandas as pd\r\nfrom pandas.util.testing import rands\r\n\r\ndef generate_strings(length, nunique, string_length=10):\r\n    unique_values = [rands(string_length) for i in range(nunique)]\r\n    values = unique_values * (length // nunique)\r\n    return values\r\n\r\ndf = pd.DataFrame()\r\ndf['a'] = generate_strings(100000000, 10000)\r\ndf['b'] = generate_strings(100000000, 10000)\r\ndf.to_parquet('/tmp/test.parquet')\r\n```\r\nAnd run following\r\n```java\n\r\nimport pyarrow.parquet as pq\r\n pq.read_table('/tmp/test.parquet') # crash\r\n pq.read_table('/tmp/test.parquet', use_threads=False) # works\n```\r\n\r\n Btw, my machine has 16GB RAM.\u00a0"
+        },
+        {
+            "created_at": "2019-08-02T22:26:11.056Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6060?focusedCommentId=16899250) by Robin K\u00e5veland (kaaveland):*\nI've had to downgrade our VMs to 0.13.0 today, I was observing parquet files that we could load just fine with 16GB of RAM earlier fail to load using VMs with 28GB of RAM. Unfortunately, I can't disclose any of the data either. We are using `parquet.ParquetDataset.read()`, but observe the problem even if we read single pieces of the parquet data sets (the pieces are between 100MB and 200MB). Most of our columns are unicode and probably would be friendly to dictionary encoding. The files have been written by spark. Normally, these datasets would take a while to load, so memory consumption would grow steadily for ~10 seconds, but now it seems like we invoke the OOM-killer in only a few seconds, so allocation seems very spiky."
+        },
+        {
+            "created_at": "2019-08-03T19:29:52.896Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6060?focusedCommentId=16899511) by Wes McKinney (wesm):*\nI confirmed the peak memory use problem with the following code (thanks for the help reproducing!):\r\n\r\n```Java\n\r\nimport pandas as pd\r\nfrom pandas.util.testing import rands\r\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\nimport gc\r\nclass memory_use:\r\n    \r\n    def __init__(self):\r\n        self.start_use = pa.total_allocated_bytes()        \r\n        self.pool = pa.default_memory_pool()\r\n        self.start_peak_use = self.pool.max_memory()\r\n        \r\n    def __enter__(self):\r\n        return\r\n    \r\n    def __exit__(self, type, value, traceback):\r\n        gc.collect()\r\n        print(\"Change in memory use: {}\"\r\n              .format(pa.total_allocated_bytes() - self.start_use))\r\n        print(\"Change in peak use: {}\"\r\n              .format(self.pool.max_memory() - self.start_peak_use))\r\n\r\ndef generate_strings(length, nunique, string_length=10):\r\n    unique_values = [rands(string_length) for i in range(nunique)]\r\n    values = unique_values * (length // nunique)\r\n    return values\r\n\r\ndf = pd.DataFrame()\r\ndf['a'] = generate_strings(100000000, 10000)\r\ndf['b'] = generate_strings(100000000, 10000)\r\ndf.to_parquet('/tmp/test.parquet')\r\n\r\nwith memory_use():\r\n    table = pq.read_table('/tmp/test.parquet')\r\n```\r\n\r\nI have with 0.13.0:\r\n\r\n```Java\n\r\nChange in memory use: 2825000192\r\nChange in peak use: 3827684608\r\n```\r\n\r\nand with 0.14.1 and master\r\n\r\n```Java\n\r\nChange in memory use: 2825000192\r\nChange in peak use: 20585786752\r\n```\r\n\r\nSo peak memory use is about 20GB now where it was less than 4GB before. I'm not sure which patch caused this but there have been a _lot_ of patches related to builders in the last several months so my guess is that one of the builders has a bug in its memory allocation logic\r\n\r\ncc `[~bkietz]` `[~pitrou]` `[~npr]`"
+        },
+        {
+            "created_at": "2019-08-03T19:31:23.052Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6060?focusedCommentId=16899512) by Wes McKinney (wesm):*\nNote that with my patch for ARROW-3325 the memory use is very low comparatively:\r\n\r\n```Java\n\r\nwith memory_use():\r\n    table = pq.read_table('/tmp/test.parquet', read_dictionary=['a', 'b'])\r\n\r\nChange in memory use: 825560448\r\nChange in peak use: 1484772224\r\n```"
+        },
+        {
+            "created_at": "2019-08-03T19:53:43.641Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6060?focusedCommentId=16899520) by Wes McKinney (wesm):*\ngit bisect reveals this issue was introduced by ARROW-3762\r\n\r\nhttps://github.com/apache/arrow/commit/a634f925d06e58141261e60dec322186e22b750c\r\n\r\n`[~bkietz]` since you last worked on this builder would you mind taking a look? "
+        },
+        {
+            "created_at": "2019-08-05T15:03:01.054Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6060?focusedCommentId=16900139) by Ben Kietzman (bkietz):*\nWill do"
+        },
+        {
+            "created_at": "2019-08-07T10:31:22.617Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6060?focusedCommentId=16901960) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 5016\n<https://github.com/apache/arrow/pull/5016>"
+        }
+    ]
+}

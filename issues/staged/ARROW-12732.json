@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[Python] read parquet in pyarrow is not idempotent for time period types",
+        "body": "***Note**: This issue was originally created as [ARROW-12732](https://issues.apache.org/jira/browse/ARROW-12732). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen reading a parquet file (attached) with a period type column via the \"read_table\" method, it returns \"int64\" on the first read. After applying \"to_pandas\" to the pyarrow table, subsequent \"read_table\" calls of the same parquet file in the same **Python session** return \"ArrowPeriodType\"\r\n```java\n\r\nimport pyarrow\r\nimport pyarrow.parquet\r\n\r\n\r\npq_table = pyarrow.parquet.read_table(\"s3://my-bucket/my-prefix/period.parquet\")\r\nprint(pq_table.schema.types)\r\n# Out[1]: [DataType(int64)]\r\n\r\nprint(pq_table.to_pandas())\r\n# Out[2]:\r\n# col\r\n# 0 2010-01\r\n\r\npq_table = pyarrow.parquet.read_table(\"s3://my-bucket/my-prefix/period.parquet\")\r\nprint(pq_table.schema.types)\r\n# Out[3]: [ArrowPeriodType(DataType(int64))]\r\n\r\npq_table = pyarrow.parquet.read_table(\"s3://my-bucket/my-prefix/period.parquet\")\r\nprint(pq_table.schema.types)\r\n# Out[4]: [ArrowPeriodType(DataType(int64))]\n```\r\n\u00a0",
+        "created_at": "2021-05-10T21:29:15.000Z",
+        "updated_at": "2022-07-12T14:04:31.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Parquet",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-05-10T22:00:21.353Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12732?focusedCommentId=17342163) by Antoine Pitrou (apitrou):*\ncc `[~jorisvandenbossche]`"
+        },
+        {
+            "created_at": "2021-05-11T06:46:43.401Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12732?focusedCommentId=17342342) by Joris Van den Bossche (jorisvandenbossche):*\nThe reason for this is that this `ArrowPeriodType` extension type is defined by pandas, and only registered as an extension type to Arrow when pandas is first imported/used. \r\n\r\nAnd pyarrow doesn't import pandas by default, but only when using functionality that requires pandas (such as the `to_pandas()` call)."
+        },
+        {
+            "created_at": "2021-05-12T07:57:58.476Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12732?focusedCommentId=17343095) by Abderrahmane Jaidi (jaidisido):*\nUnderstood, is there a more straightforward way of importing pandas types into Arrow? Calling a transformation operation such as \"to_pandas\"\u00a0 is not ideal to trigger that behavior."
+        },
+        {
+            "created_at": "2021-05-12T08:16:05.253Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12732?focusedCommentId=17343106) by Antoine Pitrou (apitrou):*\nYou should be able to use `import pandas` in your code."
+        },
+        {
+            "created_at": "2021-05-12T08:23:17.910Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12732?focusedCommentId=17343113) by Abderrahmane Jaidi (jaidisido):*\n`[~apitrou]` \u00a0do yo mean just adding `import pandas` in the import section of the code snippet above? I have tried that but still facing the same issue"
+        },
+        {
+            "created_at": "2021-05-12T08:39:58.996Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12732?focusedCommentId=17343121) by Antoine Pitrou (apitrou):*\nYes, I mean that. Sorry if that doesn't work, then perhaps `[~jorisvandenbossche]` \u00a0 can give more insight -)"
+        },
+        {
+            "created_at": "2021-05-12T08:45:58.627Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12732?focusedCommentId=17343124) by Joris Van den Bossche (jorisvandenbossche):*\nLooking into more detail, it seems that indeed just adding a `import pandas` is not enough to trigger the registration of the extension types. It is only done when actually using any pandas<->arrow conversion the first time. We did actually have a discussion about this when initially adding those extension types in pandas: https://github.com/pandas-dev/pandas/pull/28371#issuecomment-549177206\r\n\r\nI first tried to always import pyarrow to register the types to ensure an `import pandas` would be sufficient. But, at the time, that gave a problem with circular import dependency for older pyarrow versions (as those were always import pandas), and so I switched to a lazy import/registration (https://github.com/pandas-dev/pandas/pull/28371#issuecomment-572032856).  But now that pandas requires a more recent version of pyarrow, we can probably change that. \r\n\r\n`[~jaidisido]` the \"workaround\" for now is to do `import pandas.core.arrays._arrow_utils`, if you want to be able to trigger the registration of the extension types with an import. A safer way (the previous import is private, and can change at any time), might be to add a line like `pa.table(pd.DataFrame(\\{'a': pd.period_range(\"2012\", freq=\"Y\", periods=3)\\}))` after your imports. That's a cheap line and will always trigger the registration.\r\n\r\n"
+        },
+        {
+            "created_at": "2021-05-12T08:53:41.081Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12732?focusedCommentId=17343130) by Joris Van den Bossche (jorisvandenbossche):*\nI opened https://github.com/pandas-dev/pandas/issues/41432 to track this on the pandas side."
+        },
+        {
+            "created_at": "2021-05-12T08:58:53.696Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12732?focusedCommentId=17343132) by Abderrahmane Jaidi (jaidisido):*\nThank you for opening the issue\u00a0 `[~jorisvandenbossche]`. My team and I manage a Python [library](https://github.com/awslabs/aws-data-wrangler)\u00a0which leverages PyArrow (here is the [issue](https://github.com/awslabs/aws-data-wrangler/issues/675)\u00a0that we received). So a permanent solution would be ideal!"
+        },
+        {
+            "created_at": "2022-07-12T14:04:31.640Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12732?focusedCommentId=17565682) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

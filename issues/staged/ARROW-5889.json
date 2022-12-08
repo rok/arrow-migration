@@ -1,0 +1,66 @@
+{
+    "issue": {
+        "title": "[Python][C++] Parquet backwards compat for timestamps without timezone broken",
+        "body": "***Note**: This issue was originally created as [ARROW-5889](https://issues.apache.org/jira/browse/ARROW-5889). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen reading a parquet file\u00a0which has timestamp fields they are read as a timestamp with timezone UTC if the parquet file was written by pyarrow 0.13.0 and/or 0.12.1.\r\n\r\nExpected behavior would be that they are loaded as timestamps without any timezone information.\r\n\r\nThe attached files contain one row for all basic types and a few nested types, the timestamp fields are called datetime64 and datetime64_tz\r\n\r\nsee also <https://github.com/JDASoftwareGroup/kartothek/tree/master/reference-data/arrow-compat>\r\n\r\n<https://github.com/JDASoftwareGroup/kartothek/blob/c47e52116e2dc726a74d7d6b97922a0252722ed0/tests/serialization/test_arrow_compat.py#L31>\r\n\r\n\u00a0",
+        "created_at": "2019-07-09T15:21:28.000Z",
+        "updated_at": "2019-08-01T22:33:24.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-07-13T17:55:43.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-07-09T19:31:39.871Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5889?focusedCommentId=16881492) by Joris Van den Bossche (jorisvandenbossche):*\n`[~fjetter]` thanks for the testing and the report (we should probably also include tests in arrow itself with files written by older versions to check this direction of compatibility)"
+        },
+        {
+            "created_at": "2019-07-09T19:41:07.189Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5889?focusedCommentId=16881495) by Joris Van den Bossche (jorisvandenbossche):*\nThis is very much related to  ARROW-5878 / https://github.com/apache/arrow/pull/4825, but then for the other way around. With the introduction of LogicalTypes, the old ConvertedTypes TIMESTAMP_MICROS/MILLIS are now interpreted as always `isAdjustedToUTC`. \r\n\r\nReverting this corresponds to the second bullet point that Wes mentioned on the other PR at https://github.com/apache/arrow/pull/4825#issuecomment-509388706"
+        },
+        {
+            "created_at": "2019-07-10T14:08:00.116Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5889?focusedCommentId=16882093) by Wes McKinney (wesm):*\nThis is being discussed on the Parquet mailing list, see https://lists.apache.org/thread.html/08c8d89ea9ddefc7b83efdce823c0c71bf6ff5a0b863f436f6fab345@%3Cdev.parquet.apache.org%3E"
+        },
+        {
+            "created_at": "2019-07-10T18:02:12.154Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5889?focusedCommentId=16882313) by TP Boudreau (tpboudreau):*\nI can think of two possible approaches to correcting this on an interim basis before the parquet.thrift specification gets changed (if it does get changed), but neither is perfect:\r\n\r\n1.\u00a0 Add a new boolean member to the parquet::TimestampLogicalType class named fromConvertedType that is set to true if the object was constructed from a converted type, false if the user explicitly constructed the object.\u00a0 While in memory, the Arrow conversions can interrogate the property and, if \"true\", can imitate the old TIMESTAMP converted type logic.\u00a0 On writing a schema, if the property is \"true\", the writer would NOT write a TimestampLogicalType for that field/column, but would instead write just the TIMESTAMP converted type (as it does now already) \u2013 the original converted type semantics would be retained both in use and on disk.\r\n\r\nThis would require changes to the recently released public API for the TimestampLogicalType class (new creator functions, accessors, etc.).\u00a0 Also it would result in a parquet file with mixed converted type and LogicalType annotations (which seems legal, but probably wasn't intended).\r\n\r\n2. Use file level key-value metadata to store the fact that the field was from a converted type (as will be done for timezones).\u00a0 This requires changes to the Arrow public API (converting from an Arrow schema to a Parquet would produce both a Parquet schema and a K-V metadata object).\u00a0 Also, given that names are not unique, it might be difficult to produce unique keys (knowable both on the Arrow and Parquet sides).\u00a0 But both these problems will have to be addressed eventually if timezones are to be save this way\r\n\r\nI'd lean toward option (1.), but there might gotchas that I'm not considering for either option.\u00a0 Do either of these sound like they're worth pursuing? If so, I can work on this.\u00a0"
+        },
+        {
+            "created_at": "2019-07-10T18:57:57.557Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5889?focusedCommentId=16882350) by Joris Van den Bossche (jorisvandenbossche):*\n> On writing a schema, if the property is \"true\", the writer would NOT write a TimestampLogicalType for that field/column, but would instead write just the TIMESTAMP converted type (as it does now already) \u2013 the original converted type semantics would be retained both in use and on disk.\r\n\r\nWhen would this property be true when writing a schema? If we start from a arrow table and construct a schema from there, the property will never be true I suppose? "
+        },
+        {
+            "created_at": "2019-07-10T20:11:21.532Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5889?focusedCommentId=16882416) by TP Boudreau (tpboudreau):*\nThat's correct.\u00a0 An Arrow timestamp field either has a timezone or doesn't so we can always directly report that the isAdjustedToUTC is true or false (respectively).\u00a0 So that field can be converted to a Parquet node with a user supplied TimestampLogicalType (with fromConvertedType := false, as you surmise) which can then be memorialized in the Parquet file, without the fromConvertedType\u00a0flag of course, but correctly and unambiguously.\r\n\r\nIt's only when constructing the logical type from a Parquet file that has only converted types where\u00a0fromConvertedType would be true.\u00a0 Then passing the Parquet node thru to an Arrow field we could create a timezone-naive timestamp field (restoring the behavior requested in this issue).\u00a0 After that we have a well-formed Arrow field, so we can goto the first paragraph of this comment.\r\n\r\n[The reason for declining to write a TimestampLogicalType that came from a converted type is so that a non-Arrow parquet user who does a read followed by write doesn't change the semantics of the TIMESTAMP converted type by coercing it to a TimestampType with UTCAdjusted := true (as the parquet.thrift spec currently demands).\u00a0 For that user, whatever TIMESTAMP meant before, it still means and it's still the controlling annotation for the column.]\r\n\r\nHope that helps.\u00a0 (It helped me, so thanks!)\r\n\r\nUnless I hear a hard \"No\" on this, I'm going to start hacking on this first option (mostly to gain confidence that it'll work), but also to see how non-intrusive a change I can make it.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-07-10T20:18:33.152Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5889?focusedCommentId=16882418) by Wes McKinney (wesm):*\nI think keeping track that the in-memory schema resulted from a legacy ConvertedType seems like the right option. We can decide in the Arrow schema conversion then whether to apply a time zone or not. i.e.\r\n\r\n0.12.1/0.13.0 file with TIMESTAMP_MICROS -> `::arrow::timestamp(TimeUnit::MICRO)` (no time zone)\r\n\r\nSince there seems to be disagreement in Parquet about whether the prior ConvertedType values were UTC normalized I think it is safe for us to \"refuse to guess\" in Arrow"
+        },
+        {
+            "created_at": "2019-07-10T20:19:03.812Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5889?focusedCommentId=16882419) by Wes McKinney (wesm):*\nJust to confirm `[~tpboudreau]` I think this change is independent from `[~bkietz]`'s change to restore forward compatibility. Are you supportive of moving forward with that change?"
+        },
+        {
+            "created_at": "2019-07-10T20:30:03.929Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5889?focusedCommentId=16882428) by Joris Van den Bossche (jorisvandenbossche):*\nFor my education: what is an example of a non-arrow user of the parquet-cpp codebase? (that's a case I didn't think about, so `[~tpboudreau]` that explanation indeed helped!)"
+        },
+        {
+            "created_at": "2019-07-10T21:11:04.377Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5889?focusedCommentId=16882452) by TP Boudreau (tpboudreau):*\n`[~wesmckinn]`: I think you're right, but that's a tougher case.\u00a0 Here, taking the position that TIMESTAMP converted type is ambiguous, we can abstain from implementing the spec.\u00a0 There, taking the consistent position, we have to violate the spec.\u00a0 Still, I would support doing it for a regression patch fix.\u00a0 We might want to explore the possibility of allowing the user (through a new file property perhaps) to choose whether they expect strict adherence to the spec re TIMESTAMPs.\r\n\r\n\u00a0\r\n\r\n`[~jorisvandenbossche]`: see for example\u00a0<https://github.com/G-Research/ParquetSharp>\u00a0, wrapping parquet-cpp in C# like PyArrow for Python.\u00a0 But there are probably lots of others."
+        },
+        {
+            "created_at": "2019-07-10T21:44:00.149Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5889?focusedCommentId=16882466) by Wes McKinney (wesm):*\nparquet-cpp is used by several analytic database systems:\r\n\r\n- Clickhouse\n- Vertica\n  \n  Probably some others. The project has a lot of C++-only users"
+        },
+        {
+            "created_at": "2019-07-13T17:55:43.185Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5889?focusedCommentId=16884432) by Wes McKinney (wesm):*\nIssue resolved by pull request 4856\n<https://github.com/apache/arrow/pull/4856>"
+        }
+    ]
+}

@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[JS] Improve performance of filtering",
+        "body": "***Note**: This issue was originally created as [ARROW-8053](https://issues.apache.org/jira/browse/ARROW-8053). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nA series of observable notebooks have shown quite convincingly that arrow doesn't compete with other libraries or JavaScript when it comes to filtering performance. Has there been any discussion or roadmaps established for improving it?\r\n\r\nMost convincing Observables:\r\n \\* <https://observablehq.com/@duaneatat/apache-arrow-filtering-vs-array-filter>\r\n \\* <https://observablehq.com/@robertleeplummerjr/array-filtering-apache-arrow-vs-gpu-js-textures-vs-array-fil>",
+        "created_at": "2020-03-10T06:01:40.000Z",
+        "updated_at": "2022-04-06T14:14:19.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: JavaScript",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-04-06T14:14:19.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-03-10T23:25:06.461Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8053?focusedCommentId=17056514) by Wes McKinney (wesm):*\nGood question for `[~ptaylor]` or `[~lmeyerov]`. I would guess that there is a lot of room for improvement, I don't know how much the filtering has been optimized to get V8 to produce good JIT'd code"
+        },
+        {
+            "created_at": "2020-03-10T23:39:33.376Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8053?focusedCommentId=17056516) by Wes McKinney (wesm):*\nLooking at https://github.com/apache/arrow/blob/master/js/src/compute/predicate.ts it seems like there's a lot of FP constructs in use that may not be compiling that well. We have a heavily closure-packed\r\n\r\n```Java\n\r\nconst count = policiesTable.filter(\r\n    arrow.predicate.and(\r\n      arrow.predicate.col('proto').eq(6),\r\n      arrow.predicate.or(\r\n        arrow.predicate.and(\r\n          arrow.predicate.col('startPort').gt(0),\r\n          arrow.predicate.col('endPort').lt(200)\r\n        ),\r\n        arrow.predicate.col('startPort').eq(49152)\r\n      ),\r\n      arrow.predicate.col('isActive').eq(true)\r\n    )\r\n  ).count();\r\n```\r\n\r\nbeing compared with a single-closure filter:\r\n\r\n```Java\n\r\n  const predicate = policy => {\r\n    return policy.proto === 6\r\n      && ((policy.startPort > 0 && policy.endPort < 200) || policy.startPort === 49152)\r\n      && policy.isActive === true;\r\n  };\r\n  \r\n  const count = _(policies).filter(predicate).value().length;\r\n```\r\n\r\nIt hardly seems like an apples-to-apples comparison. Is it possible to translate the filter described above into some JavaScript code as a string and compile that? "
+        },
+        {
+            "created_at": "2020-03-11T00:37:19.517Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8053?focusedCommentId=17056551) by Will Strimling (willium):*\nAgreed that it's a bit apples-to-oranges in their comparison. Happy to help get a PR through once we arrive on a good solution here. I'm wondering if we may be able to approach it like Bostock does in <https://observablehq.com/@mbostock/manipulating-flat-arrays>\u00a0(which seems to be of <https://observablehq.com/@duaneatat/apache-arrow-filtering-vs-array-filter#flatFilterStats>\u00a0and is columnar)"
+        },
+        {
+            "created_at": "2020-03-11T01:22:19.801Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8053?focusedCommentId=17056567) by Leo Meyerovich (lmeyerov):*\nSorry, we never got support for continuing our arrow js plans, namely, moving on to the GPU bindings & compute stack. That would have included this case:\r\n \\* deforested typed native code via wasm\r\n \\* multicore & simd via workers & wasm\r\n \\* GPU interp via RAPIDS\r\n\r\nIMO we need the follow-up tutorial on real-world IO and follow-up on real compute (not the weird predicate stuff). My limited cycles need to be on that or figuring out GPU IO bindings.\r\n\r\n\u00a0\r\n\r\nTo be clear, you can manually do the ^^^ on this use case. It'd take real experimentation, e.g., not even clear here if row-based, columnar, or a tiled hybrid is the right choice. And probably not the filter predicates - we definitely avoid them in prod ;)"
+        },
+        {
+            "created_at": "2020-04-08T01:18:51.105Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8053?focusedCommentId=17077728) by Paul Taylor (paul.e.taylor):*\n`[~hulettbh]` did the predicates stuff. It could certainly be more optimized if it JIT'd into a flat JS function.\r\n\r\nAn apples-to-apples comparison would be to filter the rows individually:\r\n\r\n```javascript\n\r\nfunction filterStruct(struct, predicate) {\r\n  let keys = [], i = -1, j = -1;\r\n  for (let row of table) if (predicate(row, ++i)) keys[++j] = i;\r\n  return DictionaryVector.from(struct, new Int32(), keys)\r\n}\r\n\r\nfunction predicate(policy) {\r\n  return policy.proto === 6\r\n      && ((policy.startPort > 0 && policy.endPort < 200) || policy.startPort === 49152)\r\n      && policy.isActive === true;\r\n}\r\n\r\nconst count = filterStruct(policiesTable, pred).length\r\n```\r\n\r\nI generally agree with `[~lmeyerov]` though, don't do inline scans and reductions if you care about performance. Use WASM/web workers to distrubute across CPU cores, or (better yet) WebGL TransformFeedback on the GPU (both work in node and browsers, neither require non-JS dependencies). \r\n Arrow excels at both of these strategies."
+        },
+        {
+            "created_at": "2021-01-22T02:20:06.032Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8053?focusedCommentId=17269763) by Brian Hulette (bhulette):*\nThe intention with the \"weird predicate stuff\" was to be able to optimize equality expressions on dictionary-encoded columns which was important for the application I was working on at CCRi. Clearly I overfit for that use-case at the expense of everything else. I'd be open to any proposals to improve filter performance, but it would be ideal if whatever we do could maintain the dictionary-encoded optimization.\r\n\r\nAnother approach to take in this benchmark would be to use the mbostock flat array approach but with arrow vectors rather than JS arrays. I don't think that would do any better than Paul's suggestion in the previous comment though and it is harder to grok. It would be interesting to benchmark both.\r\n\r\n> I generally agree with Leo Meyerovich though, don't do inline scans and reductions if you care about performance. Use WASM/web workers to distrubute across CPU cores, or (better yet) WebGL TransformFeedback on the GPU (both work in node and browsers, neither require non-JS dependencies).\r\n\r\n[~paul.e.taylor] are there any examples demonstrating these approaches?"
+        },
+        {
+            "created_at": "2022-04-06T14:14:19.367Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8053?focusedCommentId=17518159) by Dominik Moritz (domoritz):*\nWe don't filter anymore. "
+        }
+    ]
+}

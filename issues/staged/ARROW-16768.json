@@ -1,0 +1,40 @@
+{
+    "issue": {
+        "title": "[R] Factor levels cannot contain NA",
+        "body": "***Note**: This issue was originally created as [ARROW-16768](https://issues.apache.org/jira/browse/ARROW-16768). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIf you try to write a data frame with a factor with a missing value to parquet, you get the error: \"Error: Invalid: Cannot insert dictionary values containing nulls\".\u00a0\r\n\r\nThis seems likely due to how the metadata for factors is currently captured in parquet files. Reprex follows:\r\n\r\n\u00a0\r\n\r\nlibrary(arrow)\r\n\r\nbad_data <- data.frame(A = factor(1, 2, NA))\r\n\r\nwrite_parquet(bad_data, tempfile())\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2022-06-07T10:59:15.000Z",
+        "updated_at": "2022-06-30T16:14:12.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-07T13:03:11.210Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16768?focusedCommentId=17550987) by Neal Richardson (npr):*\nThanks for the report. A couple things to note:\r\n\r\n1. factors can have missing values in the data. The issue is that in your example, you've put an NA into the \"labels\" argument of `factor()`. \r\n\r\n```Java\n\r\n> factor(1, 2, NA)\r\n[1] <NA>\r\nLevels: <NA>\r\n```\r\n\r\nAssuming you meant all of the arguments passed to `factor()` to be data values, there is no problem because R puts the NA in the data and not in the levels:\r\n\r\n```Java\n\r\n> factor(c(1, 2, NA))\r\n[1] 1    2    <NA>\r\nLevels: 1 2\r\n```\r\n\r\nSo `data.frame(A = factor(c(1, 2, NA)))` writes just fine. \r\n\r\n2. The error comes from conversion to Arrow types, prior to sending to the Parquet writer\r\n\r\n```Java\n\r\n> Array$create(factor(1, labels=NA))\r\nError: Invalid: Cannot insert dictionary values containing nulls\r\n```\r\n\r\nraised from here: https://github.com/apache/arrow/blob/91e3ac53e2e21736ce6291d73fc37da6fa21259d/cpp/src/arrow/array/builder_dict.cc#L81\r\n\r\nIf there is a real use case where you could get an NA in the factor levels, we would need to handle that in R."
+        },
+        {
+            "created_at": "2022-06-13T12:17:22.821Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16768?focusedCommentId=17553546) by Dewey Dunnington (paleolimbot):*\nI don't know how common its usage is, but there's a base R function that will happily do this for you.\r\n\r\n```R\n\r\nx <- c(1, 1, 2, 2, 3, NA)\r\naddNA(x)\r\n#> [1] 1    1    2    2    3    <NA>\r\n#> Levels: 1 2 3 <NA>\r\n```"
+        },
+        {
+            "created_at": "2022-06-22T16:31:18.282Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16768?focusedCommentId=17557556) by Kieran Martin (kieranmartin):*\nHi `[~npr]` yes you're correct, that R can handle missing values in factors, and the correct behaviour probably is that levels shouldn't normally contain missing. I encountered this issue when using the Admiral package (<https://github.com/pharmaverse/admiral)> with some dummy data, and noticed that arrow couldn't handle this edge case. I see from this overflow question <https://stackoverflow.com/questions/27195956/convert-na-into-a-factor-level> which refers to the function `[~paleolimbot]` implies that at least user wanted this! You can get the same behaviour (as per the question) using exclude = NULL in the factor argument.\r\n\r\nI think either arrow should handle this or error a bit more meaningfully so the user can debug a little more easily (it took me quite a bit of detective work to determine what exactly was causing the issue!)"
+        },
+        {
+            "created_at": "2022-06-22T16:51:37.848Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16768?focusedCommentId=17557563) by Neal Richardson (npr):*\nAgree that we should handle this more gracefully one way or another. `[~jorisvandenbossche]` is this something that is dealt with in pyarrow/pandas too?"
+        },
+        {
+            "created_at": "2022-06-22T21:41:30.223Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16768?focusedCommentId=17557714) by Joris Van den Bossche (jorisvandenbossche):*\nSpecifically for pandas this is not an issue, as it (currently) forbids missing values in the categories (factor labels).\r\n\r\nIn pyarrow both are allowed in a dictionary type (and when dictionary encoding, you can choose to keep the nulls in the data, or rather encode it in the dictionary), and there you can also run into this:\r\n\r\n```python\n\r\n>>> arr = pa.array([1, 2, 2, 3, None])\r\n# works fine\r\n>>> pq.write_table(pa.table({\"col\": pc.dictionary_encode(arr, null_encoding=\"mask\")}), \"test_dictionary_mask.parquet\")\r\n# raises\r\n>>> pq.write_table(pa.table({\"col\": pc.dictionary_encode(arr, null_encoding=\"encode\")}), \"test_dictionary_mask.parquet\")\r\n...\r\nArrowNotImplementedError: Writing DictionaryArray with null encoded in dictionary type not yet supported\r\n```"
+        },
+        {
+            "created_at": "2022-06-23T13:30:18.510Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16768?focusedCommentId=17558090) by Neal Richardson (npr):*\nSome more exploration of the R behavior, which leaves me unsure of how we should handle this other than with a better error message. Putting NA in the levels changes the meaning of the data, so we can't just encode it back into the data.\r\n\r\n```Java\n\r\n# Default: NA goes in the data\r\nf <- factor(c(1, 2, NA))\r\nf\r\n#> [1] 1    2    <NA>\r\n#> Levels: 1 2\r\nis.na(f)\r\n#> [1] FALSE FALSE  TRUE\r\n\r\n# addNA() moves it from the data to the levels\r\nf2 <- addNA(f)\r\nf2\r\n#> [1] 1    2    <NA>\r\n#> Levels: 1 2 <NA>\r\n# This has semantic changes: NA in the levels is no longer \"missing\"\r\nis.na(f2)\r\n#> [1] FALSE FALSE FALSE\r\n\r\n# You can see this in the underlying data\r\ndput(f)\r\n#> structure(c(1L, 2L, NA), levels = c(\"1\", \"2\"), class = \"factor\")\r\ndput(f2)\r\n#> structure(1:3, levels = c(\"1\", \"2\", NA), class = \"factor\")\r\n\r\n# Can you have NA's in both data and levels?\r\nf3 <- structure(c(1:3, NA), levels = c(\"1\", \"2\", NA), class = \"factor\")\r\nf3\r\n#> [1] 1    2    <NA> <NA>\r\n#> Levels: 1 2 <NA>\r\n# This looks like madness\r\nis.na(f3)\r\n#> [1] FALSE FALSE FALSE  TRUE\r\n```"
+        }
+    ]
+}

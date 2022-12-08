@@ -1,0 +1,21 @@
+{
+    "issue": {
+        "title": "[Java] Reduce the range of synchronized block when releasing an ArrowBuf",
+        "body": "***Note**: This issue was originally created as [ARROW-6723](https://issues.apache.org/jira/browse/ARROW-6723). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen releasing an ArrowBuf, we will run the following piece of code:\r\n\r\n  private int decrement(int decrement) {\r\n    allocator.assertOpen();\r\n    final int outcome;\r\n    synchronized (allocationManager) {\r\n      outcome = bufRefCnt.addAndGet(-decrement);\r\n      if (outcome == 0) {\r\n        lDestructionTime = System.nanoTime();\r\n        allocationManager.release(this);\r\n      }\r\n    }\r\n    return outcome;\r\n  }\r\n\r\nIt can be seen that we need to acquire the lock for allocation manager lock, no matter if we need to release the buffer. In addition, the operation of decrementing refcount is only carried out after the lock is acquired. This leads to unnecessary resource contention, and may degrade performance. \r\n\r\nWe propose to change the code like this:\r\n\r\n  private int decrement(int decrement) {\r\n    allocator.assertOpen();\r\n    final int outcome;\r\n    outcome = bufRefCnt.addAndGet(-decrement);\r\n    if (outcome == 0) {\r\n      lDestructionTime = System.nanoTime();\r\n      synchronized (allocationManager) {\r\n        allocationManager.release(this);\r\n      }\r\n    }\r\n    return outcome;\r\n  }\r\n\r\nNote that this change can be dangerous, as it lies in the core of our code base, so we should be careful with it. On the other hand, it may have non-trivial performance implication. As far as I know, when a distributed task is getting closed, a large number of ArrowBuf will be closed simultaneously. If we reduce the range of the synchronization block, we can significantly improve the performance. \r\n\r\nWhat do you think?",
+        "created_at": "2019-09-27T11:37:09.000Z",
+        "updated_at": "2019-10-10T11:50:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-10-10T11:50:29.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-10T11:50:29.685Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6723?focusedCommentId=16948488) by Liya Fan (fan_li_ya):*\nThis change is not guaranteed to be safe. \r\nIn addition, different ArrowBuf have separate allocation manangers, so it does not lead to resource contention for most scenarios."
+        }
+    ]
+}

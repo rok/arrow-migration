@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Java] ListBinder to bind Arrow List type to DB column ",
+        "body": "***Note**: This issue was originally created as [ARROW-17430](https://issues.apache.org/jira/browse/ARROW-17430). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nTypical real life Arrow datasets contain List type vectors of primitive type. Looks logically implement default JDBC parameter binders for such vector type or implement some kind on binder code extensibility of core framework via MetaINF/ServiceLocator\r\n\r\nCurrent implementation just [throws UnsupportedOperationException\\|#L80]]\r\n\r\n\u00a0\r\n```java\n\r\n  @Override\r\n        \r\n        \r\n            public ColumnBinder visit(ArrowType.List type) {\r\n        \r\n        \r\n              throw new UnsupportedOperationException(\"No column binder implemented for type \" + type);\r\n        \r\n        \r\n            } \n```\r\n\u00a0\r\n\r\nMy current implementation patch\u00a0<font color=\"#000000\">ColumnBinderArrowTypeVisitor in classpath (to leverage Builder functionality instead of manual vector mapping in code) to return ListBinder</font>\r\n```java\n\r\n@Override\r\npublic ColumnBinder visit(ArrowType.List type) {\r\n    return new ListBinder((ListVector) vector);\r\n} \n```\r\n<font color=\"#000000\">and following code works for me with H2 database and in java stored PostgreSQL </font><font color=\"#000000\">function in PL/Java to bind List parameter to JDBC:</font>\r\n```java\n\r\npackage org.apache.arrow.adapter.jdbc.binder;\r\n\r\nimport org.apache.arrow.vector.complex.ListVector;\r\nimport org.apache.arrow.vector.complex.impl.UnionListReader;\r\n\r\nimport java.sql.PreparedStatement;\r\nimport java.sql.SQLException;\r\nimport java.sql.Types;\r\nimport java.util.ArrayList;\r\nimport java.util.Arrays;\r\n\r\npublic class ListBinder extends BaseColumnBinder<ListVector>{\r\n\r\n    private UnionListReader reader;\r\n\r\n    public ListBinder(ListVector vector) {\r\n        this(vector, Types.ARRAY);\r\n    }\r\n\r\n    public ListBinder(ListVector vector, int jdbcType) {\r\n        super(vector, jdbcType);\r\n        reader = vector.getReader();\r\n    }\r\n\r\n    @Override\r\n    public void bind(PreparedStatement statement, int parameterIndex, int rowIndex) throws SQLException {\r\n        reader.setPosition(rowIndex);\r\n        ArrayList sourceArray = (ArrayList) reader.readObject();\r\n        Class aClass = sourceArray.get(0).getClass();\r\n        if(aClass.isAssignableFrom(Long.class)){\r\n            Long[] res = new Long[sourceArray.size()];\r\n            Arrays.setAll(res, sourceArray::get);\r\n            statement.setObject(parameterIndex, res);\r\n        } else\r\n        if(aClass.isAssignableFrom(Integer.class)){\r\n            Integer[] res = new Integer[sourceArray.size()];\r\n            Arrays.setAll(res, sourceArray::get);\r\n            statement.setObject(parameterIndex, res);\r\n        } else\r\n        if(aClass.isAssignableFrom(Short.class)){\r\n            Short[] res = new Short[sourceArray.size()];\r\n            Arrays.setAll(res, sourceArray::get);\r\n            statement.setObject(parameterIndex, res);\r\n        } else\r\n        if(aClass.isAssignableFrom(String.class)){\r\n            String[] res = new String[sourceArray.size()];\r\n            Arrays.setAll(res, sourceArray::get);\r\n            statement.setObject(parameterIndex, res);\r\n        }\r\n    }\r\n}\r\n \n```",
+        "created_at": "2022-08-16T11:23:53.000Z",
+        "updated_at": "2022-08-19T14:21:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-08-19T12:09:34.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-08-16T11:49:42.640Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17430?focusedCommentId=17580278) by David Li (lidavidm):*\nYou don't need to patch the default code: you can manually pass in a Binder instance when building the JdbcParameterBinder."
+        },
+        {
+            "created_at": "2022-08-16T12:17:14.559Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17430?focusedCommentId=17580288) by Igor Suhorukov (igor.suhorukov):*\nThank you `[~lidavidm]` your approach works for manual coding for each dataset, but org.apache.arrow.adapter.jdbc.JdbcParameterBinder.Builder is super useful to reduce efforts to implement mapping of new type for dataset. The same difference like develop program to process data or just allow end users to write SQL querey"
+        },
+        {
+            "created_at": "2022-08-16T20:36:22.064Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17430?focusedCommentId=17580463) by David Li (lidavidm):*\nWe would definitely welcome a PR with List/MapBinder implementations! Otherwise, I don't think I'd have the time to get to this for a while."
+        },
+        {
+            "created_at": "2022-08-17T12:35:46.299Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17430?focusedCommentId=17580768) by Igor Suhorukov (igor.suhorukov):*\n`[~lidavidm]` \u00a0 got it. Thanks for your time. Lets try from ListBinder. I also asked my friend to assist with PRs he'll look at code on weekends"
+        },
+        {
+            "created_at": "2022-08-19T12:09:34.770Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17430?focusedCommentId=17581815) by David Li (lidavidm):*\nIssue resolved by pull request 13906\n<https://github.com/apache/arrow/pull/13906>"
+        }
+    ]
+}

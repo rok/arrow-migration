@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[R] case_when error handling is capturing strings",
+        "body": "***Note**: This issue was originally created as [ARROW-13799](https://issues.apache.org/jira/browse/ARROW-13799). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis test, now unskipped since case_when supports string data, fails:\r\n\r\n```Java\n\r\n  expect_dplyr_equal(\r\n    input %>%\r\n      mutate(\r\n        cw = case_when(!(!(!(lgl))) ~ factor(chr), TRUE ~ fct)\r\n      ) %>%\r\n      collect(),\r\n    tbl\r\n  )\r\n```\r\n\r\nOn inspection, it seems that `factor(chr)` is hitting `base::factor()`, which tries to call `unique()` on the Expression and that fails with \"unique() applies only to vectors\". This is getting propagated through to the resulting dataset column because `arrow_eval()` returns a `try-error` on error and `nse_funcs$case_when()` isn't checking for errors.\r\n\r\ncc `[~icook]`",
+        "created_at": "2021-08-30T17:26:04.000Z",
+        "updated_at": "2021-10-17T00:36:28.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-10-14T19:37:24.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-09-02T16:37:32.101Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13799?focusedCommentId=17408969) by Ian Cook (icook):*\nRelated to this: we have a binding for `as.factor()` that calls the `dictionary_encode` kernel. I would expect that using `as.factor()` instead of `factor()` would solve this, but instead it throws this error:\r\n```java\n\r\n Error: Invalid: ExecuteScalarExpression cannot Execute non-scalar expression case_when({1=invert(invert(invert(lgl))), 2=true}, cast(dictionary_encode(chr, {null_encoding_behavior=MASK}), {to_type=string, allow_int_overflow=false, allow_time_truncate=false, allow_time_overflow=false, allow_decimal_truncate=false, allow_float_truncate=false, allow_invalid_utf8=false}), cast(fct, {to_type=string, allow_int_overflow=false, allow_time_truncate=false, allow_time_overflow=false, allow_decimal_truncate=false, allow_float_truncate=false, allow_invalid_utf8=false}))  \n```\r\nReducing this down to a simpler example:\r\n```java\n\r\n> Table$create(tbl) %>% mutate(as.factor(chr)) %>% collect()\r\n\r\nError: Invalid: ExecuteScalarExpression cannot Execute non-scalar expression dictionary_encode(chr, {null_encoding_behavior=MASK})  \n```\r\nSo it looks like something is going wrong with passing the `null_encoding_behavior` option to the `dictionary_encode` kernel."
+        },
+        {
+            "created_at": "2021-09-02T16:38:54.993Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13799?focusedCommentId=17408971) by Neal Richardson (npr):*\nYep that's ARROW-12632"
+        },
+        {
+            "created_at": "2021-10-14T19:37:25.059Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13799?focusedCommentId=17428992) by Jonathan Keane (jonkeane):*\nIssue resolved by pull request 11417\n<https://github.com/apache/arrow/pull/11417>"
+        }
+    ]
+}

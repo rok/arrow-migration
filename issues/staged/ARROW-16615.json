@@ -1,0 +1,36 @@
+{
+    "issue": {
+        "title": "[C++] An unstable crash may appears when reading table from a json file.",
+        "body": "***Note**: This issue was originally created as [ARROW-16615](https://issues.apache.org/jira/browse/ARROW-16615). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAn unstable crash may appears when reading table from a json file.\r\n\r\narrow and parquet are installed by apt-get.\r\n\r\n```Java\n\r\ng++ test_arrow_json.cpp -o test_arrow_json -larrow -lparquet && ./test_arrow_json\r\n\r\n/build/apache-arrow-8.0.0/cpp/src/arrow/result.cc:28: ValueOrDie called on an error: NotImplemented: JSON conversion to struct<timestamp_deprecated: int64, traffic_light_id: timestamp[s], camera_id: timestamp[s], camera_center_timestamp: int64, camera_trigger_timestamp: int64, tl_yaw_diff: int64, distance: int64, color: timestamp[s], shape: timestamp[s], score: int64, flashing: bool, occluded: bool, occlusion_ratio: int64, raw_color: timestamp[s], temporal_fused_color: timestamp[s], temporal_fused_flashing: bool, state_source: timestamp[s], x: int64, y: int64, width: int64, height: int64, original_width: int64, original_height: int64, light_body_bboxes: list<item: struct<x: int64, y: int64, width: int64, height: int64>>, light_bboxes: list<item: struct<x: int64, y: int64, width: int64, height: int64>>, countdown: timestamp[s]> is not supported\r\n/usr/lib/x86_64-linux-gnu/libarrow.so.800(+0x39e131)[0x7f07b843e131]\r\n/usr/lib/x86_64-linux-gnu/libarrow.so.800(_ZN5arrow4util8ArrowLogD1Ev+0xdd)[0x7f07b878e83d]\r\n/usr/lib/x86_64-linux-gnu/libarrow.so.800(_ZN5arrow8internal17InvalidValueOrDieERKNS_6StatusE+0x17d)[0x7f07b8626e8d]\r\n./test_arrow_json(+0x1b9b)[0x5613e4b53b9b]\r\n./test_arrow_json(+0x12f2)[0x5613e4b532f2]\r\n/lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0xe7)[0x7f07b772fc87]\r\n./test_arrow_json(+0xfba)[0x5613e4b52fba]\r\nAborted (core dumped)\r\n```",
+        "created_at": "2022-05-19T12:53:13.000Z",
+        "updated_at": "2022-05-20T11:21:09.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-05-19T13:05:27.789Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16615?focusedCommentId=17539535) by Antoine Pitrou (apitrou):*\nHmm... are you complaining about the crash or about the error?\r\n\r\nAs the name implies, the `ValueOrDie` method will abort the process if the `Result<T>` instance contains an error instead of a successful result. This is also explained in the method documentation:\r\n<https://arrow.apache.org/docs/cpp/api/support.html?highlight=valueordie#_CPPv4NKR5arrow6Result10ValueOrDieEv>\r\n> This method should only be called if this Result object\u2019s status is OK (i.e. a call to ok() returns true), otherwise this call will abort."
+        },
+        {
+            "created_at": "2022-05-19T13:09:10.808Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16615?focusedCommentId=17539539) by Antoine Pitrou (apitrou):*\nThe file does succeed loading in PyArrow here, though. Or is the problem you see sporadic?"
+        },
+        {
+            "created_at": "2022-05-19T13:17:56.663Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16615?focusedCommentId=17539544) by Antoine Pitrou (apitrou):*\nOk, this can be reproduced in PyArrow when the block size is a bit too small.\r\n\r\nWith a much too small block size, one gets the expected error:\r\n```python\n\r\n>>> tab = json.read_json(\"test.json\", read_options=json.ReadOptions(block_size=4096*2))\r\nTraceback (most recent call last):\r\n  ...\r\nArrowInvalid: straddling object straddles two block boundaries (try to increase block size?)\r\n```\r\n\r\nWith a large enough block size, reading the JSON file succeeds:\r\n```python\n\r\n>>> tab = json.read_json(\"test.json\", read_options=json.ReadOptions(block_size=4096*128))\r\n>>> tab.column_names\r\n['run_name', 'pose_proto', 'traffic_light_states_proto']\r\n>>> tab.num_rows\r\n1890\r\n```\r\n\r\nBut with a block size that's somewhat in-between, reading the JSON file fails with that unexpected unsupported conversion error:\r\n```python\n\r\n>>> tab = json.read_json(\"test.json\", read_options=json.ReadOptions(block_size=4096*16))\r\nTraceback (most recent call last):\r\n  ...\r\nArrowNotImplementedError: JSON conversion to struct<timestamp_deprecated: int64, traffic_light_id: timestamp[s], camera_id: timestamp[s], camera_center_timestamp: int64, camera_trigger_timestamp: int64, tl_yaw_diff: int64, distance: int64, color: timestamp[s], shape: timestamp[s], score: int64, flashing: bool, occluded: bool, occlusion_ratio: int64, raw_color: timestamp[s], temporal_fused_color: timestamp[s], temporal_fused_flashing: bool, state_source: timestamp[s], x: int64, y: int64, width: int64, height: int64, original_width: int64, original_height: int64, light_body_bboxes: list<item: struct<x: int64, y: int64, width: int64, height: int64>>, light_bboxes: list<item: struct<x: int64, y: int64, width: int64, height: int64>>, countdown: timestamp[s]> is not supported\r\n```\r\n\r\n`[~bkietz]` Is this something that you know might happen?"
+        },
+        {
+            "created_at": "2022-05-20T02:59:35.293Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16615?focusedCommentId=17539889) by Jack Tondon (Jack Tondon):*\nSorry for the late response. The problem is **sporadic** with default ReadOptions. As you see, arrow infer that `traffic_light_id` is a timestamp type, but I do sure that it's a string, and other string fields, such as `camera_id`, are also be infered as timestamp."
+        },
+        {
+            "created_at": "2022-05-20T03:12:01.109Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16615?focusedCommentId=17539895) by Jack Tondon (Jack Tondon):*\nSeems with `use_threads=false`, the problem reappears stably"
+        }
+    ]
+}

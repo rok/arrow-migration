@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Python] feather/arrow row splitting and counting (Dataset API)",
+        "body": "***Note**: This issue was originally created as [ARROW-10736](https://issues.apache.org/jira/browse/ARROW-10736). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFor parquet files using the Dataset API, we have the option to access the row groups, and count the total number of rows within each. I don't see the option to get the number of rows from a dataset with feather/arrow ipc files. For instance, a scan without any columns is not possible it seems, nor any method to get the row count.\r\n\r\nAlso, if a file consists of chunked arrays, it is exposed as 1 fragment, and it is not possible to read only a portion of a filefragment (row slicing), similar to how one could work with ParquetFileFragment.split_by_row_group.\r\n\r\nI don't know of any other way within Apache Arrow to work with feather/arrow ipc files and only read portions of it (e.g. a particular column for row i to j).\r\n\r\nAre these features possible any other way, or is this already planned, possibly difficult to implement?\r\n\r\ncheers,\r\n\r\nMaarten",
+        "created_at": "2020-11-25T19:26:09.000Z",
+        "updated_at": "2020-11-26T14:52:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-11-26T12:26:01.707Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10736?focusedCommentId=17239228) by Joris Van den Bossche (jorisvandenbossche):*\nI think this are generally things we want, and not that difficult to implement. Up to now, we mostly focused on specific functionality for the ParquetFileFragment (as that was needed to get feature parity with ParquetDataset, eg for dask, and is also used most widely), but we should try to generalize a certain subset of \"statistics\" functionality (such as number of rows).\r\n\r\nFor the row count specifically, there is also ARROW-9697\r\n\r\n>  scan without any columns is not possible it seems, nor any method to get the row count.\r\n\r\nNot that this is the nicest workaround, but I thought this was possible:\r\n\r\n```Java\n\r\nIn [1]: table = pa.table({'a': np.arange(100), 'b': np.random.randn(100)})\r\n\r\nIn [2]: import pyarrow.dataset as ds\r\n\r\n# ugly way to split table in 2 batches\r\nIn [10]: table2 = pa.Table.from_batches([*table[0:50].to_batches(), *table[50:100].to_batches()])\r\n\r\nIn [11]: ds.write_dataset(table2, \"test_ipc2\", format=\"ipc\")\r\n\r\nIn [12]: dataset = ds.dataset(\"test_ipc2\", format=\"ipc\")\r\n\r\n# indeed single fragment\r\nIn [15]: list(dataset.get_fragments())\r\nOut[15]: [<pyarrow._dataset.FileFragment at 0x7f7444252c70>]\r\n\r\n# # scanning with empty column selection\r\nIn [16]: for scan_task in dataset.scan(columns=[]):\r\n    ...:     for record_batch in scan_task.execute():\r\n    ...:         print(record_batch.num_rows)\r\n50\r\n50\r\n```\r\n\r\n"
+        },
+        {
+            "created_at": "2020-11-26T12:29:25.041Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10736?focusedCommentId=17239229) by Joris Van den Bossche (jorisvandenbossche):*\n> Also, if a file consists of chunked arrays, it is exposed as 1 fragment, and it is not possible to read only a portion of a filefragment (row slicing), similar to how one could work with ParquetFileFragment.split_by_row_group.\r\n\r\nYeah, you can get an iterator of the record batches (instead of a full table), eg with:\r\n\r\n```Java\n\r\nIn [21]: fragment = list(dataset.get_fragments())[0]\r\n\r\nIn [22]: list(fragment.to_batches())\r\nOut[22]: \r\n[pyarrow.RecordBatch\r\n a: int64\r\n b: double,\r\n pyarrow.RecordBatch\r\n a: int64\r\n b: double]\r\n```\r\n\r\nBut I don't think it's possible right now to _only_ read a specific RecordBatch (like is possible with parquet with the \"split_by_row_group\" or \"subset\" methods). I think it would be nice to add this to IPC/Feather format as well, as it should technically perfectly be possible."
+        },
+        {
+            "created_at": "2020-11-26T14:52:55.699Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10736?focusedCommentId=17239305) by Maarten Breddels (maartenbreddels):*\nThanks, I tried scan with an empty schema on the fragments, which did not work, but using columns was the trick! Together with requiring that arrow or feather files are not too big, so we can only jump over fragments, this is workable for me for the moment.\r\n\r\nMaybe slicing of datasets or row start/end number for scan would also get the job done, also for CSV files that would be interesting."
+        }
+    ]
+}

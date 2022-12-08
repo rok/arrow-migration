@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] invalid-offsetof warning from apple clang-12",
+        "body": "***Note**: This issue was originally created as [ARROW-12240](https://issues.apache.org/jira/browse/ARROW-12240). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSimilar issue as https://issues.apache.org/jira/browse/ARROW-11299.\r\n\r\nFound when building pyarrow on Macos M1. I don't think it's platform related.\r\nNo warning for clang-9,  but apple clang-12 complains about it.\r\n\r\nError log:\r\n```bash\n\r\n[ 13%] Building CXX object CMakeFiles/_csv.dir/_csv.cpp.o\r\n/Users/cyb/work/arrow/python/build/temp.macosx-11.0-arm64-3.9/_csv.cpp:19051:133: warning: offset of on non-standard-layout type 'struct __pyx_obj_7pyarrow_4_csv_ConvertOptions' [-Winvalid-offsetof]\r\n  if (__pyx_type_7pyarrow_4_csv_ConvertOptions.tp_weaklistoffset == 0) __pyx_type_7pyarrow_4_csv_ConvertOptions.tp_weaklistoffset = offsetof(struct __pyx_obj_7pyarrow_4_csv_ConvertOptions, __pyx_base.__weakref__);\r\n^                                                        ~~~~~~~~~~\r\n/Library/Developer/CommandLineTools/usr/lib/clang/12.0.0/include/stddef.h:104:24: note: expanded from macro 'offsetof'\r\n#define offsetof(t, d) __builtin_offsetof(t, d)\r\n```",
+        "created_at": "2021-04-07T06:04:40.000Z",
+        "updated_at": "2021-05-03T14:23:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-05-03T14:23:47.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-04-08T03:21:54.562Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12240?focusedCommentId=17316841) by yibocai#1 (yibocai#1):*\nThis warning only happens with clang-12. The reason is that unordered_map is [standard layout type](https://en.cppreference.com/w/cpp/named_req/StandardLayoutType) before clang-12, but may change to non-standard-layout in later version: https://godbolt.org/z/ejEoYf5oq\r\n\r\n[ConvertOptions](https://github.com/apache/arrow/blob/a691e03ce3b5b9b24eccfe600d006ff6a05be84e/cpp/src/arrow/csv/options.h#L64) struct has stl container data members (vector, unordered_map, string). These containers happen to be standard-layout for current clang version. Looks there's no spec to guarantee they must be implemented as standard-layout-type. So the ConvertOptions struct may becomes non-standard-layout for later compiler versions and cause trouble.\r\n\r\nNot quite familiar with cython, will like to seek comments. cc `[~apitrou]` `[~bkietz]`\r\nTrick in https://github.com/apache/arrow/pull/9274 should fix this issue.\r\nBut use offsetof macro to exact struct member offset looks a big limit to struct type. I don't know under which condition will cython generate this code."
+        },
+        {
+            "created_at": "2021-04-08T06:44:18.385Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12240?focusedCommentId=17316898) by Antoine Pitrou (apitrou):*\nUsing `unique_ptr` is a fine workaround.\r\n\r\nAs for offsetof, its use is more or less required by the Python C API:\r\nhttps://docs.python.org/3/c-api/typeobj.html#c.PyTypeObject.tp_weaklistoffset\r\n\r\n(the C++ rules for standard layout types seem overly restrictive, IMHO)"
+        },
+        {
+            "created_at": "2021-04-26T04:45:12.180Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12240?focusedCommentId=17331740) by yibocai#1 (yibocai#1):*\nLooks CSV options should be persistent by pickle. [This test](https://github.com/apache/arrow/blob/ca83a14e264d00c6b4b29560cc2816c6718f52e7/python/pyarrow/tests/test_dataset.py#L617) crashes after changing the embedded struct (CCSVConvertOptions) to unique_ptr. I think the pickle loaded pointer is invalid. See CI failure from [PR 10154](https://github.com/apache/arrow/pull/10154).\r\n\r\nSo ARROW-11299 makes all computer kernel options not pickle-able. Will it be a problem?"
+        },
+        {
+            "created_at": "2021-04-27T09:33:22.990Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12240?focusedCommentId=17333069) by Antoine Pitrou (apitrou):*\nI don't think compute kernel options need to be picklable for now. We can add that later."
+        },
+        {
+            "created_at": "2021-05-03T14:23:47.239Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12240?focusedCommentId=17338387) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 10154\n<https://github.com/apache/arrow/pull/10154>"
+        }
+    ]
+}

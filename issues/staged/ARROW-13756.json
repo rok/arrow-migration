@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Python] Error in pandas conversion for datetimetz column index",
+        "body": "***Note**: This issue was originally created as [ARROW-13756](https://issues.apache.org/jira/browse/ARROW-13756). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe following code fails with:\r\n\r\n\r\n```java\n\r\nFile \"[...]/lib/python3.8/site-packages/pyarrow/pandas_compat.py\", line 1052, in _pandas_type_to_numpy_type\r\n return np.dtype(pandas_type)\r\nTypeError: data type 'datetimetz' not understood\n```\r\nSample:\r\n```java\n\r\ndef run():\r\n    filename = \"test.parquet\"\r\n    df = pd.DataFrame(\r\n        data=range(31),\r\n        columns=list(\"A\"),\r\n        index=pd.date_range(\"2021-01-01\", \"2021-01-31\", freq=\"D\", tz=\"CET\"),\r\n    ).T\r\n    table = pa.Table.from_pandas(df)\r\n    pq.write_to_dataset(table, root_path=filename)\r\n    result = pq.read_table(filename).to_pandas()\r\n    return result\r\n\r\n\r\nif __name__ == \"__main__\":\r\n    run()\r\n```\r\n\r\nThe code tries to store a dataframe where the columns are timezone aware datetimes.\r\n\r\n_Observations_:\r\nIf I remove the **.T**\u00a0at the end of the dataframe, so that the datatime index are rows it is working (but not what I want).\r\nIf I remove the timezone information\u00a0**tz=\"CET\"** the code is working.\r\n\r\nI assume this bug is related to\u00a0[Error in pandas conversion for datetimetz row index](https://issues.apache.org/jira/browse/ARROW-1958)",
+        "created_at": "2021-08-25T15:16:49.000Z",
+        "updated_at": "2021-12-15T15:41:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-12-13T14:18:19.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-30T11:03:43.735Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13756?focusedCommentId=17406681) by Joris Van den Bossche (jorisvandenbossche):*\nThanks for the report. This is indeed only happening when using a DatetimeIndew with timezone as the column labels (for a row index it works, as you mentioned ARROW-1958 fixed this for row index).\r\n\r\nA smaller reproducer (it's not needed to have the roundtrip to parquet to reproduce the error):\r\n\r\n```python\n\r\ndf = pd.DataFrame(\r\n    np.random.randn(5, 3),\r\n    columns=pd.date_range(\"2021-01-01\", \"2021-01-3\", freq=\"D\", tz=\"CET\")\r\n)\r\ntable = pa.table(df)\r\n\r\n>>> table.to_pandas()\r\n...\r\nTypeError: data type 'datetimetz' not understood\r\n```\r\n\r\nIn the code to reconstruct the rows Index (`_extract_index_level`), we specifically deal with timezone-aware data. We will need to do something similar in the code to reconstruct the column Index (`_reconstruct_columns_from_metadata`)."
+        },
+        {
+            "created_at": "2021-08-30T11:09:52.691Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13756?focusedCommentId=17406682) by Joris Van den Bossche (jorisvandenbossche):*\nA workaround you can use for now is to convert your column names to strings before converting to arrow / writing to parquet, and then afterwards convert back to datetimes manually:\r\n\r\n```python\n\r\ndf.columns = df.columns.astype('str')\r\n# roundtrip to arrow or parquet\r\ntable = pa.table(df)\r\nresult = table.to_pandas()\r\n# convert string column names to datetimeindex\r\nresult.columns = pd.to_datetime(result.columns).tz_convert(\"CET\")\r\n```\r\n\r\nIn general pyarrow tries to recreate the original pandas column labels when converting back to pandas, but note that Arrow and Parquet both only support string column names anyway (so the data stored is using the stringified names anyway)."
+        },
+        {
+            "created_at": "2021-12-13T14:18:19.719Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13756?focusedCommentId=17458424) by Joris Van den Bossche (jorisvandenbossche):*\nIssue resolved by pull request 11619\n<https://github.com/apache/arrow/pull/11619>"
+        }
+    ]
+}

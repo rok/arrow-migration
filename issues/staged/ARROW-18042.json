@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[Java] Distribute Apple M1 compatible JNI libraries via mavencentral",
+        "body": "***Note**: This issue was originally created as [ARROW-18042](https://issues.apache.org/jira/browse/ARROW-18042). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently JNI libraries need to be built locally to be usable on Apple silicon. We should build and distribute compatible libraries via mavencentral.\r\n\r\n@dsusanibara @lidavidm\r\n\r\nAlso see ARROW-17267 and ARROW-16608",
+        "created_at": "2022-10-13T17:10:07.000Z",
+        "updated_at": "2022-11-08T03:36:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-11-08T01:01:45.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-13T17:11:26.677Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18042?focusedCommentId=17617203) by David Li (lidavidm):*\n`[~dsusanibara]` I thought you already had a ticket for this"
+        },
+        {
+            "created_at": "2022-10-13T17:24:34.319Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18042?focusedCommentId=17617210) by David Dali Susanibar Arce (dsusanibara):*\nThank you `[~rokm]` \u00a0 for your testing on M1.\r\n\r\nFirst of all I need to read is there are some SDK to be able to build jar packages and cover different OS Unix / MacOS M1 / Windows. Base on your testing using Zuul SDK you were able to use Dataset without problems."
+        },
+        {
+            "created_at": "2022-10-13T17:26:41.891Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18042?focusedCommentId=17617211) by David Dali Susanibar Arce (dsusanibara):*\n`[~kou]` Do you have some advice about if there are some option to also cover M1 for the Dataset jar packaging?"
+        },
+        {
+            "created_at": "2022-10-13T17:28:37.973Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18042?focusedCommentId=17617213) by Rok Mihevc (rokm):*\nZulu worked fine for me. I see Oracle might support M1 too. I'm not sure how licenses are for these."
+        },
+        {
+            "created_at": "2022-10-14T00:32:39.515Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18042?focusedCommentId=17617367) by Kouhei Sutou (kou):*\nWe need to choose one of the following approaches:\r\n\r\n- Bundle `lib*.dylib` that contains binaries for both x86_64 and arm64\n- Bundle `lib*.dylib` for x86_64 and `lib*.dylib` for arm64 separately\n  \n  See also: https://issues.apache.org/jira/browse/ARROW-16608?focusedCommentId=17539166#comment-17539166\n  \n  If we choose the former, we need to add support for `-DCMAKE_OSX_ARCHITECTURES=\"arm64;x86_64\"` in our Apache Arrow C++ CMake configuration.\n  \n  If we choose the latter, we need a change like the following + a Java side change that choose suitable `.dylib` that depends on host architecture:\n  \n  {noformat}\n  diff --git a/dev/tasks/java-jars/github.yml b/dev/tasks/java-jars/github.yml\n  index 6f7fdc82d5..f3f763c31a 100644\n\u2014 a/dev/tasks/java-jars/github.yml\r\n+++ b/dev/tasks/java-jars/github.yml\r\n@@ -47,8 +47,8 @@ jobs:\r\n         run: archery docker push java-jni-manylinux-2014\r\n     {% endif %}\r\n \r\n-  build-cpp-macos:\n-    name: Build C++ libraries macOS\n  +  build-cpp-macos-x86_64:\n  +    name: Build C++ libraries macOS x86_64\n       runs-on: macos-latest\n       env:\n         MACOSX_DEPLOYMENT_TARGET: \"10.13\"\n  @@ -76,12 +76,54 @@ jobs:\n               $GITHUB_WORKSPACE/arrow/cpp-build \\\n               $GITHUB_WORKSPACE/arrow/java-dist\n         - name: Compress into single artifact to keep directory structure\n-        run: tar -cvzf arrow-shared-libs-macos.tar.gz arrow/java-dist/\n  +        run: |\n  +          mkdir -p arrow/java-dist/x86_64\n  +          mv arrow/java-dist/**.** arrow/java-dist/x86_64/\n  +          tar -cvzf arrow-shared-libs-macos-x86_64.tar.gz arrow/java-dist/\n         - name: Upload artifacts\n           uses: actions/upload-artifact@v2\n           with:\n-          name: macos-shared-lib\n-          path: arrow-shared-libs-macos.tar.gz\n  +          name: macos-shared-lib-x86_64\n  +          path: arrow-shared-libs-macos-x86_64.tar.gz\n  +\n  +  build-cpp-macos-arm64:\n  +    name: Build C++ libraries macOS arm64\n  +    runs-on: [\"self-hosted\", \"macOS\", \"arm64\"]\n  +    env:\n  +      MACOSX_DEPLOYMENT_TARGET: \"10.13\"\n  +    steps:\n  +      ` macros.github_checkout_arrow()|indent `\n  +      ` macros.github_install_archery()|indent `\n  +      - name: Install dependencies\n  +        run: |\n  +          brew install --overwrite git\n  +          brew bundle --file=arrow/cpp/Brewfile\n  +          # We want to link aws-sdk-cpp statically but Homebrew's\n  +          # aws-sdk-cpp provides only shared library. If we have\n  +          # Homebrew's aws-sdk-cpp, our build mix Homebrew's\n  +          # aws-sdk-cpp and bundled aws-sdk-cpp. We uninstall Homebrew's\n  +          # aws-sdk-cpp to ensure using only bundled aws-sdk-cpp.\n  +          brew uninstall aws-sdk-cpp\n  +      - name: Setup ccache\n  +        run: |\n  +          arrow/ci/scripts/ccache_setup.sh\n  +      - name: Build C++ libraries\n  +        run: |\n  +          set -e\n  +          arrow/ci/scripts/java_jni_macos_build.sh \\\n  +            $GITHUB_WORKSPACE/arrow \\\n  +            $GITHUB_WORKSPACE/arrow/cpp-build \\\n  +            $GITHUB_WORKSPACE/arrow/java-dist\n  +      - name: Compress into single artifact to keep directory structure\n  +        run: |\n  +          mkdir -p arrow/java-dist/arm64\n  +          mv arrow/java-dist/**.** arrow/java-dist/arm64/\n  +          tar -cvzf arrow-shared-libs-macos-arm64.tar.gz arrow/java-dist/\n  +      - name: Upload artifacts\n  +        uses: actions/upload-artifact@v2\n  +        with:\n  +          name: macos-shared-lib-arm64\n  +          path: arrow-shared-libs-macos-arm64.tar.gz\n   \n     build-cpp-windows:\n       name: Build C++ libraries Windows\n  @@ -116,7 +158,8 @@ jobs:\n       runs-on: macos-latest\n       needs:\n         - build-cpp-ubuntu\n-      - build-cpp-macos\n  +      - build-cpp-macos-x86_64\n  +      - build-cpp-macos-arm64\n         - build-cpp-windows\n       steps:\n         ` macros.github_checkout_arrow(fetch_depth=0)|indent `\n  @@ -124,10 +167,14 @@ jobs:\n           uses: actions/download-artifact@v2\n           with:\n             name: ubuntu-shared-lib\n-      - name: Download macOS C++ libraries\n  +      - name: Download macOS x86_64 C++ libraries\n           uses: actions/download-artifact@v2\n           with:\n-          name: macos-shared-lib\n  +          name: macos-shared-lib-x86_64\n  +      - name: Download macOS arm64 C++ libraries\n  +        uses: actions/download-artifact@v2\n  +        with:\n  +          name: macos-shared-lib-arm64\n         - name: Download Windows C++ libraries\n           uses: actions/download-artifact@v2\n           with:\n  @@ -135,24 +182,30 @@ jobs:\n         - name: Descompress artifacts\n           run: |\n             tar -xvzf arrow-shared-libs-linux.tar.gz\n-          tar -xvzf arrow-shared-libs-macos.tar.gz\n  +          tar -xvzf arrow-shared-libs-macos-x86_64.tar.gz\n  +          tar -xvzf arrow-shared-libs-macos-arm64.tar.gz\n             tar -xvzf arrow-shared-libs-windows.tar.gz\n         - name: Test that shared libraries exist\n           run: |\n             set -x\n-          test -f arrow/java-dist/libarrow_cdata_jni.dylib\n  +          test -f arrow/java-dist/x86_64/libarrow_cdata_jni.dylib\n  +          test -f arrow/java-dist/arm64/libarrow_cdata_jni.dylib\n             test -f arrow/java-dist/libarrow_cdata_jni.so\n             test -f arrow/java-dist/arrow_cdata_jni.dll\n-          test -f arrow/java-dist/libarrow_dataset_jni.dylib\n  +          test -f arrow/java-dist/x86_64/libarrow_dataset_jni.dylib\n  +          test -f arrow/java-dist/arm64/libarrow_dataset_jni.dylib\n             test -f arrow/java-dist/libarrow_dataset_jni.so\n             test -f arrow/java-dist/arrow_dataset_jni.dll\n-          test -f arrow/java-dist/libarrow_orc_jni.dylib\n  +          test -f arrow/java-dist/x86_64/libarrow_orc_jni.dylib\n  +          test -f arrow/java-dist/arm64/libarrow_orc_jni.dylib\n             test -f arrow/java-dist/libarrow_orc_jni.so\n1. We can enable this after ARROW-17817 is resolved.\n1. test -f arrow/java-dist/arrow_orc_jni.dll\n   -          test -f arrow/java-dist/libgandiva_jni.dylib\n     +          test -f arrow/java-dist/x86_64/libgandiva_jni.dylib\n     +          test -f arrow/java-dist/arm64/libgandiva_jni.dylib\n                test -f arrow/java-dist/libgandiva_jni.so\n   -          test -f arrow/java-dist/libplasma_java.dylib\n     +          test -f arrow/java-dist/x86_64/libplasma_java.dylib\n     +          test -f arrow/java-dist/arm64/libplasma_java.dylib\n                test -f arrow/java-dist/libplasma_java.so\n            - name: Build bundled jar\n              run: |\n     {noformat} \n"
+        },
+        {
+            "created_at": "2022-10-14T11:55:50.015Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18042?focusedCommentId=17617667) by Rok Mihevc (rokm):*\nLatter seems better as it keeps CMake simpler."
+        },
+        {
+            "created_at": "2022-10-14T14:43:07.885Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18042?focusedCommentId=17617775) by Rok Mihevc (rokm):*\n`[~kou]` I can make a PR with your proposed change. Is that ok?"
+        },
+        {
+            "created_at": "2022-10-14T14:45:08.104Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18042?focusedCommentId=17617777) by Kouhei Sutou (kou):*\nSure!"
+        },
+        {
+            "created_at": "2022-10-14T15:38:12.646Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18042?focusedCommentId=17617809) by Rok Mihevc (rokm):*\n`[~kou]` I've opened a PR with this change. One thing I changed was arm64 -> aarch64 as that seems to be the canonical name (see: https://github.com/trustin/os-maven-plugin#property-osdetectedarch)."
+        },
+        {
+            "created_at": "2022-11-08T01:01:45.541Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18042?focusedCommentId=17630111) by Kouhei Sutou (kou):*\nIssue resolved by pull request 14472\n<https://github.com/apache/arrow/pull/14472>"
+        }
+    ]
+}

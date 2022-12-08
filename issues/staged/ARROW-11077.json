@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[Rust] ParquetFileArrowReader panicks when trying to read nested list",
+        "body": "***Note**: This issue was originally created as [ARROW-11077](https://issues.apache.org/jira/browse/ARROW-11077). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI think this is documented in the code, but I can't be 100% sure.\r\n\r\nWhen trying to execute a DataFusion query over a Parquet file where one field is a struct with a nested list, the thread panicks due to unwrapping on an `Option::None` [at this point](https://github.com/apache/arrow/blob/36d80e37373ab49454eb47b2a89c10215ca1b67e/rust/parquet/src/arrow/array_reader.rs#L1334-L1337) [.](https://github.com/apache/arrow/blob/36d80e37373ab49454eb47b2a89c10215ca1b67e/rust/parquet/src/arrow/array_reader.rs#L1334-L1337).] This `None` is returned by [`visit_primitive`](https://github.com/apache/arrow/blob/master/rust/parquet/src/arrow/array_reader.rs#L1243-L1245), but I can't quite make sense of _why_ it returns a `None` rather than an error?\r\n\r\nI added a couple of dbg! calls to see what the item_type and list_type are:\r\n```Java\n\r\n[/home/ben/repos/rust/arrow/rust/parquet/src/arrow/array_reader.rs:1339] &item_type = PrimitiveType {\r\n    basic_info: BasicTypeInfo {\r\n        name: \"item\",\r\n        repetition: Some(\r\n            OPTIONAL,\r\n        ),\r\n        logical_type: UTF8,\r\n        id: None,\r\n    },\r\n    physical_type: BYTE_ARRAY,\r\n    type_length: -1,\r\n    scale: -1,\r\n    precision: -1,\r\n}\r\n[/home/ben/repos/rust/arrow/rust/parquet/src/arrow/array_reader.rs:1340] &list_type = GroupType {\r\n    basic_info: BasicTypeInfo {\r\n        name: \"tags\",\r\n        repetition: Some(\r\n            OPTIONAL,\r\n        ),\r\n        logical_type: LIST,\r\n        id: None,\r\n    },\r\n    fields: [\r\n        GroupType {\r\n            basic_info: BasicTypeInfo {\r\n                name: \"list\",\r\n                repetition: Some(\r\n                    REPEATED,\r\n                ),\r\n                logical_type: NONE,\r\n                id: None,\r\n            },\r\n            fields: [\r\n                PrimitiveType {\r\n                    basic_info: BasicTypeInfo {\r\n                        name: \"item\",\r\n                        repetition: Some(\r\n                            OPTIONAL,\r\n                        ),\r\n                        logical_type: UTF8,\r\n                        id: None,\r\n                    },\r\n                    physical_type: BYTE_ARRAY,\r\n                    type_length: -1,\r\n                    scale: -1,\r\n                    precision: -1,\r\n                },\r\n            ],\r\n        },\r\n    ],\r\n}\n```\r\nI guess we should at least use `.expect` here instead of `.unwrap` so it's more clear why this is happening!",
+        "created_at": "2020-12-30T16:37:35.000Z",
+        "updated_at": "2021-04-26T12:44:04.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-04-26T12:44:03.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-12-30T17:07:51.231Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11077?focusedCommentId=17256607) by Ben Sully (sd2k):*\nI've attached a small Parquet file to allow for a repro. This code will trigger it (with a modification for the filepath, of course):\r\n\r\n```Java\n\r\nuse datafusion::datasource::parquet::ParquetTable;\r\nuse datafusion::execution::context::ExecutionContext;\r\n\r\n#[tokio::main]\r\nasync fn main() {\r\n    let mut ctx = ExecutionContext::new();\r\n    let table = ParquetTable::try_new(\"/home/ben/small-nested-lists.parquet\", 1).unwrap();\r\n    ctx.register_table(\"event\", Box::new(table));\r\n    ctx.sql(\"SELECT * FROM event LIMIT 10\")\r\n        .unwrap()\r\n        .collect()\r\n        .await\r\n        .unwrap();\r\n}\r\n```\r\n\r\n"
+        },
+        {
+            "created_at": "2021-04-26T12:44:02.164Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11077?focusedCommentId=17332192) by Andrew Lamb (alamb):*\nMigrated to github: https://github.com/apache/arrow-rs/issues/163"
+        }
+    ]
+}

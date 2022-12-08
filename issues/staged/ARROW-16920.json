@@ -1,0 +1,44 @@
+{
+    "issue": {
+        "title": "[Java] DictionaryProvider leaks memory while adding dictionaries with duplicate encoding",
+        "body": "***Note**: This issue was originally created as [ARROW-16920](https://issues.apache.org/jira/browse/ARROW-16920). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nDictionaryProvider leaks memory while adding dictionaries with duplicate encoding. Is this expected? Should the provider release the memory of the existing dictionary vector if it accepts another one with same encoding id ?\r\n\r\nSample code:\r\n```java\n\r\n\"dictionaryProvider\" should \" not leak memory while adding dictionaries with duplicate encoding\" in {\r\n\r\n  val allocator: RootAllocator = new RootAllocator()\r\n\r\n  val vector: ListVector = ListVector.empty(\"vector\", allocator)\r\n  val dictionaryVector1: ListVector = ListVector.empty(\"dict1\", allocator)\r\n  val dictionaryVector2: ListVector = ListVector.empty(\"dict2\", allocator)\r\n\r\n  val writer1: UnionListWriter = vector.getWriter\r\n  writer1.allocate\r\n  writer1.setValueCount(1)\r\n\r\n  val dictWriter1: UnionListWriter = dictionaryVector1.getWriter\r\n  dictWriter1.allocate\r\n  dictWriter1.setValueCount(1)\r\n\r\n  val dictWriter2: UnionListWriter = dictionaryVector2.getWriter\r\n  dictWriter2.allocate\r\n  dictWriter2.setValueCount(1)\r\n\r\n  val dictionary1: Dictionary = new Dictionary(dictionaryVector1, new DictionaryEncoding(1L, false, None.orNull))\r\n  val dictionary2: Dictionary = new Dictionary(dictionaryVector2, new DictionaryEncoding(1L, false, None.orNull))\r\n\r\n  val provider = new DictionaryProvider.MapDictionaryProvider\r\n  provider.put(dictionary1)\r\n  provider.put(dictionary2)\r\n\r\n  vector.clear()\r\n  provider.getDictionaryIds.asScala.map(id => provider.lookup(id).getVector.clear())\r\n\r\n  allocator.getAllocatedMemory shouldBe 0\r\n} \n```",
+        "created_at": "2022-06-28T09:03:13.000Z",
+        "updated_at": "2022-09-29T17:51:23.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-28T12:12:41.627Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16920?focusedCommentId=17559732) by David Li (lidavidm):*\nCC `[~dsusanibara]` could you take a look? \r\n\r\nThat said, from what I see of when dictionary replacement/delta dictionaries in ARROW-7284 (https://github.com/apache/arrow/pull/5945), instead of replacing the dictionary entirely it seems the existing code mutates the dictionary (for both replacement and delta dictionaries) which is why the library itself doesn't run into this. The provider should probably either close the old dictionary or throw an error if the dictionary is replaced instead of mutated."
+        },
+        {
+            "created_at": "2022-07-01T15:09:01.961Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16920?focusedCommentId=17561489) by David Dali Susanibar Arce (dsusanibara):*\nBase on the comment about \"ensure java implementation meets clarified dictionary spec #5945\":\r\n\r\n\u00a0\r\n```java\n\r\nA second dictionary batch for the same ID that is not a \"delta batch\"\r\nin an IPC stream indicates the dictionary should be replaced. \n```\r\n\u00a0\r\n\r\nCurrent behavior is as expected as tested at https://github.com/apache/arrow/blob/f49547b1504d9a514fd847307a2a6715959dc5e1/java/vector/src/test/java/org/apache/arrow/vector/ipc/TestArrowReaderWriter.java#L521:L525.\r\n\r\nPlease let me know if your proposal is to start a discussion to change this behavior?\u00a0\r\n\r\nCC `[~lidavidm]` \u00a0\r\n\r\n\u00a0\r\n```java\n\r\nRootAllocator allocator = new RootAllocator();\r\nListVector vector = ListVector.empty(\"vector\", allocator);\r\nListVector dictionaryVector1 = ListVector.empty(\"dict1\", allocator);\r\nListVector dictionaryVector2 = ListVector.empty(\"dict2\", allocator);\r\nUnionListWriter writer1 = vector.getWriter();\r\nwriter1.allocate();\r\nwriter1.setValueCount(1);\r\nUnionListWriter dictWriter1 = dictionaryVector1.getWriter();\r\ndictWriter1.allocate();\r\ndictWriter1.setValueCount(1);\r\nUnionListWriter dictWriter2 = dictionaryVector2.getWriter();\r\ndictWriter2.allocate();\r\ndictWriter2.setValueCount(1);\r\nDictionary dictionary1 = new Dictionary(dictionaryVector1, new DictionaryEncoding(1L, false, new ArrowType.Int(8, true)));\r\nDictionary dictionary2 = new Dictionary(dictionaryVector2, new DictionaryEncoding(1L, false, new ArrowType.Int(8, true)));\r\nDictionaryProvider.MapDictionaryProvider provider = new DictionaryProvider.MapDictionaryProvider();\r\nprovider.put(dictionary1);\r\nprovider.put(dictionary2);\r\nvector.clear();\r\nfor (Iterator<Long> it = provider.getDictionaryIds().iterator(); it.hasNext(); ) {\r\n    long a = it.next();\r\n    System.out.println(a);\r\n}\r\nSystem.out.println(allocator.getAllocatedMemory()); \n```"
+        },
+        {
+            "created_at": "2022-07-01T15:11:17.954Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16920?focusedCommentId=17561494) by David Li (lidavidm):*\n`[~dsusanibara]` I think this is purely an API design question. Note that the CDataDictionaryProvider has some comments on this too. If the behavior is expected, then it needs to be reflected in the docstring/API contract: dictionaries in a provider should be mutated, not directly replaced. And then we should raise an explicit error for the situation described here."
+        },
+        {
+            "created_at": "2022-07-01T15:45:24.256Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16920?focusedCommentId=17561511) by David Dali Susanibar Arce (dsusanibara):*\nOk `[~lidavidm]` , it is clear now, let me work on that"
+        },
+        {
+            "created_at": "2022-07-01T16:17:04.043Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16920?focusedCommentId=17561521) by David Dali Susanibar Arce (dsusanibara):*\n`[~lidavidm]` \u00a0 What is the link docstring/API contract for Dictionary?\r\n\r\nI am seeing docs/source/format and format but not sure where I could read docstring/API contract for Dictionary at this moment.\r\n\r\nWhat is the link about comments for CDataDictionaryProvider also?\r\n\r\nThank you for your support."
+        },
+        {
+            "created_at": "2022-07-01T16:23:43.168Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16920?focusedCommentId=17561527) by David Li (lidavidm):*\nI am talking about java docstrings. This is not anything to do with the format."
+        },
+        {
+            "created_at": "2022-09-29T17:51:23.519Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16920?focusedCommentId=17611159) by Apache Arrow JIRA Bot (arrowjira):*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned per [project policy](https://arrow.apache.org/docs/dev/developers/bug_reports.html#issue-assignment). Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

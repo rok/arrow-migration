@@ -1,0 +1,76 @@
+{
+    "issue": {
+        "title": "[C#] Large record batch is written with negative buffer length",
+        "body": "***Note**: This issue was originally created as [ARROW-7156](https://issues.apache.org/jira/browse/ARROW-7156). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI have a 30 gig arrow file with 100 batches.\u00a0 the largest batch in the file causes get batch to fail - All other batches load fine. in 14.11 the individual batch errors.. in 15.1.1 the batch crashes R studio when it is used\r\n\r\n**14.1.1**\r\n```java\n\r\n>  rbn <- data_rbfr$get_batch(x)\r\nError in ipc__RecordBatchFileReader_ReadRecordBatch(self, i) : \r\nInvalid: negative malloc size\r\n\u00a0 \n```\r\n**15.1.1**\r\n```java\n\r\nrbn <- data_rbfr$get_batch(x)  works!\r\ndf <- as.data.frame(rbn) - Crashes R Studio! \n```\r\n\u00a0\r\n\r\nUpdate\r\n\r\nI put the data in the batch into a separate file.\u00a0 The file size is over 2 gigs.\u00a0\r\n\r\nUsing 15.1.1, when I try to load this entire file via read_arrow it also fails.\r\n```java\n\r\nar <- arrow::read_arrow(\"e:\\\\temp\\\\file.arrow\") \r\nError in Table__from_RecordBatchFileReader(batch_reader) :\r\n Invalid: negative malloc size\n```\r\n\u00a0",
+        "created_at": "2019-11-13T15:12:01.000Z",
+        "updated_at": "2019-11-24T01:52:13.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C#",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2019-11-13T15:17:09.295Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7156?focusedCommentId=16973431) by Neal Richardson (npr):*\nCould you please provide a code example and output/error message? Even without sharing the file, that would help us understand what you're seeing."
+        },
+        {
+            "created_at": "2019-11-13T15:19:14.124Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7156?focusedCommentId=16973435) by Anthony Abate (abbot):*\nI working on it-... I have to 'downgrade' arrow since 15.x seems even more broken..."
+        },
+        {
+            "created_at": "2019-11-13T15:26:41.866Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7156?focusedCommentId=16973440) by Anthony Abate (abbot):*\nok updated - I don't know the exact size of the batch - but it can't be coincidence that the largest batch in the file fails to load - i suspect there is some size limitation that was hit"
+        },
+        {
+            "created_at": "2019-11-13T16:08:45.366Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7156?focusedCommentId=16973478) by Anthony Abate (abbot):*\nthis is still a problem in 15.1.1 but the failure is different\r\n```java\n\r\nrbn <- data_rbfr$get_batch(x)\u00a0 works!\r\ndf <- as.data.frame(rbn) - Crashes R Studio!\r\n\u00a0 \n```\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-11-13T19:07:14.820Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7156?focusedCommentId=16973607) by Neal Richardson (npr):*\nSearching for the error message, I see https://github.com/apache/arrow/blob/a33bd3acae41f89972c71ad5bd559a3cecf3e197/cpp/src/arrow/memory_pool.cc#L285\r\n\r\nwhich suggests an overflow somewhere.\r\n\r\nCould you please clarify what \"Crashes R Studio!\" means? \r\n\r\nhttps://issues.apache.org/jira/issues/?jql=project%20%3D%20ARROW%20AND%20fixVersion%20%3D%201.0.0%20AND%20component%20%3D%20R%20AND%20text%20~%20%222gb%22 finds 3 known issues about large string columns--could that be involved?"
+        },
+        {
+            "created_at": "2019-11-13T21:24:14.013Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7156?focusedCommentId=16973713) by Anthony Abate (abbot):*\n`[~npr]`- do you know if an individual RecordBatch can exceed 2 gigs (int32 max) ? \r\n\r\nThis might not be an Arrow C++ issue, but another bug in the C# library that I used to generate the file."
+        },
+        {
+            "created_at": "2019-11-13T21:27:35.108Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7156?focusedCommentId=16973714) by Anthony Abate (abbot):*\n`[~npr]`- crashes RStudio means just that - instead of an error message \r\n\r\n\u00a0\r\n\r\n![image-2019-11-13-16-27-30-641.png](https://issues.apache.org/jira/secure/attachment/12985787/image-2019-11-13-16-27-30-641.png)"
+        },
+        {
+            "created_at": "2019-11-13T21:33:55.909Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7156?focusedCommentId=16973717) by Anthony Abate (abbot):*\nFrom Event viewer:\r\n\r\n\u00a0\r\n\r\nFaulting application name: rsession.exe, version: 1.2.1335.0, time stamp: 0x5c9d0154\r\nFaulting module name: arrow.dll, version: 0.0.0.0, time stamp: 0x5dc40022\r\nException code: 0xc0000005\r\nFault offset: 0x00000000003e4c05\r\nFaulting process id: 0x8ec\r\nFaulting application start time: 0x01d59a59ff052a76\r\nFaulting application path: C:\\software\\RStudio\\bin\\rsession.exe\r\nFaulting module path: C:\\Users\\aabate\\Documents\\R\\win-library\\3.6\\arrow\\libs\\x64\\arrow.dll\r\nReport Id: db7e29f8-54ba-40fc-a104-75d3b6f75d0e\r\nFaulting package full name: \r\nFaulting package-relative application ID:"
+        },
+        {
+            "created_at": "2019-11-13T21:42:58.907Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7156?focusedCommentId=16973723) by Anthony Abate (abbot):*\nI uploaded some test files. they deceptively small compressed.. but 2gigs uncompressed\r\n\r\nI have a work around for now - just make sure my batches are less than 2 gigs.\u00a0"
+        },
+        {
+            "created_at": "2019-11-13T22:45:55.409Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7156?focusedCommentId=16973769) by Neal Richardson (npr):*\nhttps://arrow.apache.org/docs/format/Columnar.html doesn't say that RecordBatches are limited to 2 GB, but either way it sounds like there's an issue in the C# writer if it's (presumably) overflowing int32 and reporting negative offsets in the file you're trying to read."
+        },
+        {
+            "created_at": "2019-11-18T17:57:47.126Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7156?focusedCommentId=16976738) by Ben Kietzman (bkietz):*\n`[~abbot]` If it's supsected that the c# writer is emitting invalid record batches, could you share the code which generates your test files?"
+        },
+        {
+            "created_at": "2019-11-18T19:52:00.605Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7156?focusedCommentId=16976841) by Ben Kietzman (bkietz):*\nI can reproduce this failure with\r\n```Java\n\r\narrow-file-to-stream SingleBatch_String_85000_Rows.arrow > /dev/null\r\n```\r\n\r\nI can confirm that the buffer length is negative as we read from flatbuffers https://github.com/apache/arrow/blob/bef9a1c/cpp/src/arrow/ipc/message.cc#L159\r\n\r\nC# writer does seem to be producing an invalid file."
+        },
+        {
+            "created_at": "2019-11-21T16:26:53.740Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7156?focusedCommentId=16979405) by Wes McKinney (wesm):*\nUntil the C# library participates in the integration tests we will continue to be plagued by issues like this. "
+        },
+        {
+            "created_at": "2019-11-22T00:34:10.463Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7156?focusedCommentId=16979727) by Anthony Abate (abbot):*\n`[~wesm]` - I should also point out the C# library on Net Framework is not even stable in its current state due to random crashes related to this: ARROW-7040\u00a0 (I have a local build that fixes is this - so I can make a PR for this one)\r\n\r\nRegarding the integration tests - since C# is not using the C++ libs, how do the integration tests work? (i can volunteer some of my time on this, but I may have a lot of questions)"
+        },
+        {
+            "created_at": "2019-11-24T01:52:13.459Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7156?focusedCommentId=16980945) by Wes McKinney (wesm):*\nhttps://github.com/apache/arrow/tree/master/integration#arrow-integration-testing"
+        }
+    ]
+}

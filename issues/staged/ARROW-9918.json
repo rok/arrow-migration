@@ -1,0 +1,22 @@
+{
+    "issue": {
+        "title": "[Rust] [DataFusion] Favor \"from\" to create arrays for improved performance",
+        "body": "***Note**: This issue was originally created as [ARROW-9918](https://issues.apache.org/jira/browse/ARROW-9918). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n`[~yordan-pavlov]` \u00a0 hinted in https://issues.apache.org/jira/browse/ARROW-8908 that there is a performance hit when using array builders.\r\n\r\nIndeed, I get about 15% speedup by using `From` instead of a builder in DataFusion's math operations, and this number _increases with batch size_, which is detrimental since larger batch sizes leverage SIMD better.\r\n\r\nBelow, `sqrt_X_Y`, X is the log2 of the array's size, Y is log2 of the batch size:\r\n\r\n\u00a0\r\n```java\n\r\nsqrt_20_12              time:   [34.422 ms 34.503 ms 34.584 ms]                       \r\n                        change: [-16.333% -16.055% -15.806%] (p = 0.00 < 0.05)\r\n                        Performance has improved.\r\n\r\nsqrt_22_12              time:   [150.13 ms 150.79 ms 151.42 ms]                       \r\n                        change: [-16.281% -15.488% -14.779%] (p = 0.00 < 0.05)\r\n                        Performance has improved.\r\n\r\nsqrt_22_14              time:   [151.45 ms 151.68 ms 151.90 ms]                       \r\n                        change: [-18.233% -16.919% -15.888%] (p = 0.00 < 0.05)\r\n                        Performance has improved.\r\n```\r\nSee how there is no difference between\u00a0`sqrt_20_12` and `sqrt_22_12` (same batch size), but a measurable difference between `sqrt_22_12` and `sqrt_22_14` (different batch size).\r\n\r\nThis issue proposes that we migrate our datafusion and rust operations from builder-base array construction to a non-builder based, whenever possible.\r\n\r\n\u00a0\r\n\r\nMost code can be easily migrated to use `From` trait, a migration is along the lines of\r\n\r\n\u00a0\r\n```java\n\r\n        let mut builder = Float64Builder::new(array.len());\r\n        for i in 0..array.len() {\r\n            if array.is_null(i) {\r\n                builder.append_null()?;\r\n            } else {\r\n                builder.append_value(array.value(i).$FUNC())?;\r\n            }\r\n        }\r\n        Ok(Arc::new(builder.finish()))\r\n```\r\n\u00a0to\r\n\r\n\u00a0\r\n```java\n\r\n        let result: Float64Array = (0..array.len())\r\n            .map(|i| {\r\n                if array.is_null(i) {\r\n                    None\r\n                } else {\r\n                    Some(array.value(i).$FUNC())\r\n                }\r\n            })\r\n            .collect::<Vec<Option<f64>>>()\r\n            .into();\r\n        Ok(Arc::new(result))\n```\r\nand this is even simpler as we do not need to use an extra API (Builder).\r\n\r\n\u00a0",
+        "created_at": "2020-09-05T07:20:45.000Z",
+        "updated_at": "2020-09-12T20:59:22.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Component: Rust - DataFusion",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-09-12T20:59:21.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-12T20:59:22.011Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9918?focusedCommentId=17194860) by Jorge Leit\u00e3o (jorgecarleitao):*\nWhile this is true, in general we should use buffers for operations, as they increase performance even further."
+        }
+    ]
+}

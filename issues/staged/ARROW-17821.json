@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "Implement zip()",
+        "body": "***Note**: This issue was originally created as [ARROW-17821](https://issues.apache.org/jira/browse/ARROW-17821). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIf column A has list\\(x), column B has list\\(y), column C has list(z), I'd like to be able to create D = zip(A,B,C) where D would be list(\\{ A: x, B: y, C: z}).\r\nx, y, z are types in the example, type of the resulting is D is list(struct).\r\n\r\nOther features to consider:\r\n \\* Zipping list(struct) with list\\(x) or list(struct) with list(struct) should be able to merge\r\n \\* Zipping A,B into a Map with keys from A, values from B",
+        "created_at": "2022-09-22T20:23:49.000Z",
+        "updated_at": "2022-09-23T12:52:39.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-23T10:10:42.232Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17821?focusedCommentId=17608676) by Joris Van den Bossche (jorisvandenbossche):*\nI think giving an actual code example will be helpful to make it clear what you exactly mean.\r\n\r\nCurrently, we already have something like this:\r\n\r\n```Java\n\r\n>>> A = pa.array([[1, 2], [3, 4, 5]])\r\n>>> B = pa.array([[0.1, 0.2, 0.3], [0.4, 0.5]])\r\n>>> pc.make_struct(A, B, field_names=[\"A\", \"B\"]).type\r\nStructType(struct<A: list<item: int64>, B: list<item: double>>)\r\n```\r\n\r\nThis gives a Struct of List fields, but you want to have a List of structs?"
+        },
+        {
+            "created_at": "2022-09-23T11:11:29.878Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17821?focusedCommentId=17608703) by Adam Lippai (alippai):*\nExactly! The main challenge is that I have two columns with equal length lists, practically a sorted 1to1 mapping, but I can't use this info.\r\n\r\n\u00a0\r\n\r\nMy final goal is solving <https://stackoverflow.com/questions/72878590/how-to-query-pyarrow-table-stuct-field>\u00a0in an optimal way, but when playing around I found this handy operation missing"
+        },
+        {
+            "created_at": "2022-09-23T12:20:17.952Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17821?focusedCommentId=17608723) by Joris Van den Bossche (jorisvandenbossche):*\nIt seems that a map type then better suites this case (if the lists are always equal length, and basically are key-value mapping, and a Map type is actually also modelled as a List<Struct>), as you actually also mentioned in the top post. Creating a MapArray from two individual list arrays is possible like the following:\r\n\r\n```Java\n\r\nIn [1]: A = pa.array([['a', 'b'], ['a', 'b', 'c']])\r\n\r\nIn [2]: B = pa.array([[1, 2], [3, 4, 5]])\r\n\r\nIn [3]: M = pa.MapArray.from_arrays(A.offsets, A.values, B.values)\r\n\r\nIn [4]: M.type\r\nOut[4]: MapType(map<string, int64>)\r\n\r\nIn [5]: M\r\nOut[5]: \r\n<pyarrow.lib.MapArray object at 0x7fe7620e7340>\r\n[\r\n  keys:\r\n  [\r\n    \"a\",\r\n    \"b\"\r\n  ]\r\n  values:\r\n  [\r\n    1,\r\n    2\r\n  ],\r\n  keys:\r\n  [\r\n    \"a\",\r\n    \"b\",\r\n    \"c\"\r\n  ]\r\n  values:\r\n  [\r\n    3,\r\n    4,\r\n    5\r\n  ]\r\n]\r\n\r\nIn [6]: M.to_pandas()\r\nOut[6]: \r\n0            [(a, 1), (b, 2)]\r\n1    [(a, 3), (b, 4), (c, 5)]\r\ndtype: object\r\n```\r\n\r\nAnd actually, from this MapArray, it is also quite easy to construct the equivalent List<Struct> array:\r\n\r\n```Java\n\r\nIn [13]: pa.ListArray.from_arrays(M.offsets, M.values).type\r\nOut[13]: ListType(list<item: struct<key: string not null, value: int64>>)\r\n```"
+        },
+        {
+            "created_at": "2022-09-23T12:52:39.712Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17821?focusedCommentId=17608732) by Adam Lippai (alippai):*\nThis is exciting, thank you. I'll give it a try."
+        }
+    ]
+}

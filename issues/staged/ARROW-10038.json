@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[C++] SetCpuThreadPoolCapacity(1) spins up nCPUs threads",
+        "body": "***Note**: This issue was originally created as [ARROW-10038](https://issues.apache.org/jira/browse/ARROW-10038). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen I call `arrow::SetCpuThreadPoolCapacity(1);`, Arrow does this:\r\n\r\n1. Spins up a singleton `ThreadPool` with _the default thread count_;\r\n2. Sets the number of threads on that `ThreadPool` to 1 \u2013 killing the extra threads.\r\n\r\nOn my Intel system, I'm forced to spin up four threads to set the CPU thread-pool capacity to 1. This goes against the spirit of the API method \u2013 or at least, my understanding of it (and my experience with other thread pools).\r\n\r\nMy workaround, for calling code: instead of calling `arrow::SetCpuThreadPoolCapacity(1)`, call `setenv(\"OMP_NUM_THREADS\", \"1\", 1)`.\r\n\r\nBrainstorming, here are some ideas for Arrow's global thread pool that would stop launching `>limit` threads to set the limit:\r\n\r\n- `cpu_thread_pool_capacity` could be a global variable, not an attribute on the global `ThreadPool`. API users would be expected to set the thread-pool capacity _before_ creating the thread pool. (They're probably doing this anyway.)\n- `SetCpuThreadPoolCapacity()` could call `setenv(\"OMP_NUM_THREADS\", ...)`\n- `ThreadPool` could create threads on-demand instead of in the ctor. An unused `ThreadPool` would launch zero threads \u2013 resolving ARROW-10033 as a side-effect",
+        "created_at": "2020-09-18T14:04:16.000Z",
+        "updated_at": "2021-08-04T10:04:04.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-01-26T18:33:52.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-18T14:27:46.357Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10038?focusedCommentId=17198372) by Antoine Pitrou (apitrou):*\nWhile it may \"go against the spirit\", is there any concrete problem with it?\r\n\r\n> API users would be expected to set the thread-pool capacity before creating the thread pool.\r\n\r\nThat's undesirable. The global thread pool can be created implicitly, and users must be able to change the thread count afterwards.\r\n\r\n> ThreadPool could create threads on-demand instead of in the ctor. An unused ThreadPool would launch zero threads \u2013 resolving ARROW-10033 as a side-effect\r\n\r\nThat's a possibiliy indeed."
+        },
+        {
+            "created_at": "2020-09-18T18:27:34.164Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10038?focusedCommentId=17198490) by Adam Hooper (adamhooper):*\n> While it may \"go against the spirit\", is there any concrete problem with it?\r\n\r\nNot that I can find. I filed this bug before I realized that I can write code that avoids using the global thread pool entirely.\r\n\r\nMy main beef is confidence \u2013 as an application author, I lose confidence `libarrow.a` will behave as I instruct it.\r\n\r\nMy use case, by the way: I create small executables that manipulate Arrow/Parquet files and then exit. Most files are small (0-100MB) and already in RAM (because another program just wrote them). So I expect \u2013 though I haven't benchmarked \u2013 that if I start my programs 100,000 times, pthreads would take a noticeable chunk of time.\r\n\r\nBut again: I can avoid the global thread pool, so this doesn't affect me.\r\n\r\n> > API users would be expected to set the thread-pool capacity before creating the thread pool.\r\n\r\n> That's undesirable. The global thread pool can be created implicitly, and users must be able to change the thread count afterwards.\r\n\r\nAs a library user, this isn't a feature I would expect or feel I deserve.\r\n\r\nGo uses `GOMAXPROCS` (can't be resized); Openblas uses `OPENBLAS_NUM_THREADS` (can't be resized); OpenMP uses `OMP_NUM_THREADS`; Python/Java have no global thread pool (and Python ThreadPoolExecutor can't be resized); Haskell uses `+RTS Ncores` cmdline argument.... I spent half an hour searching just to find an example that _does_ let users change the a global thread pool's thread count: C# CLR.\r\n\r\n(OpenMP actually uses my second idea \u2013 `omp_set_num_threads()` calls `setenv()`.)"
+        },
+        {
+            "created_at": "2020-09-18T19:49:09.871Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10038?focusedCommentId=17198507) by Antoine Pitrou (apitrou):*\n> As a library user, this isn't a feature I would expect or feel I deserve.\r\n\r\nPerhaps, but you're not the only person using Arrow."
+        },
+        {
+            "created_at": "2020-09-22T13:32:25.562Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10038?focusedCommentId=17200086) by Antoine Pitrou (apitrou):*\nI've submitted a PR for the (IMHO) most elegant solution, aka \"create threads on-demand instead of in the ctor\"."
+        },
+        {
+            "created_at": "2021-01-26T18:33:52.313Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10038?focusedCommentId=17272318) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 8240\n<https://github.com/apache/arrow/pull/8240>"
+        }
+    ]
+}

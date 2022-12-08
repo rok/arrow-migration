@@ -1,0 +1,60 @@
+{
+    "issue": {
+        "title": "[C++][R][Python] Support reading from Delta Lake tables",
+        "body": "***Note**: This issue was originally created as [ARROW-14730](https://issues.apache.org/jira/browse/ARROW-14730). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n[Delta Lake](https://delta.io/) is a parquet table format that supports ACID transactions. It's popularized by Databricks, which uses it as the default table format in their platform. Previously, it's only been readable from Spark, but now there is an effort in [delta-rs](https://github.com/delta-io/delta-rs) to make it accessible from elsewhere. There is already some integration with DataFusion (see: https://github.com/apache/arrow-datafusion/issues/525).\r\n\r\nThere does already exist [a method to read Delta Lake tables into Arrow tables in Python](https://delta-io.github.io/delta-rs/python/api_reference.html#deltalake.table.DeltaTable.to_pyarrow_table) in the delta-rs Python bindings. This includes filtering by partitions.\r\n\r\nIs there a good way we could integrate this functionality with Arrow C++ Dataset and expose that in Python and R? Would that be something that should be implemented in Arrow libraries or in delta-rs?",
+        "created_at": "2021-11-16T21:37:21.000Z",
+        "updated_at": "2022-01-07T23:41:11.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-17T08:59:31.549Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14730?focusedCommentId=17445020) by Antoine Pitrou (apitrou):*\nIs there a Delta Lake implementation in C+? I think that would be a prerequisite for adding Delta Lake support to Arrow C+."
+        },
+        {
+            "created_at": "2021-11-18T04:56:49.358Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14730?focusedCommentId=17445630) by Will Jones (willjones127):*\nThere is not currently. If it's possible to add C++ bindings to delta-rs Rust implementation, that might be preferable. I see [some indications that it is possible](https://hsivonen.fi/modern-cpp-in-rust/), but certainly isn't common. I'm not sure how quickly the Delta Lake format is changing these days, but it would be nice not to be responsible for keeping the implementation up-to-date with it.\r\n\r\nThe logic that delta-rs implements simply reads a series of transaction files to determine which parquet files are part of the current table (or some previous version). From that's it's simply a matter of reading parquet files. In fact you can see this in the [implementation of `to_pyarrow_dataset()`](https://github.com/delta-io/delta-rs/blob/main/python/deltalake/table.py#L251).\r\n\r\nSo I think ideally C++ bindings are added in delta-rs, then Delta Lake dataset is implemented in Arrow C++, and bindings exposed in R and Python."
+        },
+        {
+            "created_at": "2021-11-18T05:00:07.367Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14730?focusedCommentId=17445632) by Will Jones (willjones127):*\n`[~Dandandan]`, `[~houqp]`, [~nevi_me] Do any of you three have thoughts on that approach?"
+        },
+        {
+            "created_at": "2021-11-18T08:28:28.897Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14730?focusedCommentId=17445726) by Antoine Pitrou (apitrou):*\nAlso cc `[~kszucs]`"
+        },
+        {
+            "created_at": "2021-11-18T17:08:39.488Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14730?focusedCommentId=17446049) by QP Hou (houqp):*\n> From that's it's simply a matter of reading parquet files. In fact you can see this in the implementation of to_pyarrow_dataset().\r\n\r\nThe current implementation is actually not complete because we are not populating partition columns based off delta table metadata. In the long run, we plan to change the Rust core to return enriched arrow record batches instead. The real hard part is writing to tables backed by S3.\r\n\r\nFor these complex table formats like delta, iceberg and hudi, I think it's better to keep them in a separate repos. For example, deltalake itself is designed for spark, but managed in its own repo outside of the spark code base.\r\n\r\nI will be more than happy to accept and help with PRs to add the C++ binding in delta-rs ;)"
+        },
+        {
+            "created_at": "2021-12-12T21:34:52.430Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14730?focusedCommentId=17458047) by Will Jones (willjones127):*\nI've thought about this a little more and I think it might make more sense to do the Dataset implementation of Delta Lake in C++ and not wrap delta-rs. From a maintenance perspective, we already have expertise maintaining the code, tests, and CI associated with Python / R / C+; trying to replicate that in delta-rs might prove difficult. And from a code perspective, a Delta Lake reader requires Filesystem (local, S3) and format reader (Parquet, JSON) implementations, and so if the PyArrow and R arrow implementations used delta-rs they would inevitably contain a Rust and C+ implementations of that with potentially different behaviors. I don't think we can avoid that.\r\n\r\nThat said, it still might make sense to have the code live in delta-io GitHub organization. AFAIK we don't yet have dataset implementations that live outside of the Arrow repo, but that's something we'd eventually like to support, right?"
+        },
+        {
+            "created_at": "2021-12-13T00:00:41.818Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14730?focusedCommentId=17458096) by QP Hou (houqp):*\nI think the main question we need to answer is whether the C++ core is OK with pulling in rust dependencies in the long run, not just delta-rs. Personally I am biased on this and think it's something worth investing in and potentially even rewrite some of the C++ core in Rust in the future because it's more productive language and produces higher quality softwares. The fact that you will never have to worry about data race or null pointers is a very liberating thing for a system programmer. I expect more data engineering projects to be built with Rust in the not so near future. If the answer to the question is yes, then this could be a good catalyst to setup that infrastructure. If the answer is no we will never take in any Rust dependency, then we will have to write something from scratch in C++.\r\n\r\nAs for different filesystem and format reader, a bit of extra work is required to make them pluggable in the Rust core. If we only want to reuse the delta parsing logic.\r\n\r\n> That said, it still might make sense to have the code live in delta-io GitHub organization. AFAIK we don't yet have dataset implementations that live outside of the Arrow repo, but that's something we'd eventually like to support, right?\r\n\r\nI agree with this, I am happy to connect you with the folks at delta-io to get that repo created if a full C++ rewrite is the route we decided to take.\r\n"
+        },
+        {
+            "created_at": "2021-12-13T00:48:21.268Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14730?focusedCommentId=17458110) by Will Jones (willjones127):*\nI think having Rust dependency would be fine in C++. I think what I am getting hung up on is I was thinking the dependencies would look like:\r\n\r\nRust -> C++ -> Python\r\n\r\nRust -> C++ -> R\u00a0\r\n\r\nBecause datasets are defined in C++ and exposed in Python and R from those bindings. I felt like that wouldn't be super maintainable in delta-rs.\u00a0\r\n\r\nIf we could instead implement the dataset implementation in Rust, and then expose that individually in C++, R, and Python then keeping that in delta-rs makes more sense. So the dependencies would be just:\r\n\r\nRust -> Python, Rust -> R, Rust -> C++\r\n\r\nIf we can structure it like that, and still support the full range of dataset functionality, then I think I am happy.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-12-15T08:08:10.753Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14730?focusedCommentId=17459717) by QP Hou (houqp):*\nYeah, I think the best way to share code between rust and c++ would be moving all the IO agnostics state maintenance code into the table state module managed at: \u00a0<https://github.com/delta-io/delta-rs/blob/main/rust/src/table_state.rs.> Then the C++ code and Rust code will each manage its own IO and parsing separately and feed parsed struct into the state maintenance core.\r\n\r\nIf we implement the dataset API in rust, it means all the IO and parquet parsing logic will need to be handled by native rust code as well? This would lead to your previous concern around inconsistent behaviors right?\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-01-05T19:09:03.227Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14730?focusedCommentId=17469492) by Will Jones (willjones127):*\nI spent some time with the delta-rs Python library and made [a PR to improve the dataset factory there](https://github.com/delta-io/delta-rs/pull/525). The API we expose actually made this quite easy to build. I think it should be easy to create a C++ and R bindings in delta-rs.\r\n\r\nThe one catch is that, as currently implemented, the delta log is read using the Rust Arrow parquet and json readers, while the table files are read through the C++ ones. I don't foresee that being a problem for Python or R users, though I could see C++ users objecting to that complexity. If we wanted to, we could do what `[~houqp]` suggests above and separate out IO so that the C++ implementation uses it's own IO code.\r\n\r\nIMO I think we have a decent path forward within the delta-rs repo. If there are no objections, I can create follow-up issues in that repo and close this issue."
+        },
+        {
+            "created_at": "2022-01-07T23:41:11.711Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14730?focusedCommentId=17470951) by QP Hou (houqp):*\nSounds good to me Will. Please feel free to ping me if you need anything."
+        }
+    ]
+}

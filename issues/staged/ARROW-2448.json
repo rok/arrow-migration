@@ -1,0 +1,34 @@
+{
+    "issue": {
+        "title": "Segfault when plasma client goes out of scope before buffer.",
+        "body": "***Note**: This issue was originally created as [ARROW-2448](https://issues.apache.org/jira/browse/ARROW-2448). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe following causes a segfault.\r\n\r\n\u00a0\r\n\r\nFirst start a plasma store with\r\n```java\n\r\nplasma_store -s /tmp/store -m 10000000000\n```\r\nThen run the following in Python.\r\n```Java\n\r\nimport pyarrow.plasma as plasma\r\nimport numpy as np\r\n\r\nclient = plasma.connect('/tmp/store', '', 0)\r\n\r\nobject_id = client.put(np.zeros(3))\r\n\r\nbuf = client.get(object_id)\r\n\r\ndel client\r\n\r\ndel buf  # This segfaults.\n```\r\nThe backtrace is\u00a0\r\n```java\n\r\n(lldb) bt\r\n\r\n* thread #1, queue = 'com.apple.main-thread', stop reason = EXC_BAD_ACCESS (code=1, address=0xfffffffffffffffc)\r\n\r\n\u00a0 * frame #0: 0x00000001056deaee libplasma.0.dylib`plasma::PlasmaClient::Release(plasma::UniqueID const&) + 142\r\n\r\n\u00a0 \u00a0 frame #1: 0x00000001056de9e9 libplasma.0.dylib`plasma::PlasmaBuffer::~PlasmaBuffer() + 41\r\n\r\n\u00a0 \u00a0 frame #2: 0x00000001056dec9f libplasma.0.dylib`arrow::Buffer::~Buffer() + 63\r\n\r\n\u00a0 \u00a0 frame #3: 0x0000000106206661 lib.cpython-36m-darwin.so`std::__1::shared_ptr<arrow::Buffer>::~shared_ptr() [inlined] std::__1::__shared_count::__release_shared(this=0x00000001019b7d20) at memory:3444\r\n\r\n\u00a0 \u00a0 frame #4: 0x0000000106206617 lib.cpython-36m-darwin.so`std::__1::shared_ptr<arrow::Buffer>::~shared_ptr() [inlined] std::__1::__shared_weak_count::__release_shared(this=0x00000001019b7d20) at memory:3486\r\n\r\n\u00a0 \u00a0 frame #5: 0x0000000106206617 lib.cpython-36m-darwin.so`std::__1::shared_ptr<arrow::Buffer>::~shared_ptr(this=0x0000000100791780) at memory:4412\r\n\r\n\u00a0 \u00a0 frame #6: 0x0000000106002b35 lib.cpython-36m-darwin.so`std::__1::shared_ptr<arrow::Buffer>::~shared_ptr(this=0x0000000100791780) at memory:4410\r\n\r\n\u00a0 \u00a0 frame #7: 0x00000001061052c5 lib.cpython-36m-darwin.so`void __Pyx_call_destructor<std::__1::shared_ptr<arrow::Buffer> >(x=std::__1::shared_ptr<arrow::Buffer>::element_type @ 0x00000001019b7d38 strong=0 weak=1) at lib.cxx:486\r\n\r\n\u00a0 \u00a0 frame #8: 0x0000000106104f93 lib.cpython-36m-darwin.so`__pyx_tp_dealloc_7pyarrow_3lib_Buffer(o=0x0000000100791768) at lib.cxx:107704\r\n\r\n\u00a0 \u00a0 frame #9: 0x00000001069fcd54 multiarray.cpython-36m-darwin.so`array_dealloc + 292\r\n\r\n\u00a0 \u00a0 frame #10: 0x00000001000e8daf libpython3.6m.dylib`_PyDict_DelItem_KnownHash + 463\r\n\r\n\u00a0 \u00a0 frame #11: 0x0000000100171899 libpython3.6m.dylib`_PyEval_EvalFrameDefault + 13321\r\n\r\n\u00a0 \u00a0 frame #12: 0x00000001001791ef libpython3.6m.dylib`_PyEval_EvalCodeWithName + 2447\r\n\r\n\u00a0 \u00a0 frame #13: 0x000000010016e3d4 libpython3.6m.dylib`PyEval_EvalCode + 100\r\n\r\n\u00a0 \u00a0 frame #14: 0x00000001001a3bd6 libpython3.6m.dylib`PyRun_InteractiveOneObject + 582\r\n\r\n\u00a0 \u00a0 frame #15: 0x00000001001a350e libpython3.6m.dylib`PyRun_InteractiveLoopFlags + 222\r\n\r\n\u00a0 \u00a0 frame #16: 0x00000001001a33fc libpython3.6m.dylib`PyRun_AnyFileExFlags + 60\r\n\r\n\u00a0 \u00a0 frame #17: 0x00000001001bc835 libpython3.6m.dylib`Py_Main + 3829\r\n\r\n\u00a0 \u00a0 frame #18: 0x0000000100000df8 python`main + 232\r\n\r\n\u00a0 \u00a0 frame #19: 0x00007fff6cd80015 libdyld.dylib`start + 1\r\n\r\n\u00a0 \u00a0 frame #20: 0x00007fff6cd80015 libdyld.dylib`start + 1\n```\r\nBasically, the issue is that when the buffer goes out of scope, it calls `Release` on the plasma client, but the client has already been deallocated.",
+        "created_at": "2018-04-11T21:02:21.000Z",
+        "updated_at": "2018-07-27T15:53:39.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++ - Plasma",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2018-04-25T18:41:17.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-04-11T21:14:48.803Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2448?focusedCommentId=16434580) by Antoine Pitrou (apitrou):*\nYes. The issue is that we don't control `PlasmaClient` lifetime (the user allocates it however they want, as the constructor is public). And there's no notion of an invalidated buffer.\r\n\r\nAlso, I don't understand why the buffer still has valid contents after the client is destroyed."
+        },
+        {
+            "created_at": "2018-04-13T01:53:41.564Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2448?focusedCommentId=16436675) by Robert Nishihara (robertnishihara):*\nWe may need to wrap the `PlasmaClient` in a wrapper class, which the user allocates, and which has a shared pointer to the actual `PlasmaClient`. Similarly, each `PlasmaBuffer` needs a shared pointer to the `PlasmaClient`. What do you think about something like that?\r\n\r\nI think something like this could be made to work.\r\n\r\nNot sure if I understand your question correctly, but the buffer\u00a0can still\u00a0point to a valid region of memory after the client is destroyed (since the store is still running)."
+        },
+        {
+            "created_at": "2018-04-13T09:17:32.808Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2448?focusedCommentId=16437057) by Antoine Pitrou (apitrou):*\n> Not sure if I understand your question correctly, but the buffer can still point to a valid region of memory after the client is destroyed (since the store is still running).\r\n\r\nIn that case, it's impossible to release that buffer's memory, right? Even when the client process dies, as long as the store is still running, the memory would still be reserved...\r\n\r\n> Similarly, each PlasmaBuffer needs a shared pointer to the PlasmaClient. What do you think about something like that?\r\n\r\nThat would probably work to fix the crash, indeed. Something like a \"pimpl\" pattern?"
+        },
+        {
+            "created_at": "2018-04-25T18:41:17.046Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2448?focusedCommentId=16452859) by Philipp Moritz (pcmoritz):*\nIssue resolved by pull request 1939\n<https://github.com/apache/arrow/pull/1939>"
+        }
+    ]
+}

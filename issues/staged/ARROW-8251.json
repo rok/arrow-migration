@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Python] pandas.ExtensionDtype does not survive round trip with write_to_dataset",
+        "body": "***Note**: This issue was originally created as [ARROW-8251](https://issues.apache.org/jira/browse/ARROW-8251). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nwrite_to_dataset with pandas fields using pandas.ExtensionDtype nullable int or string produce parquet file which when read back in has different dtypes than original df\r\n```java\n\r\nimport pandas as pd \r\nimport pyarrow as pa \r\nimport pyarrow.parquet as pq \r\nparquet_dataset = 'partquet_dataset/' \r\nparquet_file = 'test.parquet' \r\n\r\ndf = pd.DataFrame([{'str_col':'abc','int_col':1,'part':1}, {'str_col':np.nan,'int_col':np.nan,'part':1}]) \r\ndf['str_col'] = df['str_col'].astype(pd.StringDtype()) \r\ndf['int_col'] = df['int_col'].astype(pd.Int64Dtype()) \r\n\r\ntable = pa.Table.from_pandas(df) \r\n\r\npq.write_to_dataset(table, root_path=parquet_dataset, partition_cols=['part'] ) pq.write_table(table, where=parquet_file) \n```\r\nwrite_table handles schema correctly, pandas.ExtensionDtype survive round trip:\r\n```java\n\r\npq.read_table(parquet_file).to_pandas().dtypes \r\nstr_col string \r\nint_col Int64 \r\npart int64 \n```\r\nHowever, write_to_dataset reverts back to object/float:\r\n```java\n\r\npq.read_table(parquet_dataset).to_pandas().dtypes \r\nstr_col object \r\nint_col float64 \r\npart category \n```\r\nI have also tried writing common metadata at the top-level directory of a partitioned dataset and then passing metadata to read_table, but results are the same as without metadata\r\n```java\n\r\npq.write_metadata(table.schema, parquet_dataset+'_common_metadata', version='2.0') meta = pq.read_metadata(parquet_dataset+'_common_metadata') pq.read_table(parquet_dataset,metadata=meta).to_pandas().dtypes \n```\r\nThis also affects pandas to_parquet when partition_cols is specified:\r\n```java\n\r\ndf.to_parquet(path = parquet_dataset, partition_cols=['part']) pd.read_parquet(parquet_dataset).dtypes \r\nstr_col object \r\nint_col float64 \r\npart category \n```\r\n\u00a0",
+        "created_at": "2020-03-28T10:19:17.000Z",
+        "updated_at": "2020-07-08T08:17:44.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-04-29T02:43:04.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-04-01T18:42:13.544Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8251?focusedCommentId=17073080) by Joris Van den Bossche (jorisvandenbossche):*\n[~Ged.Steponavicius] Thanks for the report!\r\n\r\nI think this might be due to the `ignore_metadata=True` here: https://github.com/apache/arrow/blob/38a413418a478920d9b1c8131f2daeee27e6b12c/python/pyarrow/parquet.py#L1442, when converting the table back to a dataframe to use pandas' groupby. \r\nI am not fully sure what the original reason was to have that ignore_metadata, and there also doesn't seem to be a test failing if I remove that.\r\n\r\n(in general, the write_to_dataset is not very efficient right now, because it converts back and forth to pandas)"
+        },
+        {
+            "created_at": "2020-04-01T18:44:23.975Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8251?focusedCommentId=17073084) by Joris Van den Bossche (jorisvandenbossche):*\nARROW-7782 might be related"
+        },
+        {
+            "created_at": "2020-04-29T02:43:04.288Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8251?focusedCommentId=17095007) by Francois Saint-Jacques (fsaintjacques):*\nIssue resolved by pull request 7054\n<https://github.com/apache/arrow/pull/7054>"
+        }
+    ]
+}

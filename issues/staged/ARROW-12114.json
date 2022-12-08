@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[C++] Dataset to table filter expression API change",
+        "body": "***Note**: This issue was originally created as [ARROW-12114](https://issues.apache.org/jira/browse/ARROW-12114). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nBen:\r\n\r\nCan you please confirm that we're aware and okay with the following API change? Thanks!\r\n\r\n```Java\n\r\nimport pyarrow.dataset\r\n\r\npath_prefix = \"ursa-labs-taxi-data-repartitioned-10k/\"\r\npaths = [\r\n    f\"ursa-labs-taxi-data-repartitioned-10k/{year}/{month:02}/{part:04}/data.parquet\"\r\n    for year in range(2009, 2020)\r\n    for month in range(1, 13)\r\n    for part in range(101)\r\n    if not (year == 2019 and month > 6)  # Data ends in 2019/06\r\n    and not (year == 2010 and month == 3)  # Data is missing in 2010/03\r\n]\r\npartitioning = pyarrow.dataset.DirectoryPartitioning.discover(\r\n    field_names=[\"year\", \"month\", \"part\"],\r\n    infer_dictionary=True,\r\n)\r\ns3 = pyarrow.fs.S3FileSystem(region=\"us-east-2\")\r\ndataset = pyarrow.dataset.dataset(\r\n    paths,\r\n    format=\"parquet\",\r\n    filesystem=s3,\r\n    partitioning=partitioning,\r\n    partition_base_dir=path_prefix,\r\n)\r\nyear = pyarrow.dataset.field(\"year\")\r\nmonth = pyarrow.dataset.field(\"month\")\r\npart = pyarrow.dataset.field(\"part\")\r\nfilter_expr = (year == \"2011\") & (month == 1) & (part == 2)\r\ndataset.to_table(filter=filter_expr)\r\n```\r\n\r\nIn arrow 3.0, the above code executes without error.\r\n\r\nOn head[1], `year == \"2011\"`, which should be `year == 2011` (no quotes), raises the following exception.\r\n\r\n```Java\n\r\npyarrow.lib.ArrowNotImplementedError: Function equal has no kernel matching input types (array[int32], scalar[string])\r\n```\r\n\r\nThis API change appears to have been introduced in ARROW-8919. Perhaps it was intentional, just figured we should double check. Thanks again!\r\n\r\n[1] `51c97799b8302466b9dfbb657dc23fd3f0cd8e61`",
+        "created_at": "2021-03-27T00:37:30.000Z",
+        "updated_at": "2021-04-16T15:05:01.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-04-16T15:05:01.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-03-29T15:18:42.054Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12114?focusedCommentId=17310724) by Joris Van den Bossche (jorisvandenbossche):*\nThanks for the report `[~dianaclarke]` ! \r\nI _think_ we are fine with this change (although in theory it would be nice to first deprecate this. But since this happens on the C++ side, that's probably not so clean to do). There was a similar note about this on the PR itself: https://github.com/apache/arrow/pull/9294#discussion_r563875620 (where a boolean needed to be changed to a string to match the types)."
+        },
+        {
+            "created_at": "2021-04-04T23:26:28.736Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12114?focusedCommentId=17314642) by Wes McKinney (wesm):*\nThe exception looks correct to me. It wouldn't be correct here to implicitly cast string to integer. "
+        },
+        {
+            "created_at": "2021-04-05T17:30:24.520Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12114?focusedCommentId=17314989) by Jonathan Keane (jonkeane):*\nOk, I've dug a bit more and the arrowbench error is the opposite. We wrote the query with a numeric and the column is actually a string (it contains the code + values are below).\r\n\r\nI agree that implicitly casting a string to integer (or the reverse) is surprising, it is something that R does and I think some of our R users would expect this to continue working like it has so far. IIRC there was an R hack for autocasting that we could re-implement for things like this or we could improve the error message so it's a bit clearer what's going on there.  \r\n\r\nThe r query against the nyc taxi dataset:\r\n```Java\n\r\n> result <- ds %>%\r\n+   filter(payment_type == 3) %>%\r\n+   select(year, month, passenger_count) %>%\r\n+   group_by(year, month) %>%\r\n+   collect() %>%\r\n+   summarize(\r\n+     total_passengers = sum(passenger_count, na.rm = TRUE),\r\n+     n = n()\r\n+   )\r\nError: NotImplemented: Function equal has no kernel matching input types (array[string], scalar[double])\r\n```\r\n\r\nValues of the payment type column\r\n```Java\n\r\n[1] \"CASH\"      \"Credit\"    \"CREDIT\"    \"Cash\"      \"No Charge\" \"Dispute\"   \"CAS\"       \"Cre\"      \r\n [9] \"CRE\"       \"Cas\"       \"No \"       \"Dis\"       \"NA \"       \"CRD\"       \"CSH\"       \"NOC\"      \r\n[17] \"DIS\"       \"UNK\"       \"1\"         \"2\"         \"3\"         \"4\"         \"5\"   \r\n```"
+        },
+        {
+            "created_at": "2021-04-05T17:31:01.193Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12114?focusedCommentId=17314992) by Jonathan Keane (jonkeane):*\nFTR\r\n\r\n```Java\n\r\n> 3 == \"3\"\r\n[1] TRUE\r\n```"
+        },
+        {
+            "created_at": "2021-04-05T17:37:19.218Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12114?focusedCommentId=17314996) by Neal Richardson (npr):*\nIt wasn't an R hack here, it was that previously in the C++ dataset expression code, Scalars were always implicitly cast to the type of the other arg (an Array). Now we cast one or the other (or both) according to promotion rules."
+        },
+        {
+            "created_at": "2021-04-15T12:36:49.621Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12114?focusedCommentId=17322147) by Joris Van den Bossche (jorisvandenbossche):*\nSo have we decided that we are OK with changing this behaviour? Or is there a way to again enable it just in R (since in R it would be more expected to allow string/numeric comparison?\r\n\r\n(I think we should either fix it for 4.0, or close the issue)"
+        },
+        {
+            "created_at": "2021-04-15T16:53:17.051Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12114?focusedCommentId=17322316) by Ben Kietzman (bkietz):*\nAccepting an implicit cast from string to other types is undesirable behavior, I think it's best to keep the current behavior and close this issue."
+        },
+        {
+            "created_at": "2021-04-15T17:38:58.169Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12114?focusedCommentId=17322352) by Neal Richardson (npr):*\nI'd vote for closing this. If a user reports this as expected behavior (based on something other than our past behavior), we can reevaluate."
+        },
+        {
+            "created_at": "2021-04-16T15:04:45.433Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12114?focusedCommentId=17323884) by Ben Kietzman (bkietz):*\nI'll close this for now, then. Thanks all"
+        }
+    ]
+}

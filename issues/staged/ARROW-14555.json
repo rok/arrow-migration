@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[R] install.packages(\"arrow\") fails on docker image rocker/r-ver:4.0.2",
+        "body": "***Note**: This issue was originally created as [ARROW-14555](https://issues.apache.org/jira/browse/ARROW-14555). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSince last week we cannot build our R environment because the the arrow lib fails on\r\n```java\n\r\ninstall.packages(\"arrow\")\n```\r\nWe're using rocker/r-vers:4.0.2 as our base image. It seems that it's possible to install arrow on Windows an Mac, but not on Linux.\r\n\r\nThe effected part of the Dockerfile is the following:\r\n```java\n\r\nFROM rocker/r-ver:4.0.2 AS builder\r\nRUN apt-get update && apt-get install -y \\\r\n    git-core \\\r\n    libcurl4-openssl-dev \\\r\n    libgit2-dev \\\r\n    libglpk-dev \\\r\n    libgmp-dev \\\r\n    libicu-dev \\\r\n    libssh2-1-dev \\\r\n    libssl-dev \\\r\n    libxml2-dev \\\r\n    make pandoc pandoc-citeproc zlib1g-dev && rm -rf /var/lib/apt/lists/*\r\n\r\nRUN echo \"options(repos = c(CRAN = 'https://cran.rstudio.com/'), download.file.method = 'libcurl')\" >> /usr/local/lib/R/etc/Rprofile.site\r\nRUN R -e 'install.packages(\"remotes\")'\r\nRUN R -e 'remotes::install_github(\"r-lib/remotes\", ref = \"97bbf81\")'\r\n\r\n# copy the setup script, run it, then delete it\r\nCOPY dependencies/setup.R /\r\nRUN Rscript setup.R && rm setup.R\r\n```\r\nthe dependencies/setup.R script contains\u00a0\r\n```java\n\r\ninstall.packages(\r\n  c(\r\n    \"arrow\"\r\n  ),\r\n  quiet = FALSE,\r\n  verbose = TRUE\r\n)\r\n\r\narrow::install_arrow()\r\n```\r\nI attached the complete log output, but the interesting part ist the following:\r\n```java\n\r\n#12 55.88 * installing *source* package \u2018arrow\u2019 ...\r\n#12 55.96 ** package \u2018arrow\u2019 successfully unpacked and MD5 sums checked\r\n#12 55.96 ** using staged installation\r\n#12 56.46 *** Found local C++ source: 'tools/cpp'\r\n#12 56.46 *** Building C++ libraries\r\n#12 56.53 **** cmake\r\n#12 62.22 **** arrow  \r\n#12 663.6 **** Error building Arrow C++. Re-run with ARROW_R_DEV=true for debug information. \r\n#12 665.3 ------------------------- NOTE ---------------------------\r\n#12 665.3 There was an issue preparing the Arrow C++ libraries.\r\n#12 665.3 See https://arrow.apache.org/docs/r/articles/install.html\r\n#12 665.3 ---------------------------------------------------------\r\n#12 665.5 ERROR: configuration failed for package \u2018arrow\u2019\r\n#12 665.5 * removing \u2018/usr/local/lib/R/site-library/arrow\u2019\r\n#12 666.0 \r\n#12 666.0 The downloaded source packages are in\r\n#12 666.0       \u2018/tmp/RtmpDWxSqL/downloaded_packages\u2019\r\n#12 666.0 Warning message:\r\n#12 666.0 In install.packages(c(\"arrow\"), quiet = FALSE, verbose = TRUE) :\r\n#12 666.0   installation of package \u2018arrow\u2019 had non-zero exit status\r\n#12 666.1 Error in loadNamespace(name) : there is no package called \u2018arrow\u2019\r\n#12 666.1 Calls: :: ... loadNamespace -> withRestarts -> withOneRestart -> doWithOneRestart\r\n#12 666.1 Execution halted\r\n------\r\nexecutor failed running [/bin/sh -c Rscript setup.R && rm setup.R]: exit code: 1\r\n```\r\n\u00a0",
+        "created_at": "2021-11-02T14:00:21.000Z",
+        "updated_at": "2021-11-09T17:16:24.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-11-09T17:16:24.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-02T14:14:00.803Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14555?focusedCommentId=17437380) by Jonathan Keane (jonkeane):*\nThank you for the report. Do you have install log output after enabling a more verbose build with the environment variable `ARROW_R_DEV=true` set? That contains much more info about what's going wrong and is helpful in debugging things like this."
+        },
+        {
+            "created_at": "2021-11-02T14:29:25.668Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14555?focusedCommentId=17437387) by Daniel Teske (dnltsk):*\nYes, with\u00a0ARROW_R_DEV=true the output is the following:\r\n```java\n\r\n#12 666.4 g++: fatal error: Killed signal terminated program cc1plus\r\n#12 666.4 compilation terminated.\r\n#12 666.5 make[2]: *** [src/arrow/CMakeFiles/arrow_objlib.dir/build.make:108: src/arrow/CMakeFiles/arrow_objlib.dir/Unity/unity_19_cxx.cxx.o] Error 1\r\n#12 666.5 make[2]: *** Waiting for unfinished jobs....\r\n#12 688.1 make[1]: *** [CMakeFiles/Makefile2:903: src/arrow/CMakeFiles/arrow_objlib.dir/all] Error 2\r\n#12 688.1 make: *** [Makefile:160: all] Error 2\r\n```\r\nThe complete log is attached as complete-arrow_r_dev-output.log"
+        },
+        {
+            "created_at": "2021-11-02T14:34:13.748Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14555?focusedCommentId=17437391) by Jonathan Keane (jonkeane):*\nThanks for that info, that's super helpful. What resources does your container have access to? That error looks like the compilation process is being killed before it is complete and looks like errors I've seen when the container runs out of memory while compiling. "
+        },
+        {
+            "created_at": "2021-11-02T14:46:00.693Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14555?focusedCommentId=17437401) by Jonathan Keane (jonkeane):*\nA few other notes: you could try turning off build parallelism. In the log I see `#12 58.19 *** Building with MAKEFLAGS= -j2` which is our default (building with two cores), but if you're running into too little memory, building with one core might keep you under the limit. To do that, you could set `MAKEFLAGS=-j1`\r\n\r\nAdditionally, I see in your setup script that you first do `install.packages(\"arrow\")` and then `arrow::install_arrow()`. This is not strictly necessary (and will basically install arrow twice over). Our behavior when running `install.packages(\"arrow\")` should be all you need now. One thing to note: you should set the environment variable `NOT_CRAN` to true, and that will set the build process to 1. grab pre-build binaries from our hosted sources if compatible ones exist (which will get around running out of memory while compiling) and 2. build with a full(er) set of optional dependencies (including support for more compression codecs like snappy).\r\n\r\nWe used to recommend `arrow::install_arrow()`, but the standard install process should work just fine these days. "
+        },
+        {
+            "created_at": "2021-11-02T14:48:07.471Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14555?focusedCommentId=17437404) by Neal Richardson (npr):*\nYou may also want to try setting the env var `CMAKE_UNITY_BUILD=OFF`, that can cause higher memory usage during compilation."
+        },
+        {
+            "created_at": "2021-11-02T14:49:16.365Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14555?focusedCommentId=17437405) by Daniel Teske (dnltsk):*\nAgree, had the same instinct. Right now we didn't configured any limits so the defaults should be used. In my Activity Monitor I can see a constant usage of ~4GB. I'm going to increase some limits.\r\n\r\nAre there any recommendations from your side?"
+        },
+        {
+            "created_at": "2021-11-02T15:09:19.958Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14555?focusedCommentId=17437420) by Daniel Teske (dnltsk):*\nWow, the configuration you suggested\u00a0\r\n```java\n\r\nENV MAKEFLAGS -j1\r\nENV NOT_CRAN TRUE\r\nENV CMAKE_UNITY_BUILD OFF\n```\r\nseems to work fine.\u00a0Arrow is now getting build actually. Thanks so far.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-11-02T15:59:45.359Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14555?focusedCommentId=17437440) by Jonathan Keane (jonkeane):*\nWhat OS is your host system? If it's macOS the limits can be set in preferences (and those limits are hard limits). On a linux host, I believe the limits are soft(er) limits though it's possible you can configure that.\r\n\r\nWe do have ARROW-14039 which has some discussion, and like you've seen with the Unity build, it is quite dependent on what components you're building so there isn't one-true size that will work. FWIW, I can build arrow (with unity on, even) with these scripts in a docker container that is limited to 8gb (with a macOS host, so that's a hard limit)."
+        },
+        {
+            "created_at": "2021-11-02T16:09:16.354Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14555?focusedCommentId=17437447) by Jonathan Keane (jonkeane):*\nDo let us know if the build succeeds (or doesn't, of course!) and I'll close out this issue. "
+        },
+        {
+            "created_at": "2021-11-04T20:19:49.888Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14555?focusedCommentId=17438915) by Jonathan Keane (jonkeane):*\nDid the above suggestions resolve your installation issues?"
+        },
+        {
+            "created_at": "2021-11-09T17:16:24.410Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14555?focusedCommentId=17441292) by Jonathan Keane (jonkeane):*\nIt sounds like this is resolved, if not feel free to comment or reopen it."
+        }
+    ]
+}

@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Flight] Define GRPC IDL / wire protocol for messaging with Arrow data",
+        "body": "***Note**: This issue was originally created as [ARROW-249](https://issues.apache.org/jira/browse/ARROW-249). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn addition to memory maps / shared memory, we should be able to assemble one or more Arrow arrays in a memory block suitable for sending over the wire with GRPC (http://www.grpc.io/). This can be similarly adapted to other messaging / RPC frameworks. \n\nWe can continue to use Flatbuffers for the metadata serialization. ",
+        "created_at": "2016-08-03T18:04:33.000Z",
+        "updated_at": "2018-09-25T23:04:32.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: FlightRPC",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2018-09-25T23:04:23.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2016-08-11T22:03:07.078Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-249?focusedCommentId=15418020) by Julien Le Dem (julienledem):*\nSome requirements for the RPC layer:\n - When receiving a message we need to be able to address the buffer where the message is directly from the RPC layer without copying it.\n - when sending a message, we need to be able to point to several Arrow buffers and have them sent directly (one after the other) with no copy as well."
+        },
+        {
+            "created_at": "2016-08-11T22:27:54.490Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-249?focusedCommentId=15418045) by Wes McKinney (wesm):*\nAgreed. I do not know enough about GRPC to know how much protobuf overhead there is on receipt. If this returns a buffer of bytes in the deserialized protobuf then this can be accessed via Flatbuffers with zero copy. "
+        },
+        {
+            "created_at": "2016-08-11T22:42:11.217Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-249?focusedCommentId=15418072) by Jacques Nadeau (jnadeau):*\nI remember some from Kudu team (maybe `[~tlipcon]` or `[~jdcryans]`?) mentioned something about how they had to customize the GRPC for a sidecar data batch and see some mention of it here: https://github.com/grpc/grpc-java/issues/1054. I wonder if they could share any insights.\n\nWe implemented something custom in Drill on top of Netty before GRPC was built to satisfy the need to support off-heap sideband messages but it would be nice to have someone else manage the maintenance of the layer."
+        },
+        {
+            "created_at": "2017-05-14T00:15:29.565Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-249?focusedCommentId=16009556) by Wes McKinney (wesm):*\nI'd like to prototype a GRPC-based client and server that sends components of an Arrow stream as a series of RPC messages according to the Arrow streaming format. See this discussion about some issues around this\n\nhttps://github.com/grpc/grpc-java/issues/1054#issuecomment-301282237\n\nIn ARROW-1008, I've refactored the \"stream reader\" and \"stream writer\" concepts to be abstract interfaces, so now we could define `GrpcStreamWriter` and `GrpcStreamReader` that would be a middleman to the underlying GRPC client/server machinery, presenting a standard stream iterator to the client side. I figure we could prototype this using protobuf messages that hold each piece of the Arrow stream (first RPC message is the schema) and see how the perf compares with a \"raw\" stream. \n\ncc `[~nongli]`"
+        },
+        {
+            "created_at": "2017-10-09T17:16:25.237Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-249?focusedCommentId=16197330) by Jacques Nadeau (jnadeau):*\nSome key performance requirements from my perspective (note that I'm just skipping all the basic requirements):\r\n\r\n- Send N sidecar ByteBufs in addition to a structured message on the sending side, only doing a single copy: the kernel copying the ByteBuf to the socket.\n- Receive and pull out a single sidecar ByteBuf on the receiving-side, keeping it off heap and minimizing for its lifetime. Preferably zero copies but potentially a single copy (from a circular or rotating buffer to a final target buffer).\n- Support a cooperative backpressure methodology when using multiple streams on a single connection.\n- Handle out of direct memory situations without disrupting the connection (message failure as opposed to connection failure).\n  \n  I'm trying to piece together how we might do this using some less than ideal usage of the GRPC apis. Not sure how bad the shenaniganry will need to be. Note that we have something we've built up at Dremio (and before) that we've found very reliable for the performance requirements above:\n  \n- https://github.com/dremio/dremio-oss/tree/master/services/base-rpc\n  \n  Obviously, this is less well supported/contributed/featured than GRPC but used at many large scale production customers already. It doesn't do all the things that GRPC does but it does do the requirements above very well. On the flipside, it doesn't have all the client/language support, doesn't have all the security features, compression features, etc.\n  \n  \n"
+        },
+        {
+            "created_at": "2018-09-25T23:04:24.026Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-249?focusedCommentId=16628032) by Wes McKinney (wesm):*\nIssue resolved by pull request 2102\n<https://github.com/apache/arrow/pull/2102>"
+        }
+    ]
+}

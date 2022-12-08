@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[R] open_dataset freezes opening feather files on Windows",
+        "body": "***Note**: This issue was originally created as [ARROW-9903](https://issues.apache.org/jira/browse/ARROW-9903). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSession info:\r\n```java\n\r\n// R version 4.0.2 (2020-06-22)\r\nPlatform: x86_64-w64-mingw32/x64 (64-bit)\r\nRunning under: Windows 10 x64 (build 19041)Matrix products: defaultlocale:\r\n[1] LC_COLLATE=English_United States.1252  LC_CTYPE=English_United States.1252   \r\n[3] LC_MONETARY=English_United States.1252 LC_NUMERIC=C                          \r\n[5] LC_TIME=English_United States.1252    attached base packages:\r\n[1] stats     graphics  grDevices utils     datasets  methods   base     other attached packages:\r\n [1] forcats_0.5.0   stringr_1.4.0   dplyr_1.0.1     purrr_0.3.4     readr_1.3.1     tidyr_1.1.1    \r\n [7] tibble_3.0.3    ggplot2_3.3.2   tidyverse_1.3.0 arrow_1.0.1    loaded via a namespace (and not attached):\r\n [1] Rcpp_1.0.5       cellranger_1.1.0 pillar_1.4.6     compiler_4.0.2   dbplyr_1.4.4     tools_4.0.2     \r\n [7] bit_1.1-15.2     lubridate_1.7.9  jsonlite_1.7.0   lifecycle_0.2.0  gtable_0.3.0     pkgconfig_2.0.3 \r\n[13] rlang_0.4.7      reprex_0.3.0     cli_2.0.2        DBI_1.1.0        rstudioapi_0.11  haven_2.3.1     \r\n[19] withr_2.2.0      xml2_1.3.2       httr_1.4.2       fs_1.4.1         generics_0.0.2   vctrs_0.3.2     \r\n[25] hms_0.5.3        bit64_0.9-7      grid_4.0.2       tidyselect_1.1.0 glue_1.4.1       R6_2.4.1        \r\n[31] fansi_0.4.1      readxl_1.3.1     modelr_0.1.8     blob_1.2.1       magrittr_1.5     backports_1.1.7 \r\n[37] scales_1.1.1     ellipsis_0.3.1   rvest_0.3.5      assertthat_0.2.1 colorspace_1.4-1 stringi_1.4.6   \r\n[43] munsell_0.5.0    broom_0.7.0      crayon_1.3.4    \r\n```\r\nWhile cycling through and processing files using open_dataset(..., format = \"feather\") in R, the function hangs randomly and will not proceed to the next file. The freeze does not appear at the same file each time, additionally, the same function freezes when used one on occasion.\u00a0\r\n\r\nWhen open_dataset hangs the only way to get R to stop is using Task Manager as Rstudio becomes totally unresponsive.\u00a0",
+        "created_at": "2020-09-03T00:49:21.000Z",
+        "updated_at": "2021-02-11T02:32:02.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-12-30T17:31:20.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-03T18:33:31.146Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9903?focusedCommentId=17190348) by Neal Richardson (npr):*\n`open_dataset()` doesn't generally open all of the files when it is called, and it doesn't report on which files it is opening. How do you know it's freezing on different files? \r\n\r\nCan you share a minimal reproducible example?"
+        },
+        {
+            "created_at": "2020-09-03T18:44:07.661Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9903?focusedCommentId=17190353) by Sean Clement (sean.clement):*\nI know it's freezing on different files because I was having it produce a batch report.\u00a0\r\n\r\n\u00a0\r\n```java\n\r\n// Example\r\nds <-\r\n  open_dataset(\r\n    \"F:/Test/Feather Files/\",\r\n    format = \"feather\"\r\n  ) \r\n\r\nid_keys <-\r\n  ds %>%\r\n  select(id_col) %>%\r\n  collect() %>%\r\n  unique()\r\n\r\nfor(i in 1:nrow(id_keys)){\r\n  output <- \r\n    ds %>%\r\n    filter(id_col == id_keys$id_col[i]) %>%\r\n    collect()\r\n\r\n  #report processing here\r\n\r\n  data.table::fwrite(output, paste0(\"output_file_\", id_keys$id_col[i]))\r\n}\n```\r\nWhen running this batch, the \"output_file_\" last produced when encountering a freeze changes each time I run the batch. The files process correctly and when open_dataset doesn't freeze they process extremely fast. But open_dataset hangs in an unpredictable manner."
+        },
+        {
+            "created_at": "2020-09-03T18:50:22.635Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9903?focusedCommentId=17190359) by Sean Clement (sean.clement):*\nTo clarify what I mean, the freeze might occur at file 1, 8, or 17 with no error occurred during the previous files processing. It simply stops proceeding without error message for an indefinite amount of time when the dataset is called to produce the data frame needed."
+        },
+        {
+            "created_at": "2020-09-03T19:10:28.698Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9903?focusedCommentId=17190369) by Neal Richardson (npr):*\nOk, so `open_dataset()` itself isn't hanging, but after querying/scanning the dataset some number of times, the query stops responding. I'm not sure why that is, and these problems are difficult to debug, especially on Windows. \r\n\r\nIt looks like you're essentially trying to partition the dataset into separate chunks by `id_col` and do work on those separately. The new, not-yet-released `write_dataset()` function lets you write a dataset with files partitioned however you want, so that would simplify your dataset queries and could work around whatever issue you're hitting here. \r\n\r\nIf you're interested in trying it out, install a nightly dev package with\r\n\r\n```Java\n\r\ninstall.packages(\"arrow\", repos = \"https://arrow-r-nightly.s3.amazonaws.com\")\r\n```\r\n\r\nand see https://ursalabs.org/arrow-r-nightly/articles/dataset.html#writing-datasets for examples of how to use it.  "
+        },
+        {
+            "created_at": "2020-09-03T19:20:29.507Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9903?focusedCommentId=17190371) by Sean Clement (sean.clement):*\nThat's actually how I created the dataset to begin with, the the dataset is partitioned into about 500 pieces to make for quick loading. I'm pointing open_dataset to the base of the file tree and it's seeing all 500+ files in the ds object, but then as I try and pull it into the pieces I need it stops responding. Do I need to crawl through the file tree and call open_dataset on each file individually?\u00a0"
+        },
+        {
+            "created_at": "2020-09-03T19:35:58.239Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9903?focusedCommentId=17190376) by Neal Richardson (npr):*\nIf you've already partitioned the dataset into separate files by `id_col`, and now you want to do work on each file separately, I'd just iterate over the file listing and call `read_feather`. The dataset machinery doesn't give you any additional leverage on that problem."
+        },
+        {
+            "created_at": "2020-11-04T21:44:45.446Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9903?focusedCommentId=17226399) by Neal Richardson (npr):*\nWe suspect that ARROW-10080 may have fixed this. Would you mind trying your workflow again with a nightly build?"
+        },
+        {
+            "created_at": "2021-02-11T02:32:02.472Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9903?focusedCommentId=17282838) by Ian Cook (icook):*\nThis might be related to\u00a0ARROW-11579"
+        }
+    ]
+}

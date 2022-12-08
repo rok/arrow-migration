@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[C++] Add parallelism to streaming CSV reader",
+        "body": "***Note**: This issue was originally created as [ARROW-11889](https://issues.apache.org/jira/browse/ARROW-11889). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently the streaming CSV reader does not allow for much parallelism.\u00a0 It doesn't allow for reading more than one segment at once (useful in S3) and it doesn't allow for column fan-out for parsing & converting.\r\n\r\nIt seems both of these options would speed up CSV reading in some scenarios although it's possible this is mostly mitigated in cases where there are many more files than cores (as per-file parallelism will occupy all the cores anyways).",
+        "created_at": "2021-03-06T01:29:22.000Z",
+        "updated_at": "2021-07-16T21:52:30.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-07-16T21:52:23.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-03-25T18:23:30.821Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11889?focusedCommentId=17308885) by Antoine Pitrou (apitrou):*\nI'll add that this probably means making `ColumnDecoder` async (perhaps turning it into a generator).\r\n\r\nIt would be nice if the solution could also tackle ARROW-11853 at the same time, since both issues will require significant reworking of the `ColumnDecoder` internals anyway."
+        },
+        {
+            "created_at": "2021-06-16T01:59:24.982Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11889?focusedCommentId=17364009) by Weston Pace (westonpace):*\nIt'll probably be at least another day (probably more, I'll target the end of the week) before this is PR-ready but some notes:\r\n \\* The approach I'm taking is to create a functor for parsing (CSVBlock -> ParsedBlock) and another for decoding (ParsedBlock -> Array) and then hook\u00a0 the whole thing up as an iterator/generator.\r\n \\* Since it was already in place I'll be keeping the per-column parallelism but I'm also adding parallel readahead (for conversion/decoding) on the batches themselves so I don't expect per-column parallelism is strictly neccesary for performance.\r\n \\* There doesn't seem to be much use case for eagerly blocking (i.e. ThreadedBlockReader).\u00a0 It seems pretty unlikely we will need a multi-threaded parser.\u00a0 So for the moment I expect I can reuse SerialBlockReader and just ensure it is not pulled async-reentrantly\r\n \\* The column builders & decoders are getting even more similar, I suspect I could probably combine the two into a single set of types with a boolean \"try_reconvert\" flag or something.\u00a0 For example, the decoders already had an array of chunks although I can't see any reason they needed more than a single chunk.\r\n \\* In order to address this and ARROW-11853 each ParsedBlock will create its own ThreadedTaskGroup.\u00a0 The future for that parsed block will be completed when all columns have been decoded and any \"recode\" tasks that were launched by that parsed block have finished.\u00a0 Finish will be called on each future so a failure (or a cancellation) should get caught pretty quickly.\u00a0 The stored futures might still hang around for coordination but they won't be waited on so we shouldn't deadlock there.\r\n \\* The table reader and the streaming readers are starting to become more and more similar as well.\u00a0 It may end up that they can be combined as well where the table readers set \"try_reconvert\" to true and have some kind of emplace_into_table step at the end (although this might be a bit tricky with ordering & reconversion).\r\n \\*"
+        },
+        {
+            "created_at": "2021-07-16T21:52:23.310Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11889?focusedCommentId=17382364) by Weston Pace (westonpace):*\nIssue resolved by pull request 10568\n<https://github.com/apache/arrow/pull/10568>"
+        }
+    ]
+}

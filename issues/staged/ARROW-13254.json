@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[Python] Processes killed and semaphore objects leaked when reading pandas data",
+        "body": "***Note**: This issue was originally created as [ARROW-13254](https://issues.apache.org/jira/browse/ARROW-13254). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen I run\u00a0`pa.Table.from_pandas(df)`\u00a0for a >1G dataframe, it reports\r\n\u00a0\r\n\u00a0`Killed: 9 ../anaconda3/envs/py38/lib/python3.8/multiprocessing/resource_tracker.py:216: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown`\r\n\u00a0\r\n\u00a0",
+        "created_at": "2021-07-02T19:51:47.000Z",
+        "updated_at": "2022-08-27T14:41:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-07-15T13:55:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-07-02T21:15:28.558Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13254?focusedCommentId=17373784) by Weston Pace (westonpace):*\nI believe these are two different messages.\u00a0 The first (Killed: 9) is coming from the OOM-killer.\u00a0 You must be running out of RAM on the device.\u00a0 Is this expected?\r\n\r\n\u00a0\r\n\r\nThe second \"`../anaconda3/envs/py38/lib/python3.8/multiprocessing/resource_tracker.py:216: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown`\" is a message from python stating that resources weren't quite released properly.\u00a0 Given that the process was suddenly killed with a -9 signal this isn't too surprising.\u00a0 I don't think this message is relevant."
+        },
+        {
+            "created_at": "2021-07-02T21:18:48.212Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13254?focusedCommentId=17373787) by Koyomi Akaguro (Alalalalaki):*\n`[~westonpace]` \u00a0Thanks for reply. How can I know that the data load is out of RAM? And if it is the case, is there any suggestion?"
+        },
+        {
+            "created_at": "2021-07-02T21:44:01.984Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13254?focusedCommentId=17373801) by Weston Pace (westonpace):*\nFirst you should figure out how large your dataframe is.\u00a0 You could use df.memory_usage(deep=True) to get this information.\r\n\r\nSecond, you should determine how much memory you have available.\u00a0 The linux command \"free -h\" can be used to get this information.\r\n\r\nTo convert from Pandas safely you will probably need around double the amount of memory required to store the dataframe.\u00a0 If you do not have this much memory then you can convert the table in parts."
+        },
+        {
+            "created_at": "2021-07-02T22:32:38.816Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13254?focusedCommentId=17373811) by Koyomi Akaguro (Alalalalaki):*\n`[~westonpace]` \u00a0If it needs double the amount of memory then yes it goes over the memory. Though weirdly I run the exactly same code several month ago and it goes well.\r\n\r\nIn terms of convert table in parts, do you mean split the dataframe and take each to pa.Table and then combine?"
+        },
+        {
+            "created_at": "2021-07-02T22:52:13.532Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13254?focusedCommentId=17373837) by Weston Pace (westonpace):*\nThere are a few reasons it may have worked previously.\u00a0 If the data or data type changed then the amount of memory used in either representation may have changed.\u00a0 It's possible your OS was previously allowing swap and that was allowing you to run over the amount of physical memory on the device.\u00a0 It's also possible the amount of available memory on the server has changed because other processes are running that were not running previously.\r\n\r\n\u00a0\r\n\r\n> In terms of convert table in parts, do you mean split the dataframe and take each to pa.Table and then combine?\r\n\r\nYes, but you will need to make sure to delete the old parts of the dataframe as they are no longer needed.\u00a0 For example...\r\n\r\n\u00a0\r\n```java\n\r\ndf_1 = df.iloc[:1000000,:]\r\ndf_2 = df.iloc[1000001:,:]\r\ndel df\r\ntable_1 = pa.Table.from_pandas(df_1)\r\ndel df_1\r\ntable_2 = pa.Table.from_pandas(df_2)\r\ndel df_2\r\n```"
+        },
+        {
+            "created_at": "2021-07-03T01:34:18.960Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13254?focusedCommentId=17373863) by Koyomi Akaguro (Alalalalaki):*\n`[~westonpace]` \u00a0 Yes, my OS does use swap. I watch the activity monitor and find the whole python process jump from 12G memory use (the data is around 9G) to 60+G during\u00a0pa.Table.from_pandas and then killed. Why would the process use over sixfold memory than the data?"
+        },
+        {
+            "created_at": "2021-07-03T02:24:59.500Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13254?focusedCommentId=17373876) by Koyomi Akaguro (Alalalalaki):*\n`[~westonpace]` \u00a0 I try several times by cutting my data to different size. I find that when I use only 1/4 data, the memory used double from 3+G to 6G and then is done smoothly. However when I use half of the data which is 4.4G, the memory used again jump from 6+G to 60G and then killed. It seems that if my data is large to some limit, the\u00a0pa.Table.from_pandas function would just explode the memory to unlimited high."
+        },
+        {
+            "created_at": "2021-07-03T05:25:06.250Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13254?focusedCommentId=17373906) by Weston Pace (westonpace):*\n6x memory usage is not normal.\u00a0 This may be blowup from the dynamic allocator or it could be a bug.\u00a0 In fact, it sounds a bit like ARROW-12983.\u00a0 You mentioned you did not encounter this in the past.\u00a0 Do you get this error with the exact same data on 3.0.0?\u00a0 If you do not get the error then ARROW-12983 is most likely the culprit.\u00a0 Are you able to try with the latest nightly build (https://arrow.apache.org/docs/python/install.html#installing-nightly-packages)?"
+        },
+        {
+            "created_at": "2021-07-03T06:00:48.101Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13254?focusedCommentId=17373917) by Koyomi Akaguro (Alalalalaki):*\n`[~westonpace]` \u00a0I downgrade to 3.0 and this problem disappears. I haven't try the latest nightly build but as you said this seems to be a bug in 4.0."
+        },
+        {
+            "created_at": "2021-07-05T19:05:19.692Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13254?focusedCommentId=17374967) by Weston Pace (westonpace):*\nI'm going to go ahead and close this as a duplicate of ARROW-12983.\u00a0 If you try it on 5.0.0 (the next version to have the fix for ARROW-12983) or the latest nightly and the issue is still there then feel free to reopen."
+        },
+        {
+            "created_at": "2022-08-27T14:41:54.935Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13254?focusedCommentId=17585923) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

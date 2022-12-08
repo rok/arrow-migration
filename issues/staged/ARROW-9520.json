@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Rust] [DataFusion] Can't alias an aggregate expression",
+        "body": "***Note**: This issue was originally created as [ARROW-9520](https://issues.apache.org/jira/browse/ARROW-9520). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe following test (on execute) fails:\r\n\r\n```Java\n\r\n    #[test]\r\n    fn aggregate_with_alias() -> Result<()> {\r\n        let results = execute(\"SELECT c1, COUNT(c2) AS count FROM test GROUP BY c1\", 4)?;\r\n\r\n        assert_eq!(field_names(batch), vec![\"c1\", \"count\"]);\r\n        let expected = vec![\"0,10\", \"1,10\", \"2,10\", \"3,10\"];\r\n        let mut rows = test::format_batch(&batch);\r\n        rows.sort();\r\n        assert_eq!(rows, expected);\r\n        Ok(())\r\n    }\r\n```\r\n\r\nThe root cause is that, in `sql::planner`, we interpret `COUNT(c2) AS count` as An `Expr::Alias`, which fails the `is_aggregate_expr` condition, thus being interpreted as grouped expression instead of an aggregated expression. This raises the Error\r\n\r\n`General(\"Projection references non-aggregate values\")`\r\n\r\nThe planner could interpret the statement above as two steps: an aggregation followed by a projection. Alternatively, we can allow aliases to be valid aggregation expressions.",
+        "created_at": "2020-07-18T07:26:33.000Z",
+        "updated_at": "2020-10-03T16:53:53.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust - DataFusion",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-10-03T16:53:39.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-08-31T11:34:52.948Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9520?focusedCommentId=17187662) by Andrew Lamb (alamb):*\nHere is another reproducer (using the aggregate_test_100.csv data from the tests):\r\n\r\n```Java\n\r\n    CREATE EXTERNAL TABLE aggregate_test_100 (\r\n        c1  VARCHAR NOT NULL,\r\n        c2  INT NOT NULL,\r\n        c3  SMALLINT NOT NULL,\r\n        c4  SMALLINT NOT NULL,\r\n        c5  INT NOT NULL,\r\n        c6  BIGINT NOT NULL,\r\n        c7  SMALLINT NOT NULL,\r\n        c8  INT NOT NULL,\r\n        c9  BIGINT NOT NULL,\r\n        c10 VARCHAR NOT NULL,\r\n        c11 FLOAT NOT NULL,\r\n        c12 DOUBLE NOT NULL,\r\n        c13 VARCHAR NOT NULL\r\n    )\r\n    STORED AS CSV\r\n    WITH HEADER ROW\r\n    LOCATION 'arrow/testing/data/csv/aggregate_test_100.csv';\r\n```\r\n\r\nAnd then run this query:\r\n```Java\n\r\n> select min(c3) from aggregate_test_100 group by c1;\r\n```\r\n\r\n## Actual behavior: Error\r\n\r\n```Java\n\r\n> select min(c3) from aggregate_test_100 group by c1;\r\nGeneral(\"Projection references non-aggregate values\")\r\n```\r\n\r\n## Expected behavior: Results\r\n\r\n```Java\n\r\n+---------+\r\n| min(c3) |\r\n+---------+\r\n| -101    |\r\n| -95     |\r\n| -99     |\r\n| -117    |\r\n| -117    |\r\n+---------+\r\n```\r\n\r\n\r\nNote, If you include the group key, c1, in the select list, then it does work:\r\n```Java\n\r\n> select min(c3), c1 from aggregate_test_100 group by c1;\r\n+---------+----+\r\n| min(c3) | c1 |\r\n+---------+----+\r\n| -101    | a  |\r\n| -95     | e  |\r\n| -99     | d  |\r\n| -117    | c  |\r\n| -117    | b  |\r\n+---------+----+\r\n5 row in set. Query took 0 seconds.\r\n```\r\n\r\nTypically handling this kind of query requires that c1 is brought up in the in plan, but is hidden in the  final selection.\r\n"
+        },
+        {
+            "created_at": "2020-09-01T14:21:27.928Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9520?focusedCommentId=17188500) by Andrew Lamb (alamb):*\nHere is another example:\r\n\r\n```Java\n\r\n> create external table sales(customer_id varchar, sales bigint) stored as CSV location '/tmp/foo.csv';\r\n0 rows in set. Query took 0 seconds.\r\n\r\n> SELECT customer_id, sum(sales) FROM sales ORDER BY sum(sales);\r\nGeneral(\"Projection references non-aggregate values\")\r\n```"
+        },
+        {
+            "created_at": "2020-10-03T16:53:39.883Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9520?focusedCommentId=17206791) by Andy Grove (andygrove):*\nIssue resolved by pull request 8322\n<https://github.com/apache/arrow/pull/8322>"
+        }
+    ]
+}

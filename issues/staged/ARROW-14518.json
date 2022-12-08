@@ -1,0 +1,73 @@
+{
+    "issue": {
+        "title": "[Ruby] ArrayBuilder doesn't work correctly with Decimal",
+        "body": "***Note**: This issue was originally created as [ARROW-14518](https://issues.apache.org/jira/browse/ARROW-14518). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen trying to convert raw data with decimal values to Arrow::Table error received\r\n\r\n\u00a0\r\n```java\n\r\nArrow::Table.new(x: [BigDecimal('1.1')])\r\nArgumentError: wrong arguments: Arrow::Decimal128ArrayBuilder#initialize(): available signatures: (data_type: interface(Arrow::Decimal128DataType(GArrowDecimal128DataType)))\r\n```\r\nI guess this is because\u00a0Decimal128ArrayBuilder expects\u00a0Decimal128DataType in initialiser, however I'm not sure how to correctly and effectively detect precision and scale from array of BigDecimal\r\n\r\n\u00a0\r\n```java\n\r\nArrow::VERSION\r\n=> \"5.0.0\"\n```",
+        "created_at": "2021-10-29T10:28:40.000Z",
+        "updated_at": "2022-06-22T23:58:32.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Ruby",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-06-22T23:58:32.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-10-29T20:45:07.439Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14518?focusedCommentId=17436166) by Kouhei Sutou (kou):*\nUmm...\r\n\r\n`[~mrkn]` Can we detect correct precision and scale from BigDecimal?"
+        },
+        {
+            "created_at": "2021-10-30T17:38:29.205Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14518?focusedCommentId=17436352) by Kenta Murata (mrkn):*\nA `BigDecimal` number manages only its precision in its decimal notation.\r\n\r\nWe can get the precision of a `BigDecimal` number by `BigDecimal#precision` method.\r\n\r\n`irb(main):001:0> BigDecimal(\"1.1\").precision`\r\n`=> 2`\r\n\r\nBut, the `BigDecimal#precision` method doesn't count the trailing zeros.\r\n\r\n`irb(main):002:0> BigDecimal(\"1.10\").precision`\r\n`=> 2`\r\n\r\nThe reason why a `BigDecimal` number doesn't have the scale property may be a `BigDecimal` number isn't a fixed-precision number."
+        },
+        {
+            "created_at": "2021-10-30T21:31:21.787Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14518?focusedCommentId=17436366) by Kouhei Sutou (kou):*\nThanks.\r\nIt's not efficient but is the following reasonable as detected scale?\r\n\r\n```\n\r\ndecimals = [\r\n  BigDecimal(\"1.1\"),\r\n  BigDecimal(\"1.10\"),\r\n  BigDecimal(\"1.111\"),\r\n]\r\ndecimals.collect {|decimal| decimal.to_s(\"f\").split(\".\", 2)[1].size}.max # => 3\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-10-30T21:46:11.045Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14518?focusedCommentId=17436367) by Kanstantsin Ilchanka (simpl1g):*\nProblem here is that Arrow expects fixed scale for all array values as far as understand\r\n\r\nSo we will have a problem here,\u00a0\r\n```java\n\r\ndecimals = [\r\n  BigDecimal(\"1.1\"),\r\n  BigDecimal(\"1.10\"),\r\n  BigDecimal(\"1.111\"),\r\n]\r\ndecimals.sum.to_s => \"3.311\"\r\n\r\nArrow::Decimal128ArrayBuilder.build(\r\n  Arrow::Decimal128DataType.new(4, 3), decimals\r\n).sum.to_s => \"1.133\"\n```\r\n1.1 will be converted to 0.011 to scale to 3 digits after dot\r\n1.10 is the same\r\n\r\nArray of decimals should be validated to have the same scale, any other options?\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-10-31T20:44:20.320Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14518?focusedCommentId=17436549) by Kanstantsin Ilchanka (simpl1g):*\nBtw it faults on macOS if precision is bigger than max\r\n```java\n\r\nArrow::Decimal128DataType.new(50, 48)\r\n/tmp/apache-arrow-20211019-6348-1ltpz75/apache-arrow-5.0.0/cpp/src/arrow/type.cc:813:\u00a0 Check failed: (precision) <= (kMaxPrecision)\u00a0\r\n0 \u00a0 libarrow.500.dylib\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 0x000000011170b8e2 _ZN5arrow4util7CerrLogD2Ev + 204\r\n1 \u00a0 libarrow.500.dylib\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 0x000000011170b808 _ZN5arrow4util7CerrLogD0Ev + 14\r\n2 \u00a0 libarrow.500.dylib\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 0x000000011170b7b0 _ZN5arrow4util8ArrowLogD1Ev + 34\r\n3 \u00a0 libarrow.500.dylib\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 0x00000001116a7eba _ZN5arrow14Decimal128TypeC2Eii + 176\r\n4 \u00a0 libarrow.500.dylib\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 0x00000001116b21bc _ZN5arrow10decimal128Eii + 78\r\n5 \u00a0 libarrow-glib.500.dylib \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 0x000000011147eb68 garrow_decimal128_data_type_new + 24\r\n6 \u00a0 libffi.8.dylib\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 0x0000000111122d8a ffi_call_unix64 + 82\r\n7 \u00a0 ??? \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 0x00007ffee21c3818 0x0 + 140732691920920\r\n```\r\nAnd if invalid decimal passed\r\n```java\n\r\nArrow::Decimal128.new('2,2')\r\n/tmp/apache-arrow-20211019-6348-1ltpz75/apache-arrow-5.0.0/cpp/src/arrow/result.cc:28: ValueOrDie called on an error: Invalid: The string '2,2' is not a valid decimal number\r\n0 \u00a0 libarrow.500.dylib\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 0x00000001099718e2 _ZN5arrow4util7CerrLogD2Ev + 204\r\n1 \u00a0 libarrow.500.dylib\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 0x0000000109971808 _ZN5arrow4util7CerrLogD0Ev + 14\r\n2 \u00a0 libarrow.500.dylib\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 0x00000001099717b0 _ZN5arrow4util8ArrowLogD1Ev + 34\r\n3 \u00a0 libarrow.500.dylib\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 0x00000001098c6dcf _ZN5arrow8internal14DieWithMessageERKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE + 111\r\n4 \u00a0 libarrow.500.dylib\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 0x00000001098c6e7e _ZN5arrow8internal17InvalidValueOrDieERKNS_6StatusE + 146\r\n5 \u00a0 libarrow.500.dylib\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 0x000000010995af91 _ZN5arrow10Decimal128C1ERKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE + 93\r\n6 \u00a0 libarrow-glib.500.dylib \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 0x00000001054d73a5 _Z25garrow_decimal_new_stringIN5arrow10Decimal128EEPN16DecimalConverterIT_E10GArrowTypeEPKc + 181\r\n7 \u00a0 libffi.8.dylib\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 0x0000000105166d8a ffi_call_unix64 + 82\r\n8 \u00a0 ??? \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 0x00007ffeee29b9a8 0x0 + 140732894132648\r\n```"
+        },
+        {
+            "created_at": "2021-10-31T21:33:18.695Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14518?focusedCommentId=17436553) by Kanstantsin Ilchanka (simpl1g):*\nThis appears to be working, but I guess very inefficient\r\n\r\nArrow::Decimal128 expects string with correct scale, so ljust required to fill with zeroes\r\n```java\n\r\ndecimals = [\r\n  BigDecimal(\"1.1\"),\r\n  BigDecimal(\"1.10\"),\r\n  BigDecimal(\"1.111\"),\r\n]\r\nscale = decimals.map { |decimal| decimal.to_s(\"f\").split(\".\", 2)[1].size }.max # => 3\r\ndecimals.map! { |decimal| Arrow::Decimal128.new(decimal.to_s(\"f\").ljust(scale + 2, '0')) }\r\n\r\nArrow::Decimal128ArrayBuilder.build(\r\n  Arrow::Decimal128DataType.new(38, scale), decimals\r\n).sum.to_s => \"3.311\"\r\n```"
+        },
+        {
+            "created_at": "2021-11-01T04:39:46.460Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14518?focusedCommentId=17436608) by Kouhei Sutou (kou):*\nThanks.\r\n(Could you create a new Jira issue for the segmentation fault with an invalid precision?)\r\n\r\n`[~mrkn]` What do you think about this?"
+        },
+        {
+            "created_at": "2021-11-01T04:57:26.409Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14518?focusedCommentId=17436611) by Kenta Murata (mrkn):*\nArrow's decimal number is completely different from `BigDecimal`.  The former is a fixed-point number whereas the latter is a floating-point number.\r\n\r\nThe best approach is introducing the new fixed-point number system for Arrow's decimal numbers on the Ruby side.\r\n\r\nThe second-best approach for me is letting `Arrow::Decimal128ArrayBuilder` support arbitrary precisions and scales. That can be done by pooling `BigDecimal` values.\r\n\r\nI's OK to add the new property in `BigDecimal` to obtain the number of digits following the decimal dot for assisting the latter case. Maybe, the suitable name of this property is `BigDecimal#scale`."
+        },
+        {
+            "created_at": "2021-11-01T05:09:24.111Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14518?focusedCommentId=17436612) by Kouhei Sutou (kou):*\nWe already have `Arrow::Decimal128` and `Arrow::Decimal256` but `Arrow::ArrayBuilder.detect_builder_info` doesn't support them. If we add support for `Arrow::Decimal128` and `Arrow::Decimal256` to `Arrow::ArrayBuilder.detect_builder_info`, we can implement the best approach. We should use a new Jira issue for this approach.\r\n\r\nThe second-best approach will be convenient for many users. Could you add `BigDecimal#scale`? Then we implement the second-best approach. We can use this issue for this approach."
+        },
+        {
+            "created_at": "2021-11-01T05:14:36.491Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14518?focusedCommentId=17436613) by Kenta Murata (mrkn):*\n> Could you add BigDecimal#scale?\r\n\r\nYes, I'll add it. But the new property will be available only with the latest `bigdecimal` gem.\r\nTo support older versions of `bigdecimal` gems, we need to detect the existence of `BigDecimal#scale` and emulate it when it is absent."
+        },
+        {
+            "created_at": "2021-11-01T08:57:45.524Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14518?focusedCommentId=17436705) by Kanstantsin Ilchanka (simpl1g):*\nhttps://issues.apache.org/jira/browse/ARROW-14529\r\n\r\nhttps://issues.apache.org/jira/browse/ARROW-14530\r\n\r\n`[~kou]` \u00a0I've created 2 issues\r\n\r\nAlso I have a one more question, I'm continue testing decimals) I'm tried to multiply 2 Decimal128 arrays with max precision(38) and it fails because precision is out of range. I expected that result should be converted to Decimal256 in such case, what do you think?\r\n```java\n\r\na = Arrow::Decimal128ArrayBuilder.build(\r\n  Arrow::Decimal128DataType.new(38, 15), [1.1, 2.2, 3.3]\r\n)\r\n\r\nb = Arrow::Decimal128ArrayBuilder.build(\r\n  Arrow::Decimal128DataType.new(38, 15), [1.1, 2.2, 3.3]\r\n)\r\n\r\nArrow::Function.find('multiply').execute([a, b])\r\nArrow::Error::Invalid: [function][execute]: Invalid: Decimal precision out of range: 77\r\n\r\nArrow::Function.find('add').execute([a, b])\r\nArrow::Error::Invalid: [function][execute]: Invalid: Decimal precision out of range: 39\r\n```"
+        },
+        {
+            "created_at": "2021-11-01T09:08:23.800Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14518?focusedCommentId=17436707) by Kouhei Sutou (kou):*\nThanks.\r\nIt looks reasonable. Could you create an issue for it?\r\nWe need to improve decimal related kernels in https://github.com/apache/arrow/blob/master/cpp/src/arrow/compute/kernels/scalar_arithmetic.cc for it."
+        },
+        {
+            "created_at": "2021-11-01T09:29:39.250Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14518?focusedCommentId=17436716) by Kanstantsin Ilchanka (simpl1g):*\nhttps://issues.apache.org/jira/browse/ARROW-14532"
+        },
+        {
+            "created_at": "2022-06-22T23:58:32.618Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14518?focusedCommentId=17557737) by Kouhei Sutou (kou):*\nIssue resolved by pull request 13377\n<https://github.com/apache/arrow/pull/13377>"
+        }
+    ]
+}

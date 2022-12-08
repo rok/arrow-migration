@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[Python] pa.RecordBatch.from_pandas doesn't accept DataFrame with numeric column names",
+        "body": "***Note**: This issue was originally created as [ARROW-1291](https://issues.apache.org/jira/browse/ARROW-1291). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n```Java\nimport pyarrow as pa\nimport pandas as pd\n\ndf = pd.DataFrame([1])\npa.RecordBatch.from_pandas(df)\n```\n\nException:\n```Java\nTypeError                                 Traceback (most recent call last)\n<ipython-input-5-670ba4a2ddb2> in <module>()\n      3 \n      4 df = pd.DataFrame([1])\n----> 5 pa.RecordBatch.from_pandas(df)\n\ntable.pxi in pyarrow.lib.RecordBatch.from_pandas()\n\ntable.pxi in pyarrow.lib._dataframe_to_arrays()\n\n/home/icexelloss/miniconda3/envs/spark-dev/lib/python3.5/site-packages/pyarrow/pandas_compat.py in construct_metadata(df, index_levels, preserve_index, types)\n    187                         arrow_type=arrow_type\n    188                     )\n--> 189                     for name, arrow_type in zip(df.columns, df_types)\n    190                 ] + (\n    191                     [\n\n/home/icexelloss/miniconda3/envs/spark-dev/lib/python3.5/site-packages/pyarrow/pandas_compat.py in <listcomp>(.0)\n    187                         arrow_type=arrow_type\n    188                     )\n--> 189                     for name, arrow_type in zip(df.columns, df_types)\n    190                 ] + (\n    191                     [\n\n/home/icexelloss/miniconda3/envs/spark-dev/lib/python3.5/site-packages/pyarrow/pandas_compat.py in get_column_metadata(column, name, arrow_type)\n    125         raise TypeError(\n    126             'Column name must be a string. Got column {} of type {}'.format(\n--> 127                 name, type(name).__name__\n    128             )\n    129         )\n\nTypeError: Column name must be a string. Got column 0 of type int64\n```",
+        "created_at": "2017-07-28T15:35:55.000Z",
+        "updated_at": "2017-07-29T17:55:22.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-07-29T17:55:22.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-07-28T15:58:55.448Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1291?focusedCommentId=16105153) by Wes McKinney (wesm):*\nThis is a known limitation because Arrow schemas must have all string field names. We might consider a default casting behavior (like stringifying non-string columns), since it's better than failing. We can always choose to persist the original column labels (pickled, if necessary) in the schema metadata\n\ncc `[~cpcloud]`"
+        },
+        {
+            "created_at": "2017-07-28T16:47:38.720Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1291?focusedCommentId=16105288) by Li Jin (icexelloss):*\nI think stringifying non-string columns is fine. Having metadata containing the original column labels sounds good but I feel it will likely to get lost somewhere because other systems, for instance, Spark SQL, does not support non-string column labels.\n"
+        },
+        {
+            "created_at": "2017-07-28T17:03:27.395Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1291?focusedCommentId=16105308) by Phillip Cloud (cpcloud):*\nI'm -1 on allowing numeric column names since it adds an IMO unnecessary coupling to pandas semantics. With such a change, any tool that wants to read data out of an arrow array must now consider the origin of the data's column names, and cannot simply assume that the columns in the schema are always a simple list of strings. I don't think it's easy to make this behavior transparent to tools that use arrow, while OTOH a list of strings is easy to deal with in pretty much any system that arrow is a part of or will be a part of.\n\nSince this is really only useful when doing pandas -> arrow -> pandas, and users of pandas can already refer to columns by positional index with `.iloc` I'm not convinced we should allow this.\n\nI think adding metadata for indexes has less far-reaching effects because it's an optional feature of pandas that isn't a core part of arrow, while column names are non-negotiable.\n\nI don't think it's too much to ask people to explicitly write out their column names as strings.\n\nI **am** willing to be convinced though :)"
+        },
+        {
+            "created_at": "2017-07-28T18:50:52.706Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1291?focusedCommentId=16105491) by Li Jin (icexelloss):*\nThe use case I have is that I am passing a user provided pandas dataframe to Spark using Arrow. In my particular case, I don't care about the name of the column in the pandas DataFrame because the column names are defined in the Spark's schema, so it's weird to ask for people to write out their column names in pandas and just to throw them away later...\n\nI think it's more friendly behavior that to cast numeric columns to string than to throw this exception. My use case is a bit special that I don't care about the column names, so I could do the casting in my code. But I think other user might also find the current behavior surprising. \n\nI agree it's probably not worth it for arrow to preserve the numeric column names."
+        },
+        {
+            "created_at": "2017-07-28T20:48:20.421Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1291?focusedCommentId=16105640) by Wes McKinney (wesm):*\nHow about we convert non-string column labels to strings for now and wait and see if it becomes a real need to preserve the original labels on the back? I think efforts beyond that may fall into the YAGNI category for the moment. "
+        },
+        {
+            "created_at": "2017-07-28T21:29:41.504Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1291?focusedCommentId=16105716) by Li Jin (icexelloss):*\n+1"
+        },
+        {
+            "created_at": "2017-07-28T21:37:19.426Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1291?focusedCommentId=16105728) by Phillip Cloud (cpcloud):*\nThat could work, but then the round trip conversion is no longer exact.\n\nIt seems like the choice is \"where should the surprise be?\" or maybe \"what's least surprising to users?\" and that there are three options.\n\n1. Leave the behavior as is, and users of arrow need to handle their own input columns before sending dataframes to arrow. This is the current behavior.\n1. Add casting to strings in one direction, when the input is a dataframe with numeric columns. This gives IMO behavior that is more surprising than an error: when you call `.to_pandas()` you get back something different than what you put in. It's also not easy to tell that it's different by looking at the dataframe because of the way dataframes repr.\n1. Add enough metadata in to preserve the current round trip behavior.\n\nI favor #1 the most and #3 if we decide it really is necessary to allow numeric columns. With 3 we still lose some compatibility with other systems that want to read and write data that came from dataframes unless those systems want to handle integer columns.\n\nI think #2 isn't a great option because it results in behavior in the public API that isn't obvious unless you know something about how both arrow and pandas work.\n\nAdditionally, we can't just call `str` on every column and be done, we have to make additional decisions like do we allow mixed string and integer column names? Though, maybe that's a red herring and we can just say \"`Int64Index` s only\" though we still have to make that decision as well."
+        },
+        {
+            "created_at": "2017-07-29T15:07:17.456Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1291?focusedCommentId=16106151) by Wes McKinney (wesm):*\nI'm more in favor of #2, mostly because renaming the columns on a DataFrame without destroying the original object will generally involve a memory doubling. You can assign to `df.columns` to avoid this, but `df.rename(columns=str)` will double memory"
+        },
+        {
+            "created_at": "2017-07-29T15:34:31.107Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1291?focusedCommentId=16106155) by Wes McKinney (wesm):*\nPR: https://github.com/apache/arrow/pull/911"
+        },
+        {
+            "created_at": "2017-07-29T16:30:00.798Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1291?focusedCommentId=16106168) by Li Jin (icexelloss):*\nI think it's ok to not maintain \"roundtrip exact conversion\" between Arrow and other data representation. It's inevitable that other data representation has some exotic feature that Arrow cannot support, it's a little bit too strict in my opinion to error out in all cases. Just to provide another data point, (not saying this is correct, just for reference), Spark/Pandas conversion also casts int column names to string."
+        },
+        {
+            "created_at": "2017-07-29T17:55:22.678Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1291?focusedCommentId=16106196) by Wes McKinney (wesm):*\nIssue resolved by pull request 911\n<https://github.com/apache/arrow/pull/911>"
+        }
+    ]
+}

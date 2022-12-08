@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[R][C++][Dataset] Filtering returns all-missing rows where the filtering column is missing",
+        "body": "***Note**: This issue was originally created as [ARROW-8216](https://issues.apache.org/jira/browse/ARROW-8216). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n\u00a0\r\n\r\nI have just noticed some slightly odd behaviour with the filter method for Dataset.\u00a0\r\n\r\n\u00a0\r\n```java\n\r\nlibrary(arrow)\r\nlibrary(dplyr)\r\npackageVersion(\"arrow\")\r\n#> [1] '0.16.0.20200323'\r\n## Make sample parquet\r\nstarwars$hair_color[starwars$hair_color == \"brown\"] <- \"\"\r\ndir <- tempdir()\r\nfpath <- file.path(dir, \"data.parquet\")\r\nwrite_parquet(starwars, fpath)\r\n## df in memory\r\ndf_mem <- starwars %>%\r\n filter(hair_color == \"\")\r\n## reading from the parquet\r\ndf_parquet <- read_parquet(fpath) %>%\r\n filter(hair_color == \"\")\r\n## using open_dataset\r\ndf_dataset <- open_dataset(dir) %>%\r\n filter(hair_color == \"\") %>%\r\n collect()\r\nidentical(df_mem, df_parquet)\r\n#> [1] TRUE\r\nidentical(df_mem, df_dataset)\r\n#> [1] FALSE\r\n```\r\n\u00a0\r\n\r\n\u00a0\r\n\r\nI'm pretty sure all these should return the same data.frame. Am I missing something?\r\n\r\n\u00a0",
+        "created_at": "2020-03-25T17:26:15.000Z",
+        "updated_at": "2020-04-02T22:41:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-04-02T22:41:29.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-03-26T17:52:55.029Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8216?focusedCommentId=17067902) by Neal Richardson (npr):*\nThanks for the report. I did some exploration on this.\r\n\r\n1. The resulting data.frames are different because the one from the dataset scan is including rows of all NA for the rows where `hair_color` is missing. \r\n\r\n```Java\n\r\n> identical(df_dataset[!is.na(df_dataset$hair_color),], df_mem)\r\n[1] TRUE\r\n```\r\n\r\n2. The fact that `hair_color` has empty strings is irrelevant, as is the fact that it is a string column. Here's a simpler example:\r\n\r\n```Java\n\r\n> library(arrow)\r\n> library(dplyr)\r\n> dir <- tempdir()\r\n> fpath <- file.path(dir, \"data.parquet\")\r\n> \r\n> df <- data.frame(a=1:3, int=c(NA, 4L, 5L), dbl=c(5.0, NA, 6), str=c(\"a\", \"b\", NA), stringsAsFactors=FALSE)\r\n> df\r\n  a int dbl  str\r\n1 1  NA   5    a\r\n2 2   4  NA    b\r\n3 3   5   6 <NA>\r\n> write_parquet(df, fpath)\r\n> ds <- open_dataset(dir)\r\n> ds %>% filter(int > 4) %>% collect()\r\n# A tibble: 2 x 4\r\n      a   int   dbl str  \r\n  <int> <int> <dbl> <chr>\r\n1    NA    NA    NA NA   \r\n2     3     5     6 NA   \r\n> ds %>% filter(dbl == 5) %>% collect()\r\n# A tibble: 2 x 4\r\n      a   int   dbl str  \r\n  <int> <int> <dbl> <chr>\r\n1     1    NA     5 a    \r\n2    NA    NA    NA NA   \r\n> ds %>% filter(str == \"a\") %>% collect()\r\n# A tibble: 2 x 4\r\n      a   int   dbl str  \r\n  <int> <int> <dbl> <chr>\r\n1     1    NA     5 a    \r\n2    NA    NA    NA NA   \r\n> ds %>% filter(str == \"d\") %>% collect()\r\n# A tibble: 1 x 4\r\n      a   int   dbl str  \r\n  <int> <int> <dbl> <chr>\r\n1    NA    NA    NA NA   \r\n```\r\n\r\n3. In terms of what _should_ happen, on the one hand, matching what `dplyr` does is good; on the other, one could conceptually argue that if I filter where `int > 4`, I should keep the rows where int is NA because we don't know whether or not they are > 4. (But that's not what this is doing here: it's filling everything in the rows with NA.) So maybe this should be some option?\r\n\r\n4. Interestingly, this behavior _is_ consistent with how base R handles extracting rows with NA in the selection vector:\r\n\r\n```Java\n\r\n> df[df$int > 4,]\r\n    a int dbl  str\r\nNA NA  NA  NA <NA>\r\n3   3   5   6 <NA>\r\n# Because:\r\n> df$int > 4\r\n[1]    NA FALSE  TRUE\r\n```"
+        },
+        {
+            "created_at": "2020-03-26T19:06:21.016Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8216?focusedCommentId=17067961) by Ben Kietzman (bkietz):*\nhttps://issues.apache.org/jira/browse/ARROW-8235"
+        },
+        {
+            "created_at": "2020-04-02T22:41:29.515Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8216?focusedCommentId=17074131) by Neal Richardson (npr):*\nIssue resolved by pull request 6732\n<https://github.com/apache/arrow/pull/6732>"
+        }
+    ]
+}

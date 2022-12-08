@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[C++] ScanNode takes filter but doesn't filter",
+        "body": "***Note**: This issue was originally created as [ARROW-13498](https://issues.apache.org/jira/browse/ARROW-13498). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis turned out to be my confusion in ARROW-13344: because the ScanNode takes a filter and projection, I wasn't creating a FilterNode because I assume that the filter is already applied--why else would I provide a filter to the ScanNode? But it turns out that if you don't Filter again, you get unfiltered results:\r\n\r\n```Java\n\r\nTable$create(\r\n  group=c(1, 2), \r\n  value=c(5, 6)\r\n) %>% \r\n  filter(value > 5) %>% \r\n  group_by(group) %>% \r\n  summarize(sum(value)) %>% \r\n  collect()\r\n\r\n# A tibble: 2 x 2\r\n  group `sum(value)`\r\n  <dbl>        <dbl>\r\n1     1            5\r\n2     2            6\r\n```",
+        "created_at": "2021-07-29T19:57:16.000Z",
+        "updated_at": "2021-12-01T04:07:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-09-16T16:45:36.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-07-30T19:16:58.581Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13498?focusedCommentId=17390754) by Ben Kietzman (bkietz):*\nThis is as-designed: the ScanNode only uses the filter for predicate pushdown- so in the context of datasets, you would exclude some files whose partition expression contradicted the filter. It does not remove all rows excluded by the filter- that is deferred to FilterNode.\r\n\r\nSimilarly, ScanNode does not perform projection- it ensures that fields referenced by the projection are loaded from disk (which for example in the case of parquet means you will pay less IO if you reference fewer fields)."
+        },
+        {
+            "created_at": "2021-07-30T19:26:31.000Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13498?focusedCommentId=17390758) by Weston Pace (westonpace):*\nDoes that mean it might make sense to have three filter spots?  The pushdown filter, a filter before projection, and a filter after projection? "
+        },
+        {
+            "created_at": "2021-07-30T20:27:02.869Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13498?focusedCommentId=17390778) by Ben Kietzman (bkietz):*\nI'm not sure when we'd have filter after projection. We might have a filter after a grouped aggregation (analagous to a SQL HAVING clause)"
+        },
+        {
+            "created_at": "2021-07-31T20:58:01.040Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13498?focusedCommentId=17391055) by Neal Richardson (npr):*\nSounds to me like implementation details are leaking into the interface. Or, maybe ExecNodes aren't the interface we want--sounds like they're not quite a logical plan but also not quite a physical plan. \r\n\r\nAlso, I can't project and then filter on the thing I projected? "
+        },
+        {
+            "created_at": "2021-08-02T14:56:23.507Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13498?focusedCommentId=17391633) by Ben Kietzman (bkietz):*\nExecNodes certainly correspond to a physical plan rather than a logical plan and we'll definitely want something more declarative for user facing APIs- eventually.\r\n\r\nYou can certainly project then filter on what you've projected, I'm just not sure when that'd be preferable to a single filter pass."
+        }
+    ]
+}

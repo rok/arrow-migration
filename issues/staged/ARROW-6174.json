@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[C++] Validate chunks in ChunkedArray::Validate",
+        "body": "***Note**: This issue was originally created as [ARROW-6174](https://issues.apache.org/jira/browse/ARROW-6174). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIf I patch `Table::Validate()` to also validate the underlying arrays:\r\n```c++\n\r\ndiff --git a/cpp/src/arrow/table.cc b/cpp/src/arrow/table.cc\r\nindex 446010f93..e617470b5 100644\r\n--- a/cpp/src/arrow/table.cc\r\n+++ b/cpp/src/arrow/table.cc\r\n@@ -21,6 +21,7 @@\r\n #include <cstdlib>\r\n #include <limits>\r\n #include <memory>\r\n+#include <sstream>\r\n #include <utility>\r\n \r\n #include \"arrow/array.h\"\r\n@@ -184,10 +185,18 @@ Status ChunkedArray::Validate() const {\r\n   }\r\n \r\n   const auto& type = *chunks_[0]->type();\r\n+  // Make sure chunks all have the same type, and validate them\r\n   for (size_t i = 1; i < chunks_.size(); ++i) {\r\n-    if (!chunks_[i]->type()->Equals(type)) {\r\n+    const Array& chunk = *chunks_[i];\r\n+    if (!chunk.type()->Equals(type)) {\r\n       return Status::Invalid(\"In chunk \", i, \" expected type \", type.ToString(),\r\n-                             \" but saw \", chunks_[i]->type()->ToString());\r\n+                             \" but saw \", chunk.type()->ToString());\r\n+    }\r\n+    Status st = ValidateArray(chunk);\r\n+    if (!st.ok()) {\r\n+      std::stringstream ss;\r\n+      ss << \"Chunk \" << i << \": \" << st.message();\r\n+      return st.WithMessage(ss.str());\r\n     }\r\n   }\r\n   return Status::OK();\r\n@@ -343,7 +352,7 @@ class SimpleTable : public Table {\r\n       }\r\n     }\r\n \r\n-    // Make sure columns are all the same length\r\n+    // Make sure columns are all the same length, and validate them\r\n     for (int i = 0; i < num_columns(); ++i) {\r\n       const ChunkedArray* col = columns_[i].get();\r\n       if (col->length() != num_rows_) {\r\n@@ -351,6 +360,12 @@ class SimpleTable : public Table {\r\n                                \" expected length \", num_rows_, \" but got length \",\r\n                                col->length());\r\n       }\r\n+      Status st = col->Validate();\r\n+      if (!st.ok()) {\r\n+        std::stringstream ss;\r\n+        ss << \"Column \" << i << \": \" << st.message();\r\n+        return st.WithMessage(ss.str());\r\n+      }\r\n     }\r\n     return Status::OK();\r\n   }\r\n```\r\n\r\n... then `parquet-arrow-test` fails and then crashes:\r\n```Java\n\r\n[...]\r\n[ RUN      ] TestArrowReadWrite.TableWithChunkedColumns\r\n../src/parquet/arrow/arrow-reader-writer-test.cc:347: Failure\r\nFailed\r\n'WriteTable(*table, ::arrow::default_memory_pool(), sink, row_group_size, default_writer_properties(), arrow_properties)' failed with Invalid: Column 0: Chunk 1: Final offset invariant not equal to values length: 210!=733\r\nIn ../src/arrow/array.cc, line 1229, code: ValidateListArray(array)\r\nIn ../src/parquet/arrow/writer.cc, line 1210, code: table.Validate()\r\nIn ../src/parquet/arrow/writer.cc, line 1252, code: writer->WriteTable(table, chunk_size)\r\n../src/parquet/arrow/arrow-reader-writer-test.cc:419: Failure\r\nExpected: WriteTableToBuffer(table, row_group_size, arrow_properties, &buffer) doesn't generate new fatal failures in the current thread.\r\n  Actual: it does.\r\n/home/antoine/arrow/dev/cpp/build-support/run-test.sh : ligne 97 : 28927 Erreur de segmentation  $TEST_EXECUTABLE \"$@\" 2>&1\r\n     28930 Fini                    | $ROOT/build-support/asan_symbolize.py\r\n     28933 Fini                    | ${CXXFILT:-c++filt}\r\n     28936 Fini                    | $ROOT/build-support/stacktrace_addr2line.pl $TEST_EXECUTABLE\r\n     28939 Fini                    | $pipe_cmd 2>&1\r\n     28941 Fini                    | tee $LOGFILE\r\n~/arrow/dev/cpp/build-test/src/parquet\r\n\r\n```",
+        "created_at": "2019-08-08T13:52:09.000Z",
+        "updated_at": "2019-09-04T10:15:14.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-21T09:39:18.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-08-08T13:53:32.454Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6174?focusedCommentId=16903009) by Antoine Pitrou (apitrou):*\n`[~wesmckinn]`"
+        },
+        {
+            "created_at": "2019-08-08T14:48:01.321Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6174?focusedCommentId=16903045) by Antoine Pitrou (apitrou):*\nAh, also I noticed that my patch I don't validate chunk #0 of a chunked array. It should :)"
+        },
+        {
+            "created_at": "2019-08-21T09:39:18.927Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6174?focusedCommentId=16912127) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 5148\n<https://github.com/apache/arrow/pull/5148>"
+        }
+    ]
+}

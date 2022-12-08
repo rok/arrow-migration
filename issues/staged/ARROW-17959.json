@@ -1,0 +1,24 @@
+{
+    "issue": {
+        "title": "[C++][Dataset] Optimize Parquet column projection for subset of nested field",
+        "body": "***Note**: This issue was originally created as [ARROW-17959](https://issues.apache.org/jira/browse/ARROW-17959). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently, when reading a subfield of a nested column of a Parquet file using the Dataset API, we read the full parent column instead of only the requested field. This should be optimized to only read the field itself.\r\n\r\nThis was left as a TODO in ARROW-14658 (https://github.com/apache/arrow/pull/11704) which added the initial support for nested field refs in dataset scanning (https://github.com/apache/arrow/blob/c29ca51f44eaf41c3a2f6f72e3e23a7b428211c2/cpp/src/arrow/dataset/file_parquet.cc#L240-L246):\r\n\r\n```Java\n\r\n  if (field) {\r\n    // TODO(ARROW-1888): support fine-grained column projection. We should be\r\n    // able to materialize only the child fields requested, and not the entire\r\n    // top-level field.\r\n    // Right now, if enabled, projection/filtering will fail when they cast the\r\n    // physical schema to the dataset schema.\r\n    AddColumnIndices(*toplevel, columns_selection);\r\n```\r\n\r\nSome relevant comments at https://github.com/apache/arrow/pull/11704#discussion_r749733765. ARROW-1888 was mentioned as a blocker back then, but this is resolved in the meantime.",
+        "created_at": "2022-10-07T08:10:44.000Z",
+        "updated_at": "2022-10-14T12:09:43.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-14T09:38:07.699Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17959?focusedCommentId=17617603) by Joris Van den Bossche (jorisvandenbossche):*\n`[~lidavidm]` do you remember how you were planning to implement this? (cfr https://github.com/apache/arrow/pull/11704#discussion_r749733765, but I can't see what you did before removing it after the discussion in that comment) \r\n\r\nAt the time you mentioned that casting structs was needed. From taking a quick look, to me it seems that if I naively change file_parquet.cc (`ResolveOneFieldRef` to not add the top-level indices (so that Parquet actually only reads the required leaves), the main problem is that we \"Bind\" the FieldRef expression to the dataset schema, and at that point the FieldRef with names gets converted into a FieldRef backed by integer indices / FieldPath. But this path is into the original full struct type, and not the \"reduced\" struct that the Parquet reader now actually returns. Which then results in errors when actually executing this FieldRef expression with the \"struct_field\" kernel.\r\n\r\nOr should we keep the names in the FieldRef (cfr ARROW-17989), and only bind the type to the FieldRef expression? Then evaluating the FieldRef expression should work regardless of whether the file reader in question returned the full struct or a subsetted version.  \r\nAlthough I suppose you had something else in mind, given the reference to ARROW-1888.\r\n"
+        },
+        {
+            "created_at": "2022-10-14T12:09:43.380Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17959?focusedCommentId=17617677) by David Li (lidavidm):*\nI'm not sure anymore, it's been too long. struct_field came after, so I would really say that we shouldn't apply struct_field at all (or should only do it when needed) - Weston's \"V2\" scanner has facilities for this (there is an explicit interface for adapting the file-level schema to the dataset-level schema where we can apply needed transformations)\r\n\r\nI have the old branch with the original changes (incl nested columns in Parquet) if that's useful/interesting and I can push that up somewhere"
+        }
+    ]
+}

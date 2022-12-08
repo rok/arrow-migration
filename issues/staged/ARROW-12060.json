@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[Python] Enable calling compute functions on Expressions",
+        "body": "***Note**: This issue was originally created as [ARROW-12060](https://issues.apache.org/jira/browse/ARROW-12060). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nTo expose the full power of dataset (projection/filter) expressions, we should ensure that all compute kernels can be used in combination with expressions.",
+        "created_at": "2021-03-23T14:06:50.000Z",
+        "updated_at": "2022-01-19T23:31:48.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2022-01-18T20:41:15.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-04-13T14:59:42.171Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12060?focusedCommentId=17320238) by David Li (lidavidm):*\nFrom discussion in ARROW-12058, we may want to wait until ARROW-11929 is completed before implementing this."
+        },
+        {
+            "created_at": "2021-08-25T22:11:26.558Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12060?focusedCommentId=17404743) by Weston Pace (westonpace):*\nAt this point is this much more than removing the leading underscore from `Expression._call`?"
+        },
+        {
+            "created_at": "2021-08-30T06:43:13.703Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12060?focusedCommentId=17406591) by Joris Van den Bossche (jorisvandenbossche):*\nA quick demo of what a public \"Expression.call\" currently gives, using a compute kernel (log10) that is not directly exposed in the dataset Expression class:\r\n\r\n```python\n\r\nimport pyarrow.dataset as ds\r\n\r\ntable = pa.table({'a': range(10)})\r\nds.write_dataset(table, \"test_dataset_expression.parquet\", format=\"feather\")\r\ndataset = ds.dataset(\"test_dataset_expression.parquet/\", format=\"feather\")\r\n\r\n>>> f = ds.field(\"a\")\r\n# creating expressions\r\n>>> ds.Expression.call(\"log\", [f])\r\n<pyarrow.dataset.Expression log(a)>\r\n>>> ds.Expression.call(\"log\", [f]) > 1\r\n<pyarrow.dataset.Expression (log(a) > 1)>\r\n\r\n# using it to project/filter datasets\r\n>>> dataset.to_table(columns={'a': ds.field(\"a\"), 'a_log': ds.Expression.call(\"log10\", [ds.field('a')])}).to_pandas()\r\n   a     a_log\r\n0  0      -inf\r\n1  1  0.000000\r\n2  2  0.301030\r\n3  3  0.477121\r\n4  4  0.602060\r\n5  5  0.698970\r\n6  6  0.778151\r\n7  7  0.845098\r\n8  8  0.903090\r\n9  9  0.954243\r\n>>> dataset.to_table(columns={'a': ds.field(\"a\"), 'a_log': ds.Expression.call(\"log10\", [ds.field('a')])}, filter=ds.Expression.call(\"log10\", [ds.field('a')]) > 0.5).to_pandas()\r\n   a     a_log\r\n0  4  0.602060\r\n1  5  0.698970\r\n2  6  0.778151\r\n3  7  0.845098\r\n4  8  0.903090\r\n5  9  0.954243\r\n```\r\n\r\nSo that seems to work to use a compute kernel in pyarrow.dataset. \r\n\r\nHowever, it doesn't give a super nice user experience: it basically gives the equivalent of `pc.call_function(..)`, so eg `pc.call_function(\"log10, [...])` instead of `pc.log10(...)`. That also means that several of the niceties of the python wrapper functions are not available (e.g. validation of some arguments and not having to pass them as a list, passing options as keyword instead of the class, etc).\r\n\r\nI think ideally we would be able to use the compute wrappers directly? Like `pc.log10(ds.field('a'))` ? Or what would be our preferred user API?\r\n"
+        },
+        {
+            "created_at": "2021-08-30T13:22:33.352Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12060?focusedCommentId=17406728) by David Li (lidavidm):*\nI would vote for the compute wrappers supporting expressions. I suppose we already have some chained methods; maybe we could auto-generate all of them, like the compute wrappers? Or we could instead deprecate them and encourage people to always use the wrappers (though that may be a little inconvenient)."
+        },
+        {
+            "created_at": "2021-08-30T18:11:07.202Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12060?focusedCommentId=17406882) by Weston Pace (westonpace):*\nI don't think we can deprecate expressions since they are slightly different right?  An expression describes an operation while the compute wrappers actually perform the operation.\r\n\r\nI think it would confuse me if \"pc.log10(arr)\" returned an array and \"pc.log10(ds.field('a'))\" returned an expression.  Perhaps we could do something like \"ds.expr.log10(ds.field('a'))\""
+        },
+        {
+            "created_at": "2021-08-30T18:19:08.349Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12060?focusedCommentId=17406887) by David Li (lidavidm):*\nSorry, what I meant was to deprecate the chained methods in favor of always using the imperative ones. But maybe we should just offer both.\r\n\r\nI'm not sure that will be confusing. One is a concrete function call and one is a symbolic expression. But since neither syntax works today then we could just be explicit and have the ds.expr.\\* namespace or something. (Of course ds.field('a').log10() would also be explicit, just possibly confusing to those expecting prefix instead of postfix.)"
+        },
+        {
+            "created_at": "2021-12-09T15:22:48.449Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12060?focusedCommentId=17456499) by Joris Van den Bossche (jorisvandenbossche):*\nI would like to get back to this. \r\n\r\n> I think it would confuse me if \"pc.log10(arr)\" returned an array and \"pc.log10(ds.field('a'))\" returned an expression.\r\n\r\nA kernel like `pc.log10` already returns different things depending on the input (an array as input gives an array as result, a scalar as input gives a scalar as result, ..). So that it would return an expression for an expression as input is also not necessarily that strange IMO.\r\n\r\nNow, this also gives some \"smelly\" interdependence between the compute and dataset module (eg, if you want to pass FunctionOptions to the `Expression.\\_call`, the dataset cython module needs to depend on the cython _compute module)\r\n"
+        },
+        {
+            "created_at": "2021-12-09T15:24:28.613Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12060?focusedCommentId=17456503) by David Li (lidavidm):*\nNote that expression was moved to the compute namespace, so we could move Expression from _dataset to _compute."
+        },
+        {
+            "created_at": "2021-12-09T15:30:56.442Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12060?focusedCommentId=17456507) by Joris Van den Bossche (jorisvandenbossche):*\nAh, that's a good point. We should then probably follow that reorganization in the cython modules (and that should then solve the options problem)"
+        },
+        {
+            "created_at": "2021-12-14T10:08:55.472Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12060?focusedCommentId=17459030) by Joris Van den Bossche (jorisvandenbossche):*\nI made a PR for moving the Expression class from _dataset to _compute -> https://github.com/apache/arrow/pull/11938"
+        },
+        {
+            "created_at": "2022-01-14T13:04:51.132Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12060?focusedCommentId=17476126) by Krisztian Szucs (kszucs):*\nPostponing this to 8.0"
+        }
+    ]
+}

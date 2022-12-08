@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[Packaging] Consider uploading tarballs to avoid naming conflicts",
+        "body": "***Note**: This issue was originally created as [ARROW-2792](https://issues.apache.org/jira/browse/ARROW-2792). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n`[~kou]` has suggested, that we should upload tarballs for linux package builds, to include all .deb and/or .rpm packages.\r\nFor conda packages currenlty we postfix the artifacts with the arch name to avoid naming conflicts. To remain consistent we should chose one of the strategies (postifx or tarballs) and apply for each tasks.\r\n\r\nHowever tarballs would be a trivial solution to resolve naming conflicts, ensuring that a tarball contains all of the expected artifacts would require to download and extract it beforehand. This requires changes in status checks and artifact downloading / signing.\r\n\r\n`[~cpcloud]` thoughts?",
+        "created_at": "2018-07-04T09:39:36.000Z",
+        "updated_at": "2018-07-16T21:13:05.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Packaging",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2018-07-16T21:13:05.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-07-10T16:12:55.614Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2792?focusedCommentId=16538870) by Krisztian Szucs (kszucs):*\n`[~wesmckinn]` I need comments on this one."
+        },
+        {
+            "created_at": "2018-07-10T16:27:59.435Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2792?focusedCommentId=16538898) by Wes McKinney (wesm):*\nUploading a tarball for each task seems reasonable. Since the deployment code is somewhat opaque for this https://github.com/apache/arrow/blob/master/dev/tasks/python-wheels/travis.linux.yml#L49, the tasks themselves would need to determine whether the set of produced artifacts is complete before uploading to GitHub"
+        },
+        {
+            "created_at": "2018-07-10T16:46:28.893Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2792?focusedCommentId=16538923) by Krisztian Szucs (kszucs):*\nHow about creating a release tag for each task (instead just one for the job)? That way We would avoid name collisions.\r\nShould We be explicit about the artifact names? We can render the deploy segment with jinja2."
+        },
+        {
+            "created_at": "2018-07-10T17:25:33.809Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2792?focusedCommentId=16538990) by Wes McKinney (wesm):*\nThat sounds fine to me (tag for each task). I don't have an opinion on whether to list the exact artifact names in the file; whatever's the simplest / most robust seems OK to me"
+        },
+        {
+            "created_at": "2018-07-10T17:35:11.819Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2792?focusedCommentId=16539005) by Krisztian Szucs (kszucs):*\n`[~wesmckinn]` We probably need to split the builds (define matrix in tasks.yml instead of the templates), because linux packages starts to timeout on travis and to prevent artifact collisions within a single task. \r\n\r\nSomething like:\r\n\r\n```Java\n\r\n  wheel-win:\r\n    platform: win\r\n    template: python-wheels/appveyor.yml\r\n    matrix:\r\n      cp35: # variant\r\n        generator: Visual Studio 14 2015 Win64\r\n        numpy: \"1.13\"\r\n        python: \"3.5\"\r\n      cp36:\r\n        generator: Visual Studio 14 2015 Win64\r\n        numpy: \"1.13\"\r\n        python: \"3.6\"\r\n    artifacts:\r\n      - pyarrow-{version}-{variant}-{variant}m-win_amd64.whl\r\n      - pyarrow-{version}-{variant}-{variant}m-win_amd64.whl\r\n```\r\n\r\nI'm not exactly sure on the matrix definition though."
+        },
+        {
+            "created_at": "2018-07-10T20:08:58.997Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2792?focusedCommentId=16539173) by Phillip Cloud (cpcloud):*\n`[~kszucs]` If we do that, do we lose the ability to run an individual artifact build? That is, would it still be possible to run just the \"Python 3.5 windows wheel\" build?"
+        },
+        {
+            "created_at": "2018-07-10T20:09:59.808Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2792?focusedCommentId=16539175) by Krisztian Szucs (kszucs):*\nThat's not possible currently :)\r\nWe can't specify to run only one variant of the matrix: https://github.com/apache/arrow/blob/master/dev/tasks/python-wheels/appveyor.yml\r\n\r\nIf We want to take over the matrix handling from the CIs, we need a good enough formalism to do that. "
+        },
+        {
+            "created_at": "2018-07-11T00:55:33.131Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2792?focusedCommentId=16539421) by Kouhei Sutou (kou):*\nIf we use different filenames for each distribution, we should do it by `debian/changelog` instead of outer script. We can do it by the following patch:\r\n\r\n```\n\r\ndiff --git a/dev/tasks/linux-packages/apt/build.sh b/dev/tasks/linux-packages/apt/build.sh\r\nindex f489d026..fad5d16d 100755\r\n--- a/dev/tasks/linux-packages/apt/build.sh\r\n+++ b/dev/tasks/linux-packages/apt/build.sh\r\n@@ -54,6 +54,13 @@ if [ -d \"/host/tmp/${specific_debian_dir}\" ]; then\r\n else\r\n   run cp -rp \"/host/tmp/debian\" debian\r\n fi\r\n+run \\\r\n+  sed \\\r\n+  -i\"\" \\\r\n+  -e\"1 s/)/~${code_name}1)/\" \\\r\n+  -e\"1 s/unstable/${code_name}/\" \\\r\n+  debian/changelog\r\n+\r\n# export DEB_BUILD_OPTIONS=noopt\r\n if [ \"${DEBUG:-no}\" = \"yes\" ]; then\r\n   run debuild -us -uc\r\n```\r\n\r\nWith this patch, we can generate\r\n`libarrow0_${VERSION}~${CODE_NAME}1_${ARCHITECTURE}.deb` instead of\r\n`libarrow0_${VERSION}_${ARCHITECTURE}.deb`."
+        },
+        {
+            "created_at": "2018-07-16T21:12:52.740Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2792?focusedCommentId=16545740) by Krisztian Szucs (kszucs):*\nNow each task has its own github release tag to avoid conflicts.\r\n\r\nResolved by ARROW-2836: [Packaging] Expand build matrices to multiple tasks \r\nGithub PR: https://github.com/apache/arrow/pull/2259\r\n\r\nClosing."
+        }
+    ]
+}

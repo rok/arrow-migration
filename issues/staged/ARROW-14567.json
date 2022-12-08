@@ -1,0 +1,62 @@
+{
+    "issue": {
+        "title": "[C++][Python][R] PrettyPrint ignores timezone",
+        "body": "***Note**: This issue was originally created as [ARROW-14567](https://issues.apache.org/jira/browse/ARROW-14567). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen printing TimestampArray in pyarrow the timezone information is ignored by PrettyPrint (__str__\u00a0 calls to_string() in array.pxi).\r\n\r\n```python\n\r\nimport pyarrow as pa\r\n\r\na = pa.array([0], pa.timestamp('s', tz='+02:00'))\r\n\r\nprint(a) # representation not correct?\r\n# <pyarrow.lib.TimestampArray object at 0x7f834c7cb9a8>\r\n# [\r\n#  1970-01-01 00:00:00\r\n# ]\r\n```",
+        "created_at": "2021-11-03T08:06:07.000Z",
+        "updated_at": "2022-11-18T11:13:59.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-03T10:00:16.247Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14567?focusedCommentId=17437877) by Joris Van den Bossche (jorisvandenbossche):*\nThe PrettyPrint for Timestamp type is implemented in `StringFormatter<TimestampType>` at `formatting.h` (https://github.com/apache/arrow/blob/bf67ec74635db2183619601f025e4724bd5a6b75/cpp/src/arrow/util/formatting.h#L431-L473). \r\n\r\nCurrently this simply does not take into account any timezone information of the type, and formats the stored UTC epoch.  Personally, I find this confusing as the current repr for the array has no indication whatsoever how to interpret the printed time values (and without any indication, my first expectation would be local time in the timezone of the type, which isn't the case).\r\n\r\nThe formatting code already uses the date.h utilities (and which we have vendored anyway), so in principle we could use date.h to first localize the epoch value. However, that makes printing dependent on finding a timezone database (eg not yet supported on Windows at the moment). \r\n\r\nAn alternative could be to keep the printed value in UTC but add a `+00:00` indication to make it it clear this are the UTC times that are printed (and not the wall clock time in the timezone of the type). \r\n\r\ncc `[~rokm]` `[~apitrou]` `[~lidavidm]`\r\n"
+        },
+        {
+            "created_at": "2021-11-03T11:06:48.873Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14567?focusedCommentId=17437939) by Antoine Pitrou (apitrou):*\nI think it should be a `Z` at the end of the string?"
+        },
+        {
+            "created_at": "2021-11-03T12:35:13.086Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14567?focusedCommentId=17438026) by David Li (lidavidm):*\nAgreed with Antoine. It may confuse end users slightly but represents what the actual stored value is."
+        },
+        {
+            "created_at": "2021-11-03T12:42:17.677Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14567?focusedCommentId=17438033) by Joris Van den Bossche (jorisvandenbossche):*\nIndeed, `Z` is more correct than `+00:00` (which could still indicate any timezone that just happens to have no offset to UTC at that point in time)\r\n\r\nPersonally I would still prefer actual localized times, but adding the UTC indication would already help a lot."
+        },
+        {
+            "created_at": "2021-11-03T12:55:38.336Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14567?focusedCommentId=17438040) by Antoine Pitrou (apitrou):*\nIf we want to allow outputting localized timestamps, it should probably be an option, to avoid breaking existing uses."
+        },
+        {
+            "created_at": "2021-11-03T13:28:06.616Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14567?focusedCommentId=17438059) by Rok Mihevc (rokm):*\nZ and an option to localize sounds good.\r\n\r\nWhat would the final (once timezone database is always present) default be? Z or localized?"
+        },
+        {
+            "created_at": "2022-01-25T15:00:11.452Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14567?focusedCommentId=17481874) by Jonathan Keane (jonkeane):*\nAgreed that at the very least falling back to a timestamp with Z is good (e.g. when we can't find the timezone database). But IMO the _least confusing_ to users would be to default to localized.\r\n\r\nSeparately from the default, we should _also_ indicate in some way that though that the type _does_ include a (non-UTC) timezone. If I only saw a string of timestamps like below (+ Z), I would assume the array was set to UTC (and try casting it to a different TZ, and be confused/annoyed that it 'didn't seem to work')\r\n\r\n```Java\n\r\narr <- Array$create(ts)\r\narr\r\n#> Array\r\n#> <timestamp[us]>                     <------ maybe add timezone information here?\r\n#> [\r\n#>   2020-01-01 09:00:00.000000,\r\n#>   2020-01-01 10:00:00.000000,\r\n#>   2020-01-01 11:00:00.000000,\r\n#>   2020-01-01 12:00:00.000000,\r\n#>   2020-01-01 13:00:00.000000,\r\n#>   2020-01-01 14:00:00.000000,\r\n#>   2020-01-01 15:00:00.000000,\r\n#>   2020-01-01 16:00:00.000000,\r\n#>   2020-01-01 17:00:00.000000,\r\n#>   2020-01-01 18:00:00.000000\r\n#> ]\r\n```"
+        },
+        {
+            "created_at": "2022-01-25T16:19:37.931Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14567?focusedCommentId=17481927) by Antoine Pitrou (apitrou):*\nYes, I think adding the timezone information in the type output is the primary fix here. It would be nice to fix the values to add a \"Z\" as well (only if the timezone is set on the type)."
+        },
+        {
+            "created_at": "2022-02-07T16:22:25.589Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14567?focusedCommentId=17488228) by Joris Van den Bossche (jorisvandenbossche):*\nI agree with `[~jonkeane]` that IMO the least confusing display would be to use localized strings (with timezone offset indication, so like \"1970-01-01 02:00:00+02:00\"). Adding \"Z\" is certainly better than the current situation, but it still doesn't give a quick idea about the local time that the timestamp actually represents. "
+        },
+        {
+            "created_at": "2022-02-07T16:45:44.678Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14567?focusedCommentId=17488247) by Rok Mihevc (rokm):*\nAgreed! Offset (\"1970-01-01 02:00:00+02:00\") per value plus timezone string (<timestamp[us, \"Pacific/Marquesas\"]>) in the header would be great."
+        },
+        {
+            "created_at": "2022-08-10T16:03:42.425Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14567?focusedCommentId=17578054) by Rok Mihevc (rokm):*\nUsers do seem to be expecting local times: <https://stackoverflow.com/questions/73275465/how-to-keep-original-datatime-in-pyarrow-table>"
+        }
+    ]
+}

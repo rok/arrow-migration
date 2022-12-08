@@ -1,0 +1,34 @@
+{
+    "issue": {
+        "title": "[Plasma] PlasmaClient::Connect() of CUDA enabled build is always failed on no CUDA device machine",
+        "body": "***Note**: This issue was originally created as [ARROW-8577](https://issues.apache.org/jira/browse/ARROW-8577). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe provide CUDA enabled Plasma packages for Debian GNU/Linux and Ubuntu.\r\nIt must work on no CUDA device machine.\r\n\r\nThe original report:\r\n\r\n\u2014\r\n\r\nHi all,\r\n\r\n\u00a0Previously, I was using c_glib Plasma library (build 0.12) for creating plasma objects. It was working as expected. But now I want to use Arrow's newest build.\u00a0 I incurred the following error:\r\n\r\n\u00a0\r\n/build/apache-arrow-0.17.0/cpp/src/arrow/result.cc:28: ValueOrDie called on an error: IOError: Cuda error 100 in function 'cuInit': [CUDA_ERROR_NO_DEVICE] no CUDA-capable device is detected\r\nI think plasma client options (gplasma_client_options_new()) which I am using with default settings are enabling a check for my CUDA device and I have no CUDA device attached to my system. How I can disable this check? Any help will be highly appreciated. Thanks",
+        "created_at": "2020-04-24T02:42:38.000Z",
+        "updated_at": "2020-05-10T07:58:22.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++ - Plasma",
+            "Component: GPU",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-05-10T07:58:22.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-04-24T03:08:15.718Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8577?focusedCommentId=17091124) by Kouhei Sutou (kou):*\nCould you show a program that reproduces this problem?"
+        },
+        {
+            "created_at": "2020-04-24T12:37:15.831Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8577?focusedCommentId=17091523) by Tanveer (tahmad):*\nHi Kouhei,\r\n\r\nThis is the program. I am taking a RecordBatch (batch_genomics) as input in this function. The error arises at:\r\n\r\ngPlasmaClient = gplasma_client_new(\"/tmp/store0\",gplasmaClient_options, &error);\r\n\r\n\u00a0\r\n```java\n\r\nguint8 id_arr[20]; \r\ngenRandom(id_arr,20);\r\nchar objID_file[] = \"/home/tahmad/lib/core/objID.txt\";\r\n\r\ng_print(\"obj_id: %s\\n\", id_arr);\r\n\r\n gboolean success = TRUE;\r\n GError *error = NULL;\r\n\r\n GPlasmaClient *gPlasmaClient;\r\n GPlasmaObjectID *object_id;\r\n GPlasmaClientCreateOptions *create_options;\r\n GPlasmaClientOptions *gplasmaClient_options;\r\n GPlasmaCreatedObject *Object;\r\n GPlasmaReferredObject *refObject;\r\n GArrowBuffer *arrowBuffer;\r\n\r\n arrowBuffer = GSerializeRecordBatch(batch_genomics);\r\n gint32 size = garrow_buffer_get_size(arrowBuffer);\r\n\r\n gplasmaClient_options = gplasma_client_options_new();\r\n gPlasmaClient = gplasma_client_new(\"/tmp/store0\",gplasmaClient_options, &error);\r\n object_id = gplasma_object_id_new(id_arr, 20, &error);\r\n create_options = gplasma_client_create_options_new();\r\n {\r\n guint8 metadata[] = \"metadata\";\r\n gplasma_client_create_options_set_metadata(create_options, (const guint8 *)metadata, sizeof(metadata));\r\n }\r\n Object = gplasma_client_create(gPlasmaClient, object_id, size, create_options, &error);\r\n\r\n g_object_unref(create_options);\r\n {\r\n GArrowBuffer *data;\r\n guint8 dataW[] = \"data\";\r\n g_object_get(Object, \"data\", &data, NULL);\r\n garrow_mutable_buffer_set_data(GARROW_MUTABLE_BUFFER(data),0, garrow_buffer_get_databytes(arrowBuffer),size,&error);\r\n g_object_unref(data);\r\n }\r\n\r\n gplasma_created_object_seal(Object, &error);\r\n g_object_unref(Object);\r\n gplasma_client_disconnect(gPlasmaClient, &error);\r\n g_object_unref(gPlasmaClient);\n```\r\n\u00a0\r\n\r\nI am using this function to convert Arrow RecordBatch to ArrowBuffer:\r\n\r\n\u00a0\r\n```java\n\r\nextern \"C\" GArrowBuffer * \r\nGSerializeRecordBatchToBuffer(GArrowRecordBatch *record_batch)\r\n{\r\n \r\nconst auto arrow_record_batch = garrow_record_batch_get_raw(record_batch);\r\nstd::shared_ptr<arrow::ResizableBuffer> resizable_buffer;\r\n\r\narrow::AllocateResizableBuffer(arrow::default_memory_pool(), 0, &resizable_buffer);\r\nstd::shared_ptr<arrow::Buffer> buffer = std::dynamic_pointer_cast<arrow::Buffer>(resizable_buffer);\r\n\r\narrow::ipc::SerializeRecordBatch(*arrow_record_batch, arrow::default_memory_pool(), &buffer);\r\nreturn garrow_buffer_new_raw(&buffer);\r\n}\r\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-04-25T22:15:39.153Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8577?focusedCommentId=17092396) by Kouhei Sutou (kou):*\nThanks.\r\nThe result check for CUDA initialization causes this. The result is just ignore before 0.17.0 but The result is checked since 0.17.0 by ARROW-7330.\r\n\r\nWe should defer CUDA initialization.\r\nI'll write a patch."
+        },
+        {
+            "created_at": "2020-05-10T07:58:22.907Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8577?focusedCommentId=17103687) by Kouhei Sutou (kou):*\nIssue resolved by pull request 7138\n<https://github.com/apache/arrow/pull/7138>"
+        }
+    ]
+}

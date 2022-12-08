@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[C++][Parquet] Field-level metadata are not supported? (ColumnMetadata.key_value_metadata)",
+        "body": "***Note**: This issue was originally created as [ARROW-15548](https://issues.apache.org/jira/browse/ARROW-15548). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nDue to an application where we are considering to use field-level metadata (so not schema-level metadata), but also want to be able to save this data to Parquet, I was looking into \"field-level metadata\" for Parquet, which I assumed we supported this. \r\n\r\nWe can roundtrip Arrow's field-level metadata to/from Parquet, as shown with this example:\r\n\r\n```python\n\r\nschema = pa.schema([pa.field(\"column_name\", pa.int64(), metadata={\"key\": \"value\"})])\r\ntable = pa.table({'column_name': [0, 1, 2]}, schema=schema)\r\npq.write_table(table, \"test_field_metadata.parquet\")\r\n\r\n>>> pq.read_table(\"test_field_metadata.parquet\").schema\r\ncolumn_name: int64\r\n  -- field metadata --\r\n  key: 'value'\r\n```\r\n\r\nHowever, the reason this is restored is actually because of this being stored in the Arrow schema that we (by default) store in the `ARROW:schema` metadata in the Parquet FileMetaData.key_value_metadata.\r\n\r\nWith a small patched version to be able to turn this off (currently this is harcoded to be turned on in the python bindings), it is clear this field-level metadata is not restored on roundtrip without this stored arrow schema:\r\n\r\n```python\n\r\npq.write_table(table, \"test_field_metadata_without_schema.parquet\", store_arrow_schema=False)\r\n\r\n>>> pq.read_table(\"test_field_metadata_without_schema.parquet\").schema\r\ncolumn_name: int64\r\n```\r\n\r\nSo there is currently no mapping from Arrow's field level metadata to Parquet's column-level metadata (`ColumnMetaData.key_value_metadata` in Parquet's thrift structures). \r\n\r\n(which also means that using field-level metadata roundtripping to parquet only works as long as you are using Arrow for writing/reading, but not if you want to be able to also exchange such data with non-Arrow Parquet implementations)\r\n\r\nIn addition, it also seems we don't even expose this field in our C++ or Python bindings, to just access that data if you would have a Parquet file (written by another implementation) that has key_value_metadata in the ColumnMetaData.\r\n\r\ncc `[~emkornfield]` \r\n\r\n\r\n",
+        "created_at": "2022-02-03T11:39:10.000Z",
+        "updated_at": "2022-04-26T15:34:50.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Parquet",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-03T11:41:21.110Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15548?focusedCommentId=17486400) by Antoine Pitrou (apitrou):*\nI think this is the same for schema-level metadata, or am I mistaken?"
+        },
+        {
+            "created_at": "2022-02-03T11:42:51.616Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15548?focusedCommentId=17486401) by Joris Van den Bossche (jorisvandenbossche):*\nOn second thought, this `ColumnMetadata` in Parquet is part of the ColumnChunk, which is part of the RowGroup (https://parquet.apache.org/documentation/latest/#metadata). So if you would store Arrow's field-level metadata in this key_value_metadata for a column, that would be repeated for each row group in the Parquet file.   \r\nSo that's maybe a good reason there is no default 1:1 mapping between Arrow's field-level metadata and Parquet's ColumnMetaData.key_value_metadata?"
+        },
+        {
+            "created_at": "2022-02-03T11:45:29.690Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15548?focusedCommentId=17486403) by Joris Van den Bossche (jorisvandenbossche):*\n> I think this is the same for schema-level metadata, or am I mistaken?\r\n\r\nThat's actually stored in the Parquet FileMetaData.key_value_metadata (separately from the ARROW:schema field). For example:\r\n\r\n```Java\n\r\nschema = pa.schema([pa.field(\"column_name\", pa.int64(), metadata={\"key\": \"value\"})], metadata={\"schema_level_key\": \"value\"})\r\ntable = pa.table({'column_name': [0, 1, 2]}, schema=schema)\r\npq.write_table(table, \"test_field_metadata.parquet\")\r\n\r\n>>> pq.read_metadata(\"test_field_metadata.parquet\").metadata\r\n{b'ARROW:schema': b'//////gAAAAQAAAAAAAKAA4ABgAFAAgACgAAAAABBAAQAAAAAAAKAAwAAAAEAAgACgAAAEAAAAAEAAAAAQAAAAQAAACA////CAAAABwAAAAQAAAAc2NoZW1hX2xldmVsX2tleQAAAAAFAAAAdmFsdWUAAAABAAAAGAAAAAAAEgAYAAgABgAHAAwAAAAQABQAEgAAAAAAAQIUAAAAWAAAAAgAAAAYAAAAAAAAAAsAAABjb2x1bW5fbmFtZQABAAAADAAAAAgADAAEAAgACAAAAAgAAAAMAAAAAwAAAGtleQAFAAAAdmFsdWUAAAAIAAwACAAHAAgAAAAAAAABQAAAAA==',\r\n b'schema_level_key': b'value'}\r\n```\r\n\r\nSo this \"schema_level_key\" metadata is present in the Parquet metadata as is (I don't know if we actually deduplicate it from the ARROW:schema)"
+        },
+        {
+            "created_at": "2022-02-03T12:05:39.415Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15548?focusedCommentId=17486418) by Antoine Pitrou (apitrou):*\nNote there's actually a JIRA about preventing the duplication due to file size: ARROW-14303"
+        },
+        {
+            "created_at": "2022-02-06T05:05:04.043Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15548?focusedCommentId=17487624) by Micah Kornfield (emkornfield):*\nI don't think it is a bad idea to have something control for placing metadata for each column on a per row-group basis.\u00a0 Based on the discussion on this thread it seems like this should be opt-in though"
+        }
+    ]
+}

@@ -1,0 +1,72 @@
+{
+    "issue": {
+        "title": "[Python] StructScalar.as_py() fails if the type has duplicate field names",
+        "body": "***Note**: This issue was originally created as [ARROW-9997](https://issues.apache.org/jira/browse/ARROW-9997). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n`StructScalar` currently extends an abstract Mapping interface. Since the type allows duplicate field names we cannot provide that API.\r\n\r\n",
+        "created_at": "2020-09-14T15:37:24.000Z",
+        "updated_at": "2022-07-04T17:41:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-15T14:26:03.561Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9997?focusedCommentId=17196186) by Joris Van den Bossche (jorisvandenbossche):*\nPersonnally, I think moving away from the mapping API is quite a usability regression. Would it be a possibility to still provide that as the default, but have a alternative way to get a field by position? \r\n(in a similar way, Table and Schema also work like that, they raise when getting a field by name and the name is duplicated, but you still can get a field by name)"
+        },
+        {
+            "created_at": "2020-09-15T14:41:31.750Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9997?focusedCommentId=17196199) by Krisztian Szucs (kszucs):*\nI'd also prefer the mapping API, but `.as_py()` should not fail in any circumstance. If we keep the mapping API and return with a dict from `.as_py()`, then it is going to fail if there are duplicate field names. \r\n\r\nIf we add a mapping-like interface which tolerates duplicate keys end we implement it for both the StructScalar objects and for the one which is returned by StructScalar.as_py() then it could work. \r\n\r\ncc `[~apitrou]`"
+        },
+        {
+            "created_at": "2020-09-15T15:35:26.348Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9997?focusedCommentId=17196236) by Antoine Pitrou (apitrou):*\nYes, I think a mapping-like is the answer."
+        },
+        {
+            "created_at": "2020-09-15T15:38:44.468Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9997?focusedCommentId=17196242) by Joris Van den Bossche (jorisvandenbossche):*\nThis is marked being fixed by https://github.com/apache/arrow/pull/8088, but could it be split off? (Since it is some code change in the cython StructScalar, it doesn't need to be tied to all other refactors?)"
+        },
+        {
+            "created_at": "2020-09-15T17:21:07.214Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9997?focusedCommentId=17196405) by Krisztian Szucs (kszucs):*\nDefinitely. I added it to have a proper roundtrip for the struct arrays, but I can skip that test."
+        },
+        {
+            "created_at": "2020-09-15T17:35:45.664Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9997?focusedCommentId=17196424) by Neal Richardson (npr):*\n> I'd also prefer the mapping API, but .as_py() should not fail in any circumstance.\r\n\r\nIs that so? If the mapping API is the most useful thing to translate a struct array into, and the only reason not to is the (uncommon) chance of duplicate field names, another solution would be to make as_py() error if there are duplicate field names. IIUC as_py is a convenience method, and since Python objects and the Arrow format are not identical, there should be no hard requirement that everything translate 100% faithfully. Put differently, usability and fidelity are tradeoffs at the extremes, and we should consider whether the benefit of increased fidelity in edge cases is worth the cost of usability in common cases."
+        },
+        {
+            "created_at": "2020-09-15T22:02:57.866Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9997?focusedCommentId=17196573) by Krisztian Szucs (kszucs):*\nMy issue is StructScalar is an **arrow object** which implements a python mapping interface. Once we have duplicate keys the object stops to operate, we cannot do anything with it since all operation will raise a KeyError (not just when we call `.as_py())`\r\n\r\nMy another problem is that the struct array/scalar is the only type where we fail to roundtrip between arrow and python (at least according to a hypothesis test):\r\n```python\n\r\npa.array(arr.to_pylist(), type=arr.type)\r\npa.scalar(scalar.as_py(), type=scalar.type)\r\n```\r\nIf we want convenient pythonic access to StructScalar I'd rather add a best effort `.as_dict()` method."
+        },
+        {
+            "created_at": "2020-10-07T20:58:37.053Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9997?focusedCommentId=17209862) by Krisztian Szucs (kszucs):*\nI find this issue a bit pressing before the release, but I'm not sure about the desired resolution. Perhaps returning with a multimap/multidict like object from `scalar.as_py()` would work (although it can cause backward incompatibilities if users expect dictionary instances). \r\n\r\n`[~apitrou]` `[~jorisvandenbossche]` thoughts?"
+        },
+        {
+            "created_at": "2020-10-22T08:39:51.891Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9997?focusedCommentId=17218871) by Joris Van den Bossche (jorisvandenbossche):*\nWith multidict, you mean something like https://multidict.readthedocs.io/en/stable/multidict.html ?\r\n\r\n> My issue is StructScalar is an arrow object which implements a python mapping interface. Once we have duplicate keys the object stops to operate, we cannot do anything with it since all operation will raise a KeyError (not just when we call .as_py())\r\n\r\nBut that's something we could fix independenly from `as_py()`, I think? \r\n\r\nFor example, `__contains__` relies on key access, which gives wrong results:\r\n\r\n```Java\n\r\nIn [12]: s = pa.array([[('a', 1), ('b', 2), ('a', 3)]], pa.struct([('a', 'int64'), ('b', 'int64'), ('a', 'int64')]))[0]\r\n\r\nIn [13]: type(s)\r\nOut[13]: pyarrow.lib.StructScalar\r\n\r\nIn [15]: list(s)\r\nOut[15]: ['a', 'b', 'a']\r\n\r\nIn [16]: 'b' in s\r\nOut[16]: True\r\n\r\nIn [17]: 'a' in s\r\nOut[17]: False\r\n```\r\n\r\nBut that's something we could fix if we want, without changing the default `as_py` behaviour.\r\n\r\nAnd we could also add a method to get a field value by index instead of by name, which you could use if there are duplicate fields. "
+        },
+        {
+            "created_at": "2021-01-11T19:35:08.345Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9997?focusedCommentId=17262897) by Joris Van den Bossche (jorisvandenbossche):*\nGiven we didn't advance the discussion, moving to the next milestone"
+        },
+        {
+            "created_at": "2021-06-23T16:19:10.164Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9997?focusedCommentId=17368328) by Antoine Pitrou (apitrou):*\n`[~amol-]` There is some contention here that needs to be resolved. It seems returning a mapping-like with some support for multiple values would be a possible solution. What is your opinion?"
+        },
+        {
+            "created_at": "2021-06-24T07:45:44.999Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9997?focusedCommentId=17368688) by Joris Van den Bossche (jorisvandenbossche):*\nTo restate from my last comment above, regardless of the `as_py` discussion, I think we can certainly already do:\r\n\r\n- Fix the issue on the side of pyarrow's `StructScalar`, so that you can eg get a field value by index instead of by name using pyarrow's APIs + fix the cases where we have wrong behaviour (like the contains example). To ensure that at least our own StructScalar is usable and properly behaving with duplicate field names.\n  \n  That should already resolve one of the issues raised above. It doesn't resolve the discussion about the return type of `as_py()` of course. \n  \n  The return value of `as_py` as a dictionary is IMO the most useful one in a large majority of the use cases (and I don't think it \"should not fail in any circumstance\"). It's a reality that there is not always a direct 1:1 mapping with built-in python structures. "
+        },
+        {
+            "created_at": "2021-06-24T07:57:08.493Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9997?focusedCommentId=17368691) by Joris Van den Bossche (jorisvandenbossche):*\nSmall correction: you can already get a field by index by passing an integer to `\\_\\_getitem\\_\\_`:\r\n\r\n```Java\n\r\nIn [19]: s = pa.scalar([('a', 1), ('b', 2), ('a', 3)], pa.struct([('a', 'int64'), ('b', 'int64'), ('a', 'int64')]))\r\n\r\nIn [20]: type(s)\r\nOut[20]: pyarrow.lib.StructScalar\r\n\r\nIn [21]: s[0]\r\nOut[21]: <pyarrow.Int64Scalar: 1>\r\n```\r\n\r\nThe repr is also failing because that relies on `as_py`"
+        },
+        {
+            "created_at": "2021-06-24T09:04:13.913Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9997?focusedCommentId=17368714) by Joris Van den Bossche (jorisvandenbossche):*\nI opened ARROW-13158 (and a PR) for some of the independent StructScalar fixes."
+        }
+    ]
+}

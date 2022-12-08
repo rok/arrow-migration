@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[Python] \"SystemError: Bad call flags in _PyMethodDef_RawFastCallDict\" in Python 3.7.7 on macOS when using pyarrow wheel",
+        "body": "***Note**: This issue was originally created as [ARROW-8684](https://issues.apache.org/jira/browse/ARROW-8684). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n`[~npr]` reported this on the 0.17.0 RC0 vote thread but I have confirmed it independently. It was also reported at\r\n\r\nhttps://github.com/apache/arrow/issues/7082\r\n\r\nHere are steps to reproduce on macOS:\r\n\r\n```Java\n\r\nconda create -yn py-3.7-defaults python=3.7 -c defaults\r\nconda activate py-3.7-defaults\r\npip install pyarrow\r\n```\r\n\r\nNow open the Python interpreter, run `import pyarrow`, then exit the interpreter (`python -c \"import pyarrow\"` didn't trigger it for me):\r\n\r\n```Java\n\r\n$ python\r\nPython 3.7.7 (default, Mar 26 2020, 10:32:53) \r\n[Clang 4.0.1 (tags/RELEASE_401/final)] :: Anaconda, Inc. on darwin\r\nType \"help\", \"copyright\", \"credits\" or \"license\" for more information.\r\n>>> import pyarrow\r\n>>> \r\nError in atexit._run_exitfuncs:\r\nTraceback (most recent call last):\r\n  File \"pyarrow/types.pxi\", line 2638, in pyarrow.lib._unregister_py_extension_types\r\nSystemError: Bad call flags in _PyMethodDef_RawFastCallDict. METH_OLDARGS is no longer supported!\r\nSegmentation fault: 11\r\n```\r\n\r\nIt fails with Python 3.7.6 when using `-c conda-forge` also, so it is not particular to defaults.\r\n\r\nFrustratingly, the problem doesn't exist in Python 3.7.4 but occurs for me with 3.7.5, 3.7.6, and 3.7.7. ",
+        "created_at": "2020-05-04T01:25:30.000Z",
+        "updated_at": "2020-05-13T00:16:33.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-05-13T00:16:33.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-05-04T01:52:59.149Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8684?focusedCommentId=17098623) by Wes McKinney (wesm):*\nI briefly tried creating a debug build on macOS but couldn't get the NumPy or pyarrow wheels to install into it, so I'm pretty out of my depth to begin debugging this. \r\n\r\nHere's the backtrace I see with lldb\r\n\r\n```Java\n\r\nError in atexit._run_exitfuncs:\r\nTraceback (most recent call last):\r\n  File \"pyarrow/types.pxi\", line 2638, in pyarrow.lib._unregister_py_extension_types\r\nSystemError: Bad call flags in _PyMethodDef_RawFastCallDict. METH_OLDARGS is no longer supported!\r\nProcess 86225 stopped\r\n* thread #1, queue = 'com.apple.main-thread', stop reason = EXC_BAD_ACCESS (code=1, address=0xa00)\r\n    frame #0: 0x00000001001b689a python`new_threadstate + 410\r\npython`new_threadstate:\r\n->  0x1001b689a <+410>: movq   0xa00(%r14), %rax\r\n    0x1001b68a1 <+417>: incq   %rax\r\n    0x1001b68a4 <+420>: movq   %rax, 0xa00(%r14)\r\n    0x1001b68ab <+427>: movq   %rax, 0x110(%rbx)\r\nTarget 0: (python) stopped.\r\n(lldb) bt\r\n* thread #1, queue = 'com.apple.main-thread', stop reason = EXC_BAD_ACCESS (code=1, address=0xa00)\r\n  * frame #0: 0x00000001001b689a python`new_threadstate + 410\r\n    frame #1: 0x00000001001b79b9 python`PyGILState_Ensure + 185\r\n    frame #2: 0x000000012bbb7562 libarrow_python.17.dylib`arrow::py::OwnedRefNoGIL::~OwnedRefNoGIL() + 18\r\n    frame #3: 0x000000012bbea74f libarrow_python.17.dylib`arrow::py::PyExtensionType::~PyExtensionType() + 47\r\n    frame #4: 0x000000012aa4cec9 libarrow.17.dylib`arrow::ExtensionTypeRegistryImpl::~ExtensionTypeRegistryImpl() + 89\r\n    frame #5: 0x000000012a903291 libarrow.17.dylib`std::__1::shared_ptr<arrow::Device>::~shared_ptr() + 49\r\n    frame #6: 0x00007fff63df53cf libsystem_c.dylib`__cxa_finalize_ranges + 319\r\n    frame #7: 0x00007fff63df56b3 libsystem_c.dylib`exit + 55\r\n    frame #8: 0x00007fff63d4f3dc libdyld.dylib`start + 8\r\n    frame #9: 0x00007fff63d4f3d5 libdyld.dylib`start + 1\r\n```\r\n\r\nSo the segfault is happening it seems just because the call to pyarrow.lib._unregister_py_extension_types is failing. We could try moving the `atexit` business into pure Python land to see if that makes the problem go away"
+        },
+        {
+            "created_at": "2020-05-04T09:15:34.065Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8684?focusedCommentId=17098798) by Frederik (hantusk):*\nAs requested here is some information about my environment. Running MacOS Catalina 10.15.3. Running python version 3.7.7 compiled with pyenv.\r\n\r\n\u00a0\r\n\r\nThis is reproducible for me in a virtual environment, let me know if I can dump more debugging information for you.\r\n\r\n\u00a0`>>> import pyarrow`\r\n`>>>`\r\n`KeyboardInterrupt`\r\n`>>>`\r\n`KeyboardInterrupt`\r\n`>>> exit`\r\n`Use exit() or Ctrl-D (i.e. EOF) to exit`\r\n`>>> exit()`\r\n`Error in atexit._run_exitfuncs:`\r\n`Traceback (most recent call last):`\r\n` File \"pyarrow/types.pxi\", line 2638, in pyarrow.lib._unregister_py_extension_types`\r\n`SystemError: Bad call flags in _PyMethodDef_RawFastCallDict. METH_OLDARGS is no longer supported!`\r\n`[1] 92131 segmentation fault python`"
+        },
+        {
+            "created_at": "2020-05-04T09:22:21.529Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8684?focusedCommentId=17098804) by Antoine Pitrou (apitrou):*\nPerhaps ask for guidance on the Cython issue tracker? This looks possibly Cython-related."
+        },
+        {
+            "created_at": "2020-05-04T17:30:11.573Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8684?focusedCommentId=17099164) by Wes McKinney (wesm):*\nI just opened https://github.com/cython/cython/issues/3572"
+        },
+        {
+            "created_at": "2020-05-04T18:24:43.997Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8684?focusedCommentId=17099224) by Wes McKinney (wesm):*\n`[~apitrou]` `[~kszucs]` another problem that this exposes is that running `python -c \"import pyarrow\"` does not appear to be sufficient to assess whether the package is broken or not. "
+        },
+        {
+            "created_at": "2020-05-04T21:02:47.664Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8684?focusedCommentId=17099349) by Krisztian Szucs (kszucs):*\nI'll try to take a look at tomorrow."
+        },
+        {
+            "created_at": "2020-05-12T16:26:14.763Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8684?focusedCommentId=17105569) by Antoine Pitrou (apitrou):*\nOk, this is a Cython bug. See <https://github.com/cython/cython/issues/3603>"
+        },
+        {
+            "created_at": "2020-05-13T00:16:33.869Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8684?focusedCommentId=17105834) by Krisztian Szucs (kszucs):*\nIssue resolved by pull request 7160\n<https://github.com/apache/arrow/pull/7160>"
+        }
+    ]
+}

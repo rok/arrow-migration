@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[C++] Implement cumulative sum compute function",
+        "body": "***Note**: This issue was originally created as [ARROW-13530](https://issues.apache.org/jira/browse/ARROW-13530). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n",
+        "created_at": "2021-08-02T15:48:40.000Z",
+        "updated_at": "2022-06-21T04:07:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-05-31T13:23:20.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-02T15:49:03.907Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13530?focusedCommentId=17391668) by Antoine Pitrou (apitrou):*\ncc `[~icook]`"
+        },
+        {
+            "created_at": "2022-03-17T20:09:02.462Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13530?focusedCommentId=17508409) by Eduardo Ponce (edponce):*\nThe cumulative sum API for other libraries/languages are:\r\n- [pandas: `cumsum(values, skipna=True)`](https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.cumsum.html) - By default skips nulls/NaNs while the sum progresses\n- [R: `cumsum(values)`](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/cumsum) - Always propagates null/NaN after the first one is encountered\n- [numpy: `cumsum(values)`](https://numpy.org/doc/stable/reference/generated/numpy.cumsum.html) - Always propagates null/NaN after the first one is encountered\n  \n  Based on the combinations above, I think Arrow's cumulative sum should provide an option to handle nulls/NaNs (`skip_nulls`). What should be the default behavior: pandas or R/numpy?"
+        },
+        {
+            "created_at": "2022-03-17T20:37:09.229Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13530?focusedCommentId=17508421) by Eduardo Ponce (edponce):*\nAlso, if we plan on adding other cumulative functions, such as `cumprod`, `cummin`, `cummax` (no JIRAs for these), then we should only need generic code that can iterate through data and accumulate while using the existing `sum/min/max/multiply` kernels to execute the actual calculations."
+        },
+        {
+            "created_at": "2022-04-02T00:44:52.844Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13530?focusedCommentId=17516180) by Eduardo Ponce (edponce):*\nDifferent cumsum implementations have different behaviors wrt to nested inputs.\r\n1. Which one should Arrow's cumsum follow?\n1. Should a ChunkedArray input output a ChunkedArray of same shape or output a flattened Array?\n   \n    \\* **Pandas**\n   {code:python}\n1. Performs a \"cumulative concatenate\" operation for all nested lists\n   >>> d = pd.Series([[1,2],[3,4]])\n   >>> d.cumsum()\n   0          [1, 2]\n   1    [1, 2, 3, 4]\n   dtype: object\n   \n   >>> d = pd.Series([[1,2,[3,4]],[[5,6],7],[8,9]])\n   >>> d.cumsum(axis=0)\n   0                     [1, 2, [3, 4]]\n   1          [1, 2, [3, 4], [5, 6], 7]\n   2    [1, 2, [3, 4], [5, 6], 7, 8, 9]\n   dtype: object\n   {code}\n   \n    \\* **Numpy**\n   {code:python}\n1.   Case 1: If all of the array elements have the same nested depth, then it flattens the array and applies cumsum.\n   >>> d = np.array([[1,2],[3,4]])\n   >>> d.cumsum()\n   array([ 1,  3,  6, 10])\n   \n1.   Case 2: If array contains different nested depths, then cumsum represents a \"cumulative concatenate\" operation\n   >>> d = np.array([[1,2,[3,4]],[[5,6],7],[8,9]])\n   >>> d.cumsum()\n   array([list([1, 2, [3, 4]]), list([1, 2, [3, 4], [5, 6], 7]),\n          list([1, 2, [3, 4], [5, 6], 7, 8, 9])], dtype=object)\n   {code}\n   \n    \\* **R**\n   \n    # \n   {code:r}\n1. Flattens the nested list, then applies a cumsum\n   > cumsum(c(c(1,2),c(3,4)))\n   [1]  1  3  6 10\n   \n   > cumsum(c(c(1,2,c(3,4)),c(c(5,6),7),c(8,9)))\n   [1]  1  3  6 10 15 21 28 36 45\n   {code}"
+        },
+        {
+            "created_at": "2022-04-02T01:24:57.892Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13530?focusedCommentId=17516188) by Weston Pace (westonpace):*\nHow about option 3) Report as an invalid operation.\r\n\r\nWe don't really support nested<->nested arithmetic elsewhere do we?\r\n\r\n```\n\r\n>>> a = pa.array([[1, 2, 3], [4, 5, 6]])\r\n>>> b = pa.scalar([1, 1, 1])\r\n>>> c = pa.scalar(5)\r\n>>> pc.add(a, b)\r\n# pyarrow.lib.ArrowNotImplementedError: Function 'add' has no kernel matching input types (array[list<item: int64>], scalar[list<item: int64>])\r\n>>> pc.add(a, a)\r\n# pyarrow.lib.ArrowNotImplementedError: Function 'add' has no kernel matching input types (array[list<item: int64>], array[list<item: int64>])\r\n>>> c = pa.scalar(5)\r\npyarrow.lib.ArrowNotImplementedError: Function 'add' has no kernel matching input types (array[list<item: int64>], scalar[int64])\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-04-02T02:05:11.838Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13530?focusedCommentId=17516193) by Eduardo Ponce (edponce):*\nCorrect, arithmetic functions do not work on nested types, only scalar, arrays, and chunked arrays."
+        },
+        {
+            "created_at": "2022-04-04T15:44:20.039Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13530?focusedCommentId=17516908) by Eduardo Ponce (edponce):*\nHere is the current behavior of `{}cumulative_sum{`}:\r\n```python\n\r\n# Valid values\r\n>>> pc.cumulative_sum([1,2,3,4,5])\r\n<pyarrow.lib.Int64Array object at 0x12622c7c0>\r\n[\r\n  1,\r\n  3,\r\n  6,\r\n  10,\r\n  15\r\n]\r\n\r\n# Nulls and values\r\n>>> pc.cumulative_sum([1,2,None,3,None,5], skip_nulls=True)\r\n<pyarrow.lib.Int64Array object at 0x12622c760>\r\n[\r\n  1,\r\n  3,\r\n  null,\r\n  6,\r\n  null,\r\n  11\r\n]\r\n>>> pc.cumulative_sum([1,2,None,3,None,5], skip_nulls=False)\r\n<pyarrow.lib.Int64Array object at 0x12622c700>\r\n[\r\n  1,\r\n  3,\r\n  null,\r\n  null,\r\n  null,\r\n  null\r\n]\r\n\r\n# NaN followed by nulls and values\r\n>>> pc.cumulative_sum([1,np.nan,None,3,None,5], skip_nulls=True)\r\n<pyarrow.lib.DoubleArray object at 0x12622c640>\r\n[\r\n  1,\r\n  nan,\r\n  null,\r\n  nan,\r\n  null,\r\n  nan\r\n]\r\n>>> pc.cumulative_sum([1,np.nan,None,3,None,5], skip_nulls=False)\r\n<pyarrow.lib.DoubleArray object at 0x12622c700>\r\n[\r\n  1,\r\n  nan,\r\n  null,\r\n  null,\r\n  null,\r\n  null\r\n]\r\n \n```\r\n\r\nBehavior of `cumsum` with nulls and `NaNs`:\r\n- Numpy does not supports `None` values and behaves the same with `NaNs`\n- Pandas converts `None` to `NaN`, and behaves the same with `NaNs`. Has option to toggle `NaN` propagation.\n- R propagates both `NA` and `NaNs`"
+        },
+        {
+            "created_at": "2022-04-21T18:54:57.529Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13530?focusedCommentId=17525986) by Krisztian Szucs (kszucs):*\nPostponing to 9.0. "
+        },
+        {
+            "created_at": "2022-05-31T13:23:20.312Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13530?focusedCommentId=17544380) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 12460\n<https://github.com/apache/arrow/pull/12460>"
+        }
+    ]
+}

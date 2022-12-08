@@ -1,0 +1,16 @@
+{
+    "issue": {
+        "title": "[C++][Parquet] Extension types with nanosecond timestamp resolution don't roundtrip",
+        "body": "***Note**: This issue was originally created as [ARROW-15711](https://issues.apache.org/jira/browse/ARROW-15711). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nExample code:\r\n\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\nclass MyTimestampType(pa.PyExtensionType):\r\n\r\n    def __init__(self):\r\n        pa.PyExtensionType.__init__(self, pa.timestamp(\"ns\"))\r\n\r\n    def __reduce__(self):\r\n        return MyTimestampType, ()\r\n\r\n\r\narr = MyTimestampType().wrap_array(pa.array([1000, 2000, 3000], pa.timestamp(\"ns\")))\r\ntable = pa.table({\"col\": arr})\r\n```\r\n\r\n```Java\n\r\n>>> table.schema\r\ncol: extension<arrow.py_extension_type<MyTimestampType>>\r\n\r\n>>> pq.write_table(table, \"test_parquet_extension_type_timestamp_ns.parquet\")\r\n>>> result = pq.read_table(\"test_parquet_extension_type_timestamp_ns.parquet\")\r\n>>> result.schema\r\ncol: timestamp[us]\r\n```\r\n\r\nThe reason for this is because we only restore the extension type if the inferred storage type (inferred from parquet + after applying any updates based on the Arrow schema) exactly equals the original storage type (as stored in the Arrow schema):\r\n\r\nhttps://github.com/apache/arrow/blob/afaa92e7e4289d6e4f302cc91810368794e8092b/cpp/src/parquet/arrow/schema.cc#L973-L977\r\n\r\nAnd, with the default options, a timestamp with nanosecond resolution gets stored as microsecond resolution in Parquet, and that is something we do not restore when updating the read types based on the stored Arrow schema (eg we do add a timezone, but we don't change the resolution).\r\n\r\nAn additional issue is that _if_ you loose the extension type, the field metadata about the extension type are also lost. I think that if we cannot restore the extension type, we should at least try to keep the ARROW:extension field metadata as information. This is also what we do for an unrecognized (unregistered) extension type.",
+        "created_at": "2022-02-17T09:20:11.000Z",
+        "updated_at": "2022-02-17T09:24:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Parquet",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": []
+}

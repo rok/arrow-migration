@@ -1,0 +1,69 @@
+{
+    "issue": {
+        "title": "[Python] More graceful reading of empty String columns in ParquetDataset",
+        "body": "***Note**: This issue was originally created as [ARROW-2659](https://issues.apache.org/jira/browse/ARROW-2659). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen currently saving a `ParquetDataset` from Pandas, we don't get consistent schemas, even if the source was a single DataFrame. This is due to the fact that in some partitions object columns like string can become empty. Then the resulting Arrow schema will differ. In the central metadata, we will store this column as `pa.string` whereas in the partition file with the empty columns, this columns will be stored as `pa.null`.\r\n\r\nThe two schemas are still a valid match in terms of schema evolution and we should respect that in https://github.com/apache/arrow/blob/79a22074e0b059a24c5cd45713f8d085e24f826a/python/pyarrow/parquet.py#L754 Instead of doing a `pa.Schema.equals` in https://github.com/apache/arrow/blob/79a22074e0b059a24c5cd45713f8d085e24f826a/python/pyarrow/parquet.py#L778 we should introduce a new method `pa.Schema.can_evolve_to` that is more graceful and returns `True` if a dataset piece has a null column where the main metadata states a nullable column of any type.",
+        "created_at": "2018-06-01T08:15:06.000Z",
+        "updated_at": "2022-10-13T17:51:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2018-06-01T16:01:43.344Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2659?focusedCommentId=16498163) by Aldrin Montana (octalene):*\nIn trying to read from a parquet dataset using validate_schema=False, I then get the following exception (see read_parquet_dataset.error.read_table.novalidation.txt):\r\n```\n\r\nTraceback (most recent call last):\r\n  File \"toolbox/read_parquet.py\", line 85, in <module>\r\n    dsv_data_table = read_parquet_data(parsed_args.input_path)\r\n  File \"toolbox/read_parquet.py\", line 64, in read_parquet_data\r\n    use_pandas_metadata=use_pandas_metadata\r\n  File \"/Users/amontana/.local/share/virtualenvs/kitsi-zdrw075I/lib/python3.6/site-packages/pyarrow/parquet.py\", line 806, in read\r\n    all_data = lib.concat_tables(tables)\r\n  File \"table.pxi\", line 1285, in pyarrow.lib.concat_tables\r\n  File \"error.pxi\", line 77, in pyarrow.lib.check_status\r\n\r\npyarrow.lib.ArrowInvalid: Schema at index 3 was different:\n```\r\n\u00a0\r\n\r\nGiven this error, it seems that validating the schema is just one piece of the overall difficulty, and some way of pushing down the valid schema evolution into concat_tables in table.pxi will also be necessary.\r\n\r\n`[~xhochy]`, I'm not sure if this impression is correct, and if it is, whether we would want a related Jira to track changes in (or underlying) the concat_tables function."
+        },
+        {
+            "created_at": "2018-06-01T16:18:15.949Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2659?focusedCommentId=16498183) by Aldrin Montana (octalene):*\nIt seems to me that the following locations are the CPP code underlying the cython code:\r\n \\* [arrow::Table in cpp/src/arrow/table.cc](https://github.com/apache/arrow/blob/79a22074e0b059a24c5cd45713f8d085e24f826a/cpp/src/arrow/table.cc#L436)\r\n \\* [arrow::Schema in cpp/src/arrow/type.cc](https://github.com/apache/arrow/blob/79a22074e0b059a24c5cd45713f8d085e24f826a/cpp/src/arrow/type.cc#L291)\r\n\r\nbut since I don't actually know cython, I can't tell if this is the code that is eventually invoked when calling [pyarrow.table.pxi:concat_table()](https://github.com/apache/arrow/blob/79a22074e0b059a24c5cd45713f8d085e24f826a/python/pyarrow/table.pxi#L1384)"
+        },
+        {
+            "created_at": "2018-08-25T00:29:20.057Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2659?focusedCommentId=16592342) by Python User (pyuser):*\nI have also run into this when trying to convert from a pandas dataframe in chunks.  Here is code and data to reproduce.\r\n\r\nschema-bug.csv\r\n```none\n\r\na,b\r\n1,x\r\n2,y\r\n3,\r\n4,\r\n```\r\n\r\nschema_bug.py\r\n```python\n\r\n#!/usr/bin/env python\r\nimport sys\r\n\r\nimport pandas as pd\r\nimport pyarrow.parquet\r\n\r\nwriter = None\r\nfor chunk in pd.read_csv(sys.stdin, dtype={'a': int, 'b': str}, chunksize=2):\r\n    print('Pandas dtypes', list(chunk.dtypes.astype(str)), file=sys.stderr)\r\n    table = pyarrow.Table.from_pandas(chunk)\r\n    writer = writer or pyarrow.parquet.ParquetWriter(sys.stdout.buffer, table.schema)\r\n    writer.write_table(table)\r\n\r\nwriter.close()\r\n```\r\n\r\nHere are the results:\r\n\r\n```none\n\r\n$ ./schema_bug.py < schema-bug.csv > /dev/null\r\nPandas dtypes ['int64', 'object']\r\nPandas dtypes ['int64', 'object']\r\nTraceback (most recent call last):\r\n  File \"schema_bug.py\", line 13, in <module>\r\n    writer.write_table(table)\r\n  File \"python/lib/python3.6/site-packages/pyarrow/parquet.py\", line 335, in write_table\r\n    raise ValueError(msg)\r\nValueError: Table schema does not match schema used to create file:\r\ntable:\r\na: int64\r\nb: null\r\n__index_level_0__: int64\r\nmetadata\r\n--------\r\n{b'pandas': b'{\"index_columns\": [\"__index_level_0__\"], \"column_indexes\": [{\"na'\r\n            b'me\": null, \"field_name\": null, \"pandas_type\": \"unicode\", \"numpy_'\r\n            b'type\": \"object\", \"metadata\": {\"encoding\": \"UTF-8\"}}], \"columns\":'\r\n            b' [{\"name\": \"a\", \"field_name\": \"a\", \"pandas_type\": \"int64\", \"nump'\r\n            b'y_type\": \"int64\", \"metadata\": null}, {\"name\": \"b\", \"field_name\":'\r\n            b' \"b\", \"pandas_type\": \"empty\", \"numpy_type\": \"object\", \"metadata\"'\r\n            b': null}, {\"name\": null, \"field_name\": \"__index_level_0__\", \"pand'\r\n            b'as_type\": \"int64\", \"numpy_type\": \"int64\", \"metadata\": null}], \"p'\r\n            b'andas_version\": \"0.23.4\"}'} vs.\r\nfile:\r\na: int64\r\nb: string\r\n__index_level_0__: int64\r\nmetadata\r\n--------\r\n{b'pandas': b'{\"index_columns\": [\"__index_level_0__\"], \"column_indexes\": [{\"na'\r\n            b'me\": null, \"field_name\": null, \"pandas_type\": \"unicode\", \"numpy_'\r\n            b'type\": \"object\", \"metadata\": {\"encoding\": \"UTF-8\"}}], \"columns\":'\r\n            b' [{\"name\": \"a\", \"field_name\": \"a\", \"pandas_type\": \"int64\", \"nump'\r\n            b'y_type\": \"int64\", \"metadata\": null}, {\"name\": \"b\", \"field_name\":'\r\n            b' \"b\", \"pandas_type\": \"unicode\", \"numpy_type\": \"object\", \"metadat'\r\n            b'a\": null}, {\"name\": null, \"field_name\": \"__index_level_0__\", \"pa'\r\n            b'ndas_type\": \"int64\", \"numpy_type\": \"int64\", \"metadata\": null}], '\r\n            b'\"pandas_version\": \"0.23.4\"}'}\r\n```\r\n\r\n(The difference is that the first chunk (shown second) has `pandas_type: unicode`, where the second chunk has `pandas_type: empty`.)\r\n\r\nEven if you save the initial schema and try to use it writing subsequent tables, you get this:\r\n\r\n```none\n\r\npyarrow.lib.ArrowNotImplementedError: ('No cast implemented from null to null', 'Conversion failed for column b with type object')\r\n```\r\n\r\nThis is with Pandas 0.23.4, pyarrow 0.10.0."
+        },
+        {
+            "created_at": "2018-09-15T14:29:16.581Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2659?focusedCommentId=16616321) by Wes McKinney (wesm):*\nWe should implement schema normalization at the Parquet level. I don't think it would be appropriate to push this functionality lower into the Arrow data structures"
+        },
+        {
+            "created_at": "2019-01-10T04:57:59.689Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2659?focusedCommentId=16739008) by Wes McKinney (wesm):*\nI'm moving this to 0.13 as unfortunately I don't think we have the time to do this properly for 0.12\r\n\r\nI suggest we implement a couple of different things to help us:\r\n\r\n- \"Schema-normalized concatenate tables\" \u2013 perform safe casts and determine the merged schema for a collection of smaller tables, or attempt to safely cast tables to a fixed schema. As null will safely cast to anything this will solve the problem one way\n  \n- Additionally implement partitioned writes natively against Arrow tables without going through pandas, to avoid the issues in ARROW-2860"
+        },
+        {
+            "created_at": "2019-06-17T13:41:07.925Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2659?focusedCommentId=16865606) by Wes McKinney (wesm):*\nIt doesn't appear this is going to get done for 0.14 \u2013 I don't have the time to personally do it."
+        },
+        {
+            "created_at": "2020-04-01T14:10:54.457Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2659?focusedCommentId=17072806) by Joris Van den Bossche (jorisvandenbossche):*\nThe original root cause of this issue (`write_to_dataset` outputting parquet files with different schemas) has already been solved a while ago in ARROW-2891\r\n\r\nThe other mentioned issues (when reading a dataset, we should allow for basic schema evolution like allowing null -> any type promotion) are in the meantime solved in the Arrow Datasets project.\r\n\r\nSo once we use the datasets API under the hood in pyarrow.parquet (ARROW-8039), this issue should be solved (we can still add a test for it to close this issue)"
+        },
+        {
+            "created_at": "2020-04-01T14:25:40.226Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2659?focusedCommentId=17072815) by Wes McKinney (wesm):*\nI think the issue can be resolved once Datasets is the default implementation / engine"
+        },
+        {
+            "created_at": "2020-11-13T15:08:10.739Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2659?focusedCommentId=17231551) by Joris Van den Bossche (jorisvandenbossche):*\nARROW-9147 is now fixed, allowing a \"null -> any\" type promotion, so that should fix the remaining issues mentioned here. "
+        },
+        {
+            "created_at": "2021-03-22T16:52:41.679Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2659?focusedCommentId=17306374) by Antoine Pitrou (apitrou):*\n`[~jorisvandenbossche]` What should be the fate of this issue?"
+        },
+        {
+            "created_at": "2021-07-08T13:29:32.459Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2659?focusedCommentId=17377392) by Joris Van den Bossche (jorisvandenbossche):*\nNo urgent action to be taken (so moved to next milestone). This issue will eventually be solved when switching the default in `ParquetDataset` to use the new implementation (ARROW-9720). And it would be good to add some explicit tests (assigned to myself to do so). "
+        },
+        {
+            "created_at": "2021-11-24T22:31:57.681Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2659?focusedCommentId=17448831) by Steven Anton (santon):*\nThis is still an issue for me. The `ParquetDataset` implementation won't help in the case where you're creating a partitioned dataset one partition at a time. Suppose one partition has all nulls in a column; that partition will be written with the null datatype. In another partition, the data could contain strings.\r\n\r\nThere are a number of options that could help:\r\n- At the very least, I feel that `Schema.from_pandas` should generate a warning when encountering `object` columns that are all null. Something along the lines of \"Unable to infer data type for <col>\". Yes, there's a note in the docstring, but that's not visible when using something like `pd.DataFrame.to_parquet`.\n- Another idea is to add a `kwarg` to `Schema.from_pandas` to explicitly specify the data type for these null columns where the data type is ambiguous. The function could allow either a single type or a dictionary mapping the column name to the correct type.\n- Lastly, it seems reasonable to allow some simple schema merging. For example, if you have a partitioned dataset and some partitions have the data type as null for one column in one partition but string in another, it seems we should be able to merge the two to string. (Of course, null, int, and string could not be merged and should still raise an exception.)"
+        },
+        {
+            "created_at": "2022-10-13T17:51:28.850Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2659?focusedCommentId=17617239) by Apache Arrow JIRA Bot (arrowjira):*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned per [project policy](https://arrow.apache.org/docs/dev/developers/bug_reports.html#issue-assignment). Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

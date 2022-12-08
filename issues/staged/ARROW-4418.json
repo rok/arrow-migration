@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[Plasma] replace event loop with boost::asio for plasma store",
+        "body": "***Note**: This issue was originally created as [ARROW-4418](https://issues.apache.org/jira/browse/ARROW-4418). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nOriginal text:\r\n\r\nIt would be nice to move plasma store from current event loop to boost::asio to modernize the code, and more importantly to benefit from the functionalities provided by asio, which I think also provides opportunities for performance improvement.",
+        "created_at": "2019-01-29T15:57:25.000Z",
+        "updated_at": "2021-02-20T00:21:38.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++ - Plasma",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-02-20T00:21:38.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-01-29T18:06:20.959Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4418?focusedCommentId=16755252) by Antoine Pitrou (apitrou):*\nI think we should be careful to evaluate the cost of the boost::asio dependency. Handling boost dependencies is always delicate, especially when they come with a compiled library (i.e. the library isn't header-only)."
+        },
+        {
+            "created_at": "2019-01-29T21:06:09.401Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4418?focusedCommentId=16755381) by Robert Nishihara (robertnishihara):*\nIf preferable, there is also a non-boost version of asio [https://think-async.com/Asio/AsioAndBoostAsio.html](https://think-async.com/Asio/AsioAndBoostAsio.html,)\r\n\r\n\u00a0\r\n\r\nI also remember thinking that asio is moving into the C++ standard library, though I can't seem to find a reference for that at the moment.\r\n\r\n\u00a0\r\n\r\nThe benefits of using asio are pretty big (Windows support for the Plasma store as well as using a more standard C++ approach than what we are currently doing).\r\n\r\n\u00a0\r\n\r\nIn terms of alternatives, I know that Philipp has looked into gRPC. Maybe he could elaborate on the pros/cons there?"
+        },
+        {
+            "created_at": "2019-01-30T07:53:35.163Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4418?focusedCommentId=16755804) by Zhijun Fu (zhijunfu):*\nIn addition to above benefits that Robert mentioned,\u00a0asio also provides opportunities for performance improvements, by\u00a0providing io service, thread pool .etc.\r\n\r\nIn our internal testing, which uses 10+ actors on a single machine, I found 50% of plasma store CPU are spent on receiving messages from plasma clients, using UNIX domain socket.\r\n\r\nI'm thinking that one way to improve\u00a0perf\u00a0is like this:\u00a0\r\n \\* Use a pool of threads to receive messages from clients. To ensure correct behavior, we can bind a boost::strand to a single client, so that all the messages from a given client arrives in order. As this part is CPU consumings, using multiple threads\u00a0is going to help.\r\n \\* After this, the messages are posted into io service of main thread, which calls ProcessMessages for each of them in order.\r\n \\* After this, post the replies to a pool of threads, again use boost::strand for each plasma client to ensure correct order.\u00a0\r\n\r\nI'm thinking this would probably help on cases where there are multiple\u00a0workers using plasma store on the same machine, which should be\u00a0very common. And it seems implementing this would be hard without asio functionalities."
+        },
+        {
+            "created_at": "2019-01-31T02:20:33.596Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4418?focusedCommentId=16756791) by Robert Nishihara (robertnishihara):*\n`[~zhijunfu]`, I'd suggest doing a straightforward translation from the AE event loop to boost::asio. The multithreaded architecture sounds pretty complex, but I think it makes sense to explore if it provides substantial performance benefits (though it may not make sense for modest performance benefits).\r\n\r\nMaybe we should use `asio` instead of `boost::asio` because `asio` looks like it's header only. http://think-async.com/Asio/AsioAndBoostAsio\r\n\r\n`[~pitrou]`, the non-boost `asio` looks like it's header only, so that may be preferable. What do you think about the overall tradeoff?"
+        },
+        {
+            "created_at": "2019-01-31T02:47:49.545Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4418?focusedCommentId=16756803) by Zhijun Fu (zhijunfu):*\n`[~robertnishihara]`, yes totally agreed that the move from event loop to asio should be a straightforward change. The multithread optimization\u00a0can be evaluated after that, and\u00a0see if it\u00a0can provide non-trivial performance improvements."
+        },
+        {
+            "created_at": "2019-01-31T06:24:56.648Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4418?focusedCommentId=16756914) by Siyuan Zhuang (suquark):*\n`[~zhijunfu]` I wonder if we could just move \"client_connection\" from Ray to Arrow, so we can share some common functions."
+        },
+        {
+            "created_at": "2019-02-01T02:40:40.527Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4418?focusedCommentId=16757902) by Zhijun Fu (zhijunfu):*\n`[~suquark]` yes I think that's probably a good idea. It should be simpler than that as plasma store only deals with local UNIX domain socket."
+        },
+        {
+            "created_at": "2019-02-04T19:21:28.290Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4418?focusedCommentId=16760130) by Robert Nishihara (robertnishihara):*\n`[~zhijunfu]` `[~suquark]` note that we will need to provide an alternative to UNIX domain sockets to make it work on Windows."
+        },
+        {
+            "created_at": "2019-02-04T19:28:54.019Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4418?focusedCommentId=16760135) by Antoine Pitrou (apitrou):*\n>  the non-boost asio looks like it's header only, so that may be preferable. What do you think about the overall tradeoff\r\n\r\nThat sounds nice indeed. If the standalone asio is maintained and if the APIs are compatible, then I think we can try that."
+        },
+        {
+            "created_at": "2019-02-18T04:40:21.158Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4418?focusedCommentId=16770772) by Siyuan Zhuang (suquark):*\nI will try to create a PR soon. The only problem is the standalone asio does not include boost::bind, which\u00a0might be used in our implementation (We have already used boost::bind in a similar case in Ray project, and the official asio examples also use it). I will try std::bind first if it is inevitable."
+        }
+    ]
+}

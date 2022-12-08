@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[C++] Add async filesystem operations",
+        "body": "***Note**: This issue was originally created as [ARROW-10846](https://issues.apache.org/jira/browse/ARROW-10846). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIt would probably be useful to have Future-returning variants of some filesystem operations (at least `GetFileInfo` and `OpenInput(File|Stream)`).",
+        "created_at": "2020-12-08T12:20:55.000Z",
+        "updated_at": "2021-03-08T19:20:06.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-03-08T19:19:53.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-12-08T12:21:17.933Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10846?focusedCommentId=17245860) by Antoine Pitrou (apitrou):*\ncc `[~bkietz]` `[~westonpace]`"
+        },
+        {
+            "created_at": "2020-12-09T15:59:02.474Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10846?focusedCommentId=17246627) by Weston Pace (westonpace):*\nA related topic will be how best to pool filesystem access.\u00a0 Right now, with the synchronous operations, I'm pretty sure every thread's requests go directly to the underlying filesystem.\u00a0 This is not ideal in most cases.\r\n\r\nFor example, if a user wants to read in a dataset of 20 parquet files and they are running against a local disk of some kind then it is probably not the best approach to have 20 filesystem requests running in parallel.\u00a0 In the worst case this might lead to random reads instead of sequential reads and bog down I/O.\r\n\r\nIt's related to this issue because any future-returning variants will need to setup I/O threads separate from the calling thread (assuming we aren't enforcing the filesystem implementation be asynchronous).\u00a0 These probably should not come from the default compute thread pool since we shouldn't block on those.\u00a0 Do we setup a new thread for every request (this is kind of similar to the current synchronous approach) or do we do some kind of I/O thread pooling?\r\n\r\nI think this is an interesting topic to start looking into.\u00a0 Does anyone know if there is any existing work looking at I/O pooling?\r\n\r\nEDIT: On the other hand, for something like S3, having many concurrent requests is ideal.\u00a0 So this may be something that depends on the filesystem used."
+        },
+        {
+            "created_at": "2020-12-09T16:44:05.052Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10846?focusedCommentId=17246662) by Antoine Pitrou (apitrou):*\nThere's already an IO thread pool (see `AsyncContext` in `arrow/io/interfaces.h`).\r\nAs for S3, it will certainly use the AWS SDK's async APIs (with their own underlying thread pool, AFAIK)."
+        },
+        {
+            "created_at": "2020-12-09T17:33:24.963Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10846?focusedCommentId=17246706) by Weston Pace (westonpace):*\nBy default AWS spins up a new thread per task [1][2].\u00a0 Their reasoning comes down to \"a modern OS is the best thread pool\"[3].\u00a0 I'm not sure I entirely agree with this but I can see the reasoning.\u00a0 It would be interesting to experiment with at some point.\u00a0 It has led AWS developers to exhaust the OS thread limit if they are not careful [2][4].\u00a0 AWS exposes an executor interface that can be supplied if different behavior is desired.\r\n\r\nI agree though that it is better to let the S3 filesystem (and other async-aware filesystems) call their async implementation directly instead of wrapping their sync implementation.\u00a0 However, to keep the filesystem API that must be implemented simpler, do we want to provide default implementations for these async APIs so this can be an optional thing?\r\n\r\n\u00a0\r\n\r\nEDIT: Forgot links\r\n\r\n[1] <https://docs.aws.amazon.com/sdk-for-cpp/v1/developer-guide/client-config.html>\r\n\r\n[2] <https://aws.amazon.com/blogs/developer/using-a-thread-pool-with-the-aws-sdk-for-c/>\r\n\r\n[3] <https://github.com/aws/aws-sdk-cpp/issues/5>\r\n\r\n[4] <https://aws.amazon.com/message/11201/>\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-12-09T19:24:10.739Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10846?focusedCommentId=17246760) by Antoine Pitrou (apitrou):*\nYes, the plan is to provide default implementations, which I think will actually be synchronous (I don't think you want to wait for a new thread to notice when all you want is do a local filesystem lookup, which is probably in the kernel cache already)."
+        },
+        {
+            "created_at": "2020-12-09T20:07:09.141Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10846?focusedCommentId=17246787) by Antoine Pitrou (apitrou):*\nThanks for the AWS info, by the way. Launching a new thread for each request is wasteful. Also, it seems their async APIs don't support cancellation, meaning network requests may remain blocked for a long time."
+        },
+        {
+            "created_at": "2021-03-04T16:50:54.102Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10846?focusedCommentId=17295403) by Antoine Pitrou (apitrou):*\nSide note: the AWS executor interface won't allow hooking cancellation, since there's no way to report a deferred error..."
+        },
+        {
+            "created_at": "2021-03-08T19:19:53.819Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10846?focusedCommentId=17297656) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 9632\n<https://github.com/apache/arrow/pull/9632>"
+        }
+    ]
+}

@@ -1,0 +1,113 @@
+{
+    "issue": {
+        "title": "[JAVA] Restructure ValueVector hierarchy to minimize compile-time generated code",
+        "body": "***Note**: This issue was originally created as [ARROW-1463](https://issues.apache.org/jira/browse/ARROW-1463). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe templates used in the java package are very high mainteance and the if conditions are hard to track. As started in the discussion here: https://github.com/apache/arrow/pull/1012, I'd like to propose that we modify the structure of the internal value vectors and code generation dynamics.\n\nCreate new abstract base vectors:\n\nBaseFixedVector\nBaseVariableVector\nBaseNullableVector\n\nFor each of these, implement all the basic functionality of a vector without using templating.\n\nEvaluate whether to use code generation to generate specific specializations of this functionality for each type where needed for performance purposes (probably constrained to mutator and accessor set/get methods). Giant and complex if conditions in the templates are actually worse from my perspective than a small amount of hand written duplicated code since templates are much harder to work with. ",
+        "created_at": "2017-09-05T14:46:49.000Z",
+        "updated_at": "2018-07-08T14:24:41.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2018-02-22T21:00:36.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-09-05T15:05:41.048Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16153793) by Wes McKinney (wesm):*\n+1, my outside perspective looking at patches that touch the templates is that it seems a recipe for brittleness that makes refactoring difficult. It would make the codebase easier for newcomers, too"
+        },
+        {
+            "created_at": "2017-09-05T15:40:07.773Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16153861) by Li Jin (icexelloss):*\n+1, the complexity of those templates is bothering me as well."
+        },
+        {
+            "created_at": "2017-09-05T22:20:41.956Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16154471) by Bryan Cutler (bryanc):*\n+1 on fixing this up also, however there are already quite a lot of base classes and interfaces.  `[~jnadeau]`, following our other discussion from ARROW-1361, would it be possible to make `FixedVector` and `VariableVector` generic classes that take a ArrowType as type parameter and then specialize for types as needed?  `NullableValueVectors` could remain a template, possibly simplified, or use a base class as mentioned above.  I'm not entirely sure how feasible this is though.."
+        },
+        {
+            "created_at": "2017-09-05T22:43:00.665Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16154499) by Jacques Nadeau (jnadeau):*\nIt seems like there a milestone here that we should figure out.\n\n1. Come up with a set of goals (we can use this jira to describe potential places for improvement)\n1. Propose an object hierarchy (I think there may be a jira that Julien wrote that covers this.)\n1. Prototype a couple vectors to evaluate against goals (I suggest having maybe two people do this in parallel to see what different ideas people come up).\n1. Implement the updated vectors.\n\nI see `[~siddteotia]` assigned this to himself. I'd like to also make sure we have others involved in these subtasks and would like to break them out here. Other opinions on subtasks we should have? `[~bryanc]` and/or `[~icexelloss]` either of you interested in working on pieces of this? Definitely think it is overdue.\n"
+        },
+        {
+            "created_at": "2017-09-05T22:44:45.909Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16154502) by Jacques Nadeau (jnadeau):*\nSome initial thoughts on requirements:\n\n- Existing consumers should have minimal changes to continue to leverage the FieldVectors.\n- No performance loss on hot paths.\n- Minimize or remove use of code templates except where very simple/easy to maintain.\n- Rationalize object hiearchy\n- Continue to make engines that use code generation on top of vectors have predictable interfaces.\n- Better Javadocs on interfaces/base classes."
+        },
+        {
+            "created_at": "2017-09-05T23:09:01.989Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16154533) by Wes McKinney (wesm):*\nI think `[~alphalfalfa]` may be interested in helping, since he has dug through the templates a couple of times for adding more logical types to the hierarchy. It'll be worthwhile to harden the object hierarchy before we accumulate a lot more downstream users and risk unpleasant disruption. Certainly this should take place before a 1.0.0 release. Feedback from other active users like `[~elahrvivaz]` will be helpful"
+        },
+        {
+            "created_at": "2017-09-06T06:28:06.058Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16154874) by Gonzalo Ortiz (gortizja):*\n+1\n\nI have found that the current hierarchy and heavily use of delegation makes implementations like IntVector very slow compared to ByteBuffer. I have some JMH benchmarks where I iterate on a buffer, reading the content as ints to accumulate them. When using ByteBuffer it takes 17us to execute an iteration. With IntVector.Accessor it gets 100 us!"
+        },
+        {
+            "created_at": "2017-09-06T13:10:19.478Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16155303) by Emilio Lahr-Vivaz (elahrvivaz):*\n+1 agree with everything said so far. I'd prefer not to have any code generation at all, unless it provides some performance gains."
+        },
+        {
+            "created_at": "2017-09-06T14:21:27.970Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16155425) by Jingyuan Wang (alphalfalfa):*\nI would certainly like to help. We should probably consider to add a benchmark suite to measure both the performance of assembling and retrieval of value vectors. "
+        },
+        {
+            "created_at": "2017-09-06T16:01:11.925Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16155589) by Jacques Nadeau (jnadeau):*\nI've created an initial list of subtasks. Who wants to work on what?\n\nthx"
+        },
+        {
+            "created_at": "2017-09-06T16:23:23.678Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16155611) by Li Jin (icexelloss):*\n[~jacques@dremio.com] Thank much for putting this together. I will be out next week so I will avoid being on any critical path. But I'd like to check status and see what I can help when I get back."
+        },
+        {
+            "created_at": "2017-09-06T17:01:30.351Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16155685) by Wes McKinney (wesm):*\nThis might be a good opportunity to remove non-nullable container types. Nullability in C++ is a property of the metadata only, and computationally non-null arrays and nullable arrays with 0 null count are semantically equal. It would make the code simpler to maintain"
+        },
+        {
+            "created_at": "2017-09-07T07:13:55.630Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16156598) by Gonzalo Ortiz (gortizja):*\nOn the one hand, what `[~wesmckinn]` is right. They could be the same structure. On the other, they are not exactly semantically equal. Non nullable structures doesn't return nulls, which can be used by some static checkers or languages like Kotlin. \n\nThere are also two performance issues, one on each model. They are just a theoretical reasoning (that may be wrong!), we would need to verify that some JMH test (and it can change from one JVM to another):\n- A structure that doesn't need to check the nullable array would have shorter and simpler methods (without branches) and therefore it is more probable that the JVM can optimize that. So this is a point on having two implementations: one with nulls and one without them.\n- If there are two structures (a nullable and a non nullable) and the nullable is just a decoration/delegation on the non-nullable, nullable structures may behave quite worst than we expect for the same reason. As soon as the methods get complex (calling the delegate class) the JVM may or may not optimize them.\n\nTL;RD: From the library developer perspective, I would like to have only one implementation. From a user perspective, I would like to have both implementations, ideally without delegation (which means repeated code on nullable-structure)"
+        },
+        {
+            "created_at": "2017-09-07T13:05:36.268Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16156928) by Wes McKinney (wesm):*\n`[~gortizja]` this is probably a discussion for a whole separate JIRA. A couple points:\n\n> Non nullable structures doesn't return nulls, which can be used by some static checkers or languages like Kotlin.\n\nThis is true, hypothetically, but I question whether this benefit can only be reaped by doubling the size of the type hierarchy. In the instances where you can choose an optimized code path for non-null data, you could elect to invoke that same code path when the null count is zero (which you will want to do regardless of the nullability). This is sort of a \"composition over inheritance\" argument \u2013 it's not to say that we can have some helper interfaces that specialize based on metadata, but as a property of the type hierarchy I am not sure if it's worth the increased code size. \n\n> So this is a point on having two implementations: one with nulls and one without them.\n\nSince you can branch at the vector level, the performance implications are less obvious (benchmarks could help settle it). Somewhere you must dynamic dispatch to the correct kernel function for some analytical operation, and the dispatch could be based on null count. \n\n> [if] the nullable is just a decoration/delegation on the non-nullable, nullable structures may behave quite worst than we expect for the same reason\n\nThe performance issues you cite would appear mostly in non-vectorized code. If you're doing something performance sensitive, you're more likely to be working directly with the buffers, and selecting kernel functions based on the dynamic metadata (which can include nullability / null count). So if you implement Sum, you will want to have a sum with nulls and a sum without. Somewhere you have to decide which one to call. You will want to elect to call the SumWithoutNulls when you have a nullable vector but with zero null count anyway, so this actually makes your kernel dispatch more complex. "
+        },
+        {
+            "created_at": "2017-09-07T13:48:21.974Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16156968) by Gonzalo Ortiz (gortizja):*\nFrom a Java developer perspective, I can only implement a SumWithIntVector and prey to the JIT lord, hoping that the JVM discovers it can use vectorization... and JVM 8 it is not very good at it. But you are right. This sounds a little bit offtopic."
+        },
+        {
+            "created_at": "2017-09-07T14:59:22.927Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16157046) by Jacques Nadeau (jnadeau):*\nThere have been cases where we have found the existence of non-nullable vectors useful when doing decomposed calculations. For example, it makes things easier to manage if we want to do a tree assuming no nulls and then use a word intersection pattern to implement SQL's null output if any input is null semantic. This could be done without the separate classes but is probably easier with them. On the flipside, if we push to a fractured subclasses model for vectors, I think it is necessary to avoid composite vectors since that would make address management and allocation fairly challenging."
+        },
+        {
+            "created_at": "2017-09-11T23:30:20.677Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16162231) by Bryan Cutler (bryanc):*\nI just have a couple of questions regarding these changes, apologies if these have been answered previously\n\n1) Are there any guidelines as far as doing public API breaking changes?  Should things be deprecated or is this something that is a little more open until Arrow 1.0 is released?\n\n2) How exactly does performance play into the class hierarchies or code gen?  Is it to make sure the data can be vectorized or are there more things to consider?  I just would like to make sure I know what not to do from a performance standpoint.  Is this something that would be described in the document in ARROW-1471?"
+        },
+        {
+            "created_at": "2017-09-12T01:56:49.281Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16162361) by Wes McKinney (wesm):*\nAPI stability is not guaranteed at the moment. We have been trying to deprecate things gracefully in C++. Since development efforts in Java have been fairly limited since the Arrow project started I think we need to gather a critical mass of active Java developers before declaring API stability."
+        },
+        {
+            "created_at": "2017-09-14T20:00:46.656Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16166899) by Bryan Cutler (bryanc):*\nThat sounds fine to me in regards to API stability, thanks `[~wesmckinn]`."
+        },
+        {
+            "created_at": "2017-09-22T22:06:19.900Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16177237) by Laurent Goujon (laurent):*\nThere's a Java effort to come up with a vector API to help with vectorization (as part of the Panama project). May be worth having a look at it.\n\nThe latest version (by John Rose) is available at http://cr.openjdk.java.net/~jrose/arrays/vector/Vector.java\nThere are also some slides from Intel folks giving some insights about it might help vectorization inside the JVM: www.oracle.com/technetwork/java/jvmls2016-graves-3125549.pptx"
+        },
+        {
+            "created_at": "2017-09-25T08:00:38.876Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16178694) by Gonzalo Ortiz (gortizja):*\n`[~laurentgo]` is great to have that in mind. I'm really interested in how to be sure that operations on Arrow Vectors are, indeed, vectorized at CPU level and once Panama is released, we will be able to control that. But AFAIK they don't have a clear API (yet) that Arrow can try to get close to. They just have a proposal that it is very likely to change."
+        },
+        {
+            "created_at": "2017-12-08T19:34:32.114Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16284095) by Wes McKinney (wesm):*\nSince there are more child JIRAs here I'm moving this to 0.9.0 to close out remaining items in the next release"
+        },
+        {
+            "created_at": "2018-02-21T20:19:29.248Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16371949) by Wes McKinney (wesm):*\nWhere does this work stand?"
+        },
+        {
+            "created_at": "2018-02-22T21:00:18.450Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1463?focusedCommentId=16373438) by Siddharth Teotia (siddteotia):*\nThis work and all the follow-up refactoring is complete. I am marking it as resolved. Setting the fix-version as 0.9.0 although some of the tasks were completed in 0.8.0."
+        }
+    ]
+}

@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[Python] index / unknown columns in specified schema in Table.from_pandas",
+        "body": "***Note**: This issue was originally created as [ARROW-5220](https://issues.apache.org/jira/browse/ARROW-5220). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe `Table.from_pandas` method allows to specify a schema (\"This can be used to indicate the type of columns if we cannot infer it automatically.\").\r\n\r\nBut, if you also want to specify the type of the index, you get an error:\r\n\r\n```python\n\r\ndf = pd.DataFrame({'a': [1, 2, 3], 'b': [0.1, 0.2, 0.3]})\r\ndf.index = pd.Index(['a', 'b', 'c'], name='index')\r\n\r\nmy_schema = pa.schema([('index', pa.string()),\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 ('a', pa.int64()),\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 ('b', pa.float64()),\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 ])\r\n\r\ntable = pa.Table.from_pandas(df, schema=my_schema)\r\n```\r\n\r\ngives `KeyError: 'index'` (because it tries to look up the \"column names\" from the schema in the dataframe, and thus does not find column 'index').\r\n\r\nThis also has the consequence that re-using the schema does not work: `table1 = pa.Table.from_pandas(df1);  table2 = pa.Table.from_pandas(df2, schema=table1.schema)`\r\n\r\nExtra note: also unknown columns in general give this error (column specified in the schema that are not in the dataframe).\r\n\r\nAt least in pyarrow 0.11, this did not give an error (eg noticed this from the code in example in ARROW-3861). So before, unknown columns in the specified schema were ignored, while now they raise an error. Was this a conscious change?  \r\nSo before also specifying the index in the schema \"worked\" in the sense that it didn't raise an error, but it was also ignored, so didn't actually do what you would expect)\r\n\r\nQuestions:\r\n\r\n- I think that we should support specifying the index in the passed `schema` ? So that the example above works (although this might be complicated with RangeIndex that is not serialized any more)\n- But what to do in general with additional columns in the schema that are not in the DataFrame? Are we fine with keep raising an error as it is now (the error message could be improved then)? Or do we again want to ignore them? (or, it could actually also add them as all nulls to the table)",
+        "created_at": "2019-04-26T08:33:02.000Z",
+        "updated_at": "2019-09-18T22:07:59.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-09-14T01:33:07.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-06-13T05:59:30.451Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5220?focusedCommentId=16862738) by Christian Thiel (cthi):*\nFirst Question: Regarding the index I don't really know how to handle it best. See my comment in\u00a0ARROW-3861.\r\n\r\nSecond Question: For me the schema should be the single source of truth. Thus ignoring a column in the schema is no option. I would go with either raise or NULLs. However adding NULLs might be difficult for any non-nullable dtype such as INTs."
+        },
+        {
+            "created_at": "2019-06-13T16:42:51.118Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5220?focusedCommentId=16863260) by Ben Kietzman (bkietz):*\nI agree that the schema should be the single point of truth and it seems most reasonable to raise an error when a field in the schema does not correspond to a column in the DataFrame.\r\n\r\nWould it be an acceptable solution to require `preserve_index=True` when specifying the type of the index with a schema?\r\n\r\nIE, ensure the following works as you intend (currently fails):\r\n```Java\n\r\ntable = pa.Table.from_pandas(df, schema=my_schema, preserve_index=True)\r\n```\r\n\r\nThis would disambiguate when a name should be removed from the schema because it refers to the dataframe's index."
+        },
+        {
+            "created_at": "2019-06-13T16:46:57.152Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5220?focusedCommentId=16863272) by Wes McKinney (wesm):*\nI think so, currently the conversion path IIRC only takes into account the index as an afterthought, so the code may need to be restructured a bit to allow the index levels to be considered together with the columns when applying the schema"
+        },
+        {
+            "created_at": "2019-06-13T22:57:59.358Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5220?focusedCommentId=16863527) by Joris Van den Bossche (jorisvandenbossche):*\nI can look into taking the index columns into account for matching with the schema. \r\n\r\nOne complication will be the RangeIndex serialization (as metadata instead of column). Related discussion in ARROW-5427, an option could be to have `preserve_index=True` force a RangeIndex to always be serialized as actual data instead of the default metadata. That could make the expected schema consistent independent of whether your dataframe has a RangeIndex vs Int64Index, and thus easier to match a specified schema."
+        },
+        {
+            "created_at": "2019-06-17T20:31:38.379Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5220?focusedCommentId=16865966) by Joris Van den Bossche (jorisvandenbossche):*\n`[~wesmckinn]` what do you think of the idea that `preserve_index=True` forces RangeIndex to be an actual column in the Table? (to have a consistent match with a specified schema)"
+        },
+        {
+            "created_at": "2019-08-22T22:30:26.894Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5220?focusedCommentId=16913752) by Wes McKinney (wesm):*\nI'm in theory on board with that idea"
+        },
+        {
+            "created_at": "2019-08-23T08:14:55.006Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5220?focusedCommentId=16914040) by Joris Van den Bossche (jorisvandenbossche):*\nWhat I suggested here (about `preserve_index=True` forcing RangeIndex to be an actual column in the Table) is in the mean time already implemented (ARROW-5427, https://github.com/apache/arrow/pull/4651).  \r\nSo then I think we can go forward with this issue and ensuring that a user can specify the index column as part of a specified `schema`."
+        },
+        {
+            "created_at": "2019-09-13T12:58:36.894Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5220?focusedCommentId=16929175) by Joris Van den Bossche (jorisvandenbossche):*\nI started looking into this (as it was tagged for 0.15.0), but it has quite some consequences / corner cases. So assume we start expecting the index also to be present in the schema, if specified:\r\n\r\n- are we OK with erroring if the index is not in the schema but would be written as a column? And only if `preserve_index=True`, or also with `preserve_index=None` in case the index is not a RangeIndex ? \n    This will break some current usage (but can probably do it with a deprecation first)\n- We should follow the order of the columns in the schema, also for the index? (currently the index is always appended to the other columns)\n- What if an index is specified in the schema but `preserve_index=False` ?\n- What if there are multiple index levels (a MultiIndex), but only one of them is specified in the schema? (in case of columns, then that column that is not the in the schema is ignored)\n- What if the index is specified in the schema, but is actually a RangeIndex which would otherwise be serialized as metadata?"
+        },
+        {
+            "created_at": "2019-09-13T20:27:48.369Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5220?focusedCommentId=16929514) by Wes McKinney (wesm):*\nYikes, this is a \"grab bag\" of potential rough edges. \r\n\r\nI agree with your comment on the PR \"I think it would be good to have the rule: if a schema is specified, it is the single source of truth about the schema, and you can be 100% sure that the resulting table will have this exact schema (otherwise an error is raised)\"[\r\n\r\nFor your questions in particular\r\n\r\n> are we OK with erroring if the index is not in the schema but would be written as a column? And only if preserve_index=True, or also with preserve_index=None in case the index is not a RangeIndex ?\r\nThis will break some current usage (but can probably do it with a deprecation first)\r\n\r\nYes I think this is okay. In a sense `preserve_index` has the function of informing the final schema. I think if `preserve_index` is None and the index is RangeIndex, then we can respect the schema and write the index as metadata\r\n\r\n> We should follow the order of the columns in the schema, also for the index? (currently the index is always appended to the other columns)\r\n\r\nIt does make the implementation more complex, but I think we should respect the schema\r\n\r\n> What if an index is specified in the schema but preserve_index=False ?\r\n\r\nProbably in this case should raise an exception. Thoughts?\r\n\r\n> What if there are multiple index levels (a MultiIndex), but only one of them is specified in the schema? (in case of columns, then that column that is not the in the schema is ignored)\r\n\r\nI would say raise an exception in this case. \"In the face of ambiguity, refuse the temptation to guess\"\r\n\r\n> What if the index is specified in the schema, but is actually a RangeIndex which would otherwise be serialized as metadata?\r\n\r\nI think in such case then it should be serialized. Detecting this case is yet more complexity though =/"
+        },
+        {
+            "created_at": "2019-09-14T01:33:07.491Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5220?focusedCommentId=16929636) by Wes McKinney (wesm):*\nIssue resolved by pull request 5379\n<https://github.com/apache/arrow/pull/5379>"
+        }
+    ]
+}

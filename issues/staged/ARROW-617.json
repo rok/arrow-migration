@@ -1,0 +1,81 @@
+{
+    "issue": {
+        "title": "Time type is not specified clearly",
+        "body": "***Note**: This issue was originally created as [ARROW-617](https://issues.apache.org/jira/browse/ARROW-617). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n2 options:\n- Use 64 bits for microseconds and nanoseconds, 32 bits for other units\n- Use 64 bits for everything\n  The latter is simpler to implement, the former saves space.",
+        "created_at": "2017-03-11T00:59:55.000Z",
+        "updated_at": "2017-03-26T16:21:42.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Format",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-03-19T05:04:01.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-03-11T01:01:24.581Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-617?focusedCommentId=15905959) by Julien Le Dem (julienledem):*\nCurrently the java TimeVector supports millis only on 32 bits.\nthe c++ Time Vector is 64bits."
+        },
+        {
+            "created_at": "2017-03-12T19:06:40.389Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-617?focusedCommentId=15906655) by Wes McKinney (wesm):*\nPractically speaking, I'm OK with having both a \"time64\" and \"time32\" data type with a particular resolution/unit, e.g.\n\n- time64 would be 64 bits per value and accommodate microseconds and nanoseconds. For compatibility, we could also allow Time64 to hold both seconds and milliseconds\n\n- time32 would be milliseconds and seconds only\n\nIf it makes things too complicated, we could constrain 64-bit time to be only micro and nanoseconds.\n\nThoughts?"
+        },
+        {
+            "created_at": "2017-03-12T20:02:58.152Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-617?focusedCommentId=15906673) by Uwe Korn (uwe):*\nFrom the C++/Python side it actually looks to me that having a Time32 and a Time64 type with all 4 units would be the easiest solution, so I would be fine with that, too."
+        },
+        {
+            "created_at": "2017-03-12T20:20:18.209Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-617?focusedCommentId=15906676) by Wes McKinney (wesm):*\nJust to confirm this is what you meant: we would need to forbid micro/nanoseconds in time32. "
+        },
+        {
+            "created_at": "2017-03-13T07:32:51.004Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-617?focusedCommentId=15906961) by Uwe Korn (uwe):*\n`[~wesmckinn]` actually I didn't mean that but after a night's sleep: yes. Time64 can be seconds/milli-/micro-/nanoseconds and Time32 seconds/milliseconds."
+        },
+        {
+            "created_at": "2017-03-15T16:21:48.196Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-617?focusedCommentId=15926482) by Steven Phillips (sphillips):*\nI personally strongly favor simplicity, so if it were up to me, I would choose to go with a single physical type, even though that means we would have to resolve compatibility issues with existing code.\n\nI would actually go a step further and ask if we really need all 4 (nano/micro/milli/seconds). Couldn't we just store nanoseconds in all cases? Are we concerned about the cost of conversion?"
+        },
+        {
+            "created_at": "2017-03-15T16:39:57.150Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-617?focusedCommentId=15926530) by Jacques Nadeau (jnadeau):*\nI propose two: \n\n32bit micro and 64bit nano. \n\nAgree with simplicity. However, I also think that paying for an extra 4 bytes for the rare case is suboptimal.\n\nI'd be surprised if the base 10 shift for the other versions would be a huge problem for most systems."
+        },
+        {
+            "created_at": "2017-03-15T16:50:30.107Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-617?focusedCommentId=15926547) by Julien Le Dem (julienledem):*\nlog2(1000 \\* 1000 \\* 3600 \\*24) = 36.3... so micros don't fit in 32 bits.\nthat'd be:\n - 32 bits for second and millisecond precision\n - 64 bits for microsecond and nanosecond precision\nI would rather make it hard requirement and not allow 64 bits for sec/millis for simplicity. That way we don't have to specify 2 types (Time32 and Time64). We just use the smallest precision that works for Time based on the unit."
+        },
+        {
+            "created_at": "2017-03-15T17:22:08.391Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-617?focusedCommentId=15926591) by Bryan Cutler (bryanc):*\nI am ok with having 2 time types if it helps with performance/zero copies.  Will it be something that is transparent to the Arrow user and the storage size is determined automatically by the unit, or will it be unit-less and the user would pick the appropriate type, either Time32 or Time64?  I think I'd prefer the latter because I would want to know what's going on behind the scenes."
+        },
+        {
+            "created_at": "2017-03-15T17:29:28.292Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-617?focusedCommentId=15926601) by Julien Le Dem (julienledem):*\nThe layout in entirely defined by the Type definition which in this instance would include the unit. That's what TypeLayout is for on the java side. So that would be fixed and clear to the user"
+        },
+        {
+            "created_at": "2017-03-15T20:53:08.569Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-617?focusedCommentId=15926977) by Wes McKinney (wesm):*\n> Couldn't we just store nanoseconds in all cases? Are we concerned about the cost of conversion?\n\nThe trouble is that sometimes you are interacting with \"someone else's memory\". So if you encounter a C array that represents time, it may be anywhere from second to nanosecond resolution in practice. I've just run into this problem with dates and added a `date32` type to the C++ library so that I can interact with days-since-UNIX-epoch as `int32_t` with zero copy. \n\nThe most compatible solution that maximizes ability to do zero-copy reference to memory is\n\n- 64 bit type permitting any unit (second through nanosecond)\n- 32 bit type permitting only seconds and milliseconds\n\nIn the format documents I think we should encourage only using 64 bits for micro and nanoseconds, and 32 bits otherwise. "
+        },
+        {
+            "created_at": "2017-03-15T20:56:50.644Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-617?focusedCommentId=15926986) by Wes McKinney (wesm):*\nWe could choose to disallow 64 bits for second and millisecond for now (for ease of implementation) and wait and see if it becomes a problem. Would that work for everyone?"
+        },
+        {
+            "created_at": "2017-03-15T21:11:19.913Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-617?focusedCommentId=15926998) by Julien Le Dem (julienledem):*\n `[~wesmckinn]` that would work but the type needs to fully specify the physical layout. If the unit is used to infer the value bit width (32 or 64 bits) then we can't change in the future. So the type would be something like this?\n```\ntable Time {\n  unit: TimeUnit;\n  bitWidth: int; // restricted to 32 for sec and millis, and 64 for micros and nanos in v1\n}\n```\nPossibly we can further limit to millis and nanos only in v1 since they are respectively the most precise for each bitWIdth (millis: 32bits, nanos: 64 bits)\nThis is a little verbose but explicit and future proof."
+        },
+        {
+            "created_at": "2017-03-16T02:01:08.699Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-617?focusedCommentId=15927324) by Wes McKinney (wesm):*\nThis sound good to me. Let me put up a patch for this now"
+        },
+        {
+            "created_at": "2017-03-16T02:06:31.957Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-617?focusedCommentId=15927328) by Wes McKinney (wesm):*\nPR: https://github.com/apache/arrow/pull/385/files"
+        },
+        {
+            "created_at": "2017-03-19T05:04:01.491Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-617?focusedCommentId=15931575) by Wes McKinney (wesm):*\nIssue resolved by pull request 385\n<https://github.com/apache/arrow/pull/385>"
+        }
+    ]
+}

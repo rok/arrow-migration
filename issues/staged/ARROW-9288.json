@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[C++][Dataset] Discovery of partition field as dictionary type segfaulting with HivePartitioning",
+        "body": "***Note**: This issue was originally created as [ARROW-9288](https://issues.apache.org/jira/browse/ARROW-9288). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nTesting new feature from ARROW-8647, python test that reproduces it:\r\n\r\n```python\n\r\n@pytest.mark.parquet\r\n@pytest.mark.parametrize('partitioning', [\"directory\", \"hive\"])\r\ndef test_open_dataset_partitioned_dictionary_type(tempdir, partitioning):\r\n    import pyarrow.parquet as pq\r\n    table = pa.table({'a': range(9), 'b': [0.] * 4 + [1.] * 5})\r\n\r\n    path = tempdir / \"dataset\"\r\n    path.mkdir()\r\n\r\n    for part in [\"A\", \"B\", \"C\"]:\r\n        fmt = \"{}\" if partitioning == \"directory\" else \"part={}\"\r\n        part = path / fmt.format(part)\r\n        part.mkdir()\r\n        pq.write_table(table, part / \"test.parquet\")\r\n\r\n    if partitioning == \"directory\":\r\n        part = ds.DirectoryPartitioning.discover([\"part\"], max_partition_dictionary_size=-1)\r\n    else:\r\n        part = ds.HivePartitioning.discover(max_partition_dictionary_size=-1)\r\n    \r\n    dataset = ds.dataset(str(path), partitioning=part)\r\n    expected_schema = table.schema.append(\r\n        pa.field(\"part\", pa.dictionary(pa.int32(), pa.string()))\r\n    )\r\n    assert dataset.schema.equals(expected_schema)\r\n```\r\n\r\nThis test fails (segfaults) for HivePartitioning, but works for DirectoryPartitioning",
+        "created_at": "2020-07-01T10:03:11.000Z",
+        "updated_at": "2020-07-12T22:58:26.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-07-12T22:58:20.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-07-01T13:29:44.751Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9288?focusedCommentId=17149439) by Antoine Pitrou (apitrou):*\nCan you debug this by yourself or do you need some help?"
+        },
+        {
+            "created_at": "2020-07-01T13:44:05.631Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9288?focusedCommentId=17149450) by Joris Van den Bossche (jorisvandenbossche):*\nYes, I already debugged it, but was trying to look for a solution as well before posting it here. But my notes up to now:\r\n\r\nFrom time to time, it also gives \"ArrowInvalid: No dictionary provided for dictionary field part: dictionary<values=string, indices=int32, ordered=0>\" instead of segfaulting.\r\n\r\nFrom debugging, it seems the problem is here: <https://github.com/apache/arrow/blob/f25a014ab157d5538354309dda721cc8bb938125/cpp/src/arrow/dataset/partition.cc#L159> \r\n The `field_index` is different for hive vs directory partitioning (or maybe whether an explicit schema is provided or not). For DirectoryPartitioning, the schema passed to `ConvertKey` is the schema of _only_ the partition fields, and thus `field_index` is 0-based into that. But for HivePartitioning, the schema passed is the schema of the full dataset, so the `field_index` typically doesn't start at 0 since we by default append partition fields at the end. This causes the field_index to be out of bounds for the dictionaries (which has a length depending on the number of partition fields)"
+        },
+        {
+            "created_at": "2020-07-12T22:58:20.331Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9288?focusedCommentId=17156407) by Wes McKinney (wesm):*\nIssue resolved by pull request 7608\n<https://github.com/apache/arrow/pull/7608>"
+        }
+    ]
+}

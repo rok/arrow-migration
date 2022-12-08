@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "C++: Writing sliced record batch to IPC writes the entire array",
+        "body": "***Note**: This issue was originally created as [ARROW-809](https://issues.apache.org/jira/browse/ARROW-809). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe bug can be triggered through python:\n```Java\nimport pyarrow.parquet\narray = pyarrow.array.from_pylist([1] * 1000000)\n\nrb = pyarrow.RecordBatch.from_arrays([array], ['a'])\nrb2 = rb.slice(0,2)\n\nwith open('/tmp/t.arrow', 'wb') as f:\n  w = pyarrow.ipc.FileWriter(f, rb.schema)\n  w.write_batch(rb2)\n  w.close()\n```\n\nwhich will result in a big file:\n```Java\n$ ll /tmp/t.arrow \n-rw-rw-r-- 1 itai itai 800618 Apr 12 13:22 /tmp/t.arrow\n```\n",
+        "created_at": "2017-04-12T10:37:43.000Z",
+        "updated_at": "2017-04-19T01:12:15.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-04-19T01:12:15.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-04-12T12:26:02.247Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-809?focusedCommentId=15965731) by Itai Incze (itaiin):*\nThe reason for the bug seems to be that sliced arrays are tested with the condition `(array.offset() != 0)` throughout `arrow/ipc/writer.cc`, which doesn't account for a `\\[0:x\\]` slice. \n\nTo test for 0-based slices there's a need to know the number of elements in the original array, which is easily computed in cases like fixed-width array types but could be harder in others.\n\nAnother approach could be adding a class member to mark the slices. This could be either by a simple boolean, the original dimensions or a reference to the original array.\n"
+        },
+        {
+            "created_at": "2017-04-13T18:26:52.465Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-809?focusedCommentId=15968010) by Wes McKinney (wesm):*\nMarked for 0.3. I don't think this should be hard to fix"
+        },
+        {
+            "created_at": "2017-04-13T21:57:08.599Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-809?focusedCommentId=15968285) by Wes McKinney (wesm):*\nI'm going to truncate the data buffers to a 64-byte padding offset, patch coming tomorrow probably"
+        },
+        {
+            "created_at": "2017-04-13T22:01:57.146Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-809?focusedCommentId=15968295) by Itai Incze (itaiin):*\nI've fiddled with it a bit - without altering the array class, I found there's a problem finding the exact number of items with a boolean array - where it doesnt matter, and in union array. There may be other instances as well that i'm not aware of.\n\nSeems to me that adding a private boolean `IsSliced` to the array is the cleanest way.\n"
+        },
+        {
+            "created_at": "2017-04-13T22:08:42.890Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-809?focusedCommentId=15968310) by Wes McKinney (wesm):*\nThere is some buffer slicing happening on the IPC write path already: https://github.com/apache/arrow/blob/master/cpp/src/arrow/ipc/writer.cc#L207. It needs to be made consistent (+ well tested), though (and work for sliced arrays / offset 0)"
+        },
+        {
+            "created_at": "2017-04-13T22:13:46.834Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-809?focusedCommentId=15968317) by Itai Incze (itaiin):*\nI wrote the comment before seeing yours latest one, so not in order to doubt the solution. \nI've seen that code...  though I'm certain you're much better acquainted with it than I am :)\n"
+        },
+        {
+            "created_at": "2017-04-17T04:26:24.001Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-809?focusedCommentId=15970657) by Wes McKinney (wesm):*\nPR (WIP): https://github.com/apache/arrow/pull/555"
+        },
+        {
+            "created_at": "2017-04-19T01:12:15.280Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-809?focusedCommentId=15973835) by Wes McKinney (wesm):*\nIssue resolved by pull request 555\n<https://github.com/apache/arrow/pull/555>"
+        }
+    ]
+}

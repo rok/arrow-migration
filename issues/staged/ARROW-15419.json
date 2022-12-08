@@ -1,0 +1,38 @@
+{
+    "issue": {
+        "title": "[R] Access denied error upon trying to download NYC Taxi data used in the vignette / examples",
+        "body": "***Note**: This issue was originally created as [ARROW-15419](https://issues.apache.org/jira/browse/ARROW-15419). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI am trying to run the example code from the arrow R package vignette [Working with Arrow Datasets and dplyr\\|[https://arrow.apache.org/docs/r/articles/dataset.html]\r\n]. But data retrieval from S3 fails both using the arrow R package and the pyarrow module (code not shown).\r\n\r\nThe first step in the R vignette instructs users to download the NYC dataset from S3 but the `copy_files\u00a0`, but the function returns an **Access Denied** error:\r\n\r\n`>library(arrow)`\r\n\r\n`> arrow::arrow_with_s3()`\r\n\r\n`[1] TRUE`\r\n\r\n`> arrow::copy_files(\"s3://ursa-labs-taxi-data\", \"nyc-taxi\")`\r\n\r\n`Error: IOError: When listing objects under key '' in bucket 'ursa-labs-taxi-data': AWS Error [code 15]: Access Denied with address : 52.219.100.184 with address : 52.219.100.184`\r\n\r\n\u00a0\r\n\r\nPerhaps the data has moved or the bucket permissions have changed?",
+        "created_at": "2022-01-23T22:16:42.000Z",
+        "updated_at": "2022-01-31T13:45:38.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-01-31T13:45:38.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-01-26T15:22:30.649Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15419?focusedCommentId=17482566) by Nicola Crane (thisisnic):*\nThanks for reporting this `[~sandmann]`!\u00a0 I just tried this on my own machine and couldn't reproduce the error.\u00a0 I'm wondering if it might have been a temporary issue; would you mind trying again to see if it's still not working?"
+        },
+        {
+            "created_at": "2022-01-26T18:48:00.930Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15419?focusedCommentId=17482674) by Weston Pace (westonpace):*\nA few things to check:\r\n\r\n \\* Arrow's S3 implementation will check the usual places (e.g. ~/.aws/credentials on Linux) to try and automatically detect credentials to use.\r\n \\* S3's API will attempt to authenticate with those credentials even if it is accessing a public resource.\r\n\r\nSo you might try removing (or temporarily moving) any credentials files first and then try accessing it again.\r\n\r\nI've even ran into issues where accessing public data only works if you are accessing it anonymously (but I didn't think that was the case for the Ursa taxi data).\r\n\r\nYou might also check any config files to see if there is a default region set.  The Ursa labs taxi data is in us-east-2."
+        },
+        {
+            "created_at": "2022-01-26T19:24:27.613Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15419?focusedCommentId=17482696) by Thomas Sandmann (sandmann):*\nThanks a lot for the pointers, `[~westonpace]`!\r\n\r\nYes, it seems my system is using my credentials. E.g. even in the shell I need to add the --no-sign-request argument to access the bucket:\r\n\r\n`aws s3 ls --no-sign-request s3://ursa-labs-taxi-data/`\r\n\r\nworks, but without the argument it does not. (Specifying / modifying the default region was not required.)\r\n\r\nThis is _not_ a bug in arrow, so feel free to close this issue.\r\n\r\nBut perhaps allowing the user to specify (or ignore) credentials when a function is called might be useful? I have to juggle a few different sets of AWS credentials, usually organized into different profiles."
+        },
+        {
+            "created_at": "2022-01-26T21:34:51.275Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15419?focusedCommentId=17482754) by Weston Pace (westonpace):*\nYou _should_ be able to do this in R by manually creating the S3 filesystem manually with `anonymous = TRUE` (there are many S3 options so whenever we have to do something custom with S3 we usually end up needing to create an S3 filesystem instead of using a URL) but it appears the R interface for `copy_files` does not accept a filesystem.  So I think we are probably close to a solution.\r\n\r\nI will defer to `[~thisisnic]` on what the best way to configure the R API would be."
+        },
+        {
+            "created_at": "2022-01-28T19:51:30.033Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15419?focusedCommentId=17483943) by Thomas Sandmann (sandmann):*\nThanks a ton, `[~westonpace]`, that was super helpful. Following your advice, I was able to solve the issue by using the s3_bucket function, which passes on arguments to S3FileSystem$create().\r\n\r\nHere is the working solution:\r\n\r\n`library(arrow)`\r\n`arrow::arrow_with_s3()\u00a0 # TRUE`\r\n\r\n`outdir <- file.path(tempdir(), \"nyc-taxi\")`\r\n`dir.create(outdir, showWarnings = FALSE)`\r\n\r\n`bucket <- s3_bucket(\"ursa-labs-taxi-data\", anonymous = TRUE)`\r\n`arrow::copy_files(bucket, outdir)`\r\n\r\nMany thanks!"
+        }
+    ]
+}

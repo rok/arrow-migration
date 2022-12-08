@@ -1,0 +1,93 @@
+{
+    "issue": {
+        "title": "listing empty HDFS directory returns an error instead of returning empty list",
+        "body": "***Note**: This issue was originally created as [ARROW-805](https://issues.apache.org/jira/browse/ARROW-805). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nhttps://github.com/apache/arrow/blob/master/cpp/src/arrow/io/hdfs.cc#L409-L410\n\n```Java\n    if (entries == nullptr) {\n      // If the directory is empty, entries is NULL but errno is 0. Non-zero\n      // errno indicates error\n      //\n      // Note: errno is thread-locala\n      if (errno == 0) { num_entries = 0; }\n      { return Status::IOError(\"HDFS: list directory failed\"); }\n    }\n```\n\nI think that should have an else:\n\n```Java\n    if (entries == nullptr) {\n      // If the directory is empty, entries is NULL but errno is 0. Non-zero\n      // errno indicates error\n      //\n      // Note: errno is thread-locala\n      if (errno == 0) {\n        num_entries = 0;\n      } else {\n        return Status::IOError(\"HDFS: list directory failed\");\n      }\n    }\n```",
+        "created_at": "2017-04-11T14:10:07.000Z",
+        "updated_at": "2019-06-03T13:07:30.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-04-11T23:04:32.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-04-11T14:16:09.314Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=15964426) by Wes McKinney (wesm):*\nMarked for 0.3"
+        },
+        {
+            "created_at": "2017-04-11T14:26:12.540Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=15964439) by Leif Mortenson (leif):*\nDoes that fix look right? If so I can implement and test. "
+        },
+        {
+            "created_at": "2017-04-11T14:28:39.239Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=15964444) by Wes McKinney (wesm):*\nLooks right, yep"
+        },
+        {
+            "created_at": "2017-04-11T14:33:12.026Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=15964452) by Wes McKinney (wesm):*\n`[~cpcloud]` has a docker image with HDFS (and Hive/Impala) that we may be able to use for testing HDFS in a portable way. I currently run the tests against a local cluster, but it's pretty ad hoc. "
+        },
+        {
+            "created_at": "2017-04-11T14:36:39.177Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=15964455) by Phillip Cloud (cpcloud):*\nHere's a link to the image: https://hub.docker.com/r/cpcloud86/impala/"
+        },
+        {
+            "created_at": "2017-04-11T14:38:15.186Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=15964458) by Leif Mortenson (leif):*\nHow should I use that?  docker run bash and build/run tests in there?  Any env vars I need to set?"
+        },
+        {
+            "created_at": "2017-04-11T14:41:02.338Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=15964461) by Wes McKinney (wesm):*\nCheck out https://github.com/cloudera/ibis/blob/master/circle.yml"
+        },
+        {
+            "created_at": "2017-04-11T15:14:38.775Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=15964499) by Leif Mortenson (leif):*\nOkay, I got it set up but got a failure, I think it might be failing a permission check?  Not sure yet.\n\n```\nARROW_HDFS_TEST_PORT=9000 ARROW_HDFS_TEST_USER=hdfs ARROW_HDFS_TEST_HOST=impala debug/io-hdfs-test\n[==========] Running 18 tests from 2 test cases.\n[----------] Global test environment set-up.\n[----------] 9 tests from TestHdfsClient/0, where TypeParam = arrow::io::JNIDriver\n[ RUN      ] TestHdfsClient/0.ConnectsAgain\n2017-04-11 11:13:25,511 WARN  [main] util.NativeCodeLoader (NativeCodeLoader.java:<clinit>(62)) - Unable to load native-hadoop library for your platform... using builtin-java classes where applicable\n[       OK ] TestHdfsClient/0.ConnectsAgain (1381 ms)\n[ RUN      ] TestHdfsClient/0.CreateDirectory\n/home/leif/git/arrow/cpp/src/arrow/io/io-hdfs-test.cc:174: Failure\nValue of: s.ok()\n  Actual: false\nExpected: true\n[  FAILED  ] TestHdfsClient/0.CreateDirectory, where TypeParam = arrow::io::JNIDriver (201 ms)\n[ RUN      ] TestHdfsClient/0.GetCapacityUsed\n[       OK ] TestHdfsClient/0.GetCapacityUsed (137 ms)\n[ RUN      ] TestHdfsClient/0.GetPathInfo\n[       OK ] TestHdfsClient/0.GetPathInfo (799 ms)\n[ RUN      ] TestHdfsClient/0.AppendToFile\n2017-04-11 11:13:27,536 WARN  [Thread-15] hdfs.DFSClient (DFSOutputStream.java:run(557)) - DataStreamer Exception\njava.io.IOException: Failed to replace a bad datanode on the existing pipeline due to no more good datanodes being available to try. (Nodes: current=[DatanodeInfoWithStorage[172.17.0.2:50010,DS-12c742d4-9f2f-46b4-a512-ee1a1ebd732b,DISK]], original=[DatanodeInfoWithStorage[172.17.0.2:50010,DS-12c742d4-9f2f-46b4-a512-ee1a1ebd732b,DISK]]). The current failed datanode replacement policy is DEFAULT, and a client may configure this via 'dfs.client.block.write.replace-datanode-on-failure.policy' in its configuration.\n\tat org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.findNewDatanode(DFSOutputStream.java:914)\n\tat org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.addDatanode2ExistingPipeline(DFSOutputStream.java:988)\n\tat org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.setupPipelineForAppendOrRecovery(DFSOutputStream.java:1156)\n\tat org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.run(DFSOutputStream.java:454)\nFSDataOutputStream#close error:\njava.io.IOException: Failed to replace a bad datanode on the existing pipeline due to no more good datanodes being available to try. (Nodes: current=[DatanodeInfoWithStorage[172.17.0.2:50010,DS-12c742d4-9f2f-46b4-a512-ee1a1ebd732b,DISK]], original=[DatanodeInfoWithStorage[172.17.0.2:50010,DS-12c742d4-9f2f-46b4-a512-ee1a1ebd732b,DISK]]). The current failed datanode replacement policy is DEFAULT, and a client may configure this via 'dfs.client.block.write.replace-datanode-on-failure.policy' in its configuration.\n\tat org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.findNewDatanode(DFSOutputStream.java:914)\n\tat org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.addDatanode2ExistingPipeline(DFSOutputStream.java:988)\n\tat org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.setupPipelineForAppendOrRecovery(DFSOutputStream.java:1156)\n\tat org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.run(DFSOutputStream.java:454)\n/home/leif/git/arrow/cpp/src/arrow/io/io-hdfs-test.cc:236: Failure\nFailed\nIOError: HDFS: CloseFile failed\n2017-04-11 11:13:27,550 ERROR [main] hdfs.DFSClient (DFSClient.java:closeAllFilesBeingWritten(940)) - Failed to close inode 16419\njava.io.IOException: Failed to replace a bad datanode on the existing pipeline due to no more good datanodes being available to try. (Nodes: current=[DatanodeInfoWithStorage[172.17.0.2:50010,DS-12c742d4-9f2f-46b4-a512-ee1a1ebd732b,DISK]], original=[DatanodeInfoWithStorage[172.17.0.2:50010,DS-12c742d4-9f2f-46b4-a512-ee1a1ebd732b,DISK]]). The current failed datanode replacement policy is DEFAULT, and a client may configure this via 'dfs.client.block.write.replace-datanode-on-failure.policy' in its configuration.\n\tat org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.findNewDatanode(DFSOutputStream.java:914)\n\tat org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.addDatanode2ExistingPipeline(DFSOutputStream.java:988)\n\tat org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.setupPipelineForAppendOrRecovery(DFSOutputStream.java:1156)\n\tat org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.run(DFSOutputStream.java:454)\n[  FAILED  ] TestHdfsClient/0.AppendToFile, where TypeParam = arrow::io::JNIDriver (207 ms)\n```\n\n`[~cpcloud]` maybe we can look together this afternoon?"
+        },
+        {
+            "created_at": "2017-04-11T22:03:39.096Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=15965024) by Leif Mortenson (leif):*\nGood news, everyone!  I got these tests to pass.  I had to run them in a separate docker container that was linked with the hdfs one though, which isn't great.  I'll try my hand at automating it tonight but don't expect to get that far.\n\nThis PR has my changes but not CI changes https://github.com/apache/arrow/pull/528\n\nI think we should deal with CI in a separate PR, though I will start working on it now."
+        },
+        {
+            "created_at": "2017-04-11T22:06:30.802Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=15965027) by Leif Mortenson (leif):*\nLiving proof:\n\n```\nubuntu@49b5b4f128cb:~/build$ ARROW_HDFS_TEST_PORT=9000 ARROW_HDFS_TEST_USER=hdfs ARROW_HDFS_TEST_HOST=impala debug/io-hdfs-test \n[==========] Running 18 tests from 2 test cases.\n[----------] Global test environment set-up.\n[----------] 9 tests from TestHdfsClient/0, where TypeParam = arrow::io::JNIDriver\n[ RUN      ] TestHdfsClient/0.ConnectsAgain\n17/04/11 22:06:02 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable\n17/04/11 22:06:03 WARN shortcircuit.DomainSocketFactory: The short-circuit local reads feature cannot be used because libhadoop cannot be loaded.\n[       OK ] TestHdfsClient/0.ConnectsAgain (1837 ms)\n[ RUN      ] TestHdfsClient/0.CreateDirectory\n[       OK ] TestHdfsClient/0.CreateDirectory (211 ms)\n[ RUN      ] TestHdfsClient/0.GetCapacityUsed\n[       OK ] TestHdfsClient/0.GetCapacityUsed (156 ms)\n[ RUN      ] TestHdfsClient/0.GetPathInfo\n[       OK ] TestHdfsClient/0.GetPathInfo (393 ms)\n[ RUN      ] TestHdfsClient/0.AppendToFile\n[       OK ] TestHdfsClient/0.AppendToFile (232 ms)\n[ RUN      ] TestHdfsClient/0.ListDirectory\n[       OK ] TestHdfsClient/0.ListDirectory (228 ms)\n[ RUN      ] TestHdfsClient/0.ReadableMethods\n[       OK ] TestHdfsClient/0.ReadableMethods (230 ms)\n[ RUN      ] TestHdfsClient/0.LargeFile\n[       OK ] TestHdfsClient/0.LargeFile (263 ms)\n[ RUN      ] TestHdfsClient/0.RenameFile\n[       OK ] TestHdfsClient/0.RenameFile (192 ms)\n[----------] 9 tests from TestHdfsClient/0 (3742 ms total)\n\n[----------] 9 tests from TestHdfsClient/1, where TypeParam = arrow::io::PivotalDriver\n[ RUN      ] TestHdfsClient/1.ConnectsAgain\n[       OK ] TestHdfsClient/1.ConnectsAgain (150 ms)\n[ RUN      ] TestHdfsClient/1.CreateDirectory\n[       OK ] TestHdfsClient/1.CreateDirectory (156 ms)\n[ RUN      ] TestHdfsClient/1.GetCapacityUsed\n[       OK ] TestHdfsClient/1.GetCapacityUsed (127 ms)\n[ RUN      ] TestHdfsClient/1.GetPathInfo\n[       OK ] TestHdfsClient/1.GetPathInfo (196 ms)\n[ RUN      ] TestHdfsClient/1.AppendToFile\n[       OK ] TestHdfsClient/1.AppendToFile (225 ms)\n[ RUN      ] TestHdfsClient/1.ListDirectory\n[       OK ] TestHdfsClient/1.ListDirectory (230 ms)\n[ RUN      ] TestHdfsClient/1.ReadableMethods\n[       OK ] TestHdfsClient/1.ReadableMethods (195 ms)\n[ RUN      ] TestHdfsClient/1.LargeFile\n[       OK ] TestHdfsClient/1.LargeFile (251 ms)\n[ RUN      ] TestHdfsClient/1.RenameFile\n[       OK ] TestHdfsClient/1.RenameFile (189 ms)\n[----------] 9 tests from TestHdfsClient/1 (1719 ms total)\n\n[----------] Global test environment tear-down\n[==========] 18 tests from 2 test cases ran. (5462 ms total)\n[  PASSED  ] 18 tests.\n```"
+        },
+        {
+            "created_at": "2017-04-11T22:19:18.621Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=15965039) by Wes McKinney (wesm):*\nI don't think we'll be able to run this CI in the main repo unless we can get Circle CI. We should set up an arrow-hadoop repository someplace (I can volunteer wesm/arrow-hadoop) where we have more admin control"
+        },
+        {
+            "created_at": "2017-04-11T22:26:58.000Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=15965046) by Leif Mortenson (leif):*\nOk then, let's just focus on merging this then. "
+        },
+        {
+            "created_at": "2017-04-11T22:27:14.596Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=15965047) by Leif Mortenson (leif):*\nOk then, let's just focus on merging this then. "
+        },
+        {
+            "created_at": "2017-04-11T23:04:32.145Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=15965094) by Wes McKinney (wesm):*\nIssue resolved by pull request 528\n<https://github.com/apache/arrow/pull/528>"
+        },
+        {
+            "created_at": "2018-07-25T10:22:13.997Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=16555490) by Manu Zhang (mauzhang):*\nIf we are sure the error is empty directory why not just return \"empty directory\" ? It's unclear what the root cause is from \"list directory failed\".\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-07-25T13:33:03.077Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=16555667) by Wes McKinney (wesm):*\nWe just worked on this again in https://github.com/apache/arrow/commit/eaa60538ae776a0e4c984e6c661ba3f64def98ab. Have a look"
+        },
+        {
+            "created_at": "2018-07-26T02:21:17.087Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=16556792) by Manu Zhang (mauzhang):*\nGreat but I don't see any changes to the error message."
+        },
+        {
+            "created_at": "2018-07-26T12:17:35.816Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=16558242) by Wes McKinney (wesm):*\nOn master branch? Can you please open a new JIRA?"
+        },
+        {
+            "created_at": "2018-07-26T13:29:59.746Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-805?focusedCommentId=16558305) by Manu Zhang (mauzhang):*\nOpened https://issues.apache.org/jira/browse/ARROW-2919.\u00a0Thanks"
+        }
+    ]
+}

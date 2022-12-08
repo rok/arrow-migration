@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Python] CategoricalIndex is lost after reading back",
+        "body": "***Note**: This issue was originally created as [ARROW-3652](https://issues.apache.org/jira/browse/ARROW-3652). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen a `CategoricalIndex` is written and read back the resulting index is not more categorical.\r\n```Java\n\r\ndf = pd.DataFrame([['a', 'b'], ['c', 'd']], columns=['c1', 'c2'])\r\ndf['c1'] = df['c1'].astype('category')\r\ndf = df.set_index(['c1'])\r\n\r\ntable = pa.Table.from_pandas(df)\r\npq.write_table(table, 'test.parquet')\r\n\r\nref_df = pq.read_pandas('test.parquet').to_pandas()\r\n\r\nprint(df.index)\r\n# CategoricalIndex(['a', 'c'], categories=['a', 'c'], ordered=False, name='c1', dtype='category')\r\n\r\nprint(ref_df.index)\r\n# Index(['a', 'c'], dtype='object', name='c1')\r\n```\r\nIn the metadata the information is correctly contained:\r\n```java\n\r\n{\"name\": \"c1\", \"field_name\": \"c1\", \"p'\r\n            b'andas_type\": \"categorical\", \"numpy_type\": \"int8\", \"metadata\": {\"'\r\n            b'num_categories\": 2, \"ordered\": false}\r\n```\r\n\u00a0",
+        "created_at": "2018-10-30T10:19:44.000Z",
+        "updated_at": "2019-08-19T19:18:49.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-19T19:18:49.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-12-31T23:01:29.679Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3652?focusedCommentId=16731477) by Matthew Rocklin (mrocklin):*\nThis is lost for categorical columns generally, not only the index\r\n\r\n\r\n```python\n\r\nimport pandas as pd\r\ndf = pd.DataFrame({'x': pd.Categorical(['a'])})\r\ndf.to_parquet('df.parquet')\r\n\r\nimport pyarrow.parquet as pq\r\ntable = pq.read_table('df.parquet', use_pandas_metadata=True)\r\n\r\n>>> df.dtypes\r\nx    category\r\ndtype: object\r\n\r\n>>> table.to_pandas().dtypes\r\nx    object\r\ndtype: object\r\n\r\n>>> table\r\npyarrow.Table\r\nx: string\r\n__index_level_0__: int64\r\nmetadata\r\n--------\r\n{b'pandas': b'{\"index_columns\": [\"__index_level_0__\"], \"column_indexes\": [{\"na'\r\n            b'me\": null, \"field_name\": null, \"pandas_type\": \"unicode\", \"numpy_'\r\n            b'type\": \"object\", \"metadata\": {\"encoding\": \"UTF-8\"}}], \"columns\":'\r\n            b' [{\"name\": \"x\", \"field_name\": \"x\", \"pandas_type\": \"categorical\",'\r\n            b' \"numpy_type\": \"int8\", \"metadata\": {\"num_categories\": 1, \"ordere'\r\n            b'd\": false}}, {\"name\": null, \"field_name\": \"__index_level_0__\", \"'\r\n            b'pandas_type\": \"int64\", \"numpy_type\": \"int64\", \"metadata\": null}]'\r\n            b', \"pandas_version\": \"0.23.4\"}'}\r\n```\r\n"
+        },
+        {
+            "created_at": "2018-12-31T23:10:20.334Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3652?focusedCommentId=16731479) by Wes McKinney (wesm):*\nAs has been discussed in other issues, this is a somewhat complex topic:\r\n\r\n- Parquet does not have a categorical type\n- Dictionary encoding is used in general for compression only\n- A single RowGroup may stop using dictionary encoding mid-stream if the dictionary grows large\n- The dictionary will be different from row group to roup group in general\n  \n  In the case where both the writer and the reader is pandas, we can add pandas-specific metadata to indicate that the same dictionary has been written in each row group, and that all the data pages are dictionary encoded, to avoid the issues above. It's a doable project but with a steep learning curve, requiring comfort level with multiple layers of the C++ library and the Arrow conversion layer."
+        },
+        {
+            "created_at": "2019-01-01T00:00:49.502Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3652?focusedCommentId=16731485) by Matthew Rocklin (mrocklin):*\nRight, I've just done a search on this topic and found a few other issues.\u00a0 Happy to move conversation to one of them if desired.\r\n\r\nIn this particular case we already have pandas-specific metadata telling us that we have a categorical column (this is in the `pandas_type` entry for the column).\u00a0 As you say we don't know the category-mapping, but we could still create a Categorical column and just let Pandas decide the mapping.\u00a0 I suspect that it sorts the entries as a sane default..\u00a0 This wouldn't necessarily roundtrip the right category-to-code mapping, but we can at least roundtrip the fact that these should be represented as categoricals.\r\n\r\nSpeaking from a Dask Dataframe perspective this would be desirable.\u00a0 We're accustomed to having to remap mismatched categorical columns to make things match up.\u00a0 Pandas generally handles this case well today.\u00a0 However, I can understand if Arrow wants to play things safe here and resist the temptation to let Pandas be magical.\r\n\r\n\u00a0\r\n\r\nSo, the concrete ask here is that when converting a table to a Pandas dataframe and using the `use_pandas_metadata=` keyword that we convert columns that Pandas marked with `pandas_type='category'` to be categorical columns."
+        },
+        {
+            "created_at": "2019-01-01T00:12:36.846Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3652?focusedCommentId=16731488) by Wes McKinney (wesm):*\nMakes sense. We've recently done a bunch of work to improve the hashing machinery on the C++ side (for dictionary encoding, or whatever purpose). This has been a common enough issue / ask that I think it would be a good idea to tackle this in the next couple of months, so for the Arrow 0.13 release (0.12 is right around the corner)"
+        },
+        {
+            "created_at": "2019-08-02T02:02:36.647Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3652?focusedCommentId=16898481) by Wes McKinney (wesm):*\nI'm pretty close to being able to take care of this one finally. There are some Parquet-related oddities such as dealing with \"large\" categories if we want to accurately preserve categories in all cases."
+        },
+        {
+            "created_at": "2019-08-19T14:59:01.872Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3652?focusedCommentId=16910462) by Wes McKinney (wesm):*\nThis is working in master. I'm going to add a unit test"
+        },
+        {
+            "created_at": "2019-08-19T19:18:49.250Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3652?focusedCommentId=16910673) by Wes McKinney (wesm):*\nIssue resolved by pull request 5117\n<https://github.com/apache/arrow/pull/5117>"
+        }
+    ]
+}

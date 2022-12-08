@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[C++][Compute] Add rounding kernel",
+        "body": "***Note**: This issue was originally created as [ARROW-12744](https://issues.apache.org/jira/browse/ARROW-12744). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nKernel to round an array of floating point numbers. Should return an array of the same type as the input. Should have an option to control how many digits after the decimal point (default value 0 meaning round to the nearest integer).",
+        "created_at": "2021-05-11T21:25:06.000Z",
+        "updated_at": "2021-09-17T21:52:46.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-09-13T17:26:51.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-05-14T15:35:08.218Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12744?focusedCommentId=17344671) by Joris Van den Bossche (jorisvandenbossche):*\nFor the midpoint values, [Python's round()](https://docs.python.org/3/library/functions.html#round) and numpy use the \"round half to nearest even value\" approach (https://en.wikipedia.org/wiki/Rounding#Round_half_to_even). "
+        },
+        {
+            "created_at": "2021-05-17T17:55:52.093Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12744?focusedCommentId=17346314) by Eduardo Ponce (edponce):*\nC++ provides a\u00a0[std::round()](https://en.cppreference.com/w/cpp/numeric/math/round) function where the [rounding mode](https://en.cppreference.com/w/cpp/numeric/fenv/FE_round) can be set at runtime. Note that library implementations can provide additional rounding modes or support a subset. It seems there is no **round-half-to-even/odd** defined in spec.\r\n\r\n1. Should the Arrow **round** kernel make use of **std::round** and extend the rounding modes to support **round-half-to-even/odd** and only in these cases implement them explicitly?\r\n\r\n2. Also, **std::round()** provides versions where it outputs integral data instead of floating-point. Are these variants desirable in Arrow?"
+        },
+        {
+            "created_at": "2021-05-17T20:03:26.838Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12744?focusedCommentId=17346417) by Ben Kietzman (bkietz):*\n1. IMHO, compute kernels should not rely on (or be affected in any way by) the floating point environment. Users may have a need to adjust this for their own applications and arrow's kernels should produce correct output regardless\r\n\r\n2. Output should be of the same floating point type as the input since the extent of rounding is configurable (probably via a function option like `RoundOptions::ndigits`) whereas integral output is only well formed if we're rounding to the nearest one."
+        },
+        {
+            "created_at": "2021-05-24T16:56:40.294Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12744?focusedCommentId=17350529) by Eduardo Ponce (edponce):*\nI understand this issue requests rounding to the nearest integer, but a more general rounding function is able to round based on any factor. For example:\r\n \\* Rounding 113 to the nearest multiple of 10 is 110\r\n \\* Rounding 1.13 to the nearest multiple of 0.1 is 1.1"
+        },
+        {
+            "created_at": "2021-06-25T11:30:11.813Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12744?focusedCommentId=17369415) by Eduardo Ponce (edponce):*\nA draft PR is available that implements **round** function as a unary scalar function. It outputs float64 for integral inputs and matching type for floating-point inputs.\r\n\r\nRounding behavior is controlled via 2 option controls, a rounding mode (specifies displacement behavior) and a multiple (scale and precision).\r\n\r\nFeedback is welcomed w.r.t. to implementation, rounding options and names, and documentation."
+        },
+        {
+            "created_at": "2021-06-28T04:17:21.250Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12744?focusedCommentId=17370408) by Eduardo Ponce (edponce):*\nThe current implementation follows a **rounding with multiple** approach which is more general/flexible than **ndigits** parameter in\u00a0[Python round](https://docs.python.org/3.7/library/functions.html#round) and **decimals** parameter in [NumPy](https://numpy.org/doc/stable/reference/generated/numpy.around.html#numpy.around), [pandas round](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.round.html), and [MySQL](https://dev.mysql.com/doc/refman/5.7/en/mathematical-functions.html#function_round).\r\n\r\nThe following are comments on round APIs:\r\n \\* The **decimals** parameter name in NumPy and pandas seems counter-intuitive in that when it is a negative value it corresponds to the non-decimal part of the value. IMHO **ndigits** is a more suitable name.\r\n \\* **rounding with multiple** bypasses the need to calculate pow(10, decimals). Although, I expect the other software use a LUT table for power(10, x) which is better. For example, MySQL limits **|decimals| < 30**.\r\n \\* The **decimals** parameter only supports rounding to powers of 10.\r\n\r\nWe can also include two variants of rounding functions (similar to Excel)\r\n \\* **round(x, ndigits)**\r\n \\* **mround(x, multiple)**\r\n\r\nI am inclined to support the two variants to both support current APIs as-is and provide a more general rounding function.\r\n\r\nAny comments or suggestions are welcomed."
+        },
+        {
+            "created_at": "2021-06-28T14:57:17.395Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12744?focusedCommentId=17370645) by Eduardo Ponce (edponce):*\nThe current PR includes both variants, **round(x, ndigits)** and **round(x, multiple)**."
+        },
+        {
+            "created_at": "2021-07-19T22:27:50.344Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12744?focusedCommentId=17383637) by Krisztian Szucs (kszucs):*\nPostponing to 6.0."
+        },
+        {
+            "created_at": "2021-09-13T17:26:51.621Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12744?focusedCommentId=17414430) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 10349\n<https://github.com/apache/arrow/pull/10349>"
+        }
+    ]
+}

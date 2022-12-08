@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Rust] array::transform::tests::test_struct failed",
+        "body": "***Note**: This issue was originally created as [ARROW-11239](https://issues.apache.org/jira/browse/ARROW-11239). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nTest **array::transform::tests::test_struct**\u00a0\u00a0in **arrow/src/array/transform/mod.rs**\u00a0failed when swap the first two elements:\r\n\r\nchange from\r\n```java\n\r\n// code placeholder\r\nlet strings: ArrayRef = Arc::new(StringArray::from(vec![\r\n    Some(\"joe\"),\r\n    None,\n```\r\nto\r\n```java\n\r\n// code placeholder\r\nlet strings: ArrayRef = Arc::new(StringArray::from(vec![\r\n    None,\r\n    Some(\"joe\"),\n```\r\nThe failure was first found when I report\u00a0https://issues.apache.org/jira/browse/ARROW-11160\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2021-01-13T14:41:57.000Z",
+        "updated_at": "2021-03-12T15:33:02.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-01-30T05:21:02.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-01-15T05:44:17.403Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11239?focusedCommentId=17265711) by Qingyou Meng (mqy):*\n`[~jorgecarleitao]`\r\n\r\nTest passed if construct the `expect` directly (not from slice()).\r\n\r\nlook like the problem is caused by ArrayRef::slice(), which contains cloned buffers and null bitmap.\r\n\r\n1. Add new `array_data_slice_problem` to verify failure case 1:\r\n```\n\r\n    #[test]\r\n    fn array_bug_1() {\r\n        let strings: ArrayRef = Arc::new(StringArray::from(vec![\r\n            None,\r\n            Some(\"b\"),\r\n        ]));\r\n        let strings_slice = strings.slice(1, 1);\r\n        let strings2: ArrayRef = Arc::new(StringArray::from(vec![\r\n            Some(\"b\"),\r\n        ]));\r\n        assert_eq!(&strings2, &strings_slice, \"\\n##1: {:?}\\n##2: {:?}\", strings2.data(), strings_slice.data());\r\n    }\r\n\r\nFailed with error:\r\n\r\nthread 'array::transform::tests::array_bug_1' panicked at 'assertion failed: `(left == right)`\r\n\u00a0 left: `StringArray\r\n[\r\n\u00a0 \"b\",\r\n]`,\r\n\u00a0right: `StringArray\r\n[\r\n\u00a0 \"b\",\r\n]`:\u00a0\r\n##1: ArrayData { data_type: Utf8, len: 1, null_count: 0, offset: 0, buffers: [Buffer { data: Bytes { ptr: 0x7fd413704600, len: 8, data: [0, 0, 0, 0, 1, 0, 0, 0] }, offset: 0 }, Buffer { data: Bytes { ptr: 0x7fd413704700, len: 1, data: [98] }, offset: 0 }], child_data: [], null_bitmap: Some(Bitmap { bits: Buffer { data: Bytes { ptr: 0x7fd413704680, len: 1, data: [1] }, offset: 0 } }) }\r\n##2: ArrayData { data_type: Utf8, len: 1, null_count: 0, offset: 1, buffers: [Buffer { data: Bytes { ptr: 0x7fd413704300, len: 12, data: [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0] }, offset: 0 }, Buffer { data: Bytes { ptr: 0x7fd413704400, len: 1, data: [98] }, offset: 0 }], child_data: [], null_bitmap: Some(Bitmap { bits: Buffer { data: Bytes { ptr: 0x7fd413704380, len: 1, data: [2] }, offset: 0 } }) }', arrow/src/array/transform/mod.rs:823:9\n```\r\n\u00a0\r\n\r\n2. Adjust `array_data_slice_problem`, add element `Some(\"a\")`:\r\n\r\n\u00a0\r\n```\n\r\n    #[test]\r\n    fn array_bug_2() {\r\n        let strings: ArrayRef = Arc::new(StringArray::from(vec![\r\n            Some(\"a\"),\r\n            None,\r\n            Some(\"b\"),\r\n        ]));\r\n        let strings_slice = strings.slice(2, 1);\r\n        let strings2: ArrayRef = Arc::new(StringArray::from(vec![\r\n            Some(\"b\"),\r\n        ]));\r\n        assert_eq!(&strings2, &strings_slice, \"\\n##1: {:?}\\n##2: {:?}\", strings2.data(), strings_slice.data());\r\n    }\r\n\r\n\r\nPanic on call to `strings.slice(2, 1)`:\r\n\r\nthread 'array::transform::tests::array_bug_2' panicked at 'range end index 2 out of range for slice of length 0', arrow/src/array/equal/utils.rs:81:49\r\n\r\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-01-15T06:06:04.006Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11239?focusedCommentId=17265723) by Jorge Leit\u00e3o (jorgecarleitao):*\ngreat finding. cc [~nevi_me]"
+        },
+        {
+            "created_at": "2021-01-15T18:42:57.747Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11239?focusedCommentId=17266289) by Andrew Lamb (alamb):*\nThanks `[~mqy]` \u2013 this is a really nice one find and well written ticket"
+        },
+        {
+            "created_at": "2021-01-30T05:21:02.349Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11239?focusedCommentId=17275482) by Jorge Leit\u00e3o (jorgecarleitao):*\nIssue resolved by pull request 9211\n<https://github.com/apache/arrow/pull/9211>"
+        }
+    ]
+}

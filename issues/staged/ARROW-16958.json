@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[C++][FlightRPC] Flight generates misaligned buffers",
+        "body": "***Note**: This issue was originally created as [ARROW-16958](https://issues.apache.org/jira/browse/ARROW-16958). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nProtobuf's wire format design + our zero-copy serializer/deserializer mean that buffers can end up misaligned. On some Arrow versions, this can cause segfaults in kernels assuming alignment (and generally violates expectations). \r\n\r\nWe should:\r\n- Possibly include buffer alignment in array validation\n- See if we can adjust the serializer to somehow pad things properly\n- See if we can do anything about this in the deserializer\n  \n  Example:\n  ```python\n  \n  import pyarrow as pa\n  import pyarrow.flight as flight\n  \n  class TestServer(flight.FlightServerBase):\n      def do_get(self, context, ticket):\n          schema = pa.schema(\n              [\n                  (\"index\", pa.int64()),\n                  (\"int8\", pa.float64()),\n                  (\"int16\", pa.float64()),\n                  (\"int32\", pa.float64()),\n              ]\n          )\n          return flight.RecordBatchStream(pa.table([\n              [0, 1, 2, 3],\n              [0, 1, None, 3],\n              [0, 1, 2, None],\n              [0, None, 2, 3],\n          ], schema=schema))\n  \n  \n  with TestServer() as server:\n      client = flight.connect(f\"grpc://localhost:{server.port}\")\n      table = client.do_get(flight.Ticket(b\"\")).read_all()\n      for col in table:\n          print(col.type)\n          for chunk in col.chunks:\n              for buf in chunk.buffers():\n                  if not buf: continue\n                  print(\"buffer is 8-byte aligned?\", buf.address % 8)\n              chunk.cast(pa.float32())\n  ```\n  \n  On Arrow 8\n  ```\n  \n  int64\n  buffer is 8-byte aligned? 1\n  double\n  buffer is 8-byte aligned? 1\n  buffer is 8-byte aligned? 1\n  double\n  buffer is 8-byte aligned? 1\n  buffer is 8-byte aligned? 1\n  double\n  buffer is 8-byte aligned? 1\n  buffer is 8-byte aligned? 1\n  ```\n  On Arrow 7\n  ```\n  \n  int64\n  buffer is 8-byte aligned? 4\n  double\n  buffer is 8-byte aligned? 4\n  buffer is 8-byte aligned? 4\n  fish: Job 1, 'python ../test.py' terminated by signal SIGSEGV (Address boundary error)\n  ```",
+        "created_at": "2022-07-01T14:50:34.000Z",
+        "updated_at": "2022-09-23T00:46:11.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: FlightRPC",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-07-01T15:08:54.857Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16958?focusedCommentId=17561488) by Antoine Pitrou (apitrou):*\nOuch, our kernels should not assume alignment. What kind of instructions are generated that fail on misaligned data?"
+        },
+        {
+            "created_at": "2022-07-01T15:09:44.987Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16958?focusedCommentId=17561491) by David Li (lidavidm):*\nI didn't look too closely since it was fixed in Arrow 8.0.0, I just haven't gotten to look yet whether it was an intentional or unintentional fix"
+        },
+        {
+            "created_at": "2022-07-01T15:14:51.547Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16958?focusedCommentId=17561496) by David Li (lidavidm):*\nFWIW in Arrow 7 it's this sequence\r\n```\n\r\n   \u25020x7ffff56f06b7 <_ZN5arrow7compute8internal12_GLOBAL__N_112DoStaticCastIfdEEvPKvlllPv+119>       shr    $0x2,%r9                                                                   \u2502\r\n   \u25020x7ffff56f06bb <_ZN5arrow7compute8internal12_GLOBAL__N_112DoStaticCastIfdEEvPKvlllPv+123>       nopl   0x0(%rax,%rax,1)                                                           \u2502\r\n  >\u25020x7ffff56f06c0 <_ZN5arrow7compute8internal12_GLOBAL__N_112DoStaticCastIfdEEvPKvlllPv+128>       cvtpd2ps (%rsi,%rax,2),%xmm0                                                      \u2502\r\n   \u25020x7ffff56f06c5 <_ZN5arrow7compute8internal12_GLOBAL__N_112DoStaticCastIfdEEvPKvlllPv+133>       cvtpd2ps 0x10(%rsi,%rax,2),%xmm1                                                  \u2502\r\n   \u25020x7ffff56f06cb <_ZN5arrow7compute8internal12_GLOBAL__N_112DoStaticCastIfdEEvPKvlllPv+139>       add    $0x1,%rcx    \r\n```\r\nso an SSE instruction. Backtrace is\r\n```\n\r\n#0 \u00a00x00007ffff56f06c0 in void arrow::compute::internal::(anonymous namespace)::DoStaticCast<float, double>(void const*, long, long, long, void*) ()\r\n\u00a0 \u00a0from /home/lidavidm/miniconda3/envs/theseus_env/lib/python3.9/site-packages/pyarrow/../../../libarrow.so.700\r\n#1 \u00a00x00007ffff56fc17f in arrow::compute::internal::CastNumberToNumberUnsafe(arrow::Type::type, arrow::Type::type, arrow::Datum const&, arrow::Datum*) ()\r\n\u00a0 \u00a0from /home/lidavidm/miniconda3/envs/theseus_env/lib/python3.9/site-packages/pyarrow/../../../libarrow.so.700\r\n#2 \u00a00x00007ffff5709c73 in arrow::compute::internal::CastFloatingToFloating(arrow::compute::KernelContext*, arrow::compute::ExecBatch const&, arrow::Datum*) ()\r\n\u00a0 \u00a0from /home/lidavidm/miniconda3/envs/theseus_env/lib/python3.9/site-packages/pyarrow/../../../libarrow.so.700 \n```"
+        },
+        {
+            "created_at": "2022-07-01T15:17:04.923Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16958?focusedCommentId=17561499) by David Li (lidavidm):*\nHmm, I wonder if I misdiagnosed\u2026I thought it would be alignment, but GDB says the code dereferenced a null pointer."
+        },
+        {
+            "created_at": "2022-09-20T03:42:54.863Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16958?focusedCommentId=17606863) by Yifei Yang (yyfyyf123123):*\nHey, I guess I also got the similar issue. What I did is to use Flight to transfer an Arrow table and then feed it into Arrow's aggregate exec node to do hash-aggregate. It will crash at arrow::util::CheckAlignment(). However using the original table works well. For the transferred table, if I first serialize into bytes then recreate an arrow table using the bytes, it also works well, which I guess is because the newly created table from bytes is aligned. I tested on both 6.0.0 and 8.0.0."
+        },
+        {
+            "created_at": "2022-09-20T07:16:30.512Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16958?focusedCommentId=17606953) by Antoine Pitrou (apitrou):*\n`[~yyfyyf123123]` Can you open a JIRA for the crash at `arrow::util::CheckAlignment()` ? I don't think it should crash."
+        },
+        {
+            "created_at": "2022-09-20T16:15:16.008Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16958?focusedCommentId=17607289) by Yifei Yang (yyfyyf123123):*\n`[~apitrou]` Ticket (https://issues.apache.org/jira/browse/ARROW-17783) here, I'm still trying to reproduce it stably in a minimal test."
+        },
+        {
+            "created_at": "2022-09-20T18:02:11.597Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16958?focusedCommentId=17607348) by Yifei Yang (yyfyyf123123):*\n`[~apitrou]` I'm now able to reproduce the issue stably, and I attached the source into that ticket."
+        },
+        {
+            "created_at": "2022-09-23T00:29:14.538Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16958?focusedCommentId=17608449) by Weston Pace (westonpace):*\nI can look into `CheckAlignment` but I still think it would be nice to fix this in flight.  Otherwise data received from flight that is then passed over the C data interface could fail if the receiving library doesn't support unaligned buffers.  `[~marsupialtail]` just mentioned to me that they ran into this kind of situation trying to pass a buffer to polars (I believe arrow-rs expects buffers of T to be aligned to T)."
+        },
+        {
+            "created_at": "2022-09-23T00:35:28.285Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16958?focusedCommentId=17608451) by David Li (lidavidm):*\nUnless I come up with a great idea, that's tantamount to forcing a copy on all data coming through flight - which may not be awful given that gRPC often forces a copy on us (right now), but still isn't ideal"
+        },
+        {
+            "created_at": "2022-09-23T00:46:11.284Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16958?focusedCommentId=17608453) by David Li (lidavidm):*\nI've sort of wanted to explore this anyways in any case - can we match up the chunks that gRPC gives us to the buffers in the IPC payload, and avoid concatenating? I suppose that optimization would bring little benefit if we ended up having to align all of them anyways, though. And as mentioned, it might be possible to insert padding data to align the buffer on the wire, but then you can't count on the client being polite like that."
+        }
+    ]
+}

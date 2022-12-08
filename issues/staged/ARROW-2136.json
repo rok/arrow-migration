@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] Non-nullable schema fields not checked in conversions from pandas",
+        "body": "***Note**: This issue was originally created as [ARROW-2136](https://issues.apache.org/jira/browse/ARROW-2136). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIf you provide a schema with\u00a0`nullable=False`\u00a0but\u00a0pass a\u00a0`DataFrame`\u00a0which in fact has nulls\u00a0it appears the\u00a0schema is ignored? I would expect an error here.\r\n```Java\n\r\nimport pyarrow as pa\r\nimport pandas as pd\r\n\r\ndf = pd.DataFrame({\"a\":[1.2, 2.1, pd.np.NaN]})\r\nschema = pa.schema([pa.field(\"a\", pa.float64(), nullable=False)])\r\ntable = pa.Table.from_pandas(df, schema=schema)\r\ntable[0]\r\n\r\n<pyarrow.lib.Column object at 0x7f213bf2fb70>\r\nchunk 0: <pyarrow.lib.DoubleArray object at 0x7f213bf20ea8>\r\n[\r\n  1.2,\r\n  2.1,\r\n  NA\r\n]\r\n```",
+        "created_at": "2018-02-12T14:04:36.000Z",
+        "updated_at": "2019-06-25T18:31:28.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-06-25T11:42:04.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-02-12T15:07:54.539Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2136?focusedCommentId=16360847) by Wes McKinney (wesm):*\nWe have not yet implemented handling for non-nullable fields in most of the pandas conversions. Probably the simplest thing to do will be to leave the current conversion code as is and then raise an exception if a non-nullable field turns out to have nulls post-conversion to Arrow"
+        },
+        {
+            "created_at": "2019-06-11T20:33:20.100Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2136?focusedCommentId=16861474) by Joris Van den Bossche (jorisvandenbossche):*\nI have a PR for ARROW-5169 (https://github.com/apache/arrow/pull/4397), which tries to use this nullability of the passed `schema`, but I should check how my PR interacts with passing data with nulls."
+        },
+        {
+            "created_at": "2019-06-21T07:52:14.950Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2136?focusedCommentId=16869274) by Joris Van den Bossche (jorisvandenbossche):*\nYou can also run into this when using `pa.Table.from_arrays`\r\n\r\n```Java\n\r\nIn [2]: schema = pa.schema([pa.field(\"a\", pa.float64(), nullable=False)])\r\n\r\nIn [4]: table = pa.Table.from_arrays([pa.array([1.5, None])], schema=schema) \r\n\r\nIn [5]: table.schema\r\nOut[5]: a: double\r\n\r\nIn [6]: table.schema.field_by_name('a')\r\nOut[6]: pyarrow.Field<a: double not null>\r\n\r\nIn [7]: table.column('a')\r\nOut[7]: \r\n<Column name='a' type=DataType(double)>\r\n[\r\n  [\r\n    1.5,\r\n    null\r\n  ]\r\n]\r\n```\r\n\r\nUnder the hood, this function is doing `Column(field, array)`, and the Column constructor is assuming the field datatype matches the array's datatype.\r\n\r\nThere is a `Column::ValidateData()`, but looking at the implementation, that only checks that the chunks' types equal the field type, and does not check any metadata such as nullability (although the doc comment says \"Verify that the column's array data is consistent with the passed field's metadata\")"
+        },
+        {
+            "created_at": "2019-06-21T08:09:37.611Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2136?focusedCommentId=16869281) by Joris Van den Bossche (jorisvandenbossche):*\nFor `Table.from_pandas`, in the end, the actual conversion is done column by column with `pa.array`.\r\n\r\nSo the question for me is, do we want to bake this in into `pa.array` (eg add a `nullable=True` default keyword to `pa.array`)? So that the underlying conversion raises when it cannot satisfy a `nullable=False`.\r\n\r\nAlternatively, we could also rather easily verify in `pandas_compat.dataframe_to_arrays` (the function that calls `pa.array` for each column) that the arrays null_count does not conflict with the schema fields' metadata on this. Raising while converting in `pa.array` could of course raise earlier."
+        },
+        {
+            "created_at": "2019-06-25T11:42:04.527Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2136?focusedCommentId=16872285) by Krisztian Szucs (kszucs):*\nIssue resolved by pull request 4683\n<https://github.com/apache/arrow/pull/4683>"
+        }
+    ]
+}

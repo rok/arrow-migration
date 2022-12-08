@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[C++] TaskGroup::Finish should execute tasks",
+        "body": "***Note**: This issue was originally created as [ARROW-10014](https://issues.apache.org/jira/browse/ARROW-10014). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently ThreadedTaskGroup::Finish locks the current thread waiting for worker threads to execute tasks. Instead it could pop tasks from the queue and execute them, using the Finish-ing thread as a worker. This would enable basic nested parallelism cases using TaskGroup::MakeSubGroup() without danger of accumulating a thread deadlock.\r\n\r\nFor example in the case of reading multiple parquet files we would like to parallelize both across files to read and across columns within each file. We could support this basic nested parallelism by rewriting ParquetFileReader accept any TaskGroup across which to scatter its column reading tasks (rather than instantiating its own ThreadPool based on a boolean flag). Then file reading tasks could be scattered across a ThreadedTaskGroup, each of these creating a subgroup which runs all column reading tasks.\r\n\r\nHowever the above would currently deadlock for reading `(# files) * (# columns) >= (# threads)`, since every task of the root TaskGroup will be locked by its subgroup's call to Finish. In order to use TaskGroup::MakeSubGroup for basic nested parallelism, the Finish-ing thread must perform work in addition to checking for group completion.",
+        "created_at": "2020-09-15T13:11:27.000Z",
+        "updated_at": "2020-12-17T19:02:23.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-12-17T19:02:23.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-15T13:19:40.602Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10014?focusedCommentId=17196138) by Ben Kietzman (bkietz):*\nMinor consequence of using Finish() as a worker: we'd probably want to instantiate a thread pool of ``nproc` - 1` workers instead of ``nproc`` to reduce contention"
+        },
+        {
+            "created_at": "2020-09-15T13:52:10.488Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10014?focusedCommentId=17196163) by Antoine Pitrou (apitrou):*\nMy thinking is a bit different. It should be simple from ThreadPool to export a static method like this:\r\n```c++\n\r\nstatic ThreadPool* GetCurrentPool();\r\n```\r\n\r\nIf the current thread is in a thread pool, this would return the current thread pool, otherwise null. Then, if the current thread is in a thread pool, Finish() could ask the thread pool to run some pending tasks (at least one). We need another ThreadPool method for that:\r\n```c++\n\r\n// Return true if some tasks were pending (and run), false if returning immediately\r\nbool RunSomePendingTasksFromThread();\r\n```\r\n\r\nHow many tasks are run would be left to the thread pool as a heuristic. In the end, `Finish` could look like this:\r\n```Java\n\r\nwhile (!tasks_finished() && current_pool->RunSomePendingTasksFromThread());\r\nwait_for_tasks_to_finish();\r\n```\r\n\r\nOr perhaps this can better be coordinated inside the ThreadPool itself, I don't know..."
+        },
+        {
+            "created_at": "2020-10-05T22:41:23.589Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10014?focusedCommentId=17208391) by Weston Pace (westonpace):*\nI'm going to continue from the email discussion and investigation and have added sub tasks for my planned approach.\u00a0 It's a slightly different approach than the one laid out in the description (instead of Finish running tasks the FinishAsync method will be added which just returns immediately and gets off the thread pool).\u00a0 If anyone wants me to open a new issue for my alternate approach instead of taking over this one please let me know."
+        },
+        {
+            "created_at": "2020-12-17T19:02:23.877Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10014?focusedCommentId=17251289) by Weston Pace (westonpace):*\nThis capability will be superseded by futures (when all, etc)."
+        }
+    ]
+}

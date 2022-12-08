@@ -1,0 +1,58 @@
+{
+    "issue": {
+        "title": "[Python] `pyarrow.fs.copy_files` doesn't work if filenames contain special characters",
+        "body": "***Note**: This issue was originally created as [ARROW-18290](https://issues.apache.org/jira/browse/ARROW-18290). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI can't upload a file called `spam=ham` to a filesystem that emulates an S3 API. I can workaround the issue by renaming the file `spam-ham`.\u00a0\r\n\r\nTo reproduce, run a filesystem that emulates an S3 API:\r\n```java\n\r\ndocker run -p 9444:9000 scireum/s3-ninja:latest\r\n```\r\nAuthenticate with the filesystem:\r\n```java\n\r\nexport AWS_ACCESS_KEY_ID=\"AKIAIOSFODNN7EXAMPLE\"\r\nexport AWS_SECRET_ACCESS_KEY=\"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\"\r\n```\r\n\u00a0Then run this Python script:\r\n```python\n\r\nimport os\r\nimport tempfile\r\n\r\nimport pyarrow.fs\r\n\r\nsource = tempfile.mkdtemp()\r\nfile_path = os.path.join(source, \"spam=ham\")\r\nopen(file_path, \"w\").close()\r\n\r\nfilesystem, path = pyarrow.fs.FileSystem.from_uri(\r\n\"s3://bucket?scheme=http&endpoint_override=localhost:9444\"\r\n)\r\npyarrow.fs.copy_files(source, path, destination_filesystem=filesystem)\r\n```\r\nYou'll get the error\r\n```java\n\r\nOSError: When initiating multiple part upload for key 'spam=ham' in bucket 'bucket': AWS Error [code 22]: The computed request signature does not match the one provided. Check login credentials. (Expected: e70ab9efb620f744abd43d13e8e6846c585a41da543bfb5da67d2fe1ccfd1aaa, Found: 648456e3441dad5a014b2981c71b6e69ccac9732bdcdbe2d363d95105d914340)\r\n```\r\nThis issue is motivated by <https://github.com/ray-project/ray/issues/29845>.",
+        "created_at": "2022-11-09T03:39:10.000Z",
+        "updated_at": "2022-11-15T22:04:14.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-11-15T16:07:02.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-11-14T13:01:05.838Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18290?focusedCommentId=17633773) by Miles Granger (milesgranger):*\nHmm, seems like one way for Arrow to fix this is to do something similar as described in this issue [aws-sdk-cpp #1224 \\| https://github.com/aws/aws-sdk-cpp/issues/1224], subclassing our own client which does the `URI::URLEncodePath` as suggested:\r\n\r\n> I've found one thing that DOES work. I'm not suggesting that this is the fix, but it does seem to give the desired behavior, at least for this test case. In URI::GetURIString(), m_path is escaped using URLEncodePathRFC3986() which explicitly checks for and does not percent encode the \"=\". If this call is replaced with a similar one that does escape the \"=\" (and only done here. URLEncodePathRFC3986() is called in a few places), the resulting URL becomes this:\r\n\r\nAnd [the comment about a new client class \\| https://github.com/aws/aws-sdk-cpp/issues/1224#issuecomment-525061745] to circumvent this issue.\r\n\r\nWhat do you think, `[~apitrou]`?"
+        },
+        {
+            "created_at": "2022-11-14T13:08:00.402Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18290?focusedCommentId=17633776) by Antoine Pitrou (apitrou):*\nHmm... that is weird to say the least. What does the S3-emulating filesystem expect exactly? Can you upload a file \"spam=ham\" using their native API?"
+        },
+        {
+            "created_at": "2022-11-14T13:16:17.182Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18290?focusedCommentId=17633780) by Antoine Pitrou (apitrou):*\nI'll note that the GH comment quoted above seems outdated: in a recent version of the AWS SDK (1.9.259), `URLEncodePathRFC3986` is still defined but isn't used anywhere. `URI::GetURLEncodedPathRFC3986` is used via `URI::GetURIString`, though.\r\n"
+        },
+        {
+            "created_at": "2022-11-14T13:18:32.025Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18290?focusedCommentId=17633781) by Antoine Pitrou (apitrou):*\nI also don't know how we would override that behavior. We would have to reimplement every `URI::GetURIString`-calling function, such as `CurlHttpClient::MakeRequest`."
+        },
+        {
+            "created_at": "2022-11-14T13:35:21.347Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18290?focusedCommentId=17633800) by Miles Granger (milesgranger):*\nOk, I suppose the main thing is this works when a real S3 bucket is used ( just tried it now). I'll experiment a bit with the native API, but even if that doesn't work, I suppose supporting 'all' s3 like systems isn't within scope."
+        },
+        {
+            "created_at": "2022-11-14T13:37:59.523Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18290?focusedCommentId=17633803) by Antoine Pitrou (apitrou):*\nWell, we would like our S3 support to extend to non-AWS backends, as a best effort policy, but we also can't introduce unreasonable hacks to that purpose. This particular issue seems difficult to solve without extended surgery and a hairy maintenance story."
+        },
+        {
+            "created_at": "2022-11-14T13:38:32.681Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18290?focusedCommentId=17633804) by Antoine Pitrou (apitrou):*\nThat said, I'm still interested to know: if you manage to create \"spam=ham\" using the native API, what does it look like when you list files using the S3 API?"
+        },
+        {
+            "created_at": "2022-11-14T13:52:28.591Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18290?focusedCommentId=17633809) by Miles Granger (milesgranger):*\nSeems like it works fine:\r\n(using the same docker emulator as OP)\r\n```python\n\r\nIn [2]: import boto3\r\n\r\nIn [3]: session = boto3.session.Session()\r\n\r\nIn [4]: client = session.client(service_name=\"s3\", aws_access_key_id=\"AKIAIOSFODNN7EXAMPLE\", a\r\n   ...: ws_secret_access_key=\"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\", endpoint_url=\"http://\r\n   ...: localhost:9444\")\r\n\r\nIn [5]: with open('spam=ham', 'wb') as f:\r\n   ...:     f.write(b'hello')\r\n   ...:\r\n\r\nIn [6]: client.upload_file('./spam=ham', 'bucket', 'spam=ham')\r\n\r\nIn [7]: client.list_objects_v2(Bucket='bucket')\r\nOut[7]:\r\n{'ResponseMetadata': {'HTTPStatusCode': 200,\r\n  'HTTPHeaders': {'transfer-encoding': 'chunked',\r\n   'content-type': 'application/xml',\r\n   'cache-control': 'no-cache, max-age=0',\r\n   'last-modified': 'Mon, 14 Nov 2022 13:49:53 GMT',\r\n   'connection': 'keep-alive',\r\n   'server': 'e72f66e1b191 (scireum SIRIUS - powered by Netty)',\r\n   'p3p': 'CP=\"This site does not have a p3p policy.\"',\r\n   'vary': 'origin'},\r\n  'RetryAttempts': 0},\r\n 'IsTruncated': False,\r\n 'Contents': [{'Key': 'spam=ham',\r\n   'LastModified': datetime.datetime(2022, 11, 14, 13, 48, 54, tzinfo=tzutc()),\r\n   'ETag': '5d41402abc4b2a76b9719d911017c592',\r\n   'Size': 5,\r\n   'StorageClass': 'STANDARD'}],\r\n 'Name': 'bucket',\r\n 'Prefix': '',\r\n 'MaxKeys': 1000}\r\n```"
+        },
+        {
+            "created_at": "2022-11-15T13:22:27.909Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18290?focusedCommentId=17634353) by Antoine Pitrou (apitrou):*\nOk, it seems this should be solvable with a new enough AWS SDK."
+        },
+        {
+            "created_at": "2022-11-15T16:07:02.720Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18290?focusedCommentId=17634424) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 14645\n<https://github.com/apache/arrow/pull/14645>"
+        }
+    ]
+}

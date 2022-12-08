@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[Python] Ensure _exec_plan.execplan preserves order of inputs",
+        "body": "***Note**: This issue was originally created as [ARROW-16518](https://issues.apache.org/jira/browse/ARROW-16518). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAt the moment execplan doesn't guarantee any ordered output, the batches are consumed in a random order. This can lead to unordered rows in outputs when `use_threads=True`\r\n\r\nFor example providing a column with `b=[a, a, a, a, b, b, b, b]` will sometimes give back `b=[a, b]` and sometimes `b=[b, a]`\r\n\r\nSee\r\n```java\n\r\nIn [18]: table1 = pa.table({'a': [1, 2, 3, 4], 'b': ['a'] * 4})\r\n\r\nIn [19]: table2 = pa.table({'a': [1, 2, 3, 4], 'b': ['b'] * 4})\r\n\r\nIn [20]: table = pa.concat_tables([table1, table2])\r\n\r\nIn [21]: ep._filter_table(table, pc.field('a') == 1)\r\nOut[21]: \r\npyarrow.Table\r\na: int64\r\nb: string\r\n----\r\na: [[1],[1]]\r\nb: [[\"b\"],[\"a\"]]\r\n\r\nIn [22]: ep._filter_table(table, pc.field('a') == 1)\r\nOut[22]: \r\npyarrow.Table\r\na: int64\r\nb: string\r\n----\r\na: [[1],[1]]\r\nb: [[\"a\"],[\"b\"]] \n```",
+        "created_at": "2022-05-10T12:51:46.000Z",
+        "updated_at": "2022-10-06T09:24:37.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: task"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-05-10T12:53:24.159Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16518?focusedCommentId=17534322) by Antoine Pitrou (apitrou):*\nThis should certainly be optional."
+        },
+        {
+            "created_at": "2022-05-10T13:05:29.175Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16518?focusedCommentId=17534328) by Alessandro Molina (amol-):*\n`[~apitrou]` is there any use case you can think of where the user would expect the order of rows for a column to be scrambled compared to the order they came in?\u00a0"
+        },
+        {
+            "created_at": "2022-05-10T13:07:31.659Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16518?focusedCommentId=17534330) by Antoine Pitrou (apitrou):*\nAny application that expects database-like semantics. Also, at some point in the future it's possible that data would be scrambled _inside_ record batches, for example if finer-grained chunking/morselling is implemented ( `[~westonpace]` is that a remote possibility?)."
+        },
+        {
+            "created_at": "2022-05-10T16:35:49.241Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16518?focusedCommentId=17534457) by Weston Pace (westonpace):*\nI doubt anyone expects or wants their data to be scrambled but many users want maximum performance and can tolerate it.\r\n\r\nYes, scrambling within batches will be possible.  I'm pretty sure you can observe it today if you have batches with more than 128Ki rows.\r\n\r\nARROW-10883 is related.  There has been discussion of this on the ML.  Maintaining ordering in a plan is definitely possible but not simple and I don't know that anyone is working on it.\r\n\r\nThe way this works in `ToTable` is we do all the sorting on either end of the execution engine.  We attach fragment & batch indices (as columns) to the batches before we put them into the plan.  Then, after pulling the data out of the plan, we sort the data by these two columns and then drop the two columns before returning the table.\r\n"
+        }
+    ]
+}

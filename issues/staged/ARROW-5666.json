@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[Python] Underscores in partition (string) values are dropped when reading dataset",
+        "body": "***Note**: This issue was originally created as [ARROW-5666](https://issues.apache.org/jira/browse/ARROW-5666). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen reading a partitioned dataset, in which the partition column contains string values with underscores, pyarrow seems to be ignoring the underscores in the resulting values.\r\n\r\nFor example if I write and then read a dataset as follows:\r\n```java\n\r\nimport pyarrow as pa\r\nimport pandas as pd\r\n\r\ndf = pd.DataFrame({\r\n\u00a0\u00a0\u00a0 \"year_week\": [\"2019_2\", \"2019_3\"],\r\n\u00a0\u00a0\u00a0 \"value\": [1, 2]\r\n})\r\n\r\ntable = pa.Table.from_pandas(df.head())\r\npq.write_to_dataset(table, 'test', partition_cols=[\"year_week\"])\r\n\r\ntable2 = pq.ParquetDataset('test').read()\r\n```\r\nThe resulting 'year_week' column in table 2 has lost the underscores:\r\n```java\n\r\ntable2[1] # Gives:\r\n\r\n<Column name='year_week' type=DictionaryType(dictionary<values=int64, indices=int32, ordered=0>)>\r\n[\r\n\r\n\u00a0 -- dictionary:\r\n\u00a0\u00a0\u00a0 [\r\n\u00a0\u00a0\u00a0\u00a0\u00a0 20192,\r\n\u00a0\u00a0\u00a0\u00a0\u00a0 20193\r\n\u00a0\u00a0\u00a0 ]\r\n\u00a0 -- indices:\r\n\u00a0\u00a0\u00a0 [\r\n\u00a0\u00a0\u00a0\u00a0\u00a0 0\r\n\u00a0\u00a0\u00a0 ],\r\n\r\n\u00a0 -- dictionary:\r\n\u00a0\u00a0\u00a0 [\r\n\u00a0\u00a0\u00a0\u00a0\u00a0 20192,\r\n\u00a0\u00a0\u00a0\u00a0\u00a0 20193\r\n\u00a0\u00a0\u00a0 ]\r\n\u00a0 -- indices:\r\n\u00a0\u00a0\u00a0 [\r\n\u00a0\u00a0\u00a0\u00a0\u00a0 1\r\n\u00a0\u00a0\u00a0 ]\r\n]\r\n```\r\nIs this intentional behaviour or is this a bug in arrow?",
+        "created_at": "2019-06-20T11:48:36.000Z",
+        "updated_at": "2020-05-04T23:43:50.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-05-04T23:43:50.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-06-20T14:43:18.880Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5666?focusedCommentId=16868583) by Joris Van den Bossche (jorisvandenbossche):*\nThanks for the report!\r\n\r\nThe problem is that we try to convert the keys to integer, and if that fails just preserve them as strings. \r\nThat is done here https://github.com/apache/arrow/blob/961927af56b83d0dbca91132c3f07aa06d69fc63/python/pyarrow/parquet.py#L659-L663\r\n\r\n```Java\n\r\n# Only integer and string partition types are supported right now\r\n        try:\r\n            integer_keys = [int(x) for x in self.keys]\r\n            dictionary = lib.array(integer_keys)\r\n        except ValueError:\r\n            dictionary = lib.array(self.keys)\r\n```\r\n\r\nand apparently, Python will convert a string with an underscore to an integer ...\r\n\r\n```Java\n\r\nIn [3]: int(\"2019_1\")                                                                                                                                                                                              \r\nOut[3]: 20191\r\n```\r\n\r\nI think this is because in recent Python versions underscores are allowed in integer literals (eg to separate thousands). \r\nWe could special case this and first check if there is an underscore in the string before trying to convert to integers, but that's a big ugly."
+        },
+        {
+            "created_at": "2019-06-20T20:44:41.460Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5666?focusedCommentId=16868924) by Robin K\u00e5veland (kaaveland):*\nMaybe it's an option to check `all(key.isdigit() for key in self.keys)` ? Might also be ugly, but apparently:\r\n\r\n\u00a0\r\n```java\n\r\n>>> '1231_2'.isdigit()\r\nFalse\r\n>>> int('123_2')\r\n1232\r\n>>> '1231'.isdigit()\r\nTrue\n```\r\n\u00a0\r\n\r\nThis breaks stuff like base 16 partition keys, but at least the original data is still unchanged, so the user can coerce themselves."
+        },
+        {
+            "created_at": "2019-06-21T09:36:01.639Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5666?focusedCommentId=16869341) by Julian de Ruiter (jrderuiter):*\nI think isdigit might be a good solution, it would also guard against silently casting (for example) floats to integers. It also less ugly than explicitly testing for an underscore."
+        },
+        {
+            "created_at": "2019-06-21T09:40:18.267Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5666?focusedCommentId=16869345) by Julian de Ruiter (jrderuiter):*\nWhat about negative values though? isdigit returns false for '-10' for example, whilst int('-10') returns an int."
+        },
+        {
+            "created_at": "2019-06-24T08:41:29.876Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5666?focusedCommentId=16870952) by Robin K\u00e5veland (kaaveland):*\nThat's just a slight modification to the expression above:\r\n```java\n\r\nall(key.isdigit() or (key.startswith('-') and key[1:].isdigit()) for key in self.keys)\n```\r\nBut it's starting to feel like a bad idea to attempt to do this coercing at all. Maybe it's better to force the user to deal with what type the partition key should have? If it were to be interpreted as something that looks a bit like `pd.Categorical`, it would be relatively cheap to read it into memory and deal with it after the user has read the file?"
+        },
+        {
+            "created_at": "2019-06-25T20:27:56.383Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5666?focusedCommentId=16872692) by Julian de Ruiter (jrderuiter):*\nIdeally you would want to preserve the data type of the partition columns, but that's going to be hard to do properly if you also want to include other types such as dates, etc. Maybe it would be most consistent to just read partitioned columns as a categorical type and let the user handle the details, as this makes the code less magic than what happens now."
+        },
+        {
+            "created_at": "2020-03-17T14:57:40.439Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5666?focusedCommentId=17060975) by Joris Van den Bossche (jorisvandenbossche):*\nThis now works with the new Datasets API:\r\n\r\n```Java\n\r\nIn [2]: import pyarrow.dataset as ds\r\n\r\nIn [3]: dataset = ds.dataset(\"test/\", format=\"parquet\", partitioning=\"hive\")                                                                                                           \r\n\r\nIn [4]: dataset.schema                                                                                                                                                                                             \r\nOut[4]: \r\nvalue: int64\r\nyear_week: string\r\n\r\nIn [5]: dataset.to_table().to_pandas()                                                                                                                                                                             \r\nOut[5]: \r\n   value year_week\r\n0      1    2019_2\r\n1      2    2019_3\r\n```\r\n\r\nSo once we start using this new code in the parquet module (ARROW-8039), this issue should get resolved."
+        },
+        {
+            "created_at": "2020-03-17T15:03:28.094Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5666?focusedCommentId=17060980) by Joris Van den Bossche (jorisvandenbossche):*\nWith the new API, you can also specify the exact schema of the partition keys in case the default inference is not what you want (eg specify string in case it looks like integers but you want to keep it as string)\r\n\r\nFor example:\r\n\r\n```Java\n\r\npart = ds.partitioning(pa.schema([(\"year_week\", pa.int64())]), flavor=\"hive\")   \r\ndataset = ds.dataset(\"test\", format=\"parquet\", partitioning=part)      \r\n```\r\n\r\n(for the actual example code this doesn't work, because \"2019_2\" is no longer parsable as int now, and then it gives all nulls instead of raising an error, going to open a separate issue about that)"
+        },
+        {
+            "created_at": "2020-05-04T23:43:50.890Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5666?focusedCommentId=17099423) by Wes McKinney (wesm):*\nTest added in https://github.com/apache/arrow/commit/57b50823d6d35a8169dc2f92ae68448a293a89e9"
+        }
+    ]
+}

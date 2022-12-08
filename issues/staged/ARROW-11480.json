@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Python] Segmentation fault reading parquet with date filter with INT96 column",
+        "body": "***Note**: This issue was originally created as [ARROW-11480](https://issues.apache.org/jira/browse/ARROW-11480). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIf I read a parquet file (see attachment) with timestamps generated in Spark and apply a filter on a date column I get segmentation fault\r\n\u00a0\r\n```java\n\r\nimport pyarrow.parquet as pq \u00a0\r\nnow = datetime.datetime.now()\r\ntable = pq.read_table(\"timestamp.parquet\", filters=[(\"date\", \"<=\", now)])\r\n```\r\n\u00a0\r\n\r\nThe attached parquet file is generated with this code in spark:\r\n```java\n\r\nnow = datetime.datetime.now() \r\ndata = {\"date\": [ now - datetime.timedelta(days=i) for i in range(100)]} \r\nschema = { \"type\": \"struct\", \"fields\": [{\"name\": \"date\", \"type\": \"timestamp\", \"nullable\": True, \"metadata\": {}}, ], } \r\nspf = spark.createDataFrame(pd.DataFrame(data), schema=StructType.fromJson(schema)) \r\nspf.write.format(\"parquet\").mode(\"overwrite\").save(\"timestamp.parquet\") \r\n```\r\nIf I downgrade pyarrow to 2.0.0 it works fine.\r\n\r\nPython version\u00a03.7.7\r\n\r\npyarrow version 3.0.0",
+        "created_at": "2021-02-03T10:36:19.000Z",
+        "updated_at": "2021-03-10T16:39:57.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-02-16T14:59:13.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-02-04T09:57:48.483Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11480?focusedCommentId=17278729) by Joris Van den Bossche (jorisvandenbossche):*\n`[~henrikrasmussen]` thanks for the report! \r\nI _suppose_ this is a duplicate of ARROW-11379, although I didn't realize that it could be a regression compared to 2.0.0"
+        },
+        {
+            "created_at": "2021-02-04T10:12:53.784Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11480?focusedCommentId=17278744) by Joris Van den Bossche (jorisvandenbossche):*\nIndeed, also the example of ARROW-11379 (where we filter on a partition column, not a normal column) also worked in 2.0.0 and is thus a regression.\r\n\r\nTo make a reproducer with python:\r\n\r\n```Java\n\r\ndf = pd.DataFrame({\"dates\": pd.date_range(\"2020-01-01\", periods=10, freq=\"D\"), \"col\": range(10)})\r\ndf.to_parquet(\"timestamps.parquet\", use_deprecated_int96_timestamps=True)\r\n\r\nimport datetime\r\nimport pyarrow.parquet as pq\r\npq.read_table(\"timestamps.parquet\", filters=[(\"dates\", \"<=\", datetime.datetime(2020, 1, 5))]).to_pandas()\r\n```\r\n\r\nIt seems I need specifically `use_deprecated_int96_timestamps=True` to trigger the segfault. Without it (so using normal timestamp parquet type), it works as expected (so it's in any case a somewhat different issue as ARROW-11379)."
+        },
+        {
+            "created_at": "2021-02-16T14:59:13.846Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11480?focusedCommentId=17285258) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 9470\n<https://github.com/apache/arrow/pull/9470>"
+        }
+    ]
+}

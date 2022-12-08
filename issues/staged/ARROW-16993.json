@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[C++] cmake: `cannot create imported target \"Boost::headers\"`",
+        "body": "***Note**: This issue was originally created as [ARROW-16993](https://issues.apache.org/jira/browse/ARROW-16993). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi,\r\n\r\nI just tried to build arrow/cpp using cmake, and on the master branch I get the error\r\n\r\n\u00a0\r\n```java\n\r\narrow-build $ cmake -DARROW_PARQUET=ON -DCMAKE_BUILD_TYPE=DEBUG ../arrow/cpp/\r\n...\r\nCMake Error at cmake_modules/ThirdpartyToolchain.cmake:873 (add_library):\r\n\u00a0 add_library cannot create imported target \"Boost::headers\" because another\r\n\u00a0 target with the same name already exists.\r\nCall Stack (most recent call first):\r\n\u00a0 cmake_modules/ThirdpartyToolchain.cmake:139 (build_boost)\r\n\u00a0 cmake_modules/ThirdpartyToolchain.cmake:236 (build_dependency)\r\n\u00a0 cmake_modules/ThirdpartyToolchain.cmake:1014 (resolve_dependency)\r\n\u00a0 CMakeLists.txt:552 (include) \r\n...\r\n-- Configuring incomplete, errors occurred!\r\nSee also \"/app/arrow-build/CMakeFiles/CMakeOutput.log\".\r\nSee also \"/app/arrow-build/CMakeFiles/CMakeError.log\".\n```\r\nand CMake exits with status 1.\u00a0 The project configures successfully on the apache-arrow-8.0.0 tag.\u00a0 Running a git bisect, the defect was introduced in the commit:\r\n```\n\r\nd653b71d79fc381c43f59d3095cc1c9fb0c1cf7c\r\nARROW-16168: [C++][CMake] Use target to add include paths\n```\r\nI have attached CMakeOutput.log and CMakeError.log.\r\n\r\nThanks!",
+        "created_at": "2022-07-06T18:05:37.000Z",
+        "updated_at": "2022-08-17T02:12:04.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-08-16T23:53:46.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-07-06T18:08:08.872Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16993?focusedCommentId=17563373) by David Li (lidavidm):*\nThe issue is that we need the Boost headers but not the Boost libraries for non-test builds but the CMake code does not reflect that and tries to find the libraries anyways. When that fails it tries to build Boost as a subproject but by then we've already found a Boost installation and so CMake errors when we try to (re)define the Boost targets.\r\n\r\nARROW-16947 will fix this. I would vote that this is a duplicate/symptom of that unless there's something I missed here."
+        },
+        {
+            "created_at": "2022-07-06T18:27:28.912Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16993?focusedCommentId=17563378) by Jefferson Carpenter (jcarpenter2):*\n`[~lidavidm]` That sounds like a good explanation to me, I don't think you missed something.\u00a0 I'll let you know if this isn't resolved after that issue is closed."
+        },
+        {
+            "created_at": "2022-07-06T21:14:35.482Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16993?focusedCommentId=17563430) by Kouhei Sutou (kou):*\n`[~jcarpenter2]` Could you also attach the full output of `cmake -DARROW_PARQUET=ON -DCMAKE_BUILD_TYPE=DEBUG ../arrow/cpp/`?"
+        },
+        {
+            "created_at": "2022-07-06T23:01:46.553Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16993?focusedCommentId=17563488) by Jefferson Carpenter (jcarpenter2):*\n`[~kou]` Attached"
+        },
+        {
+            "created_at": "2022-07-06T23:43:43.664Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16993?focusedCommentId=17563500) by Kouhei Sutou (kou):*\nThanks.\r\n\r\n```\n\r\n-- Could NOT find Boost: missing: system filesystem (found /usr/local/lib/cmake/Boost-1.76.0/BoostConfig.cmake (found suitable version \"1.76.0\", minimum required is \"1.58\"))\r\n```\r\n\r\nis the root cause. You have system Boost but it doesn't include system and filesystem components. So `Boost::headers` is loaded but system Boost detection is failed. If system Boost detection is failed, we use bundled Boost and create `Boost::headers` for bundled Boost but `Boost::headers` already exists. It causes this error.\r\n\r\nCMake doesn't provide a feature to remove a created target (`Boost::headers`). We may be able to support this case by reusing (overriding) `Boost::headers` defined by system Boost but it may not be a good CMake manner...\r\n\r\nI think that installing Boost's system and filesystem components to your system is the best solution for this case for now."
+        },
+        {
+            "created_at": "2022-08-10T19:24:23.477Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16993?focusedCommentId=17578131) by Neal Richardson (npr):*\nI think these lines should be conditional on `ARROW_BOOST_REQUIRE_LIBRARY` because we don't need boost::system and boost::filesystem if we only need the headers: https://github.com/apache/arrow/blob/master/cpp/cmake_modules/ThirdpartyToolchain.cmake#L1025-L1027\r\n\r\nWe currently set and use `ARROW_BOOST_REQUIRE_LIBRARY` in the build_boost macro, but it has no effect on the find_package step or anything after it, and that seems off. "
+        },
+        {
+            "created_at": "2022-08-10T21:13:33.798Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16993?focusedCommentId=17578152) by Kouhei Sutou (kou):*\nYou're right. I was wrong. Sorry. I opened a pull request for it.\r\n\r\n(I noticed that the David's first comment already described the reason...)"
+        },
+        {
+            "created_at": "2022-08-10T21:15:23.786Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16993?focusedCommentId=17578153) by Kouhei Sutou (kou):*\nOh, I didn't notice that a pull request is already opened: https://github.com/apache/arrow/pull/13845"
+        },
+        {
+            "created_at": "2022-08-16T23:53:46.252Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16993?focusedCommentId=17580504) by Kouhei Sutou (kou):*\nIssue resolved by pull request 13846\n<https://github.com/apache/arrow/pull/13846>"
+        }
+    ]
+}

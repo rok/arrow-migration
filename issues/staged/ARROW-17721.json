@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[C++][Gandiva] Expression Evaluation Performance Improvement using Mimalloc",
+        "body": "***Note**: This issue was originally created as [ARROW-17721](https://issues.apache.org/jira/browse/ARROW-17721). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nArrow use jemalloc as default memory allocator. For some reason, I am going to use mimalloc instead. But there seems have big performance difference between two memory allocators.\r\n\r\nHere are my steps.\r\n\r\nI use simple compile options:\r\n```java\n\r\n-DCMAKE_BUILD_TYPE=debug\r\n-DARROW_JEMALLOC=OFF|ON\r\n-DARROW_MIMALLOC=ON|OFF\r\n-DARROW_GANDIVA=ON\r\n-DARROW_GANDIVA_STATIC_LIBSTDCPP=ON\r\n-DARROW_BUILD_TESTS=ON\r\n```\r\n\u00a0\r\nThen I write a simple case:\r\n```cpp\n\r\n#include <gtest/gtest.h>\r\n#include \"arrow/memory_pool.h\"\r\n#include \"arrow/status.h\"\r\n\r\n#include \"gandiva/projector.h\"\r\n#include \"gandiva/tests/test_util.h\"\r\n#include \"gandiva/tree_expr_builder.h\"\r\n\r\n#include <chrono>\r\n#include <iostream>\r\n\r\nnamespace gandiva {\r\n\r\nusing arrow::boolean;\r\nusing arrow::date64;\r\nusing arrow::int32;\r\nusing arrow::int64;\r\nusing arrow::utf8;\r\n\r\nclass TestUtf8Perf : public ::testing::Test {\r\n public:\r\n  void SetUp() { pool_ = arrow::default_memory_pool(); }\r\n\r\n protected:\r\n  arrow::MemoryPool* pool_;\r\n};\r\n\r\nvoid TestPerf(int64_t char_length, int64_t num_records) {\r\n  // schema for input fields\r\n  auto field_a = field(\"a\", utf8());\r\n  auto schema = arrow::schema({field_a});\r\n\r\n  // output fields\r\n  auto res = field(\"res\", utf8());\r\n\r\n  auto node_a = TreeExprBuilder::MakeField(field_a);\r\n  auto upper_a = TreeExprBuilder::MakeFunction(\"upper\", {node_a}, utf8());\r\n  auto expr = TreeExprBuilder::MakeExpression(upper_a, res);\r\n\r\n  // Build a projector for the expressions.\r\n  std::shared_ptr<Projector> projector;\r\n  auto status = Projector::Make(schema, {expr}, TestConfiguration(), &projector);\r\n  EXPECT_TRUE(status.ok()) << status.message();\r\n\r\n  std::string val = std::string(char_length, 'a');\r\n  arrow::StringBuilder builder;\r\n  for (int i = 0; i < num_records; i++) {\r\n    auto _ = builder.Append(val);\r\n  }\r\n  std::shared_ptr<arrow::StringArray> array_a;\r\n  auto _ = builder.Finish(&array_a);\r\n\r\n  // prepare input record batch\r\n  auto in_batch = arrow::RecordBatch::Make(schema, num_records, {array_a});\r\n\r\n  auto start_epoch = std::chrono::duration_cast<std::chrono::milliseconds>(\r\n                         std::chrono::system_clock::now().time_since_epoch())\r\n                         .count();\r\n  // Evaluate expression\r\n  arrow::ArrayVector outputs;\r\n  status = projector->Evaluate(*in_batch, pool_, &outputs);\r\n  EXPECT_TRUE(status.ok()) << status.message();\r\n\r\n  std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(\r\n                   std::chrono::system_clock::now().time_since_epoch())\r\n                       .count() -\r\n                   start_epoch\r\n            << \"ms\" << std::endl;\r\n}\r\nTEST_F(TestUtf8Perf, TestMemoryAllocsPerf) {\r\n  TestPerf(20, 10000);\r\n \u00a0TestPerf(20, 100000);\r\n  TestPerf(200, 10000);\r\n  TestPerf(200, 100000);\r\n  TestPerf(2000, 10000);\r\n}\r\n\r\n}  // namespace gandiva\r\n```\r\nthis case is going to calculate expression {**}upper(a){**}, **a** has different size with 20/200/2000. Evaluation time results are:\r\n\n|char_length|num_records|Using Mimalloc (ms)|Using Jemalloc(ms)|\r|\n|-|-|-|-|-|\n|20|10000|29|3|\r|\n|20|100000|2686|26|\r|\n|200|10000|954|11|\r|\n|200|100000|220153|118|\r|\n|2000|10000|21162|89|\r<br>\r<br>\u00a0\r<br>Is this performance gap expected? Or any other compile options should I note? How to make performance better using mimalloc?|\n",
+        "created_at": "2022-09-14T07:18:08.000Z",
+        "updated_at": "2022-10-10T04:11:27.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++ - Gandiva",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-10T04:11:27.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-23T02:41:13.775Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17721?focusedCommentId=17608477) by Jin Shang (jinshang):*\nHi Jiangtao! I can reproduce your case locally. I ran some perfs on your benchmark and it shows 99% of the time is spent on mi_realloc_aligned. I am looking into this and will get back to you soon."
+        },
+        {
+            "created_at": "2022-09-23T08:03:31.844Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17721?focusedCommentId=17608613) by Jin Shang (jinshang):*\nHi Jiangtao, some updates for you.\r\n\r\nFor an expression with variable length output, such as string in your case, Gandiva would reallocate the output buffer to make space for results after the computation for each row. Mimalloc is not good at frequently reallocating large buffers, hence the performance you see. I create this issue: https://issues.apache.org/jira/browse/ARROW-17824 that may help solving the issue.\u00a0\r\n\r\nIn the meantime, does your workload often involves computing tens of thousands of rows in one batch? For smaller batch size, such as <1000, the performance of mimalloc is on par with jemalloc from what I observed.\u00a0\r\n\r\nAlso do check out arrow's compute engine at <https://arrow.apache.org/docs/cpp/compute.html> and see if it satisfies your need."
+        },
+        {
+            "created_at": "2022-09-26T06:04:05.585Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17721?focusedCommentId=17609306) by Jin Shang (jinshang):*\nARROW-17824 has been merged to master. Can you rerun your benchmark again and see if it improved?"
+        },
+        {
+            "created_at": "2022-10-10T04:06:49.702Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17721?focusedCommentId=17614862) by Jiangtao Peng (NinaPeng):*\nhi `[~jinshang]`, thanks for your update. I have validate this on master branch, benchmark has been improved! That's what I want. "
+        }
+    ]
+}

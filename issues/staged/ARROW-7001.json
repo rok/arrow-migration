@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[C++] Develop threading APIs to accommodate nested parallelism ",
+        "body": "***Note**: This issue was originally created as [ARROW-7001](https://issues.apache.org/jira/browse/ARROW-7001). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nTasks invoked in parallel may be able to submit their own subtasks, which in OpenMP and TBB documentation is often called \"nested parallelism\". \r\n\r\nIf a task blocks on the completion of subtasks, then outright deadlocks are possible \u2013 running tasks are all blocking on their subtasks, but the thread pool will not schedule any further tasks.\r\n\r\nI suggest that such code have a way to indicate to the thread pool (if one is passed in) that it is blocking on the completion of other tasks so that further tasks can be run while the task waits for its child tasks to complete. One possible way to do this is to have a floating \"soft limit\" for concurrent tasks that can be incremented when tasks are waiting. \r\n\r\nSo if we normally allow 8 concurrent tasks, then this can be temporarily increased for each \"suspended\" task. Preferably we would provide some way for the dependent task group to \"awaken\" the suspended task so that it does not have to do any work while waiting for the task group to finish\r\n\r\nNote this feature can also be used in tasks that are waiting for IO calls\r\n",
+        "created_at": "2019-10-26T18:04:43.000Z",
+        "updated_at": "2021-06-22T02:16:46.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-06-22T02:16:46.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-26T18:58:38.632Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7001?focusedCommentId=16960415) by Wes McKinney (wesm):*\nAs a demonstration of the success of this, we should be able to run a task that spawns recursive subtasks to arbitrary nesting depth on a ThreadPool with size 1. This would also serve as a helpful stress performance test e.g. to see how quickly a recursively nested task chain with depth ~100 can be executed. "
+        },
+        {
+            "created_at": "2019-10-30T20:28:27.942Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7001?focusedCommentId=16963399) by Antoine Pitrou (apitrou):*\nOk, so the problem here is to have a task blocking on another, right? Otherwise, you can schedule a task from another task, and pass e.g. a callback to that new task. Not very pretty, but it works.\r\n\r\nI still think it would be worthwhile discussing this on a higher level, i.e. which execution model we have in mind. In one execution model, IO is interspersed with computations in the same thread and therefore a way to signal that a task is blocking on some external completion is needed. In another execution model, you have a driver thread that does IO and pushes available data to pure-CPU workers."
+        },
+        {
+            "created_at": "2019-10-30T21:20:28.763Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7001?focusedCommentId=16963437) by Wes McKinney (wesm):*\nI think realistically we may need to support both styles of scheduling\r\n\r\nTo make the problem more concrete, I think we should focus on the needs of reading multiple files that are capable of parallelizing at the file level. For example, Parquet files. Not only do we parallelize at the column level, but within a thread reading a column, we perform IO calls which may block. Somehow we need to not block a CPU core on an IO call returning. Do we need to do a major refactoring? Or can the current code be retrofitted with a suspend-task-resume-task API that allows other tasks to be started when there is IO waiting. \r\n\r\nFacebook's Folly library has a fibers / coroutines library that may provide some ideas about what kind of programming models make sense for certain applications\r\n\r\nhttps://github.com/facebook/folly/tree/master/folly/fibers"
+        },
+        {
+            "created_at": "2020-06-12T03:13:00.102Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7001?focusedCommentId=17133870) by Wes McKinney (wesm):*\nI'm not thinking this is going to be completed for 1.0.0 yet"
+        },
+        {
+            "created_at": "2021-02-25T11:49:19.095Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7001?focusedCommentId=17290873) by Anton Malakhov (anton-malakhov):*\nPlease consider ideas from this blog:\u00a0https://habr.com/en/company/intel/blog/542908/"
+        },
+        {
+            "created_at": "2021-02-26T23:29:14.245Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7001?focusedCommentId=17291966) by Weston Pace (westonpace):*\nThanks `[~anton-malakhov]` .\u00a0 I took a look at the blog and oox looks like it can be useful.\u00a0 I have been working on this issue and a slightly broader goal of removing all blocking I/O waits from the CPU thread pool (see <https://docs.google.com/document/d/1tO2WwYL-G2cB_MCPqYguKjKkRT7mZ8C2Gc9ONvspfgo/edit?usp=sharing> ).\r\n\r\n\u00a0\r\n\r\nI have been using an arrow::Result-aware implementation of std::future (arrow::Future) and using simple Then/All/Any continuations.\u00a0 This only allows for dags of flow dependencies (and not output & anti dependencies).\u00a0 I'm fairly certain this will be sufficient and there is a broad understanding of the capabilities from other languages that support this kind of construct (e.g. Javascript's Promise.then, C# Task.ContinueWith, Java's CompletableFuture).\r\n\r\n\u00a0\r\n\r\nI was not able to find any oox library or mention of licensing.\u00a0 If there is a repository out there somewhere with a reference implementation I'd be happy to take a closer look.\u00a0 I appreciate you bringing sharing this but at the moment I do not think the sophistication offered by oox is needed to solve this problem."
+        },
+        {
+            "created_at": "2021-03-01T07:31:00.075Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7001?focusedCommentId=17292682) by Anton Malakhov (anton-malakhov):*\nThanks for looking into this! As I mentioned in the article, OOX is not productized but it has PoC implementation, which was created for TBB. If there is enough interest from you and other people, I can try to convince Intel to publish the sources."
+        },
+        {
+            "created_at": "2021-06-22T02:16:27.853Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7001?focusedCommentId=17366940) by Weston Pace (westonpace):*\n`[~apitrou]` `[~lidavidm]` `[~wesm]` Given the state of the async operators, the exec plan work, and the fact that nested parallelism is supported on parquet (e.g. ARROW-12597) I am going to mark this resolved.\u00a0 Feel free to reopen with details if you think more is needed."
+        }
+    ]
+}

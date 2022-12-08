@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[Java] Implement dictionaries in stream/file encoding",
+        "body": "***Note**: This issue was originally created as [ARROW-542](https://issues.apache.org/jira/browse/ARROW-542). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n",
+        "created_at": "2017-02-08T14:32:44.000Z",
+        "updated_at": "2017-03-26T16:21:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2017-03-16T18:00:03.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-02-08T17:40:26.510Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-542?focusedCommentId=15858295) by Emilio Lahr-Vivaz (elahrvivaz):*\n`[~wesmckinn]` I'm looking into how dictionary vectors will be encoded in the file format. In the current message definitions, it appears dictionary batches are distinct from regular batches, and have an ID associated with them: https://github.com/apache/arrow/blob/b99d049c3d1894908b7e52774eb657675dc1f439/format/Message.fbs#L284\nWouldn't the dictionary already be defined by the Field? I'm unclear what the ID in the DictionaryBatch is supposed to represent.\nThanks,"
+        },
+        {
+            "created_at": "2017-02-08T17:58:11.213Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-542?focusedCommentId=15858312) by Julien Le Dem (julienledem):*\nthe Field metadata refers to a dictionaryID. The DictionaryBatch contains the dictionary data for that id."
+        },
+        {
+            "created_at": "2017-02-08T17:58:19.636Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-542?focusedCommentId=15858313) by Wes McKinney (wesm):*\nI raised this issue in the PR discussion for ARROW-366. The problem right now is that the Field POJO in the Java library is tightly coupled to the JSON and Flatbuffer metadata representation, which has a dictionary id. \n\nWhen you read the Flatbuffer metadata to reconstruct a dictionary vector, the process is:\n\n- Field has dictionary id K\n- You examine the dictionary batches and find the dictionary batch metadata with id K\n- Read that dictionary\n- Construct the dictionary vector\n\nWhen you are writing the metadata / to IPC, the process is reversed:\n\n- Extract all Dictionary objects from the record batch\n- Assign a unique id to each dictionary\n- Write the corresponding unique id for the field metadata that the dictionary vector\n- Write a DictionaryBatch with that dictionary and id for each dictionary\n\nIn the case of streaming, based on the number of observed dictionaries in the metadata, we would expect to read that number of dictionary batches as the first messages in the stream, followed by normal record batches (which will contain the dictionary indices)\n\nLet me know if this makes sense"
+        },
+        {
+            "created_at": "2017-02-08T18:14:09.258Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-542?focusedCommentId=15858342) by Emilio Lahr-Vivaz (elahrvivaz):*\nAh, makes sense thanks."
+        },
+        {
+            "created_at": "2017-02-09T17:33:22.895Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-542?focusedCommentId=15859863) by Emilio Lahr-Vivaz (elahrvivaz):*\nIt's getting a little complicated trying to encode/decode the dictionaries, given the interplay between the reader/writers, the vector loader/unloader and the ArrowRecordBatch. Right now I'm trying to rely on finding DictionaryVector class instances, but that breaks down when things start getting encoded. The two step process between the vector loaders/unloaders and the file readers/writers makes it hard to track state. The ArrowRecordBatch which is passed around doesn't even include any Field data. It seems like it would be more straightforward to require the user to set the dictionary ids up front in the Field. The dictionary ID is defined as a Long, which seems to imply that they were not meant to be entirely transient (otherwise it could be an Int or smaller). `[~wesmckinn]` thoughts? I realize this goes against what you've been saying."
+        },
+        {
+            "created_at": "2017-02-09T22:03:01.128Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-542?focusedCommentId=15860292) by Emilio Lahr-Vivaz (elahrvivaz):*\nAnother blocker I'm hitting is that I don't see any way that the type of a dictionary block can be determined during read. DictionaryEncoding has an indexType, but that seems to refer to the ints used to reference the dictionary values: https://github.com/apache/arrow/blob/b99d049c3d1894908b7e52774eb657675dc1f439/format/Message.fbs#L165\nA dictionary encoded vector currently has it's type defined as the dictionary index type, but the type of the dictionary is not defined. It works when the data is in memory with the dictionary alongside it, but not when encoding to the file format... Possibly the dictionary encoded vector should specify the dictionary type? It seems like either that or the message format needs another field for the dictionary type."
+        },
+        {
+            "created_at": "2017-02-09T23:35:41.588Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-542?focusedCommentId=15860400) by Wes McKinney (wesm):*\n`[~elahrvivaz]` the type of the dictionary is the same as the type in the Field, i.e. https://github.com/apache/arrow/blob/master/format/Message.fbs#L186"
+        },
+        {
+            "created_at": "2017-03-16T18:00:03.322Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-542?focusedCommentId=15928535) by Wes McKinney (wesm):*\nIssue resolved by pull request 334\n<https://github.com/apache/arrow/pull/334>"
+        }
+    ]
+}

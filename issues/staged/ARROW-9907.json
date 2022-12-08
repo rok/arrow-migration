@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] Failed to parse string into timestamp",
+        "body": "***Note**: This issue was originally created as [ARROW-9907](https://issues.apache.org/jira/browse/ARROW-9907). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi,\r\n\r\nNot sure if I am missing something, but I am unable to get pyarrow to parse my datetimes that are being inferred as strings, to be timestamps.\r\n\r\nMy strings are arriving in CSVs with this format: '2015-01-09 00:00:00.000'\r\n\r\nI have tried:\r\n```\r\nconvert_ops = csv.ConvertOptions(timestamp_parsers=['%Y-%m-%d %H:%M:%S.%f])\r\ndf = csv.read_csv('path_to_csv', convert_options=convert_opts)\r\nprint(df.schema)\r\n```\r\n\r\n\r\nThis yields no change and has my columns with these formatted timestamps still showing as strings.\r\n\r\nAdditionally, I have tried casting as well:\r\n```\r\ndfschema = pa.schema([\r\n('date_column', pa.timestamp('ms'))\r\n])\r\ndf = csv.read_csv('path_to_csv')\r\ndf.cast(target_schema=dfschema)\r\n```\r\n\r\nThis way yields the error: \"pyarrow.lib.ArrowInvalid: Failed to parse string: 2015-01-09 00:00:00.000\"\r\n\r\nI am using pyarrow=1.0.1 on a linux docker container.\r\n\r\nI tried to send an email to the users email list but it keeps returning a Mailer Daemon error.",
+        "created_at": "2020-09-03T14:05:49.000Z",
+        "updated_at": "2022-08-16T08:36:15.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-08-16T08:36:15.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-03T15:45:53.104Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9907?focusedCommentId=17190239) by Joris Van den Bossche (jorisvandenbossche):*\nSee also ARROW-9561, support for parsing subsecond timestamps (fractional seconds) was only added after the 1.0 release. So the error is expected for 1.0, and should work on master.\r\n\r\nNow, that the reading of csv silently results in strings instead of indicating that the specified format is not supported might be something to check."
+        },
+        {
+            "created_at": "2020-09-03T15:55:32.065Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9907?focusedCommentId=17190245) by Neal Richardson (npr):*\nIf you want to test out the latest (unreleased) version that includes this timestamp support, you can pip install a wheel from https://repo.fury.io/arrow-nightlies/. "
+        },
+        {
+            "created_at": "2020-09-03T15:59:28.192Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9907?focusedCommentId=17190252) by Joris Van den Bossche (jorisvandenbossche):*\n> Now, that the reading of csv silently results in strings instead of indicating that the specified format is not supported might be something to check.\r\n\r\nHmm, since the format string can basically contain any random string as well (in addition to specific `%` fields), that might be difficult to check, actually."
+        },
+        {
+            "created_at": "2022-08-16T08:30:09.143Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9907?focusedCommentId=17580154) by Joris Van den Bossche (jorisvandenbossche):*\nShort update here clarifying the current status of this issue:\r\n\r\n1) Parsing sub-second values (fractional second) is supported with the default ISO8601 parser:\r\n\r\n```Java\n\r\nimport io\r\nfrom pyarrow import csv\r\n\r\ns = \"\"\"col\r\n2015-01-09 00:00:00.000\"\"\"\r\n\r\n>>> csv.read_csv(io.BytesIO(s.encode()))\r\npyarrow.Table\r\ncol: timestamp[ns]\r\n----\r\ncol: [[2015-01-09 00:00:00.000000000]]\r\n\r\n>>> csv.read_csv(io.BytesIO(s.encode()), convert_options=csv.ConvertOptions(timestamp_parsers=[csv.ISO8601]))\r\npyarrow.Table\r\ncol: timestamp[ns]\r\n----\r\ncol: [[2015-01-09 00:00:00.000000000]]\r\n```\r\n\r\n2) It does not yet work when manually specifying the format (resulting type is string and not timestamp):\r\n\r\n```Java\n\r\nIn [28]: csv.read_csv(io.BytesIO(s.encode()), convert_options=csv.ConvertOptions(timestamp_parsers=[\"%Y-%m-%d %H:%M:%S.%f\"]))\r\nOut[28]: \r\npyarrow.Table\r\ncol: string\r\n----\r\ncol: [[\"2015-01-09 00:00:00.000\"]]\r\n```\r\n\r\nThis can also be seen directly in `strptime`:\r\n\r\n```Java\n\r\n>>> import pyarrow.compute as pc\r\n>>> pc.strptime(\"2015-01-09 00:00:00.000\", format=\"%Y-%m-%d %H:%M:%S\", unit=\"ns\")\r\n...\r\nArrowInvalid: Failed to parse string: '2015-01-09 00:00:00.000' as a scalar of type timestamp[ns]\r\n\r\n>>> pc.strptime(\"2015-01-09 00:00:00.000\", format=\"%Y-%m-%d %H:%M:%S.%f\", unit=\"ns\")\r\n...\r\nArrowInvalid: Failed to parse string: '2015-01-09 00:00:00.000' as a scalar of type timestamp[ns]\r\n```\r\n\r\nFor the issue of parsing fractional seconds in strptime, we also have ARROW-10430 and ARROW-15883"
+        },
+        {
+            "created_at": "2022-08-16T08:30:41.387Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9907?focusedCommentId=17580155) by Joris Van den Bossche (jorisvandenbossche):*\nSo I am going to close this as a duplicate of ARROW-15883"
+        }
+    ]
+}

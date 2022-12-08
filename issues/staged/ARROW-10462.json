@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[Python] ParquetDatasetPiece's path broken when using fsspec fs on Windows",
+        "body": "***Note**: This issue was originally created as [ARROW-10462](https://issues.apache.org/jira/browse/ARROW-10462). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nDask reported some failures starting with the pyarrow 2.0 release, and specifically on Windows: https://github.com/dask/dask/issues/6754\r\n\r\nAfter some investigation, it seems that this is due to the `ParquetDatasetPiece` its `path` attribute now returning a path with a mixture of &#92;&#92;  and / in it. \r\n\r\nIt specifically happens when dask is passing a posix-style base path pointing to the dataset base directory (so using all `/`), and passing an fsspec-based (local) filesystem.  \r\nFrom a debugging output during one of the dask tests:\r\n\r\n```Java\n\r\n(Pdb) dataset\r\n<pyarrow.parquet.ParquetDataset object at 0x00000290D7506308>\r\n(Pdb) dataset.paths\r\n'C:/Users/joris/AppData/Local/Temp/pytest-of-joris/pytest-25/test_partition_on_pyarrow_0'\r\n(Pdb) dataset.pieces[0].path\r\n'C:/Users/joris/AppData/Local/Temp/pytest-of-joris/pytest-25/test_partition_on_pyarrow_0\\\\a1=A\\\\a2=X\\\\part.0.parquet'\r\n```\r\n\r\nSo you can see that the result here has a mix of &#92;&#92; and `/`. Using pyarrow 1.0, this was consistently using `/`.\r\n\r\nThe reason for the change is that in pyarrow 2.0 we started to replace fsspec LocalFileSystem with our own LocalFileSystem (assuming for a local filesystem that should be equivalent). But it seems that our own LocalFileSystem has a `pathsep`} property that equals to `os.path.sep`, which is &#92;&#92; on Windows (https://github.com/apache/arrow/blob/9231976609d352b7050f5c706b86c15e8c604927/python/pyarrow/filesystem.py#L304-L306.\r\n\r\nSo note that while this started being broken in pyarrow 2.0 when using fsspec filesystem, this was already \"broken\" before when using our own local filesystem (or when not passing any filesystem). But, 1) dask always passes an fsspec filesystem, and 2) dask uses the piece's path as dictionary key and is thus especially sensitive to the change (using it as a file path to read something in, it will probably still work even with the mixture of path separators).",
+        "created_at": "2020-11-02T14:31:01.000Z",
+        "updated_at": "2021-03-10T16:40:20.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-11-09T12:15:24.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-11-02T15:37:27.426Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10462?focusedCommentId=17224741) by Joris Van den Bossche (jorisvandenbossche):*\nThe actual trigger that caused this bug to surface was not a change in pyarrow 2.0 itself, but is that fssec stopped subclassing pyarrow.filesystem.FileSystem when pyarrow >= 2.0 is installed (because we now better handle fsspec filesystems, and because pyarrow.filesystem is deprecated, so this was a good change). \r\nBut the code that swaps a fsspec LocalFileSystem with our own LocalFileSystem was only reached when the passed filesystems was _not_ a pyarrow filesystem subclass. So with pyarrow 1.0 (where fsspec-based filesystems subclassed pyarrow), this code was never run in practice .. But now with pyarrow 2.0 and the latest fsspec, we started running this. \r\n"
+        },
+        {
+            "created_at": "2020-11-09T12:15:24.667Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10462?focusedCommentId=17228544) by Joris Van den Bossche (jorisvandenbossche):*\nIssue resolved by pull request 8539\n<https://github.com/apache/arrow/pull/8539>"
+        }
+    ]
+}

@@ -1,0 +1,39 @@
+{
+    "issue": {
+        "title": "[Python][Parquet] pyarrow.parquet.write_metadata with metadata_collector appears to be O(n^2)",
+        "body": "***Note**: This issue was originally created as [ARROW-16613](https://issues.apache.org/jira/browse/ARROW-16613). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHello!\r\n\r\n\u00a0\r\n\r\nI've noticed that when writing a `_metadata` file with `pyarrow.parquet.write_metadata`, it is very slow with a large `metadata_collector`, exhibiting O(n^2) behavior. Specifically, it appears that the concatenation inside `metadata.append_row_groups` is very slow. The writer first [iterates over every item of the list](https://github.com/apache/arrow/blob/027920be05198ee89e643b9e44e20fb477f97292/python/pyarrow/parquet/__init__.py#L3301-L3302) and then [concatenates them on each iteration](https://github.com/apache/arrow/blob/b0c75dee34de65834e5a83438e6581f90970fd3d/python/pyarrow/_parquet.pyx#L787-L799).\r\n\r\n\u00a0\r\n\r\nWould it be possible to make a vectorized implementation of this? Where `append_row_groups` accepts a list of `FileMetaData` objects, and where concatenation happens only once?\r\n\r\n\u00a0\r\n\r\nRepro (in IPython to use `%time`)\r\n```java\n\r\nfrom io import BytesIO\r\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\ndef create_example_file_meta_data():\r\n\u00a0 \u00a0 data = {\r\n\u00a0 \u00a0 \u00a0 \u00a0 \"str\": pa.array([\"a\", \"b\", \"c\", \"d\"], type=pa.string()),\r\n\u00a0 \u00a0 \u00a0 \u00a0 \"uint8\": pa.array([1, 2, 3, 4], type=pa.uint8()),\r\n\u00a0 \u00a0 \u00a0 \u00a0 \"int32\": pa.array([0, -2147483638, 2147483637, 1], type=pa.int32()),\r\n\u00a0 \u00a0 \u00a0 \u00a0 \"bool\": pa.array([True, True, False, False], type=pa.bool_()),\r\n\u00a0 \u00a0 }\r\n\u00a0 \u00a0 table = pa.table(data)\r\n\u00a0 \u00a0 metadata_collector = []\r\n\u00a0 \u00a0 pq.write_table(table, BytesIO(), metadata_collector=metadata_collector)\r\n\u00a0 \u00a0 return table.schema, metadata_collector[0]\r\n\r\nschema, meta = create_example_file_meta_data()\r\n\r\nmetadata_collector = [meta] * 500\r\n%time pq.write_metadata(schema, BytesIO(), metadata_collector=metadata_collector)\r\n# CPU times: user 230 ms, sys: 2.96 ms, total: 233 ms\r\n# Wall time: 234 ms\r\n\r\nmetadata_collector = [meta] * 1000\r\n%time pq.write_metadata(schema, BytesIO(), metadata_collector=metadata_collector)\r\n# CPU times: user 960 ms, sys: 6.56 ms, total: 967 ms\r\n# Wall time: 970 ms\r\n\r\nmetadata_collector = [meta] * 2000\r\n%time pq.write_metadata(schema, BytesIO(), metadata_collector=metadata_collector)\r\n# CPU times: user 4.08 s, sys: 54.3 ms, total: 4.13 s\r\n# Wall time: 4.3 s\r\n\r\nmetadata_collector = [meta] * 4000\r\n%time pq.write_metadata(schema, BytesIO(), metadata_collector=metadata_collector)\r\n# CPU times: user 16.6 s, sys: 593 ms, total: 17.2 s\r\n# Wall time: 17.3 s\r\n```",
+        "created_at": "2022-05-19T00:05:15.000Z",
+        "updated_at": "2022-06-01T11:51:36.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Parquet",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-05-31T17:07:31.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-05-19T07:48:30.304Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16613?focusedCommentId=17539373) by Antoine Pitrou (apitrou):*\ncc `[~alenkaf]` `[~jorisvandenbossche]`"
+        },
+        {
+            "created_at": "2022-05-24T09:55:22.325Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16613?focusedCommentId=17541394) by Joris Van den Bossche (jorisvandenbossche):*\nHey Kyle, good catch. I think that should certainly be possible. The C++ implementation of the AppendRowGroups is here: https://github.com/apache/arrow/blob/b0c75dee34de65834e5a83438e6581f90970fd3d/cpp/src/parquet/metadata.cc#L652-L665. It should be doable to write a version of that function that accepts a vector of FileMetaData objects, and reserves enough space for the combined row groups at once. "
+        },
+        {
+            "created_at": "2022-05-24T16:07:43.512Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16613?focusedCommentId=17541595) by Kyle Barron (kylebarron2):*\nCool! Unfortunately I have zero C++ experience, so I'm not sure I'll be able to submit a PR for this myself."
+        },
+        {
+            "created_at": "2022-05-25T20:44:20.955Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16613?focusedCommentId=17542233) by Kshiteej K (kshitij12345):*\nHi,\r\n\r\nI'll be interested in giving it a shot :)\r\n\r\nDraft PR ready at : https://github.com/apache/arrow/pull/13234"
+        },
+        {
+            "created_at": "2022-05-31T17:07:31.785Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16613?focusedCommentId=17544507) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 13265\n<https://github.com/apache/arrow/pull/13265>"
+        }
+    ]
+}

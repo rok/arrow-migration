@@ -1,0 +1,73 @@
+{
+    "issue": {
+        "title": "[Python][Parquet] Table of nested arrays doesn't round trip",
+        "body": "***Note**: This issue was originally created as [ARROW-5630](https://issues.apache.org/jira/browse/ARROW-5630). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis is pyarrow 0.13 on Windows.\r\n\r\n```python\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\ndef make_table(num_rows):\r\n    typ = pa.list_(pa.field(\"item\", pa.float32(), False))\r\n    return pa.Table.from_arrays([\r\n        pa.array([[0] * (i%10) for i in range(0, num_rows)], type=typ),\r\n        pa.array([[0] * ((i+5)%10) for i in range(0, num_rows)], type=typ)\r\n    ], ['a', 'b'])\r\n\r\npq.write_table(make_table(1000000), 'test.parquet')\r\n\r\npq.read_table('test.parquet')\r\n```\r\n\r\nThe last line throws the following exception:\r\n\r\n\r\n```\n\r\n---------------------------------------------------------------------------\r\nArrowInvalid                              Traceback (most recent call last)\r\n<ipython-input-4-0f3266afa36c> in <module>\r\n----> 1 pq.read_table('full.parquet')\r\n\r\n~\\Anaconda3\\lib\\site-packages\\pyarrow\\parquet.py in read_table(source, columns, use_threads, metadata, use_pandas_metadata, memory_map, filesystem)\r\n   1150         return fs.read_parquet(path, columns=columns,\r\n   1151                                use_threads=use_threads, metadata=metadata,\r\n-> 1152                                use_pandas_metadata=use_pandas_metadata)\r\n   1153 \r\n   1154     pf = ParquetFile(source, metadata=metadata)\r\n\r\n~\\Anaconda3\\lib\\site-packages\\pyarrow\\filesystem.py in read_parquet(self, path, columns, metadata, schema, use_threads, use_pandas_metadata)\r\n    179                                  filesystem=self)\r\n    180         return dataset.read(columns=columns, use_threads=use_threads,\r\n--> 181                             use_pandas_metadata=use_pandas_metadata)\r\n    182 \r\n    183     def open(self, path, mode='rb'):\r\n\r\n~\\Anaconda3\\lib\\site-packages\\pyarrow\\parquet.py in read(self, columns, use_threads, use_pandas_metadata)\r\n   1012             table = piece.read(columns=columns, use_threads=use_threads,\r\n   1013                                partitions=self.partitions,\r\n-> 1014                                use_pandas_metadata=use_pandas_metadata)\r\n   1015             tables.append(table)\r\n   1016 \r\n\r\n~\\Anaconda3\\lib\\site-packages\\pyarrow\\parquet.py in read(self, columns, use_threads, partitions, open_file_func, file, use_pandas_metadata)\r\n    562             table = reader.read_row_group(self.row_group, **options)\r\n    563         else:\r\n--> 564             table = reader.read(**options)\r\n    565 \r\n    566         if len(self.partition_keys) > 0:\r\n\r\n~\\Anaconda3\\lib\\site-packages\\pyarrow\\parquet.py in read(self, columns, use_threads, use_pandas_metadata)\r\n    212             columns, use_pandas_metadata=use_pandas_metadata)\r\n    213         return self.reader.read_all(column_indices=column_indices,\r\n--> 214                                     use_threads=use_threads)\r\n    215 \r\n    216     def scan_contents(self, columns=None, batch_size=65536):\r\n\r\n~\\Anaconda3\\lib\\site-packages\\pyarrow\\_parquet.pyx in pyarrow._parquet.ParquetReader.read_all()\r\n\r\n~\\Anaconda3\\lib\\site-packages\\pyarrow\\error.pxi in pyarrow.lib.check_status()\r\n\r\nArrowInvalid: Column 1 named b expected length 932066 but got length 932063\r\n```\r\n",
+        "created_at": "2019-06-17T15:37:46.000Z",
+        "updated_at": "2019-09-17T12:09:18.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-09-17T12:09:17.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-06-19T15:06:24.793Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5630?focusedCommentId=16867742) by Philip Felton (philjdf):*\nI've tested the same example on pyarrow 0.12 and it works. So it's a regression."
+        },
+        {
+            "created_at": "2019-06-19T15:37:06.877Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5630?focusedCommentId=16867763) by Wes McKinney (wesm):*\nI'll try to take a look but no guarantees about a fix for 0.14"
+        },
+        {
+            "created_at": "2019-06-19T20:31:40.054Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5630?focusedCommentId=16867981) by Joris Van den Bossche (jorisvandenbossche):*\nIt is somehow related to the length of the array. I see the same error as above on master, but when using 10x less data it works correctly."
+        },
+        {
+            "created_at": "2019-06-19T20:32:33.932Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5630?focusedCommentId=16867983) by Wes McKinney (wesm):*\nDoes it work if the list item field is nullable?"
+        },
+        {
+            "created_at": "2019-06-19T20:36:42.840Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5630?focusedCommentId=16867988) by Joris Van den Bossche (jorisvandenbossche):*\nYes, with the default of nullable=True, I don't see the error."
+        },
+        {
+            "created_at": "2019-06-19T20:40:42.208Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5630?focusedCommentId=16867990) by Wes McKinney (wesm):*\nThat helps. It's probably an error with the decoding logic then (possibly in RecordReader). Can you wait for me to take a closer look so I can determine the general location of the issue before spending more time on it?"
+        },
+        {
+            "created_at": "2019-06-19T20:48:06.249Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5630?focusedCommentId=16867997) by Joris Van den Bossche (jorisvandenbossche):*\nSure, I didn't yet look into it (and will certainly not tonight). I only ran the code snippet to see if I could reproduce on master yesterday, but forgot to comment about it."
+        },
+        {
+            "created_at": "2019-06-26T01:05:11.002Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5630?focusedCommentId=16872841) by Wes McKinney (wesm):*\nWe'll have to fix this in the next release, I'm not going to have time to debug"
+        },
+        {
+            "created_at": "2019-08-22T22:52:00.437Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5630?focusedCommentId=16913774) by Wes McKinney (wesm):*\nAdded to 0.15.0. Is this still an issue?"
+        },
+        {
+            "created_at": "2019-08-23T06:42:45.061Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5630?focusedCommentId=16913988) by Joris Van den Bossche (jorisvandenbossche):*\nYes, get the same error on latest master."
+        },
+        {
+            "created_at": "2019-09-16T15:33:45.893Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5630?focusedCommentId=16930657) by Wes McKinney (wesm):*\nThis bug only occurs when the field is non-nullable. In general, we have inadequate testing of non-nullable fields. I'm going to try to find where the issue is happening"
+        },
+        {
+            "created_at": "2019-09-16T16:41:21.499Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5630?focusedCommentId=16930687) by Wes McKinney (wesm):*\nI found the root cause and opened PARQUET-1652. I'm surprised this has not been more of an issue until now. I'm going to try to fix"
+        },
+        {
+            "created_at": "2019-09-16T19:39:12.248Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5630?focusedCommentId=16930809) by Krisztian Szucs (kszucs):*\nWe should start to write and regularly run hypothesis tests, it should be easy to write simple roundtrip tests for [tables](https://github.com/apache/arrow/blob/master/python/pyarrow/tests/strategies.py#L247) covering [non-nullable](https://github.com/apache/arrow/blob/master/python/pyarrow/tests/strategies.py#L103) cases."
+        },
+        {
+            "created_at": "2019-09-17T12:09:18.038Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5630?focusedCommentId=16931368) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 5395\n<https://github.com/apache/arrow/pull/5395>"
+        }
+    ]
+}

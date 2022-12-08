@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[C++][Python] Large strings cause ArrowInvalid: offset overflow while concatenating arrays",
+        "body": "***Note**: This issue was originally created as [ARROW-17828](https://issues.apache.org/jira/browse/ARROW-17828). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen working with medium-sized datasets that have very long strings, arrow fails when trying to operate on the strings. The root is the `combine_chunks` function.\r\n\r\nHere is a minimally reproducible example\r\n```java\n\r\nimport numpy as np\r\nimport pyarrow as pa\r\n\r\n# Create a large string\r\nx = str(np.random.randint(low=0,high=1000, size=(30000,)).tolist())\r\nt = pa.chunked_array([x]*20_000)\r\n# Combine the chunks into large string array - fails\r\ncombined = t.combine_chunks()\n```\r\nI get the following error\r\n```java\n\r\n--------------------------------------------------------------------------- ArrowInvalid Traceback (most recent call last) /var/folders/x6/00594j4s2yv3swcn98bn8gxr0000gn/T/ipykernel_95780/4128956270.py in <module> ----> 1 z=t.combine_chunks()\r\n~/.venv/lib/python3.7/site-packages/pyarrow/table.pxi in pyarrow.lib.ChunkedArray.combine_chunks() \r\n~/.venv/lib/python3.7/site-packages/pyarrow/array.pxi in pyarrow.lib.concat_arrays() ~/Documents/Github/dataquality/.venv/lib/python3.7/site-packages/pyarrow/error.pxi in pyarrow.lib.pyarrow_internal_check_status() ~.venv/lib/python3.7/site-packages/pyarrow/error.pxi in pyarrow.lib.check_status() \r\nArrowInvalid: offset overflow while concatenating arrays \n```\r\nWith smaller strings or smaller arrays this works fine.\r\n```java\n\r\nx = str(np.random.randint(low=0,high=1000, size=(10,)).tolist())\r\nt = pa.chunked_array([x]*1000)\r\ncombined = t.combine_chunks()\n```\r\nThe first example that fails takes a few minutes to run. If you'd like a faster example for experimentation, you can use `vaex` to generate the chunked array much faster. This will throw the identical error and will run about 1 second.\r\n```java\n\r\nimport vaex\r\nimport numpy as np\r\n\r\nn = 50_000\r\nx = str(np.random.randint(low=0,high=1000, size=(30_000,)).tolist())\r\ndf = vaex.from_arrays(\r\n    id=list(range(n)),\r\n    y=np.random.randint(low=0,high=1000,size=n)\r\n)\r\ndf[\"text\"] = vaex.vconstant(x, len(df))\r\n# text_chunk_array is now a pyarrow.lib.ChunkedArray\r\ntext_chunk_array = df.text.values\r\nx = text_chunk_array.combine_chunks() \n```\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2022-09-23T13:46:20.000Z",
+        "updated_at": "2022-09-23T15:10:38.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-23T13:48:46.801Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17828?focusedCommentId=17608754) by David Li (lidavidm):*\nIt's because Arrow string arrays have a 2 GiB limit due to the representation (each element is represented by 32-bit signed offsets into a backing buffer); you can cast to large_string first to avoid this (this uses 64-bit offsets) but I think the error here could be much improved (it should at least tell you what to do)"
+        },
+        {
+            "created_at": "2022-09-23T13:52:54.993Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17828?focusedCommentId=17608760) by Ben Epstein (benepstein1):*\n`[~lidavidm]` thanks for the reply!\r\n\r\n\u00a0\r\n\r\nIs there a way for me to check this before casting? Ie instead of trying, catching the failure, casting, and trying again, is there a (fast) computation I can run to see if i'm over the size limit?"
+        },
+        {
+            "created_at": "2022-09-23T13:55:39.612Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17828?focusedCommentId=17608762) by David Li (lidavidm):*\nHmm, off the top of my head, there isn't such a helper; you could do it by adding up lengths of the buffers but it'd be a bit annoying to account for the offsets.\r\n\r\n`Array.nbytes` is an overapproximation but you could sum that up for all the chunks (overapproximation because it includes the space taken up by the validity buffer and the offsets themselves)"
+        },
+        {
+            "created_at": "2022-09-23T13:58:21.272Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17828?focusedCommentId=17608763) by David Li (lidavidm):*\nFor posterity: labeling good-first-issue in case someone wants to improve the error message here, also linked some related issues"
+        },
+        {
+            "created_at": "2022-09-23T13:58:53.251Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17828?focusedCommentId=17608764) by David Li (lidavidm):*\nIt's also possible we could convert from string to large_string for you; not sure which behavior would be more surprising to people"
+        },
+        {
+            "created_at": "2022-09-23T14:06:33.393Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17828?focusedCommentId=17608768) by Ben Epstein (benepstein1):*\nI (personally) would prefer you convert to large string and emit a warning (converting string to large_string as column XX is over the arrow string size limit).\r\n\r\n\u00a0\r\n\r\nI'm using vaex for all my arrow work, so using your suggestion here's how i'm handling it (in cast others find themselves here)\r\n```java\n\r\nimport pyarrow as pa\r\nimport vaex\r\nimport numpy as np\r\nfrom vaex.dataframe import DataFrame\r\n\r\nn = 50_000\r\nx = str(np.random.randint(low=0,high=1000, size=(30_000,)).tolist())\r\n# Create a df with a string too large\r\ndf = vaex.from_arrays(\r\n    id=list(range(n)), \r\n    y=np.random.randint(low=0,high=1000,size=n)\r\n)\r\ndf[\"text\"] = vaex.vconstant(x, len(df))\r\n\r\n# byte limit for arrow strings\r\n# because 1 character = 1 byte, the total number of characters in the\u00a0\r\n# column in question must be less than the size_limit\r\nsize_limit = 2*1e9\r\ndef validate_str_cols(df: DataFrame) -> DataFrame:\r\n\u00a0 \u00a0 for col, dtype in zip(df.get_column_names(), df.dtypes):\r\n\u00a0 \u00a0 \u00a0 \u00a0 if dtype == str and df[col].str.len().sum() >= size_limit:\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 df[col] = df[col].to_arrow().cast(pa.large_string())\r\n\u00a0 \u00a0 return df\r\n\r\n# text is type string\r\nprint(df.dtypes)\r\ndf = validate_str_cols(df)\r\n# test is type large_string\r\nprint(df.dtypes)\r\n# works!\r\ny = df.text.values.combine_chunks()\n```"
+        },
+        {
+            "created_at": "2022-09-23T15:07:21.780Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17828?focusedCommentId=17608795) by David Li (lidavidm):*\nThat might be reasonable, though I'm not sure if we can emit a Python warning in C++ (would be an interesting thing to do, and would probably be useful elsewhere). Maybe `[~jorisvandenbossche]` has opinions.\r\n\r\nIn general the large_X vs X type handling could use some consideration, I think"
+        }
+    ]
+}

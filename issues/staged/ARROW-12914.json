@@ -1,0 +1,44 @@
+{
+    "issue": {
+        "title": "[C++] ArrowLog with FATAL level is not robust if running in the service",
+        "body": "***Note**: This issue was originally created as [ARROW-12914](https://issues.apache.org/jira/browse/ARROW-12914). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe are a public cloud service provider and use Apache Arrow C++ as a dependency in the provisioned services. However, ArrowLog (CerrLog) w/ level ARROW_FATAL causes the service crash due to std::abort() call. The detail is as below.\r\n\r\n\u00a0\r\n\r\n1. The Arrow C++ implementation has defined marco\u00a0ARROW_CHECK (<https://github.com/apache/arrow/blob/master/cpp/src/arrow/util/logging.h#L61>) and uses it every where.\u00a0If the condition in ARROW_CHECK does not meet, it creates an ArrowLog object with the level ARROW_FATAL and then logs something.\r\n```cpp\n\r\n#define ARROW_CHECK(condition)                                               \\\r\n  ARROW_PREDICT_TRUE(condition)                                              \\\r\n  ? ARROW_IGNORE_EXPR(0)                                                     \\\r\n  : ::arrow::util::Voidify() &                                               \\\r\n          ::arrow::util::ArrowLog(__FILE__, __LINE__,                        \\\r\n                                  ::arrow::util::ArrowLogLevel::ARROW_FATAL) \\\r\n              << \" Check failed: \" #condition \" \"\r\n```\r\n\u00a0\r\n\r\n2. The ArrowLog uses CerrLog (<https://github.com/apache/arrow/blob/master/cpp/src/arrow/util/logging.cc#L62>) as the logging provider if GLog is not enabled.\r\n```cpp\n\r\n#ifdef ARROW_USE_GLOG\r\ntypedef google::LogMessage LoggingProvider;\r\n#else\r\ntypedef CerrLog LoggingProvider;\r\n#endif\r\n```\r\n\u00a0\r\n\r\n3. The problem is in the destructor of CerrLog. It prints back trace and then dies with abort call. It results in crash of the service process and thus makes it unavailable.\r\n```cpp\n\r\n  virtual ~CerrLog() {\r\n    if (has_logged_) {\r\n      std::cerr << std::endl;\r\n    }\r\n    if (severity_ == ArrowLogLevel::ARROW_FATAL) {\r\n      PrintBackTrace();\r\n      std::abort();\r\n    }\r\n  }\r\n```\r\n\u00a0\r\n\r\nI have traced back to https://issues.apache.org/jira/browse/ARROW-2138\u00a0and it seems that the behavior is expected. I'd suggest a more robust approach to get rid of the abort call. It should throw exception where the fatal error emerges and the logger's job is as simple as logging something. Thoughts?",
+        "created_at": "2021-06-01T02:50:36.000Z",
+        "updated_at": "2021-06-02T02:26:02.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-01T03:04:55.327Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12914?focusedCommentId=17354763) by Ji Liu (tianchen92):*\nHi, `[~apitrou]` `[~wesm]` \u00a0 please help take a look at this issue, thanks!"
+        },
+        {
+            "created_at": "2021-06-01T07:43:57.848Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12914?focusedCommentId=17354903) by Antoine Pitrou (apitrou):*\nWhere is `ARROW_LOG(FATAL)` called?"
+        },
+        {
+            "created_at": "2021-06-01T14:47:39.712Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12914?focusedCommentId=17355143) by Gang Wu (wgtmac):*\nThanks for the reply `[~apitrou]`\r\n\r\n\u00a0\r\n\r\nFor example, if I call arrow::decimal(0,0) to create an illegal decimal type, the call chain is as below:\r\n \\* Decimal128Type constructor:\u00a0<https://github.com/apache/arrow/blob/master/cpp/src/arrow/type.cc#L801>\r\n \\* ARROW_CHECK_GE:\u00a0\u00a0<https://github.com/apache/arrow/blob/master/cpp/src/arrow/util/logging.h#L86>\r\n \\* ARROW_CHECK with\u00a0ARROW_LOG(FATAL): <https://github.com/apache/arrow/blob/master/cpp/src/arrow/util/logging.h#L61>\r\n\r\n\u00a0\r\n\r\nI understand that not throwing exception is the project convention. In addition, there is an alternative\u00a0function Decimal128Type::Make() to return a Result type which can check the status to get rid of the abort() call (<https://github.com/apache/arrow/blob/master/cpp/src/arrow/type.cc#L805)>\u00a0. But I am not sure if we can totally get rid of process crash caused by ARROW_CHECK."
+        },
+        {
+            "created_at": "2021-06-01T15:03:04.644Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12914?focusedCommentId=17355151) by Antoine Pitrou (apitrou):*\nAs you said, you can call `Decimal128Type::Make()`. Are there other asserts which cannot be circumvented by an error-checking alternative?"
+        },
+        {
+            "created_at": "2021-06-01T15:12:22.382Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12914?focusedCommentId=17355159) by Gang Wu (wgtmac):*\nYes, please check here for example: <https://github.com/apache/arrow/blob/master/cpp/src/arrow/type.cc#L543>"
+        },
+        {
+            "created_at": "2021-06-01T15:16:00.703Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12914?focusedCommentId=17355163) by Antoine Pitrou (apitrou):*\nI think it would be acceptable to add type-checked versions of those. Do you want to submit a PR?"
+        },
+        {
+            "created_at": "2021-06-02T02:26:02.081Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12914?focusedCommentId=17355452) by Gang Wu (wgtmac):*\nSure, I will submit PRs once there are blocking issues. Thanks!"
+        }
+    ]
+}

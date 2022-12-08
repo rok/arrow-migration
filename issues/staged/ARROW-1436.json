@@ -1,0 +1,34 @@
+{
+    "issue": {
+        "title": "PyArrow Timestamps written to Parquet as INT96 appear in Spark as 'bigint'",
+        "body": "***Note**: This issue was originally created as [ARROW-1436](https://issues.apache.org/jira/browse/ARROW-1436). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen using the 'use_deprecated_int96_timestamps' option to write Parquet files compatible with Spark <2.2.0 (which doesn't support INT64 backed Timestamps) Spark identifies the Timestamp columns as BigInts. Some metadata may be missing.",
+        "created_at": "2017-08-30T19:57:30.000Z",
+        "updated_at": "2017-11-26T16:38:39.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Format",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-11-26T16:38:33.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-09-28T16:34:18.701Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1436?focusedCommentId=16184412) by Wes McKinney (wesm):*\nIs there a fix or workaroudn for this?"
+        },
+        {
+            "created_at": "2017-11-26T12:36:28.695Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1436?focusedCommentId=16265989) by Licht Takeuchi (Licht-T):*\n`[~wesmckinn]` This seems already fixed in latest Arrow and Spark.\r\n\r\n- Python code:\n  ```java\n  \n  import pandas as pd\n  import pyarrow as pa\n  from pyarrow import parquet as pq\n  import numpy as np\n  \n  t = pa.timestamp('ns')\n  start = pd.Timestamp('2001-01-01').value\n  data = np.array([start, start + 1000, start + 2000], dtype='int64')\n  a = pa.array(data, type=t)\n  \n  table = pa.Table.from_arrays([a], ['ts'])\n  \n  pq.write_table(table, 'test-1.parquet', use_deprecated_int96_timestamps=True)\n  pq.write_table(table, 'test-2.parquet', use_deprecated_int96_timestamps=False)\n  ```\n  \n- Spark code:\n  ```java\n  \n  import org.apache.parquet.hadoop.ParquetFileReader\n  import org.apache.hadoop.fs.{FileSystem, Path}\n  import org.apache.hadoop.conf.Configuration\n  val sqlContext = new org.apache.spark.sql.SQLContext(sc)\n  import sqlContext.implicits._\n  val conf = sc.hadoopConfiguration\n  val fs = FileSystem.get(conf)\n  \n  \n  // int96 timestamp case\n  ParquetFileReader.readAllFootersInParallel(conf, fs.getFileStatus(new Path(\"test-1.parquet\")))\n  var df = sqlContext.read.parquet(\"test-1.parquet\")\n  df.take(3)\n  \n  \n  // int64 timestamp case\n  ParquetFileReader.readAllFootersInParallel(conf, fs.getFileStatus(new Path(\"test-2.parquet\")))\n  var df = sqlContext.read.parquet(\"test-2.parquet\")\n  df.take(3)\n  ```\n- Spark output\n  ```java\n  \n  scala> // int96 timestamp case\n  \n  scala> ParquetFileReader.readAllFootersInParallel(conf, fs.getFileStatus(new Path(\"test-1.parquet\")))\n  res12: java.util.List[org.apache.parquet.hadoop.Footer] =\n  [Footer{file:/Users/rito/GitHub/arrow/python/test-1.parquet, ParquetMetaData{FileMetaData{schema: message schema {\n    optional int96 ts;\n  }\n  , metadata: {}}, blocks: [BlockMetaData{3, 104 [ColumnMetaData{SNAPPY [ts] INT96  [PLAIN_DICTIONARY, RLE, PLAIN], 47}]}]}}]\n  \n  scala> var df = sqlContext.read.parquet(\"test-1.parquet\")\n  df: org.apache.spark.sql.DataFrame = [ts: timestamp]\n  \n  scala> df.take(3)\n  res13: Array[org.apache.spark.sql.Row] = Array([2001-01-01 09:00:00.0], [2001-01-01 09:00:00.000001], [2001-01-01 09:00:00.000002])\n  \n  scala>\n  \n  scala>\n  \n  scala> // int64 timestamp case\n  \n  scala> ParquetFileReader.readAllFootersInParallel(conf, fs.getFileStatus(new Path(\"test-2.parquet\")))\n  res14: java.util.List[org.apache.parquet.hadoop.Footer] =\n  [Footer{file:/Users/rito/GitHub/arrow/python/test-2.parquet, ParquetMetaData{FileMetaData{schema: message schema {\n    optional int64 ts (TIMESTAMP_MICROS);\n  }\n  , metadata: {}}, blocks: [BlockMetaData{3, 93 [ColumnMetaData{SNAPPY [ts] INT64  [PLAIN_DICTIONARY, RLE, PLAIN], 44}]}]}}]\n  \n  scala> var df = sqlContext.read.parquet(\"test-2.parquet\")\n  df: org.apache.spark.sql.DataFrame = [ts: timestamp]\n  \n  scala> df.take(3)\n  res15: Array[org.apache.spark.sql.Row] = Array([2001-01-01 09:00:00.0], [2001-01-01 09:00:00.000001], [2001-01-01 09:00:00.000002])\n  ```\n  \n"
+        },
+        {
+            "created_at": "2017-11-26T12:44:14.637Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1436?focusedCommentId=16265991) by Licht Takeuchi (Licht-T):*\nHere is the old Spark@1.5.0 result.\r\n\r\n```java\n\r\nscala> // int96 timestamp case\r\n\r\nscala> ParquetFileReader.readAllFootersInParallel(conf, fs.getFileStatus(new Path(\"test-1.parquet\")))\r\nres0: java.util.List[org.apache.parquet.hadoop.Footer] =\r\n[Footer{file:/Users/rito/GitHub/arrow/python/test-1.parquet, ParquetMetaData{FileMetaData{schema: message schema {\r\n  optional int96 ts;\r\n}\r\n, metadata: {}}, blocks: [BlockMetaData{3, 104 [ColumnMetaData{SNAPPY [ts] INT96  [PLAIN_DICTIONARY, RLE, PLAIN], 47}]}]}}]\r\n\r\nscala> var df = sqlContext.read.parquet(\"test-1.parquet\")\r\ndf: org.apache.spark.sql.DataFrame = [ts: timestamp]\r\n\r\nscala> df.take(3)\r\nres1: Array[org.apache.spark.sql.Row] = Array([2001-01-01 09:00:00.0], [2001-01-01 09:00:00.000001], [2001-01-01 09:00:00.000002])\r\n```\r\n"
+        },
+        {
+            "created_at": "2017-11-26T16:38:33.694Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1436?focusedCommentId=16266096) by Wes McKinney (wesm):*\nThanks `[~Licht-T]` for looking into this! `[~LucasPickup]` if you can post a reproduction of the issue we can investigate further"
+        }
+    ]
+}

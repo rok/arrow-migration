@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[R] transmute() fails after pulling data into R",
+        "body": "***Note**: This issue was originally created as [ARROW-13262](https://issues.apache.org/jira/browse/ARROW-13262). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nNOTE: This issue was originally named \"[R] Support namespacing of function maps?\". `[~icook]` \u00a0renamed it to reflect the resolution described in the comments\u00a0below.\r\n\r\nWith our NSE function map setup, we translate various functions into Arrow equivalents:\r\n```java\n\r\nlibrary(arrow)\r\nlibrary(dplyr)\r\n\r\narrow_table <- Table$create(tibble::tibble(\r\n  v = c(\"A\", \"B\", \"C\"),\r\n  w = c(\"a\", \"b\", \"c\"),\r\n  x = c(\"d\", NA_character_, \"f\"),\r\n  y = c(NA_character_, \"h\", \"i\"),\r\n  z = c(1.1, 2.2, NA)\r\n))\r\n\r\narrow_table %>%\r\n  transmute(str_c(x, y, sep = \" \")) %>%\r\n  collect()\r\n#> # A tibble: 3 x 1\r\n#>   `str_c(x, y, sep = \" \")`\r\n#>   <chr>                   \r\n#> 1 <NA>                    \r\n#> 2 <NA>                    \r\n#> 3 f i\r\n```\r\nWhich is great, however if the code that is being used uses the `sringr::` namespace prefix this errors:\r\n```java\n\r\narrow_table %>%\r\n  transmute(stringr::str_c(x, y, sep = \" \")) %>%\r\n  collect()\r\n#> Warning: Expression stringr::str_c(x, y, sep = \" \") not supported in Arrow;\r\n#> pulling data into R\r\n#> Error: Problem with `mutate()` input `..1`.\r\n#> \u2139 `..1 = ..1`.\r\n#> x object 'x' not found\r\n```\r\nShould we support this (basically **also** translate `stringr::str_c()` to what we have for `str_c()`)? Or warn/error more clearly what happened if we don't support any namespace prefixed functions? Something else?",
+        "created_at": "2021-07-06T16:52:45.000Z",
+        "updated_at": "2021-07-07T15:00:15.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-07-07T15:00:06.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-07-06T20:05:32.336Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13262?focusedCommentId=17375989) by Ian Cook (icook):*\nThis same problem occurs in dbplyr in and other non-data.frame dplyr interface packages. For example, functions from the stringr and lubridate packages\u00a0don't work with dbplyr if you include `stringr::`\u00a0or `lubridate::` before their names.\r\n\r\nI think it's fine to close this as \"won't fix\" at least for now. It's a general limitation affecting dplyr when used on objects that are not R data frames.\r\n\r\nAlternatively, we could try to fix this, like I do in tidyquery: When the data object is something besides an R data frame, tidyquery calls this `unscope_expression`\u00a0function to remove the `package::`\u00a0prefix by manipulating the AST:\u00a0<https://github.com/ianmcook/tidyquery/blob/master/R/unscope.R>\u00a0My 2 cents: I don't think this is worth the effort right now."
+        },
+        {
+            "created_at": "2021-07-06T20:15:39.010Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13262?focusedCommentId=17375998) by Jonathan Keane (jonkeane):*\nYeah, it's certainly a bit of an edge case, and might not be worth unscoping or trying to error more gracefully. But what I find a bit surprising is that I expected (in this case, at least) that when it pulled into R it would evaluate correctly since at that point it should be standard dplyr-on-data.frame.\r\n\r\nThis works:\r\n```Java\n\r\n> arrow_table %>%\r\n+   collect() %>% \r\n+   transmute(stringr::str_c(x, y, sep = \" \"))\r\n# A tibble: 3 x 1\r\n  `stringr::str_c(x, y, sep = \" \")`\r\n  <chr>                            \r\n1 NA                               \r\n2 NA                               \r\n3 f i   \r\n```\r\n\r\nBut if transmute is above the collect it does not. "
+        },
+        {
+            "created_at": "2021-07-06T21:50:50.479Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13262?focusedCommentId=17376050) by Ian Cook (icook):*\nOh, right, the expectation is that it should warn (`not supported in Arrow;\u00a0pulling data into R`) but then succeed, not error. Strange."
+        },
+        {
+            "created_at": "2021-07-07T02:15:12.961Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13262?focusedCommentId=17376155) by Ian Cook (icook):*\nI found out why the failure was happening after the data is pulled into R. It's because the `transmute` function was not defusing the dots arguments before passing them to `mutate`. I will open a PR to resolve this."
+        },
+        {
+            "created_at": "2021-07-07T15:00:06.658Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13262?focusedCommentId=17376620) by Ian Cook (icook):*\nIssue resolved by pull request 10672\n<https://github.com/apache/arrow/pull/10672>"
+        }
+    ]
+}

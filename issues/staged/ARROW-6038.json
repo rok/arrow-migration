@@ -1,0 +1,42 @@
+{
+    "issue": {
+        "title": "[Python] pyarrow.Table.from_batches produces corrupted table if any of the batches were empty",
+        "body": "***Note**: This issue was originally created as [ARROW-6038](https://issues.apache.org/jira/browse/ARROW-6038). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen creating a Table from a list/iterator of batches which contains an \"empty\" RecordBatch a Table is produced but attempts to run any pyarrow built-in functions (such as unique()) occasionally result in a Segfault.\r\n\r\nThe MWE is attached:\u00a0[segfault_ex.py](segfault_ex.py)\r\n1. The segfaults happen randomly, around 30% of the time.\n1. Commenting out line 10 in the MWE results in no segfaults.\n1. The segfault is triggered using the unique() function, but I doubt the behaviour is specific to that function, from what I gather the problem lies in Table creation.\n   \n   I'm on Windows 10, using Python 3.6 and pyarrow 0.14.0\u00a0installed through pip (problem also occurs with 0.13.0 from conda-forge).",
+        "created_at": "2019-07-25T16:09:50.000Z",
+        "updated_at": "2019-08-16T02:36:08.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-16T02:29:06.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-07-25T17:12:20.607Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6038?focusedCommentId=16892963) by Wes McKinney (wesm):*\nDoes the problem occur with 0.14.0? "
+        },
+        {
+            "created_at": "2019-07-26T06:58:56.410Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6038?focusedCommentId=16893383) by Piotr Bajger (Bajger):*\nThanks for a quick reply \u2013 yes, it does, I updated the version labels."
+        },
+        {
+            "created_at": "2019-07-31T12:45:44.597Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6038?focusedCommentId=16897133) by Antoine Pitrou (apitrou):*\nOk, the issue here is that you are creating a Table column with different types. The second array is inferred to be an array of type \"null\". Arrow should prevent you from doing that instead of crashing.\r\n\r\nHowever, comparing types can be a bit expensive (if e.g. they are nested types). `[~wesmckinn]` what do you think?"
+        },
+        {
+            "created_at": "2019-07-31T12:51:07.591Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6038?focusedCommentId=16897136) by Antoine Pitrou (apitrou):*\nNote that it would be possible to have faster type equality comparisons, if we want to invest a bit of time and complexity."
+        },
+        {
+            "created_at": "2019-08-16T02:29:06.734Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6038?focusedCommentId=16908634) by Wes McKinney (wesm):*\nIssue resolved by pull request 4983\n<https://github.com/apache/arrow/pull/4983>"
+        },
+        {
+            "created_at": "2019-08-16T02:36:08.740Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6038?focusedCommentId=16908642) by Wes McKinney (wesm):*\nI confirmed that the MWE is behaving properly now\r\n\r\n```Java\n\r\n$ python ~/Downloads/segfault_ex.py \r\nCreating table\r\nTraceback (most recent call last):\r\n  File \"/home/wesm/Downloads/segfault_ex.py\", line 11, in <module>\r\n    pa.RecordBatch.from_arrays([pa.array([\"C\", \"C\", \"C\"])], schema),\r\n  File \"pyarrow/table.pxi\", line 1117, in pyarrow.lib.Table.from_batches\r\n    return pyarrow_wrap_table(c_table)\r\n  File \"pyarrow/public-api.pxi\", line 316, in pyarrow.lib.pyarrow_wrap_table\r\n    check_status(ctable.get().Validate())\r\n  File \"pyarrow/error.pxi\", line 78, in pyarrow.lib.check_status\r\n    raise ArrowInvalid(message)\r\npyarrow.lib.ArrowInvalid: Column 0: In chunk 1 expected type string but saw null\r\n```\r\n\r\nThis is still weird and dangerous though:\r\n\r\n```Java\n\r\nIn [4]: pa.RecordBatch.from_arrays([pa.array([])], schema)                                                  \r\nOut[4]: <pyarrow.lib.RecordBatch at 0x7fc36fa18db8>\r\n\r\nIn [5]: rb = pa.RecordBatch.from_arrays([pa.array([])], schema)                                             \r\n\r\nIn [6]: rb                                                                                                  \r\nOut[6]: <pyarrow.lib.RecordBatch at 0x7fc37d9c69f8>\r\n\r\nIn [7]: rb.schema                                                                                           \r\nOut[7]: col: string\r\n\r\nIn [8]: rb[0]                                                                                               \r\nOut[8]: \r\n<pyarrow.lib.NullArray object at 0x7fc36fa8ce08>\r\n0 nulls\r\n```\r\n\r\nI opened ARROW-6263"
+        }
+    ]
+}

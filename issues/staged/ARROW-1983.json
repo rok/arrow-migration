@@ -1,0 +1,178 @@
+{
+    "issue": {
+        "title": "[Python] Add ability to write parquet `_metadata` file",
+        "body": "***Note**: This issue was originally created as [ARROW-1983](https://issues.apache.org/jira/browse/ARROW-1983). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently `pyarrow.parquet` can only write the `_common_metadata` file (mostly just schema information). It would be useful to add the ability to write a `_metadata` file as well. This should include information about each row group in the dataset, including summary statistics. Having this summary file would allow filtering of row groups without needing to access each file beforehand.\r\n\r\nThis would require that the user is able to get the written RowGroups out of a `pyarrow.parquet.write_table` call and then give these objects as a list to new function that then passes them on as C++ objects to `parquet-cpp` that generates the respective `_metadata` file.",
+        "created_at": "2018-01-10T20:48:14.000Z",
+        "updated_at": "2021-07-08T07:07:04.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-06-06T21:38:32.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-07-11T15:16:36.851Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16540231) by Robbie Gruener (rgruener):*\nThis looks like it\u00a0would\u00a0need changes in parquet-cpp as the [arrow writer only takes a Schema](https://github.com/apache/parquet-cpp/blob/master/src/parquet/arrow/writer.h#L116)\u00a0and not the FileMetaData object which contains the row group information."
+        },
+        {
+            "created_at": "2018-07-12T15:16:11.714Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16541803) by Robbie Gruener (rgruener):*\n`[~xhochy]` I made this dependent task\u00a0PARQUET-1348"
+        },
+        {
+            "created_at": "2018-10-01T09:27:22.799Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16633762) by Wes McKinney (wesm):*\nMore work is needed here it seems. Moving to 0.12"
+        },
+        {
+            "created_at": "2018-11-14T22:00:32.556Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16687186) by Wes McKinney (wesm):*\nIf I understand correctly, we need to combine all of the row group metadata for all files in a directory. When a new file is written, does this file have to be updated?"
+        },
+        {
+            "created_at": "2018-12-29T22:45:07.606Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16730844) by Matthew Rocklin (mrocklin):*\n> If I understand correctly, we need to combine all of the row group metadata for all files in a directory.\r\n\r\nYes.\u00a0 Ideally when writing a row group we would get some metadata object in memory. We would then collect all of those objects and hand them to some `write_metadata` function afterwards.\r\n\r\n> When a new file is written, does this file have to be updated?\r\n\u00a0\r\nYes, or it can be removed/invalidated.\r\n\u00a0\r\nAs a side note, this is probably one of a small number of issues that stop Dask Dataframe from using PyArrow by default.\u00a0 Metadata files with full row group information are especially valuable for us, particularly with remote/cloud storage.  (I'm going through Dask's parquet handling now)"
+        },
+        {
+            "created_at": "2018-12-31T22:12:45.628Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16731464) by Wes McKinney (wesm):*\nMechanically this isn't a huge change. On the C++ side we would expose an API to append row group metadata into a common file. This can be used from the Python side, then. I'm planning to move more of the multifile dataset handling into C++ because we also need it in Ruby and R, so would make sense to maintain one implementation for the 3 languages"
+        },
+        {
+            "created_at": "2018-12-31T22:23:03.446Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16731467) by Matthew Rocklin (mrocklin):*\n>  I'm planning to move more of the multifile dataset handling into C++ because we also need it in Ruby and R, so would make sense to maintain one implementation for the 3 languages\r\n\r\nMakes sense to me.  No pressure, but is there a time in particular when you're planning to do this?  This will help me with planning on the Dask side.  I'm also happy to help with things on the Python Arrow side near term if they come up.  \r\n\r\nFor context see https://github.com/dask/dask/pull/4336#issuecomment-450686100"
+        },
+        {
+            "created_at": "2018-12-31T22:46:52.863Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16731472) by Wes McKinney (wesm):*\nVelocity on these things should pick up in 2019 since the Ursa Labs team is growing. The \"Arrow Dataset\" project extends beyond Parquet (where Parquet is one storage format). Ideally this work will happen in Q1 2019. Handling the \"_metadata\" file is lower hanging fruit so that can likely get done a lot sooner"
+        },
+        {
+            "created_at": "2019-01-24T20:10:26.721Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16751500) by Matthew Rocklin (mrocklin):*\nIn https://github.com/dask/dask/issues/4410 we learn that metadata information can grow to be large in the case where there are many columns and many partitions.  There is some value to ensuring that the metadata results are somewhat compact in memory, though I also wouldn't spend a ton of effort optimizing here."
+        },
+        {
+            "created_at": "2019-03-01T22:22:21.283Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16782163) by Matthew Rocklin (mrocklin):*\nHi all, thought I would check in here.  I'll likely start planning work around Dask Parquet reader/writer functionality soon, and am curious is there is any timeline on this issue.  \"Nope\" is a totally fine answer, just looking for information for planning purposes. "
+        },
+        {
+            "created_at": "2019-03-08T00:34:33.127Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16787367) by Wes McKinney (wesm):*\nNo timeline. I'm not sure who is going to do the work; I will not be able to in time for 0.13"
+        },
+        {
+            "created_at": "2019-03-14T14:01:24.749Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16792681) by Wes McKinney (wesm):*\nThis will have to get done for 0.14. We're basically out of time for 0.13 and only fixing bugs now"
+        },
+        {
+            "created_at": "2019-04-14T13:52:07.598Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16817308) by Pearu Peterson (pearu):*\nCurrently,\u00a0ParquetDataset metadata has the following approximate data structure (type-specs are shown only for the relevant attributes):\r\n```\n\r\nParquetDataset:\r\n  list<ParquetDatasetPiece> pieces\r\n  list<str> paths\r\n  fs\r\n  common_metadata, common_metadata_path\r\n  metadata, metadata_path\r\n\r\nParquetDatasetPiece:\r\n  sting path\r\n  get_metadata() -> FileMetaData\r\n  partition_keys\r\n\r\nFileMetaData:\r\n  list<RowGroupMetaData> row_groups\r\n  ParquetSchema schema\r\n  dict metadata = {b\u2018pandas\u2019: <pandas metadata in bytes>}\r\n  int num_rows, num_columns\r\n  str format_version, created_by\r\n\r\nRowGroupMetaData:\r\n  list<ColumnChunkMetaData> columns\r\n  int num_rows, total_byte_size\r\n\r\nColumnChunkMetaData:\r\n  str physical_type, encodings, path_in_schema, compression\r\n  int num_values, total_uncompressed_size, total_compressed_size, data_page_offset, index_page_offset, dictionary_page_offset\r\n  RowGroupStatistics statistics\r\n\r\nRowGroupStatistics:\r\n  bool has_min_max\r\n  int min, max, null_count, distinct_count, num_values\r\n  str physical_type\n```\r\nIf only the data in RowGroupStatistics is relevant for this issue (please confirm), then the statistics data could be collected into a single Parquet file, say `_statistics`, containing the following columns:\r\n```\n\r\n<Piece.path>, <RowGroup index>, <ColumnChunk index>, <RowGroupStatistics data>\n```\r\n`[~mrocklin]`, would the information in `_statistics` sufficient for Dask needs?"
+        },
+        {
+            "created_at": "2019-04-15T19:32:06.303Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16818319) by Matthew Rocklin (mrocklin):*\nMy understanding is that there is already a standard around using a \"_metadata\" file that presumably is expected to have certain data laid out in a certain way.  It may be that `[~mdurant]` can provide a nice reference to the expectations.\r\n\r\nIt also looks like PyArrow has a nice reader for this information.  If I open up a Parquet Dataset that has a `_metadata` file I find that my object has all of the right information, so that might also be a good place to look."
+        },
+        {
+            "created_at": "2019-04-15T19:47:38.860Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16818334) by Martin Durant (mdurant):*\nA convention, yes, but not in the parquet standard as such. I believe spark might have started this, although they producing them is now optional. You typically have `_metadata`, containing schema, references to all the row-groups and information about them such as column statistics, and `_common_metadata`, which contains only the schema (and is therefore much smaller)."
+        },
+        {
+            "created_at": "2019-04-15T20:02:48.373Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16818343) by Pearu Peterson (pearu):*\nNote that the Parquet format has three different metadata structures, see <https://github.com/apache/parquet-format#metadata>\u00a0.\r\n\r\nThe \"_metadata\" corresponds to `FileMetaData.key_value_metadata` (in parquet-format specification) + schema while the \"statistics\" (that is of interest of Dask, if I understand it correctly) corresponds to `ColumnMetadata.key_value_metadata`.\r\n Yes, Arrow can read all this information and more. My basic questions are:\r\n1. What information needs to be collected? Note that some information is internal to parquet files that one would never need, hence it would just a waste of space to collect it, especially when the Datasets become huge (as would be expected in Dask applications).\n1. Where this information should be gathered for easy and efficient access?\n   \n   \u00a0"
+        },
+        {
+            "created_at": "2019-04-15T20:40:34.854Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16818370) by Martin Durant (mdurant):*\n> Note that the Parquet format has three different metadata structures\r\n\r\nNo, this is incorrect, unfortunately the term \"metadata\" is used with multiple meanings here. \r\n\r\n- All parquet files contain FileMetaData in the file footer, which may include one or more key-value pairs, and includes other important things like the schema\n- If the file contains any row-groups or references to row-groups in other files, it will also contain ColumnMetaData (and possible more key-value pairs); this is all **within** the FileMetaData structure\n- the special file `_metadata` may exist, which contains **only** FileMetaData, and any row-groups have only links to other files and no data within the file.\n- the special file `_common_metadata` may exist, which also only contains a FileMetaData structure, but has no row group components at all. \n- ordinary data files should have the same common metadata (schema, key-values), so you can load any one of them, but they contain only the row-groups of that one file and no links to any others."
+        },
+        {
+            "created_at": "2019-04-17T13:26:42.432Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16820084) by Pearu Peterson (pearu):*\nThere seems to be two options to write a separate metadata file from Arrow:\r\n1. Following Wes comment \"On the C++ side we would expose an API to append row group metadata into a common file.\", introduce the second sink argument to\u00a0ParquetFileWriter::Open that will be used for collecting FileMetaData content during the writing. `[~wesmckinn]`, can you confirm that this would be the right approach?\n1. Introduce a flag to\u00a0ParquetFileWriter that when enabled will cause skipping all data writes and would write only FileMetaData content. As a result, one would need to call the dataset write twice, one for writing data (and metadata) as currently, and the second time for writing metadata-only (writes would be collected to a single file).\n   \n   Comparing the two approaches, the approach 2 is simpler but suboptimal as the writing process is executed twice. In both cases, the metadata would have duplicated storage (in data files as currently, and in the separate metadata file). If readers would be able to use metadata from a separate file (not sure if parquet format would allow it), duplicating metadata storage in both approaches could be avoided."
+        },
+        {
+            "created_at": "2019-04-17T13:32:30.358Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16820090) by Martin Durant (mdurant):*\n> If readers would be able to use metadata from a separate file (not sure if parquet format would allow it), duplicating metadata storage in both approaches could be avoided.\r\n\r\nYes, this is exactly what should happen: the metadata file contains all of the metadata (with paths pointing to the actual data files) and the data files contain the metadata with only their own row-groups specified. Each row group def appears thus in two places, and the schema is repeated many times. This duplication is desirable to allow viewing the data as a complete set, or each file independently.\r\n\r\nIf reading via the separate metadata file, the reader does not need to touch the footers of the data files at all, since it already has everything it needs."
+        },
+        {
+            "created_at": "2019-04-17T21:06:50.321Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16820504) by Pearu Peterson (pearu):*\nArrow [PR 4166](https://github.com/apache/arrow/pull/4166)\u00a0implements the approach 1 above."
+        },
+        {
+            "created_at": "2019-04-22T13:45:58.367Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16823112) by Wes McKinney (wesm):*\nI'm just returning from vacation and catching up on e-mail etc., this effort is a priority for me so I will review the discussion and PR and give feedback as soon as I can"
+        },
+        {
+            "created_at": "2019-04-25T15:34:01.882Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16826171) by Martin Durant (mdurant):*\nI don't know about \"deprecated\" (or whether a Parquet 2.0 is really a thing), but...\r\nIt is definitely useful for the Dask case of wanting to know what files exist and the max/mins for basic filtering, without having to touch all the files before makign that decision.\r\n\r\nThe metadata file was indeed taken on by Hive, and could be seen as a convention, but it is certainly allowed by the spec since the column_chunk structure allows for a path, and so for a row-group to have its data in another file. You can indeed just append to a file as you go, since in the case that there is no actual data, you know exactly how much space is taken up before the start of the thrift block (4 bytes: PAR1). However, the writes must be atomic, and will in general **not work** for remote storage, where small appends don't happen as you might assume."
+        },
+        {
+            "created_at": "2019-04-25T15:38:51.305Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16826178) by Martin Durant (mdurant):*\nI don't know about deprecated, and I wouldn't hold my breath over a Parquet 2.0... the metadata file is very useful in the context of Dask, so that we can know what files exist in the dataset without doing a glob, and we can do simple filtering on max/min values without having to touch every file, which can be very slow on remote storage.\r\n\r\nThe spec certainly allows for a metadata file even if it could be seen as more of a convention from Hive: a column chunk allows for a file_path attribute, indicating that the data itself is in another file (which, actually, doesn't need to be a proper parquet file, but in practice always is).\r\n\r\nYou could indeed construct the metadata by repeatedly appending to a file, since you will know that everything in the file is the thrift footer block except for the PAR1 bytes. However, you will not preserve row-group order in general, which might be important, and writes had better be atomic. Furthermore, remote storage will usually **not allow** small appends from multiple processes in this way."
+        },
+        {
+            "created_at": "2019-04-25T15:39:48.315Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16826179) by Martin Durant (mdurant):*\nI don't know about deprecated, and I wouldn't hold my breath over a Parquet 2.0... the metadata file is very useful in the context of Dask, so that we can know what files exist in the dataset without doing a glob, and we can do simple filtering on max/min values without having to touch every file, which can be very slow on remote storage.\r\n\r\nThe spec certainly allows for a metadata file even if it could be seen as more of a convention from Hive: a column chunk allows for a file_path attribute, indicating that the data itself is in another file (which, actually, doesn't need to be a proper parquet file, but in practice always is).\r\n\r\nYou could indeed construct the metadata by repeatedly appending to a file, since you will know that everything in the file is the thrift footer block except for the PAR1 bytes. However, you will not preserve row-group order in general, which might be important, and writes had better be atomic. Furthermore, remote storage will usually **not allow** small appends from multiple processes in this way."
+        },
+        {
+            "created_at": "2019-05-01T19:12:34.000Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16831195) by Pearu Peterson (pearu):*\nArrow [PR 4236](https://github.com/apache/arrow/pull/4236)\u00a0implements another approach for collecting the file metadata instances of dataset pieces: `write_to_dataset` can take a `metadata_collector` kw argument that list value will be filled with the file metadata instances."
+        },
+        {
+            "created_at": "2019-05-04T18:50:56.972Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16833140) by Pearu Peterson (pearu):*\nARROW-5258 provides a way to collect file metadata objects created by write_to_dataset function."
+        },
+        {
+            "created_at": "2019-05-04T18:53:06.527Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16833141) by Pearu Peterson (pearu):*\nFor this issue, questions raised in https://github.com/apache/arrow/pull/4236#issuecomment-489017226 needs to be addressed."
+        },
+        {
+            "created_at": "2019-05-16T14:33:33.167Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16841417) by Joris Van den Bossche (jorisvandenbossche):*\nCopying the questions that `[~pearu]` mentioned above / asked on github here:\r\n\r\n> 2. After collecting all file metadata of dataset pieces (possibly from different dask processes), what would be desired the interface for writing and reading the dataset metadata instances? Here's an initial proposal for Python:\n> \n> ```python\n> def write_dataset_metadata(metadata_list, where):\n> ...\n> \n> def read_dataset_metadata(where, memory_map=False):\n> ...\n> return metadata_list\n> ```\n> \n> 3. Clearly, each file metadata instance in `metadata_list` contains same information as in all metadata instances. Would it make sense and use to introduce a new `DatasetMetadata` class (in C++, also exposed to Python) that would collect the metadata information of dataset pieces in a more compact way as well as would provide I/O methods? (This also addresses the question 2.)\r\n\r\n"
+        },
+        {
+            "created_at": "2019-05-16T14:38:44.894Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16841424) by Joris Van den Bossche (jorisvandenbossche):*\n> what would be desired the interface for writing and reading the dataset metadata instances?\r\n\r\nFor reading, I think the existing `parquet.read_metadata` is sufficient? (that already works with such metadata files generated by other libraries).\r\n\r\nFor writing, the current `parquet.write_metadata` expects a pyarrow schema, so for that we indeed need a new method, or adapt the existing one to also accept a parquet FileMetaData object.\r\n\r\n\u00a0\r\n\r\nBut for writing, I think the main part that is missing is a way to combined the list of metadata objects into a single FileMetaData object?\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-05-16T18:30:47.097Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16841625) by Wes McKinney (wesm):*\nRight. This is a relatively straightforward C++ function to write \u2013 Pearu actually already had partially implemented it in one of the patch iterations. The API would be something like\r\n```java\n\r\nStatus WriteMultipleMetadata(const std::vector<std::shared_ptr<FileMetaData>>& metadatas,\r\n                             arrow::io::OutputStream* out);\r\n```\r\nDoes someone want to write it (I mean, I can do it, but it would be good for other people to get some experience with the Parquet codebase)? We also need to make sure that the file path is being set in the metadata, otherwise the `_metadata` file is useless"
+        },
+        {
+            "created_at": "2019-05-16T19:28:29.249Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16841668) by Joris Van den Bossche (jorisvandenbossche):*\n> We also need to make sure that the file path is being set in the metadata, otherwise the `_metadata` file is useless\r\n\r\nIndeed, I opened ARROW-5349 for that earlier today. I assume this is separate from the `WriteMultipleMetadata` you mention above, as it is the user (eg Dask) who knows where the files that correspond to the different metadata objects are put?\r\n\r\n"
+        },
+        {
+            "created_at": "2019-05-27T17:47:31.694Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16849106) by Wes McKinney (wesm):*\nProbably the most flexible thing for writing would be a function that appends a metadata to an OutputStream\r\n\r\n```java\n\r\nStatus AppendFileMetaData(const FileMetaData& metadata, arrow::io::OutputStream* out);\r\n```\r\n\r\nCorrespondingly, please also write a function that parses a multiple-metadata file like\r\n\r\n```Java\n\r\nStatus ParseMetaDataFile(arrow::io::InputStream* input, std::vector<std::shared_ptr<FileMetaData>>* out);\r\n```\r\n\r\nLastly, AFAIK we are not able to instantiate `ParquetFileReader` given previously-read `FileMetaData` \u2013 probably can do that in a separate JIRA"
+        },
+        {
+            "created_at": "2019-05-27T18:17:25.006Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16849118) by Joris Van den Bossche (jorisvandenbossche):*\n> Correspondingly, please also write a function that parses a multiple-metadata file like\r\n\r\nWe already have `read_metadata` (on the python side, it actually uses the normal parquet file reading), that does read such `_metadata` files. Are you still looking for something else?\r\n\r\nTo my understanding, it is not really a \"multiple-metadata file\", but a file with a single FileMetadata where the row groups of all metadata objects are combined."
+        },
+        {
+            "created_at": "2019-05-27T20:09:48.173Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16849176) by Wes McKinney (wesm):*\nI see, that was not clear to me. So what we actually need is a `FileMetaData::AppendRowGroups` method (that merges one metadata into another), is that correct?"
+        },
+        {
+            "created_at": "2019-05-27T20:29:17.134Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16849187) by Joris Van den Bossche (jorisvandenbossche):*\nI think so yes (at least when reading, it returns a single FileMetadata instance with all row groups).\r\n\r\nBesides the \"append\" operation, we also need a \"write\" method for such FileMetadata instance (I suppose this only needs some work on the python/cython side, since this is just writing a parquet file without actual data, although didn't check C++). There is currently a `write_metadata`, but that requires an _arrow_ schema, and not a _parquet_ schema. \r\nRegarding the public API, I suppose we can modify `write_metadata` to also accept a parquet schema, to not have to add an extra function. But it will need some more changes under the hood in `ParquetWriter` to be able to accept a given FileMetadata object instead of creating one based on the data it is writing."
+        },
+        {
+            "created_at": "2019-05-31T19:55:30.613Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16853378) by Rick Zamora (rjzamora):*\nI submitted a PR to perform the metadata aggregation and metadata-only file write (<https://github.com/apache/arrow/pull/4405>).\u00a0 I just syncronized with the master branch, so hopefully I can address any suggestions/concerns people have relatively quickly.\r\n\r\nAre there any additional features that\u00a0we need for \"utilizing\"\u00a0the metadata file within arrow.parque itself?\u00a0 I believe the existing read_metadata function should be sufficient for the needs of dask."
+        },
+        {
+            "created_at": "2019-05-31T20:03:26.240Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16853383) by Wes McKinney (wesm):*\nWell, one issue is how to use the _metadata file to read data from the files it lists within without having to parse those files' respective metadata again. I think this may require a little bit of refactoring in the Parquet C++ library"
+        },
+        {
+            "created_at": "2019-05-31T21:14:05.757Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16853430) by Rick Zamora (rjzamora):*\nRight, I see what you are saying.\u00a0 You can pass in a list of files to\u00a0pq.ParquetDataset\u00a0(obtained by calling\u00a0read_metadata on the metadata file), but the footer metadata will be unecessarily parsed a second time.\u00a0\u00a0\u00a0For dask, this is probably not much of an issue, because each worker will only be dealing with a subset of the global dataset. In many other cases\u00a0this is clearly undesireable.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-05-31T21:28:04.566Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16853433) by Wes McKinney (wesm):*\nYes. I don't think it is necessary to resolve all of this in a single patch, so we can open a follow-up JIRA to implement the optimization to read a row group given a _metadata file. There is some other complexity there such as how to open the filepath (you need a FileSystem handle \u2013 see the filesystem API work that is in process)"
+        },
+        {
+            "created_at": "2019-06-06T21:38:32.663Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1983?focusedCommentId=16858116) by Wes McKinney (wesm):*\nIssue resolved by pull request 4405\n<https://github.com/apache/arrow/pull/4405>"
+        }
+    ]
+}

@@ -1,0 +1,30 @@
+{
+    "issue": {
+        "title": "Direct (individualized) access to definition levels, repetition levels, and numeric data of a column",
+        "body": "***Note**: This issue was originally created as [ARROW-14770](https://issues.apache.org/jira/browse/ARROW-14770). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIt would be useful to have more low-level access to the three components of a Parquet column in Python: the definition levels, the repetition levels, and the numeric data, {_}individually{_}.\r\n\r\nThe particular use-case we have in Awkward Array is that users will sometimes lazily read an array of lists of structs without reading any of the fields of those structs. To build the data structure, we need the lengths of the lists independently of the columns (which users can then use in functions like `{}ak.num{`}; the number of structs without their field values is useful information).\r\n\r\nWhat we're doing right now is reading a column, converting it to Arrow (`{}pa.Array{`}), and getting the list lengths from that Arrow array. We have been using the schema to try to pick the smallest column (booleans are best!), but that's because we really just want the definition and repetition levels without the numeric data.\r\n\r\nI've heard that the Parquet metadata includes offsets to select just the definition levels, just the repetition levels, or just the numeric data (pre-decompression?). Exposing those in Python as `pa.Buffer` objects would be ideal.\r\n\r\nBeyond our use case, such a feature could also help with wide structs in lists: all of the non-nullable fields of the struct would share the same definition and repetition levels, so they don't need to be re-read. For that use-case, the ability to pick out definition, repetition, and numeric data separately would still be useful, but the purpose would be to read the numeric data without the structural integers (opposite of ours).\r\n\r\nThe desired interface would be like `{}ParquetFile.read_row_group{`}, but would return one, two, or three `pa.Buffer` objects depending on three boolean arguments, `{}definition{`}, `{}repetition{`}, and `{}numeric{`}. The `pa.Buffer` would be unpacked, with all run-length encodings and fixed-width encodings converted into integers of at least one byte each. It may make more sense for the output to be `{}np.ndarray{`}, to carry `dtype` information if that can depend on the maximum level (though levels larger than 255 are likely rare!). This information must be available at some level in Arrow's C++ code; the request is to expose it to Python.\r\n\r\nI've labeled this minor because it is for optimizations, but it would be really nice to have!",
+        "created_at": "2021-11-18T17:31:40.000Z",
+        "updated_at": "2021-11-22T21:30:30.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Parquet",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-18T17:39:09.123Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14770?focusedCommentId=17446064) by Martin Durant (mdurant):*\nQuick comment: the separate file offsets to the three components is explicitly given in V2 pages, where only the data portion is compressed. For V1, the components are compressed together, and the lengths of the components is only known after decompression, although that decompression could be streamed."
+        },
+        {
+            "created_at": "2021-11-22T13:40:49.952Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14770?focusedCommentId=17447408) by Joris Van den Bossche (jorisvandenbossche):*\ncc `[~emkornfield]`"
+        },
+        {
+            "created_at": "2021-11-22T21:30:30.910Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14770?focusedCommentId=17447632) by Micah Kornfield (emkornfield):*\nFWIW writing V2 data pages isn't production ready in arrow.\u00a0 There is at least one open bug for incorrect statistics and we don't align pages to row boundaries which I believe is a requirement for V2.\u00a0 My understanding is that V2 is not widely used in general, and we certainly haven't put a lot of effort into optimizing the read paths either.\r\n\r\n\u00a0\r\n\r\nIn regards to addressing the specific issue, would a higher level API that returned list lengths be more appropriate?\u00a0\r\n\r\nI think exposing the \"values\" column as a raw buffer is not something I would really like to support, because while it is easy to get to a representation that uses would agree with numeric types, it is a little bit less straight-forward to string/byte types.\u00a0 \u00a0For only processing the repetition/levels and definition levels it would take some refactoring to isolate these components, but there still might be a performance win if we decode and ignore the values buffer (which would in turn allow the use of existing parquet C++ APIs).\u00a0 \u00a0\r\n\r\n\u00a0\r\n\r\n`[~jpivarski]` is this something you would like to contribute, I can give you some code pointers.\u00a0"
+        }
+    ]
+}

@@ -1,0 +1,46 @@
+{
+    "issue": {
+        "title": "[C++] Mode kernel incorrect for boolean inputs",
+        "body": "***Note**: This issue was originally created as [ARROW-17096](https://issues.apache.org/jira/browse/ARROW-17096). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n```java\n\r\nIn [1]: import pyarrow.compute as pc\r\n\r\nIn [2]: import pyarrow as pa\r\n\r\nIn [3]: pa.__version__\r\nOut[3]: '8.0.0'\r\n\r\nIn [4]: pc.mode(pa.array([True, True]))\r\n# Correct\r\nOut[4]:\r\n<pyarrow.lib.StructArray object at 0x1266d5c60>\r\n-- is_valid: all not null\r\n-- child 0 type: bool\r\n\u00a0 [\r\n\u00a0 \u00a0 true\r\n\u00a0 ]\r\n-- child 1 type: int64\r\n\u00a0 [\r\n\u00a0 \u00a0 2\r\n\u00a0 ]\r\n\r\n# Incorrect\r\nIn [5]: pc.mode(pa.array([True, False]), 2)\r\nOut[5]:\r\n<pyarrow.lib.StructArray object at 0x1262110c0>\r\n-- is_valid: all not null\r\n-- child 0 type: bool\r\n\u00a0 [\r\n\u00a0 \u00a0 false, # should be true\r\n\u00a0 \u00a0 false\r\n\u00a0 ]\r\n-- child 1 type: int64\r\n\u00a0 [\r\n\u00a0 \u00a0 1,\r\n\u00a0 \u00a0 1\r\n\u00a0 ] \n```",
+        "created_at": "2022-07-15T19:58:42.000Z",
+        "updated_at": "2022-07-20T06:51:49.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-07-19T12:05:23.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-07-16T02:17:06.727Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17096?focusedCommentId=17567436) by Yibo Cai (yibocai):*\n{~~}Confirmed this bug also happens in C++{~~}, thanks for the report `[~moeschke]`.\r\nC++ is okay."
+        },
+        {
+            "created_at": "2022-07-18T08:09:23.386Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17096?focusedCommentId=17567865) by Yibo Cai (yibocai):*\ncc `[~jorisvandenbossche]` , `[~apitrou]` \u00a0for comments.\r\n\r\nIn below test, the printed result **[false, false]** is wrong, but the underlying buffer is correct **[false, true]** (00, 01).\r\nFiddling the buffer directly, looks pyarrow is treating the buffer as bitmap (one bit per value), not one byte per value like C++ compute kernel.\r\n\r\n```python\n\r\nIn [1]: import pyarrow.compute as pc\r\n\r\nIn [2]: import pyarrow as pa\r\n\r\nIn [3]: m = pc.mode(pa.array([True, False]), 2)\r\n\r\nIn [4]: m.field(0)\r\nOut[4: \r\n<pyarrow.lib.BooleanArray object at 0x7fc50da06460>\r\n[\r\n  false,\r\n  false\r\n]\r\n\r\nIn [5]: m.field(0).buffers()[1].to_pybytes()\r\nOut[5]: b'\\x00\\x01'\r\n```"
+        },
+        {
+            "created_at": "2022-07-18T08:13:24.194Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17096?focusedCommentId=17567872) by Antoine Pitrou (apitrou):*\nHmm, this is weird. PyArrow doesn't do any pretty-printing on its own, it delegates to Arrow C++."
+        },
+        {
+            "created_at": "2022-07-18T08:17:34.523Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17096?focusedCommentId=17567874) by Antoine Pitrou (apitrou):*\nI think this is a C++ bug. In `aggregate_test.cc`, this line is incorrect for boolean inputs:\r\nhttps://github.com/apache/arrow/blob/master/cpp/src/arrow/compute/kernels/aggregate_test.cc#L2541\r\n\r\nThere should be a `CheckModes` specialization for bools."
+        },
+        {
+            "created_at": "2022-07-18T08:19:37.603Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17096?focusedCommentId=17567877) by Joris Van den Bossche (jorisvandenbossche):*\n>  Fiddling the buffer directly, looks pyarrow is treating the buffer as bitmap (one bit per value), not one byte per value like C++ compute kernel.\r\n\r\nIsn't that then a bug in C++? I thought a BooleanArray is expected to use one bit per value (I wanted to point to the format docs to prove this, but it's actually not very explicitly said, only in a sidenote in the first paragraph at https://arrow.apache.org/docs/format/Columnar.html#fixed-size-primitive-layout, and also Schema.fbs doesn't mention it)"
+        },
+        {
+            "created_at": "2022-07-18T08:28:22.062Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17096?focusedCommentId=17567883) by Yibo Cai (yibocai):*\nAh, it's indeed a bug in C++."
+        },
+        {
+            "created_at": "2022-07-19T12:05:23.419Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17096?focusedCommentId=17568508) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 13646\n<https://github.com/apache/arrow/pull/13646>"
+        }
+    ]
+}

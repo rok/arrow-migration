@@ -1,0 +1,109 @@
+{
+    "issue": {
+        "title": "[C++][Flight] Symbol lookup error in tests with conda-forge g++",
+        "body": "***Note**: This issue was originally created as [ARROW-16520](https://issues.apache.org/jira/browse/ARROW-16520). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen building Arrow with conda-forge `g\\+\\+`, I get the following errors in the Flight tests. This did not seem to happen with `clang\\+\\+`.\r\n```Java\n\r\n29/69 Test #51: arrow-flight-internals-test ..............***Failed    0.18 sec\r\nRunning arrow-flight-internals-test, redirecting output into /home/antoine/arrow/dev/cpp/build-test/build/test-logs/arrow-flight-internals-test.txt (attempt 1/1)\r\n/home/antoine/arrow/dev/cpp/build-test/debug/arrow-flight-internals-test: symbol lookup error: /home/antoine/miniconda3/envs/pyarrow/lib/libarrow_flight.so.900: undefined symbol: google::protobuf::internal::InternalMetadata::~InternalMetadata()\r\n~/arrow/dev/cpp/build-test/src/arrow/flight\r\n\r\n      Start 55: arrow-ipc-json-simple-test\r\n30/69 Test #52: arrow-flight-test ........................***Failed    0.16 sec\r\nRunning arrow-flight-test, redirecting output into /home/antoine/arrow/dev/cpp/build-test/build/test-logs/arrow-flight-test.txt (attempt 1/1)\r\n/home/antoine/arrow/dev/cpp/build-test/debug/arrow-flight-test: symbol lookup error: /home/antoine/miniconda3/envs/pyarrow/lib/libarrow_flight.so.900: undefined symbol: google::protobuf::internal::InternalMetadata::~InternalMetadata()\r\n~/arrow/dev/cpp/build-test/src/arrow/flight\r\n\r\n      Start 56: arrow-ipc-read-write-test\r\n31/69 Test #53: arrow-flight-sql-test ....................***Failed    0.17 sec\r\nRunning arrow-flight-sql-test, redirecting output into /home/antoine/arrow/dev/cpp/build-test/build/test-logs/arrow-flight-sql-test.txt (attempt 1/1)\r\n/home/antoine/arrow/dev/cpp/build-test/debug/arrow-flight-sql-test: symbol lookup error: /home/antoine/miniconda3/envs/pyarrow/lib/libarrow_flight.so.900: undefined symbol: google::protobuf::internal::InternalMetadata::~InternalMetadata()\r\n~/arrow/dev/cpp/build-test/src/arrow/flight/sql\r\n\r\n```\r\n",
+        "created_at": "2022-05-10T16:00:04.000Z",
+        "updated_at": "2022-05-11T13:23:56.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: FlightRPC",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-05-10T16:00:32.009Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534433) by Antoine Pitrou (apitrou):*\ncc `[~uwe]` `[~kou]` `[~lidavidm]`  `[~mariusvniekerk]`"
+        },
+        {
+            "created_at": "2022-05-10T20:39:19.134Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534575) by Kouhei Sutou (kou):*\nCould you show `ldd /home/antoine/miniconda3/envs/pyarrow/lib/libarrow_flight.so.900 | grep proto` and `strings ${PATH_TO_LINKED_LIBPROTOBUF_SO} | grep InternalMetadata`?"
+        },
+        {
+            "created_at": "2022-05-11T09:59:17.312Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534796) by Antoine Pitrou (apitrou):*\n```Java\n\r\n$ ldd /home/antoine/miniconda3/envs/pyarrow/lib/libarrow_flight.so.900 | rg proto\r\n\tlibprotobuf.so.31 => /home/antoine/miniconda3/envs/pyarrow/lib/libprotobuf.so.31 (0x00007fe839ab8000)\r\n```\r\n\r\n```Java\n\r\n$ nm --demangle /home/antoine/miniconda3/envs/pyarrow/lib/libprotobuf.so.31 | rg InternalMetadata\r\n[ ... ]\r\n00000000000c3890 t google::protobuf::internal::InternalMetadata::~InternalMetadata()\r\n00000000000c3890 t google::protobuf::internal::InternalMetadata::~InternalMetadata()\r\n[ ... ]\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-05-11T10:00:29.615Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534797) by Antoine Pitrou (apitrou):*\nAlso, without demangling:\r\n```Java\n\r\n$ ./build-test/debug/arrow-flight-test \r\n./build-test/debug/arrow-flight-test: symbol lookup error: /home/antoine/miniconda3/envs/pyarrow/lib/libarrow_flight.so.900: undefined symbol: _ZN6google8protobuf8internal16InternalMetadataD1Ev\r\n```\r\n\r\n```Java\n\r\n$ nm /home/antoine/miniconda3/envs/pyarrow/lib/libprotobuf.so.31 | rg _ZN6google8protobuf8internal16InternalMetadataD1Ev\r\n00000000000c3890 t _ZN6google8protobuf8internal16InternalMetadataD1Ev\r\n```"
+        },
+        {
+            "created_at": "2022-05-11T10:28:55.167Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534808) by Antoine Pitrou (apitrou):*\nNote the lowercase \"t\" in the `nm` output, which means it's a local symbol, probably not available for dynamic linking.\r\nIndeed if I pass `\\-\\-dynamic` or `\\-\\-extern-only` to `nm`, the symbol isn't displayed."
+        },
+        {
+            "created_at": "2022-05-11T10:33:54.800Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534809) by Antoine Pitrou (apitrou):*\nMight this be related to our zero-copy protobuf hacks? `[~lidavidm]`"
+        },
+        {
+            "created_at": "2022-05-11T11:08:24.917Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534819) by Antoine Pitrou (apitrou):*\nOk, I can tell now that this fails with libprotobuf 3.20, but works with 3.19.\r\n\r\nI see the following change in the `InternalMetadata` destructor:\r\n- 3.19:\n  ```c++\n  \n    ~InternalMetadata() {\n      if (HasMessageOwnedArenaTag()) {\n        delete arena();\n      }\n    }\n  ```\n  \n- 3.20:\n  {code:c++}\n#if defined(NDEBUG) || defined(_MSC_VER)\r\n  ~InternalMetadata() {\r\n    if (HasMessageOwnedArenaTag()) {\r\n      delete reinterpret_cast<Arena\\*>(ptr_ - kMessageOwnedArenaTagMask);\r\n    }\r\n  }\r\n#else\r\n  ~InternalMetadata();\r\n#endif\r\n{code}"
+        },
+        {
+            "created_at": "2022-05-11T11:12:53.423Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534821) by Antoine Pitrou (apitrou):*\nWith 3.19:\r\n```Java\n\r\n$ nm --demangle --undefined-only build-test/debug/libarrow_flight.so | rg InternalMetadata\r\n$\r\n```\r\n\r\nWith 3.20:\r\n```Java\n\r\n$ nm --demangle --undefined-only build-test/debug/libarrow_flight.so | rg InternalMetadata\r\n                 U google::protobuf::internal::InternalMetadata::~InternalMetadata()\r\n$\r\n```"
+        },
+        {
+            "created_at": "2022-05-11T11:25:22.495Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534827) by Antoine Pitrou (apitrou):*\nHmm, so I tried to build protobuf 3.20.1 from source...\r\nIf I use the standard Ubuntu 20.04 build tools, the symbol is exported (see uppercase \"W\") by the generated `libprotobuf.so`:\r\n```Java\n\r\n$ nm --demangle ./src/.libs/libprotobuf.so | rg ~InternalMetadata\r\n00000000000f8e10 W google::protobuf::internal::InternalMetadata::~InternalMetadata()\r\n00000000000f8e10 W google::protobuf::internal::InternalMetadata::~InternalMetadata()\r\n```\r\n\r\nHowever, if I use the conda-forge build tools, the symbol is local (see lowercase \"t\"):\r\n```Java\n\r\n$ nm --demangle ./src/.libs/libprotobuf.so | rg ~InternalMetadata\r\n00000000000c3870 t google::protobuf::internal::InternalMetadata::~InternalMetadata()\r\n00000000000c3870 t google::protobuf::internal::InternalMetadata::~InternalMetadata()\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-05-11T11:26:17.815Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534828) by Antoine Pitrou (apitrou):*\nMeaning that the `~InternalMetadata()` change is the trigger but not the actual cause of the issue."
+        },
+        {
+            "created_at": "2022-05-11T11:28:03.623Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534830) by Antoine Pitrou (apitrou):*\nI'll also note that protobuf has very simple linker scripts that export any symbol containing the string \"google\", so that shouldn't be a problem:\r\nhttps://github.com/protocolbuffers/protobuf/blob/main/src/libprotobuf.map"
+        },
+        {
+            "created_at": "2022-05-11T11:40:41.462Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534835) by Antoine Pitrou (apitrou):*\nOk, I've determined that the culprit is the `-fvisibility-inlines-hidden` that conda-forge sets in `CXXFLAGS`. If I remove that option before compiling protobuf, the symbol is exported by the .so file."
+        },
+        {
+            "created_at": "2022-05-11T11:54:35.541Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534842) by Antoine Pitrou (apitrou):*\nI've reported https://github.com/conda-forge/ctng-compiler-activation-feedstock/issues/73"
+        },
+        {
+            "created_at": "2022-05-11T12:21:35.787Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534853) by Uwe Korn (uwe):*\nI'm a bit confused that the error only shows up at runtime. Shouldn't it already trigger during linkage?"
+        },
+        {
+            "created_at": "2022-05-11T12:22:59.709Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534855) by Antoine Pitrou (apitrou):*\nI have no idea why it doesn't trigger during linkage. Perhaps the fact that the symbol **is** defined inside the .so, but not dynamically exported (it's a local/hidden symbol), is why the error only happens at runtime?"
+        },
+        {
+            "created_at": "2022-05-11T12:26:21.141Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534861) by Uwe Korn (uwe):*\nNo that should have triggered it already. My feeling is currently that you see different versions of `libprotobuf` in your setup."
+        },
+        {
+            "created_at": "2022-05-11T12:31:27.262Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534863) by Antoine Pitrou (apitrou):*\nIf I force-load the protobuf 3.20.1 I compiled without `-fvisibility-inlines-hidden`, it works:\r\n```Java\n\r\nLD_PRELOAD=/home/antoine/protobuf/src/.libs/libprotobuf.so ./build-test/debug/arrow-flight-test\r\nRunning main() from /home/antoine/arrow/dev/cpp/build-test/googletest_ep-prefix/src/googletest_ep/googletest/src/gtest_main.cc\r\n[==========] Running 84 tests from 18 test suites.\r\n[----------] Global test environment set-up.\r\n[----------] 5 tests from GrpcConnectivityTest\r\n\r\n[....]\r\n\r\n\r\n[----------] Global test environment tear-down\r\n[==========] 84 tests from 18 test suites ran. (1012 ms total)\r\n[  PASSED  ] 81 tests.\r\n[  SKIPPED ] 3 tests, listed below:\r\n[  SKIPPED ] GrpcCudaDataTest.TestDoGet\r\n[  SKIPPED ] GrpcCudaDataTest.TestDoPut\r\n[  SKIPPED ] GrpcCudaDataTest.TestDoExchange\r\n```\r\n\r\n"
+        },
+        {
+            "created_at": "2022-05-11T12:33:34.583Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534864) by Antoine Pitrou (apitrou):*\nIf I force-load protobuf 3.20.1 from conda-forge, it fails:\r\n```Java\n\r\n$ LD_PRELOAD=/home/antoine/miniconda3/pkgs/libprotobuf-3.20.1-h6239696_0/lib/libprotobuf.so.31 ./build-test/debug/arrow-flight-test \r\n./build-test/debug/arrow-flight-test: symbol lookup error: /home/antoine/miniconda3/envs/pyarrow/lib/libarrow_flight.so.900: undefined symbol: _ZN6google8protobuf8internal16InternalMetadataD1Ev\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-05-11T12:34:03.850Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534866) by Uwe Korn (uwe):*\nStill trying to build a minimal reproducer for this: https://gist.github.com/xhochy/0ec41c962e669d90026c671105aebb5f This breaks independently of `-fvisibility-inlines-hidden`"
+        },
+        {
+            "created_at": "2022-05-11T12:37:22.381Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534868) by Antoine Pitrou (apitrou):*\nTry conditionally defining `Test::~Test()` in `lib.cpp`?\r\n```c++\n\r\n#include \"lib.h\"\r\n\r\nTest::Test() {\r\n\tthis->ptr = new int(8);\r\n}\r\n#ifndef LIB\r\nTest::~Test() { delete this->ptr; }\r\n#endif\r\n```"
+        },
+        {
+            "created_at": "2022-05-11T12:54:31.418Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534877) by Uwe Korn (uwe):*\nThis won't make a difference as `lib.cpp` isn't used for the build of `main`."
+        },
+        {
+            "created_at": "2022-05-11T13:02:34.623Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534886) by Antoine Pitrou (apitrou):*\nBut it's used for building the shared library."
+        },
+        {
+            "created_at": "2022-05-11T13:23:56.064Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16520?focusedCommentId=17534900) by Antoine Pitrou (apitrou):*\nHere is a reproducer for me: <https://gist.github.com/pitrou/1c892d1c42bd6ece9b68a9eb015b76c8>"
+        }
+    ]
+}

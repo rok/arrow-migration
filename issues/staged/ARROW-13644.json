@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[C++] Create LruCache that works with futures",
+        "body": "***Note**: This issue was originally created as [ARROW-13644](https://issues.apache.org/jira/browse/ARROW-13644). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe dataset writer needs an LRU cache to keep track of open files so that it can respect a \"max open files\" property (see ARROW-12321).  A synchronous LruCache implementation already exists but on eviction from the cache we need to wait until all pending writes have completed before we evict the item and open a new file.  This ticket is to create an AsyncLruCache which will allow the creation of items and the eviction of items to be asynchronous.",
+        "created_at": "2021-08-17T08:12:03.000Z",
+        "updated_at": "2021-08-18T03:38:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2021-08-18T03:38:25.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-17T08:18:02.536Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13644?focusedCommentId=17400233) by Antoine Pitrou (apitrou):*\nWhy do you need a LRU cache for this? A semaphore-like facility should be sufficient."
+        },
+        {
+            "created_at": "2021-08-17T08:22:19.350Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13644?focusedCommentId=17400238) by Weston Pace (westonpace):*\nA semaphore will allow me to control how many files I'm writing to at once but not how many files I have open (whether I am writing to them or not).  I need to close the old files so that the file handle is returned to the OS.  That means closing the writer and starting a new file later if more data comes in for that file."
+        },
+        {
+            "created_at": "2021-08-17T08:23:26.883Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13644?focusedCommentId=17400239) by Antoine Pitrou (apitrou):*\n> A semaphore will allow me to control how many files I'm writing to at once but not how many files I have open\r\n\r\nWhy not?"
+        },
+        {
+            "created_at": "2021-08-17T08:28:52.893Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13644?focusedCommentId=17400247) by Weston Pace (westonpace):*\nI guess I'm not sure I follow.  Let's assume the user only wants two files open (obviously it should never be this low).  A batch comes in that is partitioned on files X and Y.  Then a batch comes in that is partitioned on files X and Z.  I want to close file Y before I open file Z.  With a semaphore I have something like...\r\n\r\n\r\n```python\n\r\ndef queue_write(f, batch):\r\n# actual write\r\n  release(1)\r\n\r\nfor f, batch in files:\r\n  acquire(1)\r\n  queue_write(f, batch)\r\n```\r\n\r\nIt seems to me that the semaphore would just block indefinitely.  File Y will not close itself, even when it finishes writing (files are held open in case more data comes for that file)."
+        },
+        {
+            "created_at": "2021-08-17T09:24:10.401Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13644?focusedCommentId=17400281) by Antoine Pitrou (apitrou):*\nYou would acquire the semaphore when opening a file and release it when closing the file. I'm not sure I understand your use case?"
+        },
+        {
+            "created_at": "2021-08-17T09:25:11.664Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13644?focusedCommentId=17400283) by Antoine Pitrou (apitrou):*\nOf course, you would still need an async semaphore (one where Acquire() / Lock() returns a Future). But that's much simpler than an async LRU cache."
+        },
+        {
+            "created_at": "2021-08-17T10:11:19.841Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13644?focusedCommentId=17400304) by Weston Pace (westonpace):*\n> You would acquire the semaphore when opening a file and release it when closing the file\r\n\r\nWhen writing a dataset we only close the files at the very end when all data has been processed.  There is no way to know ahead of time when we are finished working with a file.  The very last batch of a 50GB dataset might write to the same file that the first batch did.\r\n\r\nThe current implementation handles this by leaving all files open for the entire scan.  That leads to running out of file handles.  So as a compromise we can set a limit to how many files we have open.  When we reach the limit we have to close one of the current open files.  This might mean we create more files than strictly necessary.  LRU is one way to handle this.\r\n\r\nThis compromise won't always work well.  Maybe it will help to consider a case where LRU performs poorly.  If a dataset looks something like...\r\n\r\n```Java\n\r\npart_col, val\r\n1,0\r\n2,1\r\n3,2\r\n4,3\r\n5,4\r\n1,5\r\n2,6\r\n3,7\r\n4,8\r\n5,9\r\n1,10\r\n2,11\r\n3,12\r\n4,13\r\n5,14\r\n```\r\n\r\nIf we partition on `part_col` with a batch size of 5 we will get three batches and then if we don't do any limit on how many files we can have open then we end up with 5 files:\r\n\r\n```Java\n\r\npart_col=1/part-0.arrow\r\npart_col=2/part-1.arrow\r\npart_col=3/part-2.arrow\r\npart_col=4/part-3.arrow\r\npart_col=5/part-4.arrow\r\n```\r\n\r\nWe will open 5 files on the first batch and keep them open the entire read.  If we need to limit how many files we have open (let's say 3) then we need to figure something out.  With LRU we'd end up with 15 files...\r\n\r\n```Java\n\r\npart_col=1/part-0.arrow\r\npart_col=1/part-5.arrow\r\npart_col=1/part-10.arrow\r\npart_col=2/part-1.arrow\r\npart_col=2/part-6.arrow\r\n...\r\n```\r\n\r\nAnother way to handle it would be to sort the complete data by the partition column(s) but that would introduce a pipeline breaker.  Or we could close the file that has the most rows in it but that would require a priority queue which isn't really simpler."
+        },
+        {
+            "created_at": "2021-08-17T10:16:23.039Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13644?focusedCommentId=17400307) by Antoine Pitrou (apitrou):*\nThis assumes that your file format supports appending efficiently. This does not seem to be easily resolvable in the general case."
+        },
+        {
+            "created_at": "2021-08-17T10:25:01.395Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13644?focusedCommentId=17400312) by Weston Pace (westonpace):*\nI do not append.  I close the file and start a new file.  That 15 file \"worst case\" would be 15 files each with 1 row."
+        },
+        {
+            "created_at": "2021-08-17T10:32:47.517Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13644?focusedCommentId=17400315) by Antoine Pitrou (apitrou):*\nAh, I see. My mistake."
+        },
+        {
+            "created_at": "2021-08-18T03:38:25.481Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13644?focusedCommentId=17400744) by Weston Pace (westonpace):*\nAn LRU queue might be more efficient but mixing the LRU cache with the rest of the dataset writer code was becoming too tedious and I ended up backing away from this approach.  Instead, in the rare event we exceed the max # of open files, I simply do a linear search to find the file with the most rows and close that one (in hopes of minimizing the # of files created)."
+        }
+    ]
+}

@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "Static libarrow is missing vendored libdouble-conversion",
+        "body": "***Note**: This issue was originally created as [ARROW-4844](https://issues.apache.org/jira/browse/ARROW-4844). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen trying to statically link the R bindings to libarrow.a, I get linking errors which suggest that libdouble-conversion.a was not properly embedded in libarrow.a. This problem happens on both MacOS and Windows.\r\n\r\nHere is the arrow build log: https://ci.appveyor.com/project/jeroen/rtools-packages/builds/23015303/job/mtgl6rvfde502iu7\r\n\r\n\r\n```Java\n\r\nC:/rtools40/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/8.3.0/../../../../x86_64-w64-mingw32/bin/ld.exe: C:/rtools40/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/8.3.0/../../../../lib/libarrow.a(cast.cc.obj):(.text+0x1c77c): undefined reference to `double_conversion::StringToDoubleConverter::StringToDouble(char const*, int, int*) const'\r\nC:/rtools40/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/8.3.0/../../../../x86_64-w64-mingw32/bin/ld.exe: C:/rtools40/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/8.3.0/../../../../lib/libarrow.a(converter.cc.obj):(.text+0x5fda): undefined reference to `double_conversion::StringToDoubleConverter::StringToDouble(char const*, int, int*) const'\r\nC:/rtools40/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/8.3.0/../../../../x86_64-w64-mingw32/bin/ld.exe: C:/rtools40/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/8.3.0/../../../../lib/libarrow.a(converter.cc.obj):(.text+0x6097): undefined reference to `double_conversion::StringToDoubleConverter::StringToDouble(char const*, int, int*) const'\r\nC:/rtools40/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/8.3.0/../../../../x86_64-w64-mingw32/bin/ld.exe: C:/rtools40/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/8.3.0/../../../../lib/libarrow.a(converter.cc.obj):(.text+0x6589): undefined reference to `double_conversion::StringToDoubleConverter::StringToFloat(char const*, int, int*) const'\r\nC:/rtools40/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/8.3.0/../../../../x86_64-w64-mingw32/bin/ld.exe: C:/rtools40/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/8.3.0/../../../../lib/libarrow.a(converter.cc.obj):(.text+0x6647): undefined reference to `double_conversion::StringToDoubleConverter::StringToFloat(char const*, int, int*) const'\r\n```",
+        "created_at": "2019-03-12T18:21:07.000Z",
+        "updated_at": "2020-02-07T17:14:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-15T23:20:21.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-03-12T20:33:10.712Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4844?focusedCommentId=16790984) by Uwe Korn (uwe):*\n`[~jeroenooms]` This is the expected behaviour. I guess what you need for the R bindings is an optional to bundle ALL static dependencies of `libarrow.a` into it? For the Python wheels, we built `libarrow.so` with all static dependencies included and then set the RPATH of the Python modules to `$ORIGIN` to\u00a0always pick up the correct `libarrow.so`. If that would be possible for R, this would be a preferable solution from the build system side (and also from interop side as you then could use the same `libarrow.so` for Python and R)."
+        },
+        {
+            "created_at": "2019-03-12T20:44:24.384Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4844?focusedCommentId=16790990) by Jeroen (jeroenooms):*\nHmm I don't understand. How are bindings supposed to use `libarrow.a` if it depends on internal vendored libraries which are not shipped with the installation? There is no way to link to this?\r\n\r\nIt seems to me you either need to include the internal libdouble-conversion object files into `libarrow.a`, or alternatively ship libdouble-conversion.a along with libarrow.a in the installation (perhaps rename to libarrow_double-conversion.a) and update arrow.pc to link with \"-larrow -ldouble-conversion\"\r\n\r\nShared libs (dll files) are not permitted in R so we need a complete static build of libarrow."
+        },
+        {
+            "created_at": "2019-03-12T21:07:03.525Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4844?focusedCommentId=16791011) by Uwe Korn (uwe):*\nTo solve this, it is probably best to build the `libarrow.a` for R then with `ARROW_DEPENDENCY_SOURCE=BUNDLED`\u00a0(see <https://github.com/apache/arrow/pull/3688)>\u00a0and add a new flag `ARROW_WHOLE_ARCHIVE`\u00a0that adds `--whole-archive` on the linker. I can have a look after 3688 is merged."
+        },
+        {
+            "created_at": "2019-03-12T22:41:30.092Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4844?focusedCommentId=16791069) by Jeroen (jeroenooms):*\nOK thank you. FWIW: I was able to make the R bindings work by building an external libdouble-conversion, and then rebuilding libarrow using this external library by setting  -DDOUBLE_CONVERSION_HOME. By avoiding the vendored library, I can now statically link against libarrow by also including `-ldouble-conversion`. So I have a workaround.\r\n\r\nStill, I do think that when arrow does get built with vendored libs, those should be shipped one way or another. Otherwise there is no way to link with the resulting libarrow library."
+        },
+        {
+            "created_at": "2019-03-13T04:30:49.763Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4844?focusedCommentId=16791283) by Wes McKinney (wesm):*\n`[~jeroenooms]` the vendoring in the build system right now is oriented around producing dependency-free shared libraries. If you are static linking `libarrow.a` the expectation is that you are managing your own library toolchain and providing all transitive dependencies (I think this is what HP Vertica is doing for example). With the CMake refactor that Uwe is working on we can arrange so that the build system refuses to vendor anything at all. Once the CMake refactor lands we should document this aspect of the build system better so it's clear what static linkers need to do to use `libarrow.a`"
+        },
+        {
+            "created_at": "2019-03-30T12:10:10.042Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4844?focusedCommentId=16805787) by Jeroen (jeroenooms):*\nFor example opencv ships the vendored static libs in a special dir lib/opencv4/3rdparty. Thereby we can statically link to the library, and the vendored libs won't conflict with anything else on the system. I think that is more user friendly than restricting static builds by \"refusing to vendor anything at all\".\r\n \r\n```Java\n\r\n[MSYS2 CI] mingw-w64-opencv: Checking Binaries\r\n./pkg/mingw-w64-i686-opencv/mingw32/bin/opencv_annotation.exe\r\n./pkg/mingw-w64-i686-opencv/mingw32/bin/opencv_interactive-calibration.exe\r\n./pkg/mingw-w64-i686-opencv/mingw32/bin/opencv_version.exe\r\n./pkg/mingw-w64-i686-opencv/mingw32/bin/opencv_version_win32.exe\r\n./pkg/mingw-w64-i686-opencv/mingw32/bin/opencv_visualisation.exe\r\n./pkg/mingw-w64-i686-opencv/mingw32/lib/libopencv_calib3d.a\r\n./pkg/mingw-w64-i686-opencv/mingw32/lib/libopencv_core.a\r\n./pkg/mingw-w64-i686-opencv/mingw32/lib/libopencv_features2d.a\r\n./pkg/mingw-w64-i686-opencv/mingw32/lib/libopencv_flann.a\r\n./pkg/mingw-w64-i686-opencv/mingw32/lib/libopencv_gapi.a\r\n./pkg/mingw-w64-i686-opencv/mingw32/lib/libopencv_highgui.a\r\n./pkg/mingw-w64-i686-opencv/mingw32/lib/libopencv_imgcodecs.a\r\n./pkg/mingw-w64-i686-opencv/mingw32/lib/libopencv_imgproc.a\r\n./pkg/mingw-w64-i686-opencv/mingw32/lib/libopencv_ml.a\r\n./pkg/mingw-w64-i686-opencv/mingw32/lib/libopencv_objdetect.a\r\n./pkg/mingw-w64-i686-opencv/mingw32/lib/libopencv_photo.a\r\n./pkg/mingw-w64-i686-opencv/mingw32/lib/libopencv_stitching.a\r\n./pkg/mingw-w64-i686-opencv/mingw32/lib/libopencv_video.a\r\n./pkg/mingw-w64-i686-opencv/mingw32/lib/libopencv_videoio.a\r\n./pkg/mingw-w64-i686-opencv/mingw32/lib/opencv4/3rdparty/libade.a\r\n./pkg/mingw-w64-i686-opencv/mingw32/lib/opencv4/3rdparty/libquirc.a\r\n./pkg/mingw-w64-i686-opencv/mingw32/lib/pkgconfig/opencv4.pc\r\n```"
+        },
+        {
+            "created_at": "2019-08-15T23:20:21.482Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4844?focusedCommentId=16908543) by Wes McKinney (wesm):*\nIf I'm not mistaken this issue is not causing problems anymore"
+        },
+        {
+            "created_at": "2019-08-15T23:23:12.926Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4844?focusedCommentId=16908545) by Jeroen (jeroenooms):*\nI'm working around it now by linking an external libdouble-conversion rather than the vendored one."
+        },
+        {
+            "created_at": "2019-08-15T23:27:08.309Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4844?focusedCommentId=16908546) by Wes McKinney (wesm):*\nIf you're statically linking that's the correct approach for right now. Shipping a complete vendored library toolchain is probably a fairly extensive project, so a volunteer is free to take up that work in the future. "
+        },
+        {
+            "created_at": "2019-08-15T23:46:07.150Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4844?focusedCommentId=16908555) by Wes McKinney (wesm):*\nI opened https://issues.apache.org/jira/browse/ARROW-6261 to be the umbrella issue for the project"
+        },
+        {
+            "created_at": "2020-02-07T17:14:03.880Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4844?focusedCommentId=17032535) by Neal Richardson (npr):*\nARROW-6633 definitively eliminated this issue for double-conversion by vendoring it. ARROW-6261 and some others will address the general issues around a bundled static build."
+        }
+    ]
+}

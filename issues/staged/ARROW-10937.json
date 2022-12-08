@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[Python] ArrowInvalid error on reading partitioned parquet files from S3 (arrow-2.0.0)",
+        "body": "***Note**: This issue was originally created as [ARROW-10937](https://issues.apache.org/jira/browse/ARROW-10937). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHello\r\n\r\nIt looks like pyarrow-2.0.0 could not read partitioned datasets from S3 buckets:\u00a0\r\n```java\n\r\nimport s3fs\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\nfilesystem = s3fs.S3FileSystem()\r\n\r\nd = pd.date_range('1990-01-01', freq='D', periods=10000)\r\nvals = np.random.randn(len(d), 4)\r\nx = pd.DataFrame(vals, index=d, columns=['A', 'B', 'C', 'D'])\r\nx['Year'] = x.index.year\r\n\r\ntable = pa.Table.from_pandas(x, preserve_index=True)\r\npq.write_to_dataset(table, root_path='s3://bucket/test_pyarrow.parquet', partition_cols=['Year'], filesystem=filesystem)\r\n```\r\n\u00a0\r\n\r\n\u00a0Now, reading it via pq.read_table:\r\n```java\n\r\npq.read_table('s3://bucket/test_pyarrow.parquet', filesystem=filesystem, use_pandas_metadata=True)\r\n```\r\nRaises exception:\u00a0\r\n```java\n\r\nArrowInvalid: GetFileInfo() yielded path 'bucket/test_pyarrow.parquet/Year=2017/ffcc136787cf46a18e8cc8f72958453f.parquet', which is outside base dir 's3://bucket/test_pyarrow.parquet'\r\n```\r\n\u00a0\r\n\r\nDirect read in pandas:\r\n```java\n\r\npd.read_parquet('s3://bucket/test_pyarrow.parquet')\n```\r\nreturns empty DataFrame.\r\n\r\n\u00a0\r\n\r\nThe issue does not exist in pyarrow-1.0.1",
+        "created_at": "2020-12-16T09:24:15.000Z",
+        "updated_at": "2021-06-22T00:30:56.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-06-22T00:30:56.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-12-16T12:59:12.586Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10937?focusedCommentId=17250288) by Antoine Pitrou (apitrou):*\ncc `[~jorisvandenbossche]`"
+        },
+        {
+            "created_at": "2020-12-16T16:18:58.559Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10937?focusedCommentId=17250423) by Joris Van den Bossche (jorisvandenbossche):*\nNot necessarily related, but ARROW-10264 has a similar error message.\r\n\r\n`[~Filimonov]` Thanks for the report! \r\nCould you try something like this:\r\n\r\n```Java\n\r\nfilesystem = s3fs.S3FileSystem()\r\n\r\nfrom pyarrow.fs import FileSelector, PyFileSystem, FSSpecHandler\r\nfs = PyFileSystem(FSSpecHandler(filesystem))\r\nselector = FileSelector(\"s3://bucket/test_pyarrow.parquet\", recursive=True)\r\nfs.get_file_info(selector)\r\n```\r\n\r\nand tell us what it returns?  \r\n(note I didn't try that code, so there might be a mistake in it, but think it _should_ work)\r\n\r\n"
+        },
+        {
+            "created_at": "2020-12-16T16:20:07.840Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10937?focusedCommentId=17250425) by Antoine Pitrou (apitrou):*\n`[~jorisvandenbossche]` didn't you fix this issue at some point?"
+        },
+        {
+            "created_at": "2020-12-16T16:22:49.086Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10937?focusedCommentId=17250428) by Joris Van den Bossche (jorisvandenbossche):*\nActually, `[~apitrou]`, I suppose the problem is that the `get_file_info` returns a string like \"bucket/test_pyarrow.parquet/...\", while the selector's base_dir is \"s3://bucket/test_pyarrow.parquet\". So the `RemoveAncestor` utility doesn't work, and we raise this error here: https://github.com/apache/arrow/blob/06ac7509adb14f3109e1089221fd5cb9a28c8519/cpp/src/arrow/dataset/discovery.cc#L188-L191\r\n\r\nWhat does the filesystem layer expect here us to do? Should the base_dir have been stripped of the \"s3://\" before creating a Selector of it?"
+        },
+        {
+            "created_at": "2020-12-16T16:31:20.087Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10937?focusedCommentId=17250436) by Antoine Pitrou (apitrou):*\n> Should the base_dir have been stripped of the \"s3://\" before creating a Selector of it?\r\n\r\nYes, it should, and I believe this was already fixed."
+        },
+        {
+            "created_at": "2020-12-16T19:19:58.981Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10937?focusedCommentId=17250558) by Joris Van den Bossche (jorisvandenbossche):*\n`[~Filimonov]` can you also try `pq.read_table('bucket/test_pyarrow.parquet', filesystem=filesystem, use_pandas_metadata=True)` (so without the \"s3://\" part in the file path) ?  \r\nSince you are passing a filesystem object, you don't need to pass a URI for the file path. This might actually be the reason of the failure, although I think we should solve it on the arrow side as well (or at least detect the case and give a nice error message, as otherwise many users will run into this without a good clue what they are doing wrong)."
+        },
+        {
+            "created_at": "2020-12-16T21:27:49.134Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10937?focusedCommentId=17250647) by Vladimir (Filimonov):*\nHello `[~jorisvandenbossche]`, `[~apitrou]`\r\n\r\nOn your questions:\r\n\r\n1. Calling \"fs.get_file_info\" returns the full list of files in both pyarrow-1.0.1 and 2.0.0:\r\n```java\n\r\n[<FileInfo for 'bucket/test_pyarrow.parquet/Year=1990/6583990469864a579b4a7a579b81bec4.parquet': type=FileType.File, size=20402>,\r\n <FileInfo for 'bucket/test_pyarrow.parquet/Year=1991/03ab50a5f5c9449bb10c8440358c7e35.parquet': type=FileType.File, size=20404>,\r\n...\n```\r\n2. Calling pq.read_table without prefix \"s3://\" prefix (\"pq.read_table('bucket/test_pyarrow.parquet', filesystem=filesystem, use_pandas_metadata=True)\" returns empty pyarrow.Table - also both in 1.0.1 and 2.0.0\r\n\r\n3. Correction to my original description: reading partitioned dataset via pandas as\u00a0\r\n```python\n\r\npd.read_parquet('s3://bucket/test_pyarrow.parquet')\n```\r\nreturns empty dataframe in **both** 1.0.1 and 2.0.0. If I supply \"filesystem\" argument to pd.read_parquet then 1.0.1 reads dataset properly, and 2.0.0 raises the same\u00a0ArrowInvalid exception.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-12-17T15:35:09.705Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10937?focusedCommentId=17251170) by Joris Van den Bossche (jorisvandenbossche):*\nThanks `[~Filimonov]`\r\n\r\nSo your original error shown at the top post, is indeed because of passing a file path with starting with \"s3://...\" while also passing a filesystem object. IMO we should improve the handling of that case (or at least improve the error message).\r\n\r\nNow, that you get an empty table when removing the prefix is strange. Certainly given that listing the files seems to work, and shows that there are actually files in that folder."
+        },
+        {
+            "created_at": "2020-12-21T14:29:32.411Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10937?focusedCommentId=17252888) by Joris Van den Bossche (jorisvandenbossche):*\nI opened ARROW-10998 for the issue that we should give a clearer error message when passing a URI and specifying a filesystem object.\r\n"
+        },
+        {
+            "created_at": "2021-02-17T16:32:29.592Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10937?focusedCommentId=17285955) by Antoine Pitrou (apitrou):*\nDoes this need to be kept open? It seems the ARROW-10998 covers the \"better error message\" issue."
+        }
+    ]
+}

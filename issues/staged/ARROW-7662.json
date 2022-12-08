@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[R] Support creating ListArray from R list",
+        "body": "***Note**: This issue was originally created as [ARROW-7662](https://issues.apache.org/jira/browse/ARROW-7662). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n```r\n\r\nDF = data.frame(a = 1:10)\r\nDF$b = as.list(DF$a)\r\narrow::write_parquet(DF, 'test.parquet')\r\n# Error in Table__from_dots(dots, schema) : cannot infer type from data\r\n```\r\n\r\nThis appears to be supported naturally already in Python:\r\n\r\n```python\n\r\nimport pandas as pd\r\npd.DataFrame({'a': [1, 2, 3], 'b': [[1, 2], [3, 4], [5, 6]]}).to_parquet('test.parquet')\r\n```",
+        "created_at": "2020-01-23T11:28:55.000Z",
+        "updated_at": "2020-02-13T15:51:53.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-02-09T16:59:00.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-01-23T17:03:41.049Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7662?focusedCommentId=17022274) by Neal Richardson (npr):*\nThis logic would go in https://github.com/apache/arrow/blob/dd6b17d/r/src/array_from_vector.cpp#L871. I think you'd have to iterate over the list and call InferType on each element, and if they were all the same type, you could construct a ListType of that type (cf. https://github.com/apache/arrow/blob/dd6b17d0cc1a77aaff84c5a4472ac73bc79486af/r/R/list.R#L30). If they weren't all the same, there's probably a way to represent that in Arrow, but you could also just bail out like it does now; getting the uniform list type supported would probably solve most use cases. \r\n\r\nWould you be interested in submitting a PR?"
+        },
+        {
+            "created_at": "2020-01-23T17:05:02.502Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7662?focusedCommentId=17022276) by Michael Chirico (michaelchirico):*\nHey `[~npr]`, I'm taking a look at this now (first time looking at src for arrow), it looks like it should be as simple as making a similar version as for StructType for ArrayType here:\r\n\r\nhttps://github.com/apache/arrow/blob/master/r/src/array_from_vector.cpp#L861-L871\r\n\r\n```r\n\r\ncase VECSXP:\r\n  if (Rf_inherits(x, \"data.frame\")) {\r\n    R_xlen_t n = XLENGTH(x);\r\n    SEXP names = Rf_getAttrib(x, R_NamesSymbol);\r\n    std::vector<std::shared_ptr<arrow::Field>> fields(n);\r\n    for (R_xlen_t i = 0; i < n; i++) {\r\n      fields[i] = std::make_shared<arrow::Field>(CHAR(STRING_ELT(names, i)),\r\n                                                 InferType(VECTOR_ELT(x, i)));\r\n    }\r\n    return std::make_shared<StructType>(std::move(fields));\r\n  }\r\n```\r\n\r\nDoes that sound about right?"
+        },
+        {
+            "created_at": "2020-01-23T17:08:22.840Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7662?focusedCommentId=17022278) by Michael Chirico (michaelchirico):*\nI guess we were commenting at the same time, seems I found the right part of the code after all.\r\n\r\nIs there a difference between ListType and StructType with respect to the need to enforce type consistency? My (rudimentary) understanding was that both StructType and ListType need fixed types \u2013 StructType as (KeyType, ValueType) and ListType as just ValueType. So I was planning to just imitate that logic."
+        },
+        {
+            "created_at": "2020-01-23T18:58:53.549Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7662?focusedCommentId=17022378) by Neal Richardson (npr):*\nYes, there is a difference. Think of StructType as a data frame, so each row of the table has a row of the StructType in it. \r\n\r\n```Java\n\r\n> df <- data.frame(col1=1:3, col2=c(\"a\", \"b\", \"c\"))\r\n> a <- Array$create(df)\r\n> a$type\r\nStructType\r\nstruct<col1: int32, col2: dictionary<values=string, indices=int8, ordered=0>>\r\n> length(a)\r\n[1] 3\r\n```\r\n\r\nEach column in the data frame has a type, so each field of the StructType is a known type. \r\n\r\nI think the tricky part is that for a data frame column, it is an R \"list\" underneath because that's what a data frame is, but the list elements are the columns of the struct, and the rows are the rows within each column of the data frame. But for list column, the list elements are the rows. So when we create `list_of()`, we need to know what type to provide there.\r\n\r\nJust brainstorming, but I think you want something like (forgive the probably invalid code)\r\n\r\n```Java\n\r\ncase VECSXP:\r\n  if (Rf_inherits(x, \"data.frame\")) {\r\n    (... the existing code)\r\n  } else { // perhaps you want to check that the list is not named?\r\n    R_xlen_t n = XLENGTH(x);\r\n    if (n > 0) {\r\n      std::shared_ptr<arrow::Type> element_type = InferType(VECTOR_ELT(x, 0);\r\n      for (R_xlen_t i = 1; i < n; i++) {\r\n        if (element_type != InferType(VECTOR_ELT(x, i)) {\r\n          break;\r\n        }\r\n      }\r\n      if (i == n) { // we made it through the loop and all are the same\r\n        return std::make_shared<ListType>(element_type);\r\n      }\r\n  }\r\n```\r\n\r\nThat said, I'm not sure how great the ListType support is currently in the R package. We might be able to infer the type but still have more left to implement. \r\n\r\n```Java\n\r\n> lcol <- list(1, 2, 3)\r\n> Array$create(lcol)$type\r\nError in Array__from_vector(x, type) : cannot infer type from data\r\n## That was expected, given that we haven't fixed that switch statement yet\r\n## but what if we specify the type?\r\n> Array$create(lcol, type = list_of(float64()))\r\nError in Array__from_vector(x, type) : \r\n  NotImplemented: type not implemented\r\n```\r\n"
+        },
+        {
+            "created_at": "2020-02-09T16:59:00.778Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7662?focusedCommentId=17033262) by Neal Richardson (npr):*\nIssue resolved by pull request 6275\n<https://github.com/apache/arrow/pull/6275>"
+        }
+    ]
+}

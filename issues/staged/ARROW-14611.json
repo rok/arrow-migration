@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[R][C++] Reporting progress from copy_files()?",
+        "body": "***Note**: This issue was originally created as [ARROW-14611](https://issues.apache.org/jira/browse/ARROW-14611). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWould it be possible to have something that reports progress from `copy_files()` which calls CopyFiles from FileSystem?\u00a0 When copying huge files, the R session just hangs and the user doesn't know if it's working or not.",
+        "created_at": "2021-11-05T15:37:00.000Z",
+        "updated_at": "2021-11-06T00:40:37.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-05T17:34:37.788Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14611?focusedCommentId=17439398) by Dewey Dunnington (paleolimbot):*\n\r\n\r\nI took the opportunity to learn a bit about the C++ sources! I didn\u2019t find a way to put a callback into CopyFiles that gives any progress info but perhaps there is one. \r\nC++ source from the R package: <https://github.com/apache/arrow/blob/master/r/src/filesystem.cpp#L267-L275> \r\nImplementation for arrow::fs::CopyFiles: <https://github.com/apache/arrow/blob/master/cpp/src/arrow/filesystem/filesystem.cc#L586-L607> \r\n\r\n```R\n\r\nlibrary(cpp11)\r\nSys.setenv(\r\n  PKG_CXXFLAGS = paste0(\"-I\", Sys.getenv(\"ARROW_HOME\"), \"/include\"),\r\n  PKG_LIBS = paste0(\"-L\", Sys.getenv(\"ARROW_HOME\"), \"/lib\", \" -larrow\")\r\n)\r\n\r\ncpp11::cpp_source(code = '\r\n\r\n#include <cpp11.hpp>\r\n#include <arrow/filesystem/api.h>\r\nusing namespace cpp11;\r\nusing namespace arrow;\r\n\r\n[[cpp11::register]]\r\nvoid copy_files2(std::string src_dir, std::string dst_dir) {\r\n  auto fs = std::make_shared<fs::LocalFileSystem>();\r\n  fs::FileSelector source_sel;\r\n  source_sel.base_dir = src_dir;\r\n  \r\n  Status status = fs::CopyFiles(fs, source_sel, fs, dst_dir);\r\n  \r\n  if (!status.ok()) {\r\n    std::string s = status.ToString();\r\n    stop(\"%s\", s.c_str());\r\n  }\r\n}\r\n\r\n')\r\n\r\nsource_dir <- tempfile()\r\ndest_dir <- tempfile()\r\n\r\ndir.create(source_dir)\r\nfor (i in 1:1000) {\r\n  write(\r\n    as.character(1:i),\r\n    sprintf(\"%s/file%03d.txt\", source_dir, i)\r\n  )\r\n}\r\ndir.create(dest_dir)\r\n\r\ncopy_files2(source_dir, dest_dir)\r\nwaldo::compare(list.files(source_dir), list.files(dest_dir))\r\n#> \u2713 No differences\r\n```\r\n\r\n\r\nIf there is a way to do this with a callback, C++ progress bars using the progress package might be useful? <https://github.com/r-lib/progress#c-api>\r\n"
+        },
+        {
+            "created_at": "2021-11-06T00:40:37.508Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14611?focusedCommentId=17439565) by Weston Pace (westonpace):*\nI'll express some reluctance here in adding to the C++ impl.  Arrow isn't really meant to be a cross-platform filesystem library.  In the past we've shied away from adding things to the filesystem abstraction that aren't strictly needed by Arrow's internals.  Keep in mind that any capability added to one filesystem needs to be added to all the rest (e.g. S3, GCS, and any fsspect compatible filesystems that users have already created).\r\n\r\nHowever, you should be able to implement this yourself by opening an input file and output file and manually doing the copy.\r\n\r\nIn fact, CopyFiles doesn't appear to be used internally anywhere (or CopyFile for that matter).  It might actually make sense to remove these capabilities from the filesystem abstraction."
+        }
+    ]
+}

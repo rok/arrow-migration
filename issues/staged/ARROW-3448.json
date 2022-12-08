@@ -1,0 +1,36 @@
+{
+    "issue": {
+        "title": "[Python] Pandas roundtrip doesn't preserve list of datetime objects",
+        "body": "***Note**: This issue was originally created as [ARROW-3448](https://issues.apache.org/jira/browse/ARROW-3448). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAdding the following to the pandas_example.py::dataframe_with_lists functionn:\r\n\r\n```python\n\r\ndatetime_data = [\r\n     [datetime(2015, 1, 5, 12, 0, 0), datetime(2020, 8, 22, 10, 5, 0)],\r\n     [datetime(2024, 5, 5, 5, 49, 1), datetime(2015, 12, 24, 22, 10, 17)],\r\n     [datetime(1996, 4, 30, 2, 38, 11)],\r\n     None,\r\n     [datetime(1987, 1, 27, 8, 21, 59)]\r\n]\r\n\r\ntype = pa.timestamp('s'|'ms'|'us'|'ns')\r\n```\r\n\r\nbreaks the tests cases, because the roundtrip doesn't preserve the object type.",
+        "created_at": "2018-10-06T07:44:42.000Z",
+        "updated_at": "2022-05-04T15:18:52.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2019-05-08T08:00:58.583Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3448?focusedCommentId=16835411) by Joris Van den Bossche (jorisvandenbossche):*\nIs this something we would like to fix? \r\nIn the meaning of: change the behaviour (but I am not sure this is desired), or have some to specify this as an option, or save more information in the pandas metadata?\r\n\r\nI think in general ListArrays are always converted to columns of arrays (not preserving the original column of lists), and here in addition the question is whether it should be object dtype or datetime64 (for the nested array dtype)."
+        },
+        {
+            "created_at": "2021-08-04T10:34:42.632Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3448?focusedCommentId=17393008) by Antoine Pitrou (apitrou):*\nShould we close this issue?"
+        },
+        {
+            "created_at": "2021-08-04T13:26:34.792Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3448?focusedCommentId=17393153) by Krisztian Szucs (kszucs):*\nThis might have been resolved since the creation of the ticket. I quickly checked the test cases with timestamp columns and the roundtrip seems to work - except in the nanosecond case when we use pandas timestamp objects."
+        },
+        {
+            "created_at": "2021-08-04T14:12:14.862Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3448?focusedCommentId=17393197) by Joris Van den Bossche (jorisvandenbossche):*\nI don't think this is actually \"fixed\". When converting back the nested list with timestamp columns, we create numpy arrays with datetime64 dtype, not object dtype arrays with datetime objects:\r\n\r\n```Java\n\r\n>>> df = pd.DataFrame({'a': datetime_data})\r\n>>> table = pa.table(df)\r\n>>> table \r\npyarrow.Table\r\na: list<item: timestamp[us]>\r\n  child 0, item: timestamp[us]\r\n\r\n>>> table.to_pandas()['a'][0]\r\narray(['2015-01-05T12:00:00.000000', '2020-08-22T10:05:00.000000'],\r\n      dtype='datetime64[us]')\r\n\r\n>>> df['a'][0]\r\n[datetime.datetime(2015, 1, 5, 12, 0), datetime.datetime(2020, 8, 22, 10, 5)]\r\n```\r\n\r\nBut as I mentioned above, not sure we actually _want_ to change this behaviour."
+        },
+        {
+            "created_at": "2021-08-04T14:47:26.666Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3448?focusedCommentId=17393237) by Krisztian Szucs (kszucs):*\nI can't recall the original error, but it's more about keeping the dataframes equal before and after the roundtrip. Perhaps pandas has changed the semantics of checking  equality of numpy arrays with datetime objects, for older pandas version the roundtrip fails: https://github.com/apache/arrow/pull/10866/checks?check_run_id=3242074723#step:8:7795\r\n\r\nSo `assert_series_equal(pa.table(df).to_pandas(), df)` wasn't true previously."
+        }
+    ]
+}

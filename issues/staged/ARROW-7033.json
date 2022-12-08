@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[C++] Error in./configure step for jemalloc when building on OSX 10.14.6",
+        "body": "***Note**: This issue was originally created as [ARROW-7033](https://issues.apache.org/jira/browse/ARROW-7033). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHello. I'm trying to build the C++ part of Apache Arrow (as a first step to possible contributions). I'm following the C++ Development instructions, but running into an error early. I also looked at ARROW-4935, but the cause there seems different, so I'm opening a new bug report.\r\n\r\nI'm on MacOS 10.14.6. I have the XCode cli tools installed (via xcode-select), and installed the other dependencies with Homebrew, giving it the cpp/Brewfile. I want to be able to run the tests, so I'm configuring a debug build with:\r\n\r\n\u00a0 cmake -DCMAKE_BUILD_TYPE=Debug -DARROW_BUILD_TESTS=ON ..\r\n\r\nfrom an out-of-source build, in a cpp/debug directory. Then, running make, I get very quickly the following error:\r\n\r\n`$ make`\r\n`[ 0%] Performing configure step for 'jemalloc_ep'`\r\n`CMake Error at /Users/chrish/Code/arrow/cpp/debug/jemalloc_ep-prefix/src/jemalloc_ep-stamp/jemalloc_ep-configure-DEBUG.cmake:49 (message):`\r\n` Command failed: 1``'./configure' 'AR=/Library/Developer/CommandLineTools/usr/bin/ar' 'CC=/Library/Developer/CommandLineTools/usr/bin/cc' '--prefix=/Users/chrish/Code/arrow/cpp/debug/jemalloc_ep-prefix/src/jemalloc_ep/dist/' '--with-jemalloc-prefix=je_arrow_' '--with-private-namespace=je_arrow_private_' '--without-export' '--disable-cxx' '--disable-libdl' '--disable-initial-exec-tls'``See also``/Users/chrish/Code/arrow/cpp/debug/jemalloc_ep-prefix/src/jemalloc_ep-stamp/jemalloc_ep-configure-*.log`\r\n`make[2]: *** [jemalloc_ep-prefix/src/jemalloc_ep-stamp/jemalloc_ep-configure] Error 1`\r\n`make[1]: *** [CMakeFiles/jemalloc_ep.dir/all] Error 2`\r\n`make: *** [all] Error 2`\r\n\r\n`Looking into the log file as suggested, I see:`\r\n\r\nconfigure: error: in `/Users/chrish/Code/arrow/cpp/debug/jemalloc_ep-prefix/src/jemalloc_ep':\r\nconfigure: error: cannot run C compiled programs.\r\nIf you meant to cross compile, use `--host'.\r\nSee `config.log' for more details\u00a0\r\n\r\n... which seems a bit suspicuous. Running the ./configure invocation manually, I get the same error:\r\n\r\n`$ './configure' 'AR=/Library/Developer/CommandLineTools/usr/bin/ar' 'CC=/Library/Developer/CommandLineTools/usr/bin/cc' '--prefix=/Users/chrish/Code/arrow/cpp/debug/jemalloc_ep-prefix/src/jemalloc_ep/dist/' '--with-jemalloc-prefix=je_arrow_' '--with-private-namespace=je_arrow_private_' '--without-export' '--disable-cxx' '--disable-libdl' '--disable-initial-exec-tls'`\r\n`checking for xsltproc... /usr/bin/xsltproc`\r\n`checking for gcc... /Library/Developer/CommandLineTools/usr/bin/cc`\r\n`checking whether the C compiler works... yes`\r\n`checking for C compiler default output file name... a.out`\r\n`checking for suffix of executables...`\r\n`checking whether we are cross compiling... configure: error: in `/Users/chrish/Code/arrow/cpp/debug/jemalloc_ep-prefix/src/jemalloc_ep':`\r\n`configure: error: cannot run C compiled programs.`\r\n`If you meant to cross compile, use `--host'.`\r\n`See `config.log' for more details```\r\n\r\n`Digging into config.log, I see:`\r\n\r\nconfigure:3213: checking whether we are cross compiling\r\n**configure:3221: /Library/Developer/CommandLineTools/usr/bin/cc -o conftest conftest.c >&5**\r\n**conftest.c:9:10: fatal error: 'stdio.h' file not found**\r\n#include <stdio.h>\r\n ^~~~~~~~~\r\n1 error generated.\r\nconfigure:3225: $? = 1\r\nconfigure:3232: ./conftest\r\n./configure: line 3234: ./conftest: No such file or directory\r\nconfigure:3236: $? = 127\r\nconfigure:3243: error: in `/Users/chrish/Code/arrow/cpp/debug/jemalloc_ep-prefix/src/jemalloc_ep':\r\nconfigure:3245: error: cannot run C compiled programs.\r\nIf you meant to cross compile, use `--host'.\r\n\r\n(Relevant bit in bold.) Well, that would make more sense, at least. I create a close-enough conftest.c by hand:\r\n\r\n`#include <stdio.h>`\r\n\r\n`int main(void) \\{ return 0; `}\r\n\r\nand try to compile it with the same command-line invocation:\r\n\r\n`$\u00a0 /Library/Developer/CommandLineTools/usr/bin/cc -o conftest conftest.c`\r\n\r\n`I get that same error:`\r\n\r\nconftest.c:1:10: fatal error: 'stdio.h' file not found\r\n#include <stdio.h>\r\n ^~~~~~~~~\r\n1 error generated.\r\n\r\nHowever, I also have a cc in /usr/bin. If I try that one instead, things works:\r\n\r\n`$ /usr/bin/cc -o conftest conftest.c`\r\n`$ ls -l conftest`\r\n`-rwxr-xr-x 1 chrish staff 4,2K oct 30 16:03 conftest*`\r\n`$ ./conftest`\r\n\r\n`(No error compiling or running conftest.c)`\r\n\r\nThe two executable seem to be the same compiler (or at least the exact same version):\r\n\r\n{{$ /usr/bin/cc --version\r\nApple LLVM version 10.0.1 (clang-1001.0.46.4)\r\nTarget: x86_64-apple-darwin18.7.0\r\nThread model: posix\r\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin}}\r\n\r\n{{$ /Library/Developer/CommandLineTools/usr/bin/cc --version\r\nApple LLVM version 10.0.1 (clang-1001.0.46.4)\r\nTarget: x86_64-apple-darwin18.7.0\r\nThread model: posix\r\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin}}``\r\n\r\nSo... I guess at least for me, Apple's Clang works correctly only if invoked from the /usr/bin path. Any reason why the configure, etc. scripts make a special effort to invoke it from /Library/Developer/CommandLineTools/usr/bin, if it's also available in /usr/bin (which is even in the path by default). How do I fix this, so others don't run into that problem too? Thanks!",
+        "created_at": "2019-10-30T20:11:07.000Z",
+        "updated_at": "2019-11-04T17:13:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-11-04T17:13:55.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-30T20:35:53.779Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7033?focusedCommentId=16963408) by Christian Hudon (chrish42):*\nWhen overriding the compilers with:\r\n\r\n`cmake -DCMAKE_C_COMPILER=/usr/bin/cc -DCMAKE_CXX_COMPILER=/usr/bin/c++ -DCMAKE_BUILD_TYPE=Debug -DARROW_BUILD_TESTS=ON ..`\r\n\r\n`then jemalloc configures and builds fine.`\r\n\r\nThe rest of the build is successful too, then."
+        },
+        {
+            "created_at": "2019-10-30T21:17:15.394Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7033?focusedCommentId=16963434) by Kouhei Sutou (kou):*\nOr `export SDKROOT=\"$(xcrun --show-sdk-path)\"` will also fix this."
+        },
+        {
+            "created_at": "2019-10-31T14:15:04.708Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7033?focusedCommentId=16964070) by Christian Hudon (chrish42):*\nYes. Confirming that the C++ build works with that SDKROOT export.\r\n\r\nThe two questions for me are: 1) was my environment broken in some weird way for the initial build to fail like this, and, if not 2) what's the best way to fix things so that they \"just work\"?"
+        },
+        {
+            "created_at": "2019-10-31T16:29:43.717Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7033?focusedCommentId=16964184) by Wes McKinney (wesm):*\nI confirmed that this fails for me out of the box on macOS, too\r\n\r\n```Java\n\r\n$ make jemalloc_ep\r\nScanning dependencies of target jemalloc_ep\r\n[ 33%] Creating directories for 'jemalloc_ep'\r\n[ 33%] Performing download step (download, verify and extract) for 'jemalloc_ep'\r\n-- jemalloc_ep download command succeeded.  See also /Users/wesm/code/arrow/cpp/brew-build/jemalloc_ep-prefix/src/jemalloc_ep-stamp/jemalloc_ep-download-*.log\r\n[ 66%] Performing patch step for 'jemalloc_ep'\r\n[ 66%] No update step for 'jemalloc_ep'\r\n[ 66%] Performing configure step for 'jemalloc_ep'\r\nCMake Error at /Users/wesm/code/arrow/cpp/brew-build/jemalloc_ep-prefix/src/jemalloc_ep-stamp/jemalloc_ep-configure-DEBUG.cmake:49 (message):\r\n  Command failed: 1\r\n\r\n   './configure' 'AR=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ar' 'CC=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/cc' '--prefix=/Users/wesm/code/arrow/cpp/brew-build/jemalloc_ep-prefix/src/jemalloc_ep/dist/' '--with-jemalloc-prefix=je_arrow_' '--with-private-namespace=je_arrow_private_' '--without-export' '--disable-cxx' '--disable-libdl' '--disable-initial-exec-tls'\r\n\r\n  See also\r\n\r\n    /Users/wesm/code/arrow/cpp/brew-build/jemalloc_ep-prefix/src/jemalloc_ep-stamp/jemalloc_ep-configure-*.log\r\n\r\n\r\nmake[3]: *** [jemalloc_ep-prefix/src/jemalloc_ep-stamp/jemalloc_ep-configure] Error 1\r\nmake[2]: *** [CMakeFiles/jemalloc_ep.dir/all] Error 2\r\nmake[1]: *** [CMakeFiles/jemalloc_ep.dir/rule] Error 2\r\nmake: *** [jemalloc_ep] Error 2\r\n```\r\n\r\nI think this is something we need to fix in the build system. "
+        },
+        {
+            "created_at": "2019-10-31T16:35:32.797Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7033?focusedCommentId=16964191) by Wes McKinney (wesm):*\nIt might be that we fail to configure the build if SDKROOT is not set. I googled a bit about this and didn't find consistent advice other than using SDKROOT. It could be an issue with CMake itself"
+        },
+        {
+            "created_at": "2019-10-31T19:13:57.824Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7033?focusedCommentId=16964347) by Christian Hudon (chrish42):*\nHmm. At least for me, the Arrow C++ developer docs didn't mention that I needed / should set SDKROOT, so that's why it wasn't set.\r\n\r\nI'm using CMake 3.15.4, if that helps."
+        },
+        {
+            "created_at": "2019-10-31T19:15:24.069Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7033?focusedCommentId=16964349) by Wes McKinney (wesm):*\nI think this is a new issue with newer versions of Xcode, this was not required in the past as far as I know"
+        },
+        {
+            "created_at": "2019-11-01T17:55:23.856Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7033?focusedCommentId=16965011) by Wes McKinney (wesm):*\nI think it's possible to set SDKROOT dynamically when building jemalloc, I'll try to submit a patch"
+        },
+        {
+            "created_at": "2019-11-04T00:19:39.497Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7033?focusedCommentId=16966317) by Kouhei Sutou (kou):*\nI've submitted a patch: https://github.com/apache/arrow/pull/5769"
+        },
+        {
+            "created_at": "2019-11-04T17:13:55.492Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7033?focusedCommentId=16966840) by Wes McKinney (wesm):*\nIssue resolved by pull request 5769\n<https://github.com/apache/arrow/pull/5769>"
+        }
+    ]
+}

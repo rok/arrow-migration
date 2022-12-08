@@ -1,0 +1,69 @@
+{
+    "issue": {
+        "title": "[Python] Cast Parquet column statistics to unicode if UTF8 ConvertedType is set",
+        "body": "***Note**: This issue was originally created as [ARROW-4139](https://issues.apache.org/jira/browse/ARROW-4139). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen writing Pandas data to Parquet format and reading it back again I find that that statistics of text columns are stored as byte arrays rather than as unicode text. \r\n\r\nI'm not sure if this is a bug in Arrow, PyArrow, or just in my understanding of how best to manage statistics.  (I'd be quite happy to learn that it was the latter).\r\n\r\nHere is a minimal example\r\n\r\n```python\n\r\nimport pandas as pd\r\ndf = pd.DataFrame({'x': ['a']})\r\ndf.to_parquet('df.parquet')\r\nimport pyarrow.parquet as pq\r\npf = pq.ParquetDataset('df.parquet')\r\npiece = pf.pieces[0]\r\nrg = piece.row_group(0)\r\nmd = piece.get_metadata(pq.ParquetFile)\r\nrg = md.row_group(0)\r\nc = rg.column(0)\r\n\r\n>>> c\r\n<pyarrow._parquet.ColumnChunkMetaData object at 0x7fd1a377c238>\r\n  file_offset: 63\r\n  file_path: \r\n  physical_type: BYTE_ARRAY\r\n  num_values: 1\r\n  path_in_schema: x\r\n  is_stats_set: True\r\n  statistics:\r\n    <pyarrow._parquet.RowGroupStatistics object at 0x7fd1a37d4418>\r\n      has_min_max: True\r\n      min: b'a'\r\n      max: b'a'\r\n      null_count: 0\r\n      distinct_count: 0\r\n      num_values: 1\r\n      physical_type: BYTE_ARRAY\r\n  compression: SNAPPY\r\n  encodings: ('PLAIN_DICTIONARY', 'PLAIN', 'RLE')\r\n  has_dictionary_page: True\r\n  dictionary_page_offset: 4\r\n  data_page_offset: 25\r\n  total_compressed_size: 59\r\n  total_uncompressed_size: 55\r\n\r\n>>> type(c.statistics.min)\r\nbytes\r\n```\r\n\r\nMy guess is that we would want to store a logical type in the statistics like UNICODE, though I don't have enough experience with Parquet data types to know if this is a good idea or possible.",
+        "created_at": "2019-01-01T03:39:05.000Z",
+        "updated_at": "2019-06-25T19:38:13.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-06-25T17:46:05.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-01-02T16:57:52.138Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4139?focusedCommentId=16732226) by Wes McKinney (wesm):*\nParquet uses BYTE_ARRAY for physical storage of unicode. Currently logical types aren't being considered in the \"boxing\" logic when accessing the statistics\r\n\r\nhttps://github.com/apache/arrow/blob/master/python/pyarrow/_parquet.pyx#L69\r\n\r\nI don't see an issue casting to unicode if the UTF8 ConvertedType is set"
+        },
+        {
+            "created_at": "2019-01-02T17:19:50.229Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4139?focusedCommentId=16732236) by Uwe Korn (uwe):*\nWe currently always return the physical types in all cases for the statistics. We should add `logical_(min,max)` as additional accessors."
+        },
+        {
+            "created_at": "2019-03-27T00:07:32.608Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4139?focusedCommentId=16802291) by Matthew Rocklin (mrocklin):*\nPerhaps relatedly, it would be useful to get physical types for statistics of other types.  Here is another issue I ran into with timestamps\r\n\r\n```Java\n\r\nIn [1]: import pandas as pd\r\n\r\nIn [2]: df = pd.util.testing.makeTimeDataFrame()\r\n\r\nIn [3]: df.head()\r\nOut[3]:\r\n                   A         B         C         D\r\n2000-01-03  1.255856 -1.092558 -1.454595  0.898535\r\n2000-01-04 -1.006590  0.640467 -2.249877  0.068293\r\n2000-01-05 -1.525559  0.567070  1.039230 -0.967301\r\n2000-01-06 -0.773395 -1.565619  0.025786  0.106949\r\n2000-01-07 -0.079000  0.367165  1.746211 -0.097441\r\n\r\nIn [4]: df.to_parquet('foo.parquet')\r\n\r\nIn [5]: import pyarrow.parquet as pq\r\n\r\nIn [6]: p = pq.ParquetDataset('foo.parquet')\r\n\r\nIn [7]: piece = p.pieces[0]\r\n\r\nIn [8]: md = piece.get_metadata(open_file_func=lambda fn: open(fn, mode='rb'))\r\n\r\nIn [9]: rg = md.row_group(0)\r\n\r\nIn [10]: rg.column(4)\r\nOut[10]:\r\n<pyarrow._parquet.ColumnChunkMetaData object at 0x1203d0670>\r\n  file_offset: 1913\r\n  file_path:\r\n  physical_type: INT64\r\n  num_values: 30\r\n  path_in_schema: __index_level_0__\r\n  is_stats_set: True\r\n  statistics:\r\n    <pyarrow._parquet.RowGroupStatistics object at 0x11f821af8>\r\n      has_min_max: True\r\n      min: 946857600000\r\n      max: 950227200000\r\n      null_count: 0\r\n      distinct_count: 0\r\n      num_values: 30\r\n      physical_type: INT64\r\n  compression: SNAPPY\r\n  encodings: ('PLAIN_DICTIONARY', 'PLAIN', 'RLE')\r\n  has_dictionary_page: True\r\n  dictionary_page_offset: 1635\r\n  data_page_offset: 1842\r\n  total_compressed_size: 278\r\n  total_uncompressed_size: 325\r\n\r\nIn [11]: rg.column(4).statistics.min  # I want this to be some sort of timestamp object\r\nOut[11]: 946857600000\r\n```\r\n\r\nSomewhat unrelatedly, there is a lot of boiler plate to get down to that information.  If there are nicer ways to get to statistics I'd be interested in hearing about them."
+        },
+        {
+            "created_at": "2019-04-18T20:55:07.436Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4139?focusedCommentId=16821482) by Michael Eaton (meaton):*\n\u00a0I was able to access the logical types using pyarrow as:\r\n\r\n\u00a0\r\nmd = piece.get_metadata(pq.ParquetFile)\r\nrg = md.row_group(0)\r\nps=pq.ParquetSchema(md)\r\nlt = ps.column(i).logical_type\r\n\r\n\r\nAnd then do appropriate conversion using decode('UTF8') and np.datetime64() respectively.\r\n\r\n`[~mrocklin]`, does it work for you to write an accessor that returns the converted statistics given column? Or what would work best for your use case?\r\n\r\ne.g.\u00a0 get_statistics( column_index )\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-04-19T17:38:02.284Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4139?focusedCommentId=16822085) by Matthew Rocklin (mrocklin):*\nI don't have strong thoughts about the API.  I mostly care that downstream projects don't have to special case a variety of types.  I expect that that special casing will be quite brittle and break over time.  Ideally we wouldn't be special casing these things in Arrow either.  \r\n\r\nMy guess is that there is already code somewhere in Arrow that knows how to convert these values in a consistent way.  Hopefully that same code would be engaged for statistics as well, that way we would have confidence that things wouldn't drift in the future.\r\n"
+        },
+        {
+            "created_at": "2019-04-22T11:14:08.888Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4139?focusedCommentId=16823025) by Uwe Korn (uwe):*\nHave a look at https://github.com/apache/arrow/pull/2623/files which implements predicate pushdown in Arrow on the Python side. There should also be some code in there that handles the physical to logical conversion."
+        },
+        {
+            "created_at": "2019-04-22T14:42:12.176Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4139?focusedCommentId=16823146) by Wes McKinney (wesm):*\nI added this to my list of things to look at early this week"
+        },
+        {
+            "created_at": "2019-04-23T03:18:44.967Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4139?focusedCommentId=16823647) by Michael Eaton (meaton):*\nI submitted a rough WIP PR, in order to facilitate conversation.\u00a0"
+        },
+        {
+            "created_at": "2019-04-29T19:13:41.122Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4139?focusedCommentId=16829633) by Michael Eaton (meaton):*\nThe following comment seems to suggest that there is a latent issue sorting unsigned types, specifically mentioning UTF-8.\r\n\r\nIf this is indeed the case, then would not the sorting have to be fixed before this issue can be resolved?\u00a0\u00a0<https://github.com/apache/arrow/blob/de84293d9c93fe721cd127f1a27acc94fe290f3f/cpp/src/parquet/metadata.cc#L140>\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-04-29T21:12:18.744Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4139?focusedCommentId=16829730) by Wes McKinney (wesm):*\nI don't think there is a sorting issue with UTF-8 types \u2013 `[~mdeepak]` worked through this I believe"
+        },
+        {
+            "created_at": "2019-04-29T21:29:01.524Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4139?focusedCommentId=16829738) by Deepak Majeti (mdeepak):*\nThe statistics are fixed for UTF-8 types. https://github.com/apache/arrow/blob/de84293d9c93fe721cd127f1a27acc94fe290f3f/cpp/src/parquet/types.cc#L260\r\nhttps://github.com/apache/arrow/blob/de84293d9c93fe721cd127f1a27acc94fe290f3f/cpp/src/parquet/metadata.cc#L140 is an out of date comment and must be fixed.\r\nSee comment here https://github.com/apache/arrow/blob/de84293d9c93fe721cd127f1a27acc94fe290f3f/cpp/src/parquet/metadata.cc#L558"
+        },
+        {
+            "created_at": "2019-06-11T17:57:25.051Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4139?focusedCommentId=16861272) by Wes McKinney (wesm):*\nI can pick up this one for 0.14.0, but someone else is free to take it from me"
+        },
+        {
+            "created_at": "2019-06-25T17:46:05.111Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4139?focusedCommentId=16872567) by Wes McKinney (wesm):*\nIssue resolved by pull request 4680\n<https://github.com/apache/arrow/pull/4680>"
+        }
+    ]
+}

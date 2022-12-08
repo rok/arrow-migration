@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[C++] HashJoin fails if it encounters a batch with more than 32Ki rows",
+        "body": "***Note**: This issue was originally created as [ARROW-17115](https://issues.apache.org/jira/browse/ARROW-17115). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe new swiss join assumes that batches are being broken according to the morsel/batch model and it assumes those batches have, at most, 32Ki rows (signed 16-bit indices are used in various places).\r\n\r\nHowever, we are not currently slicing all of our inputs to batches this small.  This is causing conbench to fail and would likely be a problem with any large inputs.\r\n\r\nWe should fix this by slicing batches in the engine to the appropriate maximum size.",
+        "created_at": "2022-07-18T23:20:00.000Z",
+        "updated_at": "2022-07-24T05:31:10.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-07-22T21:21:05.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-07-20T21:12:43.173Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17115?focusedCommentId=17569175) by Jonathan Keane (jonkeane):*\nA reprex that causes this from R (which is effectively the TPC-H 12 query that segfaults):\r\n\r\n\r\n```r\n\r\nlibrary(arrow)\r\nlibrary(dplyr)\r\nlibrary(arrowbench)\r\n\r\nensure_source(\"tpch\", scale_factor = 10)\r\n\r\nopen_dataset(\"data/lineitem_10.parquet\") %>%\r\n  filter(\r\n    l_shipmode %in% c(\"MAIL\", \"SHIP\"),\r\n    l_commitdate < l_receiptdate,\r\n    l_shipdate < l_commitdate,\r\n    l_receiptdate >= as.Date(\"1994-01-01\"),\r\n    l_receiptdate < as.Date(\"1995-01-01\")\r\n  ) %>%\r\n  inner_join(\r\n    open_dataset(\"data/orders_10.parquet\"),\r\n    by = c(\"l_orderkey\" = \"o_orderkey\")\r\n  ) %>%\r\n  group_by(l_shipmode) %>%\r\n  summarise(\r\n    high_line_count = sum(\r\n      if_else(\r\n        (o_orderpriority == \"1-URGENT\") | (o_orderpriority == \"2-HIGH\"),\r\n        1L,\r\n        0L\r\n      )\r\n    ),\r\n    low_line_count = sum(\r\n      if_else(\r\n        (o_orderpriority != \"1-URGENT\") & (o_orderpriority != \"2-HIGH\"),\r\n        1L,\r\n        0L\r\n      )\r\n    )\r\n  ) %>%\r\n  ungroup() %>%\r\n  arrange(l_shipmode) %>%\r\n  collect()\r\n```"
+        },
+        {
+            "created_at": "2022-07-22T21:21:05.898Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17115?focusedCommentId=17570178) by Weston Pace (westonpace):*\nIssue resolved by pull request 13679\n<https://github.com/apache/arrow/pull/13679>"
+        }
+    ]
+}

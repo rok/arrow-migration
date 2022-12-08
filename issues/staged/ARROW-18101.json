@@ -1,0 +1,20 @@
+{
+    "issue": {
+        "title": "[R] RecordBatchReaderHead from ExecPlan with UDF cannot be read",
+        "body": "***Note**: This issue was originally created as [ARROW-18101](https://issues.apache.org/jira/browse/ARROW-18101). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n```Java\n\r\n  register_scalar_function(\r\n    \"times_32\",\r\n    function(context, x) x * 32.0,\r\n    int32(),\r\n    float64(),\r\n    auto_convert = TRUE\r\n  )\r\n  record_batch(a = 1:1000) %>%\r\n    dplyr::mutate(b = times_32(a)) %>%\r\n    as_record_batch_reader() %>%\r\n    head(11) %>%\r\n    as_arrow_table()\r\n\r\n# Error: NotImplemented: Call to R (resolve scalar user-defined function output data type) from a non-R thread from an unsupported context\r\n# /arrow/cpp/src/arrow/compute/exec.cc:649  kernel_->signature->out_type().Resolve(kernel_ctx_, args.inputs)\r\n# /arrow/cpp/src/arrow/compute/exec/expression.cc:602  executor->Init(&kernel_context, {kernel, types, options})\r\n# /arrow/cpp/src/arrow/compute/exec/project_node.cc:91  ExecuteScalarExpression(simplified_expr, target, plan()->exec_context())\r\n# /arrow/cpp/src/arrow/record_batch.cc:336  ReadNext(&batch)\r\n# /arrow/cpp/src/arrow/record_batch.cc:350  ToRecordBatches()\r\n```\r\n\r\nIt works fine if you don't call `as_record_batch_reader()` in the middle. Oddly, it also works fine if you add `as_adq()` (aka `collapse()`) after head() and before evaluating to table--that is, if you run it through an ExecPlan again, it doesn't error.",
+        "created_at": "2022-10-19T18:45:20.000Z",
+        "updated_at": "2022-11-02T13:15:41.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-20T01:35:55.825Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18101?focusedCommentId=17620669) by Dewey Dunnington (paleolimbot):*\nAfter some sleuthing, it seems that's because an `ExecPlanReader` is collected to a table explicitly using `RunWithCapturedR`:\r\n\r\nhttps://github.com/apache/arrow/blob/5984d8a81a6fe8d53e89457d113c931aae59dcd8/r/src/compute-exec.cpp#L191-L198\r\n\r\n...but a regular `RecordBatchReader` (like the one created by `head.RecordBatchReader()`) is not:\r\n\r\nhttps://github.com/apache/arrow/blob/5984d8a81a6fe8d53e89457d113c931aae59dcd8/r/src/recordbatchreader.cpp#L113-L117\r\n\r\nI believe this was on purpose to limit number of places where `RunWithCapturedR()` was used since it might be causing problems in valgrind/autobrew nightlies (ARROW-17879). Ideally, `RunWithCapturedR()` causes no problems and it's safe to use it to collect any RecordBatchReader into a table."
+        }
+    ]
+}

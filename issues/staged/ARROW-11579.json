@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[R] read_feather hanging on Windows",
+        "body": "***Note**: This issue was originally created as [ARROW-11579](https://issues.apache.org/jira/browse/ARROW-11579). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nOn windows 10, reading large feather objects in R seems to lead to hanging on a repeat read.\r\n\r\n\u00a0\r\n\r\nThis issue has been reproduced on 3 different windows machines.\u00a0 All running win 10, R 4.0.0 (or later).\r\n\r\nread_feather does not hang if using version = 1, or using uncompressed with version 2.\r\n\r\nThis issue does not happen on tests on linux (Ubuntu 20.04 atleast)\r\n\r\n\u00a0\r\n\r\nExample:\r\n\r\n\u00a0\r\n\r\nlibrary(arrow)\r\n\r\nm <- data.frame(x = rnorm(7e6), y = rnorm(5), b = rnorm(5), n = rnorm(5), c = c(\"a\", \"n\"))\r\n\r\nwrite_feather(m, \"test.feather4\", version = 2, compression = \"lz4\") # does not hang with uncompressed, but does with lz4 and zstd\r\n\r\nfor (j in 1:50){ \u00a0\r\n\r\ny <- read_feather(\"test.feather4\")\u00a0 # hangs after an unpredictable number of reads, just on windows though \u00a0\r\n\r\nprint(paste0(\"feather read \", j, \"...\"))\r\n\r\n}\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\nInterestingly, a work around is to use read_feather but call just one column at a time.\u00a0 This does not hang so far.\r\n\r\n\u00a0\r\n\r\ne.g. y returns the full data frame, and this doesn't hang on repeated reads:\r\n\r\n\u00a0\r\n\r\n_y <- lapply(cols, function(col) {_\r\n\r\n_read_feather(\"test.feather4\", col_select = all_of(col))_\r\n\r\n_})_\r\n\r\n\u00a0",
+        "created_at": "2021-02-10T01:35:23.000Z",
+        "updated_at": "2021-09-29T18:45:50.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-09-29T18:45:50.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-02-10T22:48:28.034Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11579?focusedCommentId=17282758) by Claymore Marshall (claymoremarshall):*\nPerhaps related, it seems (on win 10) write_feather(..., compression = \"lz4\") etc of large objects may also be hanging"
+        },
+        {
+            "created_at": "2021-02-11T01:42:12.526Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11579?focusedCommentId=17282830) by Ian Cook (icook):*\n`[~claymoremarshall]` Thank you for reporting this. I made two attempts to reproduce this error, both with version 3.0.0 of the arrow package installed from CRAN running in R x64 4.0.3. First I used Windows 10 running in a VM with VirtualBox on a macOS host. The error did not occur there even after repeated attempts. Next I used a laptop running Windows 10 natively, and there I was able to reproduce the issue immediately.\r\n\r\nI also experimented with two things:\r\n - running `Sys.setenv(ARROW_DEFAULT_MEMORY_POOL=\"system\")` before loading the arrow package\r\n - running `gc()` in each iteration of the loop\r\n\r\nThe hanging behavior occurred regardless.\r\n\r\nIn my tests, there was no memory starvation when the hanging occurred.\r\n\r\nI'll keep investigating."
+        },
+        {
+            "created_at": "2021-02-11T02:10:01.386Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11579?focusedCommentId=17282836) by Ian Cook (icook):*\n`[~claymoremarshall]` \u00a0It seems this hanging behavior is being caused by a thread deadlock. In the VM where I could not reproduce the issue, `arrow::cpu_count()`\u00a0was 2, meaning the VM had two virtual CPU cores. On the machine where the hanging **did** occur, `arrow::cpu_count()`\u00a0was 8.\r\n\r\nYou can get the hanging to stop by using `arrow::set_cpu_count()` to reduce the number of CPU threads Arrow can use.\u00a0When I set\u00a0`arrow::set_cpu_count(2)`, the hanging behavior stopped for me."
+        },
+        {
+            "created_at": "2021-02-12T00:24:29.338Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11579?focusedCommentId=17283441) by Claymore Marshall (claymoremarshall):*\nThanks, also agree reducing set_cpu_count() stops the hanging on read_feather (and write_feather) so far."
+        },
+        {
+            "created_at": "2021-02-16T07:37:10.667Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11579?focusedCommentId=17285072) by Claymore Marshall (claymoremarshall):*\nNoting that I was able to use set_cpu_count(2) without hanging, but have now noticed on bulk small feather data set reads, getting hanging behaviour again.\u00a0 Need to set to\u00a0set_cpu_count(1) to avoid this."
+        },
+        {
+            "created_at": "2021-02-16T17:51:44.858Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11579?focusedCommentId=17285377) by Neal Richardson (npr):*\nFTR, another way you can turn off multithreading is to set `options(arrow.use_threads = FALSE)`\r\n\r\nThere are some longstanding issues with multithreading on Windows that we unfortunately haven't been able to pin down. See also ARROW-8379."
+        },
+        {
+            "created_at": "2021-05-14T19:12:39.980Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11579?focusedCommentId=17344827) by Andrew C Thomas (acthomasca):*\nSame problem found here. Also applies to read_parquet in my case. Turning off multithreading seems to have done the trick.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-09-29T18:45:50.285Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11579?focusedCommentId=17422332) by Neal Richardson (npr):*\nWe believe that this has been resolved in ARROW-8379. If you still experience this with version 6.0.0 or greater (after it is released in mid-October), please open a new issue."
+        }
+    ]
+}

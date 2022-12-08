@@ -1,0 +1,26 @@
+{
+    "issue": {
+        "title": "[C++] Have JSON reader treat mixed singleton/array fields as arrays.",
+        "body": "***Note**: This issue was originally created as [ARROW-15978](https://issues.apache.org/jira/browse/ARROW-15978). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI frequently encounter real-world files that mix array types and singletons across entries for a single field. For example, consider an ndjson file consisting of:\r\n\r\n\u00a0\r\n```java\n\r\n{\"author\": \"Hunter Thompson\"}\r\n{\"author\": [\"Bob Woodward\", \"Carl Bernstein\"]} \n```\r\nWidely used specs promote writing JSON like this, where a singleton isn't be wrapped in array brackets. For example, the 'target' field in the w3 annotation model [may be a string or an array of strings.](https://www.w3.org/TR/annotation-model/#:~:text=The%20body%20and/or%20target%20relationships%20of%20the%20Annotation%20may%20be%20arrays%20rather%20than%20a%20single%20object.)\u00a0\r\n\r\n\u00a0\r\n\r\nCurrently I see no way to read this sort of data with the C++ json reader. It would be nice if arrow's ndjson reader could do two things to support data like this.\r\n1. When inferring types, silently promote entries of type <T> to type <T[]> if the column is mixed;\n1. When passed an explicit schema that includes a ListArray, promote all instances of the field to an array if they aren't already.\u00a0\n   \n   My sense is that this might be pretty simple.\n   \n   Thanks to everyone who works on this project.",
+        "created_at": "2022-03-19T10:10:56.000Z",
+        "updated_at": "2022-03-21T22:02:38.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-21T10:22:29.524Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15978?focusedCommentId=17509748) by Alessandro Molina (amol-):*\nWhen a schema is explicitly provided, it might be reasonable to promote all the single entries to lists if the schema was set to a list.\u00a0\r\n\r\nAutomatic promotion is instead an harder topic. The risk of evolving into a multi-criteria decision system is not rare, as users might start reporting behaviour change requests once the guessing logic is released. For example a random user might argue that if all entries are a list and only one is a single value instead of promoting the single value we should error because it was obviously a wrong entry. Requests like this might pile up and the system would become too complex to work reliably pretty quickly."
+        },
+        {
+            "created_at": "2022-03-21T21:57:22.434Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15978?focusedCommentId=17510116) by Ben Schmidt (bmschmidt):*\nThat is a reasonable concern. For my specific case a useful in-between option would be to make automatic list promotion an option to json.ParseOptions.\u00a0\r\n\r\nTo give some context, I work a lot with library records and other cultural heritage data, and I find myself encountering this all of the time in otherwise high-quality data. My hunch is that it often happens in sets where fields used to be in XML, and listiness was inferred from how many times they appear on a per-record basis.\r\n\r\nAs a more real world example of a case where this would help, here's a [single record](https://gist.github.com/bmschmidt/e038634264135fb25b6cb46ca1631f36) out of several million from the National Archives and Record Administration of the United States. (To be clear, this is **one record** split over several lines for clarity\u2013NARA released several million rows of json like this). Although the schema is extremely complicated, pyarrow's json reader is generally able to correctly infer the times and convert the whole thing to a nested set of struct-columns that I can then flatten and work with.\r\n\r\nIt's a miracle that it does so well, and I am in awe of the Arrow group's work! But one thing holding it back right now is the key in line 151 of that gist, where the field at `description.specificRecordsTypeArray.specificRecordsType` (if I'm following it right) might be an object or an array of objects. There are many others like this in the dataset. Although schema-following would make it possible to read without rewriting the underlying json, to infer a schema would require require reading the first few rows to get a schema, then reading until it encountered a single error, altering the schema, reading until the next error, parsing that one, etc."
+        }
+    ]
+}

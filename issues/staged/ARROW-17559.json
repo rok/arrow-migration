@@ -1,0 +1,38 @@
+{
+    "issue": {
+        "title": "[R][C++] Regression: big performance hit after removing schema binding",
+        "body": "***Note**: This issue was originally created as [ARROW-17559](https://issues.apache.org/jira/browse/ARROW-17559). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAfter\u00a0ARROW-15260 I observe a big memory  and compute time increases with basic sumarize queries. My use case shows almost 10x memory and 10x computation time increases in some cases.  \r\n\r\nHere is a less dramatic replication along my real use case which gives 2x time increase:\r\n\r\n```R\n\r\n  library(arrow)\r\n  dir.create(dir <- \"/tmp/iris\", showWarnings = F)\r\n  for (day in seq_len(100)) {\r\n    dir.create(glue(\"{dir}/day={day}\"), showWarnings = F)\r\n    for (i in seq_len(10)) {\r\n      dfs <- map(seq_len(20), function(j) {\r\n        names(iris) <- paste0(names(iris), j)\r\n        iris\r\n      })\r\n      df <- dplyr::bind_cols(!!!dfs)\r\n      write_parquet(df, glue(\"{dir}/day={day}/{i}.parquet\"))\r\n    }\r\n  }\r\n\r\n  library(arrow)\r\n  system.time(\r\n    open_dataset(\"/tmp/iris\") %>%\r\n    group_by(day, Species1) %>%\r\n    summarise(N = n(), .groups = \"drop\") %>%\r\n    collect())\r\n\r\n```\r\n\r\nBefore commit 838687178: 0.33sec, after: 0.73sec. \r\n\r\nIf I put back the schema Binding which was removed [here](https://github.com/apache/arrow/pull/12826/files#diff-0d1ff6f17f571f6a348848af7de9c05ed588d3339f46dd3bcf2808489f7dca92L235) I get the performance back. ",
+        "created_at": "2022-08-29T22:12:43.000Z",
+        "updated_at": "2022-10-18T12:59:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-18T12:58:52.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-08-29T23:07:53.874Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17559?focusedCommentId=17597429) by Weston Pace (westonpace):*\nOops, I suspect this is related to ARROW-17556"
+        },
+        {
+            "created_at": "2022-10-14T20:02:42.765Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17559?focusedCommentId=17617945) by Neal Richardson (npr):*\n`[~westonpace]` can we close this now or do we need to verify further? I guess we can see what the benchmarks say."
+        },
+        {
+            "created_at": "2022-10-14T21:56:08.063Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17559?focusedCommentId=17617977) by Weston Pace (westonpace):*\n`[~npr]` did we have any benchmarks that were regressed due to this?  I thought part of the problem was that they were all micro-benchmarks or \"load entire dataset\" benchmarks and we didn't capture this."
+        },
+        {
+            "created_at": "2022-10-15T18:26:25.327Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17559?focusedCommentId=17618147) by Neal Richardson (npr):*\nIIRC the R nyc-taxi benchmarks started failing due to the null column not being excluded from the projection anymore, so we should see the benchmarks succeeding again."
+        },
+        {
+            "created_at": "2022-10-18T12:59:29.732Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17559?focusedCommentId=17619508) by Neal Richardson (npr):*\nConfirmed that the benchmarks that were failing before succeed with this change: https://conbench.ursa.dev/benchmarks/29c99f0945144e15b04b4076c46ff2da/"
+        }
+    ]
+}

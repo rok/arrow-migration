@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[C++] Add io::OutputStream::Abort()",
+        "body": "***Note**: This issue was originally created as [ARROW-6300](https://issues.apache.org/jira/browse/ARROW-6300). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis method would abort the current output stream without trying to flush or commit any pending internal data. This makes sense mostly for buffered streams. For other streams it could simply synonymous to Close().\r\n",
+        "created_at": "2019-08-20T14:25:20.000Z",
+        "updated_at": "2019-09-10T01:25:24.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-09-10T01:25:22.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-08-20T14:26:56.593Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6300?focusedCommentId=16911402) by Antoine Pitrou (apitrou):*\nContext: S3 multipart uploads must be either completed or aborted:\r\nhttps://docs.aws.amazon.com/AmazonS3/latest/dev/mpuoverview.html\r\n\r\nAborting can be done implicitly in the destructor but it may be nice to have an explicit method call for that (especially to catch any errors)."
+        },
+        {
+            "created_at": "2019-08-20T14:29:41.745Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6300?focusedCommentId=16911406) by Antoine Pitrou (apitrou):*\n[~emkornfield@gmail.com] opinions?"
+        },
+        {
+            "created_at": "2019-08-20T14:49:00.588Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6300?focusedCommentId=16911427) by Wes McKinney (wesm):*\nSeems reasonable to have the default implementation to call Close (mis-wrote \"no-op\" but that's clearly not right)"
+        },
+        {
+            "created_at": "2019-08-21T03:54:27.874Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6300?focusedCommentId=16911928) by Micah Kornfield (emkornfield@gmail.com):*\nTwo questions:\r\n\r\n1.\u00a0 What is the use-case for such a method?\u00a0 Are we expected to abort midway through?\r\n\r\n2.\u00a0 For regulard file systems, would it make sense to delete the underlying file (they both seem to be about clearing underlying resources?)\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-08-21T09:22:59.641Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6300?focusedCommentId=16912119) by Antoine Pitrou (apitrou):*\n> 1.  What is the use-case for such a method?  Are we expected to abort midway through?\r\n\r\nIn some cases yes. Suppose you're writing a file as part of a larger pipeline. But another part of the pipeline fails, and you want to signal the stream that it can abort its operations.\r\n\r\n> 2.  For regulard file systems, would it make sense to delete the underlying file (they both seem to be about clearing underlying resources?)\r\n\r\nI don't think so. The aim is to clear any temporary runtime resources associated to the stream. We don't claim that Abort() will rollback any persistent changes.\r\n\r\nPerhaps this is not necessary and we can just rely on the destructor, since C++ destruction is deterministic.\r\n"
+        },
+        {
+            "created_at": "2019-08-22T04:11:37.651Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6300?focusedCommentId=16912950) by Micah Kornfield (emkornfield@gmail.com):*\nIt sounds like it makes sense, I think not just hiding it in the destructor make sense (generally, I thought it was frowned upon to work that could fail in the destructor anyways).\r\n\r\n\u00a0\r\n\r\n>> 2. For regulard file systems, would it make sense to delete the underlying file (they both seem to be about clearing underlying resources?)\r\n\r\n>I don't think so. The aim is to clear any temporary runtime resources associated to the stream. We don't claim that Abort() will rollback any persistent changes.\r\n\r\nAre we writing temporary files and then moving them (i.e. letting the OS cleanup the temporary file)?"
+        },
+        {
+            "created_at": "2019-08-22T08:26:36.852Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6300?focusedCommentId=16913120) by Antoine Pitrou (apitrou):*\n> generally, I thought it was frowned upon to work that could fail in the destructor anyways\r\n\r\nProbably, but I think it's unavoidable to handle cases where the user didn't clean up explicitly.\r\n\r\n> Are we writing temporary files and then moving them (i.e. letting the OS cleanup the temporary file)?\r\n\r\nNo, we aren't doing that in any of the IO classes currently."
+        },
+        {
+            "created_at": "2019-09-04T13:07:46.554Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6300?focusedCommentId=16922465) by Antoine Pitrou (apitrou):*\nHmm, so if we call Abort() from the destructor, this will be a behaviour change, as we currently call Close() (flushing any pending data). Perhaps some code paths in third-party code rely on that.\r\n\r\nAlso, this means that on the Python side, files created using e.g. `pa.output_stream()` wouldn't flush properly when destroyed. This would break expectations of Python users.\r\n\r\nSo perhaps we should keep calling Close() from the destructor. What do you think?"
+        },
+        {
+            "created_at": "2019-09-04T14:36:17.230Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6300?focusedCommentId=16922562) by Wes McKinney (wesm):*\nI think that continuing to call `Close` on non-closed files in the dtor makes sense. This logic could also be moved up into the binding layer, too"
+        },
+        {
+            "created_at": "2019-09-10T01:25:22.675Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6300?focusedCommentId=16926232) by Wes McKinney (wesm):*\nIssue resolved by pull request 5274\n<https://github.com/apache/arrow/pull/5274>"
+        }
+    ]
+}

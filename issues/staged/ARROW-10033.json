@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[C++][Parquet] ArrowReaderProperties creates thread pool, even when use_threads=False and pre_buffer=False",
+        "body": "***Note**: This issue was originally created as [ARROW-10033](https://issues.apache.org/jira/browse/ARROW-10033). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n`ArrowReaderProperties` has a `::arrow::io::AsyncContext async_context_;` member. Its constructor creates a thread pool \u2013 regardless of options.\r\n\r\nAs a caller, I expect `!use_threads` to prevent the creation of a thread pool. (Maybe there should be an exception if `pre_buffer && !use_threads`?)\r\n\r\nStack trace:\r\n\r\n\r\n```\n\r\n#0  arrow::internal::ThreadPool::ThreadPool (this=0x232fa90) at /src/apache-arrow-1.0.1/cpp/src/arrow/util/thread_pool.cc:121\r\n#1  0x00000000008e4747 in arrow::internal::ThreadPool::Make (threads=8)\r\n    at /src/apache-arrow-1.0.1/cpp/src/arrow/util/thread_pool.cc:246\r\n#2  0x00000000008e48c9 in arrow::internal::ThreadPool::MakeEternal (threads=8)\r\n    at /src/apache-arrow-1.0.1/cpp/src/arrow/util/thread_pool.cc:252\r\n#3  0x00000000008a20ac in arrow::io::internal::MakeIOThreadPool () at /src/apache-arrow-1.0.1/cpp/src/arrow/io/interfaces.cc:326\r\n#4  0x00000000008a21dd in arrow::io::internal::GetIOThreadPool () at /src/apache-arrow-1.0.1/cpp/src/arrow/io/interfaces.cc:334\r\n#5  0x00000000008a064f in arrow::io::AsyncContext::AsyncContext (\r\n    this=0xea6bb0 <parquet::default_arrow_reader_properties()::default_reader_props+80>)\r\n    at /src/apache-arrow-1.0.1/cpp/src/arrow/io/interfaces.cc:49\r\n#6  0x000000000048893e in parquet::ArrowReaderProperties::ArrowReaderProperties (\r\n    this=0xea6b60 <parquet::default_arrow_reader_properties()::default_reader_props>, use_threads=false)\r\n    at /src/apache-arrow-1.0.1/cpp/src/parquet/properties.h:579\r\n#7  0x00000000005e1b98 in parquet::default_arrow_reader_properties () at /src/apache-arrow-1.0.1/cpp/src/parquet/properties.cc:53\r\n#8  0x0000000000414843 in parquet::arrow::FileReaderBuilder::FileReaderBuilder (this=0x7fffb31f0c60)\r\n    at /src/apache-arrow-1.0.1/cpp/src/parquet/arrow/reader.cc:930\r\n#9  0x0000000000414b10 in parquet::arrow::OpenFile (file=..., pool=0xea6cf0 <arrow::jemalloc_pool>, reader=0x7fffb31f0e08)\r\n    at /src/apache-arrow-1.0.1/cpp/src/parquet/arrow/reader.cc:957\r\n```",
+        "created_at": "2020-09-17T21:06:52.000Z",
+        "updated_at": "2020-09-24T03:05:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-18T17:57:40.120Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10033?focusedCommentId=17198476) by Adam Hooper (adamhooper):*\nI think this should be \"Major\" because it nudges towards a segfault on the simplest possible program:\r\n\r\n```\n\r\n#include <parquet/arrow/reader.h>\r\n\r\nint main(int argc, char** argv) {\r\n  parquet::ArrowReaderProperties arrowReaderProperties(false); // do not use threads\r\n  return 0;\r\n}\r\n```\r\n\r\nExpected return code: 0\r\nActual return code: segfault\r\n\r\n(Docker, Linux 5.8.4-200.fc32.x86_64, GCC Debian 8.3.0-6, linker flags `-rdynamic main.cc.o -o parquet-to-arrow -static /usr/local/lib/libparquet.a /usr/local/lib/libarrow.a -lsnappy -pthread /usr/local/lib/libarrow_bundled_dependencies.a`)\r\n\r\nPerhaps this is because `ThreadPool` doesn't call `pthread_join` in its dtor? I'm not sure. But nixing the `async_context_` member certainly fixes the segfault.\r\n\r\nMy workaround is to patch Arrow to remove the member variable."
+        },
+        {
+            "created_at": "2020-09-18T23:18:26.055Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10033?focusedCommentId=17198581) by Wes McKinney (wesm):*\nI seem to recall this came up before. "
+        },
+        {
+            "created_at": "2020-09-19T14:25:21.252Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10033?focusedCommentId=17198745) by Adam Hooper (adamhooper):*\n> I seem to recall this came up before.\r\n\r\nSorry, I should have linked it: ARROW-4633 ... still open, but I suspect that one a separate bug because A) there was no `async_context_` when ARROW-4633 was reported, and B) my example code didn't segfault in 0.16.0."
+        },
+        {
+            "created_at": "2020-09-24T03:05:03.028Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10033?focusedCommentId=17201239) by dy9 (dy9):*\nHey folks, Im new to arrow but interested in giving it a try. Could you please share some hints on where it might be a good place to get started on this bug?\u00a0"
+        }
+    ]
+}

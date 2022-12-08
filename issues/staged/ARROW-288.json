@@ -1,0 +1,50 @@
+{
+    "issue": {
+        "title": "Implement Arrow adapter for Spark Datasets",
+        "body": "***Note**: This issue was originally created as [ARROW-288](https://issues.apache.org/jira/browse/ARROW-288). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIt would be valuable for applications that use Arrow to be able to \n\n- Convert between Spark DataFrames/Datasets and Java Arrow vectors\n- Send / Receive Arrow record batches / Arrow file format RPCs to / from Spark \n- Allow PySpark to use Arrow for messaging in UDF evaluation",
+        "created_at": "2016-09-11T17:02:03.000Z",
+        "updated_at": "2017-08-23T14:32:35.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-08-23T14:32:35.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2016-09-16T22:41:45.751Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-288?focusedCommentId=15497618) by Frederick Reiss (freiss):*\n`[~wesmckinn]`, are you planning to do this yourself? Would you like some help with this task?"
+        },
+        {
+            "created_at": "2016-09-17T00:19:52.302Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-288?focusedCommentId=15497799) by Julien Le Dem (julienledem):*\n`[~freiss]` Hi Frederick, I'll let Wes confirm but I believe that this JIRA is not immediately planned. Help is always welcome. We're happy to assist with reviews and answering questions."
+        },
+        {
+            "created_at": "2016-09-17T20:22:17.279Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-288?focusedCommentId=15499623) by Wes McKinney (wesm):*\nYes, we'd happily accept help with this. There is lots of work to do both in Arrow (e.g. integration testing / conforming the Java and C++ implementations) and Spark."
+        },
+        {
+            "created_at": "2016-09-22T11:37:56.499Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-288?focusedCommentId=15513039) by Jacek Laskowski (jlaskowski):*\nI've scheduled a [Spark/Scala meetup](http://www.meetup.com/WarsawScala/events/234156519/) next week and found the issue that we could help with somehow. We've got no experience with Arrow but quite fine with Spark SQL's Datasets.\n\nCould you `[~wesmckinn]` or `[~julienledem]` describe the very small steps needed for the task? They could also just be a subtasks of the \"umbrella\" task. Thanks."
+        },
+        {
+            "created_at": "2016-09-23T23:35:11.730Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-288?focusedCommentId=15517881) by Frederick Reiss (freiss):*\nApologies for my delay in replying here; it's been a very hectic week.\n\nAlong the lines of what [~jacek@japila.pl] says above, I think it would be good to break this overall task into smaller, bite-size chunks.\n\nOne top-level question that we'll need to answer before we can break things down properly: Should we use Arrow's Java APIs or Arrow's C++ APIs to perform the conversion?\n\nIf we use the Java APIs to convert the data, then the \"collect Dataset to Arrow\" will go roughly like this:\n1. Determine that the Spark Dataset can indeed be expressed in Arrow format.\n1. Obtain low-level access to the internal columnar representation of the Dataset.\n1. Convert Spark's columnar representation to Arrow using the Arrow Java APIs.\n1. Ship the Arrow buffer over the Py4j socket to the Python process as an array of bytes.\n1. Cast the array of bytes to a Python Arrow array.\n\nAll these steps will be contingent on Spark accepting a dependency on Arrow's Java API. This last point might be a bit tricky, given that the API doesn't have any users right now. At the least, we would need to break out some testing/documentation activities to create greater confidence in the robustness of the Java APIs.\n\nIf we use Arrow's C++ API to do the conversion, the flow would go as follows:\n1. Determine that the Spark Dataset can be expressed in Arrow format\n1. Obtain low-level access to the internal columnar representation of the Dataset\n1. Ship chunks of column values over the Py4j socket to the Python process as arrays of primitive types\n1. Insert the column values into an Arrow buffer on the Python side, using C++ APIs\n   Note that the last step here could potentially be implemented against Pandas dataframes instead of Arrow as a short-term expedient.\n\nA third possibility is to use Parquet as an intermediate format:\n1. Determine that the Spark Dataset can be expressed in Arrow format.\n1. Write the Dataset to a Parquet file in a location that the Python process can access.\n1. Read the Parquet file back into an Arrow buffer in the Python process using C++ APIs.\n\nThis approach would involve a lot less code, but it would of course require creating and deleting temporary files.\n\n"
+        },
+        {
+            "created_at": "2016-10-13T20:06:03.159Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-288?focusedCommentId=15573017) by Wes McKinney (wesm):*\nhi `[~freiss]` and `[~jlaskowski]` \u2013 we made pretty big progress on the C++ side to be able to be closer to full interoperability with the Arrow Java library. We still need to do some integration testing, but it would be great to start exploring the technical plan for making this happen. I was just talking with `[~rxin]` about this the other day, so there may be someone on the Spark side who could help with this effort, too. \n\nThe first step is to convert a Spark Dataset into 1 or more Arrow record batches, including metadata conversion, and then converting back. The Java <~~> C++ data movement itself is a comparatively minor task because that is just sending a serialized byte buffer through the existing protocol. We can test this out in Python using the Arrow <~~> pandas bridge which has already been completed. \n\nLet me know if anyone will have the bandwidth to work on this and we can coordinate. thanks!"
+        },
+        {
+            "created_at": "2016-10-17T18:45:15.077Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-288?focusedCommentId=15583076) by Frederick Reiss (freiss):*\n`[~bryanc]`, `[~holdenk]`, and `[~yinxusen]` are looking into this item on our end. We should have an update around the end of this week."
+        },
+        {
+            "created_at": "2017-08-23T14:32:35.406Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-288?focusedCommentId=16138427) by Wes McKinney (wesm):*\nThis development is being managed in the Spark JIRA; the preliminary Arrow adapter was merged around the time of Arrow 0.5.0"
+        }
+    ]
+}

@@ -1,0 +1,81 @@
+{
+    "issue": {
+        "title": "python hangs after write a few parquet tables",
+        "body": "***Note**: This issue was originally created as [ARROW-1311](https://issues.apache.org/jira/browse/ARROW-1311). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI had a program to read some csv files (a few million rows each, 9 columns), and converted with:\n\n```Java\nimport os\nimport pandas as pd\n\nimport pyarrow.parquet as pq\nimport pyarrow\n\ndef to_parquet(output_file, csv_file):\n    df = pd.read_csv(csv_file)\n    df['gecco_variant'] = [ v.lstrip('0') for v in df['gecco_variant']]\n    table = pyarrow.Table.from_pandas(df)\n    pq.write_table(table, output_file)\n```\n\nThe first csv file would always complete, but python would hang on the second or third file, and sometimes on a much later file.",
+        "created_at": "2017-08-01T22:37:45.000Z",
+        "updated_at": "2022-08-27T14:41:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-08-02T21:59:22.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-08-02T02:29:43.648Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1311?focusedCommentId=16110163) by Wes McKinney (wesm):*\nhi `[~K94]` \u2013 on what platform, and how did you install? Seems this may be ARROW-1282. \n\n`[~xhochy]` I think we need to get patched builds out ASAP. Let me know how you want to proceed"
+        },
+        {
+            "created_at": "2017-08-02T16:01:07.929Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1311?focusedCommentId=16111156) by Uwe Korn (uwe):*\n`[~wesmckinn]` We should simply disable `jemalloc`\u00a0by default until these problems have been resolved. I will try to reproduce locally and then talk to the jemalloc people to get it fixed upstream."
+        },
+        {
+            "created_at": "2017-08-02T16:16:32.128Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1311?focusedCommentId=16111190) by Wes McKinney (wesm):*\nWe could release patched builds on PyPI but there is the performance regression ARROW-1290. I may update 0.5.0 on conda-forge to include this patch and disable jemalloc for now"
+        },
+        {
+            "created_at": "2017-08-02T21:54:58.323Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1311?focusedCommentId=16111785) by Keith Curtis (K94):*\nStack trace from gdb when Python appeared to be hung.  "
+        },
+        {
+            "created_at": "2017-08-02T21:56:42.678Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1311?focusedCommentId=16111787) by Keith Curtis (K94):*\nI re-ran my code, and have a revised function, where I added a line to update the column, which seems to matter.\n\ndef to_parquet(output_file, csv_file):\n    df = pd.read_csv(csv_file)\n    df['gecco_variant'] = [ v.lstrip('0') for v in df['gecco_variant']]\n    table = pyarrow.Table.from_pandas(df)\n    pq.write_table(table, output_file)\n\nWhen Python seemed hung (after 3 minutes with no progress), I captured a stack trace with gdb, and attached the file\n\nI'm running on Ubuntu 14.04.3. I installed into a conda virtual environment using pip.\n"
+        },
+        {
+            "created_at": "2017-08-02T21:59:04.907Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1311?focusedCommentId=16111790) by Wes McKinney (wesm):*\nThanks, indeed this is ARROW-1282. I'm in the process of updating 0.5.0 binaries to disable the jemalloc allocator. \n\nIf you are using pip, can you try `pip install pyarrow==0.5.*` which should pull the `0.5.0.post1` updated build? If you are using conda, it will take me a little while to update the binaries on conda-forge."
+        },
+        {
+            "created_at": "2017-08-02T21:59:22.113Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1311?focusedCommentId=16111791) by Wes McKinney (wesm):*\nSame issue as ARROW-1282"
+        },
+        {
+            "created_at": "2017-08-02T22:02:46.093Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1311?focusedCommentId=16111796) by Wes McKinney (wesm):*\nActually, I made a mistake in the build, and need to post another one, hang on for a few minutes."
+        },
+        {
+            "created_at": "2017-08-02T22:09:39.668Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1311?focusedCommentId=16111811) by Wes McKinney (wesm):*\nShould be all set now with 0.5.0.post2"
+        },
+        {
+            "created_at": "2017-08-02T22:10:50.528Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1311?focusedCommentId=16111813) by Keith Curtis (K94):*\nHi,  I think I have the updated one:\n  $ pip install --upgrade  pyarrow==0.5.\\*\nCollecting pyarrow==0.5.\\*\n  Downloading pyarrow-0.5.0.post1-cp35-cp35m-manylinux1_x86_64.whl (8.9MB)\n  ...\n\nI re-ran my script, but python appeared to hang, and the stack trace looks similar:\n\n#0  je_spin_adaptive (spin=<synthetic pointer>) at include/jemalloc/internal/spin.h:40\n#1  chunk_dss_max_update (new_addr=<optimized out>) at src/chunk_dss.c:83\n#2  je_chunk_alloc_dss (tsdn=tsdn@entry=0x7f6d609ab620, arena=arena@entry=0x7f6ca8800140, new_addr=new_addr@entry=0x7f6c33000000, size=size@entry=8388608, \n    alignment=alignment@entry=2097152, zero=zero@entry=0x7fff45db9850, commit=commit@entry=0x7fff45db97a0) at src/chunk_dss.c:122\n#3  0x00007f6ca92bb02f in chunk_alloc_core (dss_prec=dss_prec_secondary, commit=0x7fff45db97a0, zero=0x7fff45db9850, alignment=2097152, size=8388608, new_addr=0x7f6c33000000, \n    arena=0x7f6ca8800140, tsdn=0x7f6d609ab620) at src/chunk.c:357\n#4  chunk_alloc_default_impl (commit=0x7fff45db97a0, zero=0x7fff45db9850, alignment=2097152, size=8388608, new_addr=0x7f6c33000000, arena=0x7f6ca8800140, tsdn=0x7f6d609ab620)\n    at src/chunk.c:430\n#5  je_chunk_alloc_wrapper (tsdn=tsdn@entry=0x7f6d609ab620, arena=arena@entry=0x7f6ca8800140, chunk_hooks=chunk_hooks@entry=0x7fff45db97c0, new_addr=new_addr@entry=0x7f6c33000000, \n    size=size@entry=8388608, alignment=2097152, sn=sn@entry=0x7fff45db97b0, zero=zero@entry=0x7fff45db9850, commit=commit@entry=0x7fff45db97a0) at src/chunk.c:490\n ...\n"
+        },
+        {
+            "created_at": "2017-08-02T22:12:58.836Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1311?focusedCommentId=16111815) by Keith Curtis (K94):*\nOk, I'll re-try with post2"
+        },
+        {
+            "created_at": "2017-08-02T22:19:59.380Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1311?focusedCommentId=16111831) by Keith Curtis (K94):*\nI re-ran my script with pyarrow-0.5.0.post2; that seemed to fixed it, my script ran smoothly converting 22 csv files to parquet format. Thanks!"
+        },
+        {
+            "created_at": "2017-08-02T22:22:22.197Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1311?focusedCommentId=16111836) by Wes McKinney (wesm):*\nCool, thank you! And very sorry about the trouble. We would have learned about these problems with jemalloc earlier but we only made it the default allocator in 0.5.0 so it's good to know so we can work with the jemalloc developers to figure out what's wrong"
+        },
+        {
+            "created_at": "2017-08-03T08:08:16.722Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1311?focusedCommentId=16112378) by Uwe Korn (uwe):*\nTwo things I see in this BT: \n\n- The size change is quite small: `size=2097216, oldsize=2097152`\n- We're in the are of 2GiB of allocated memory and want to expand the region by a some page, not a full re-allocation.\n\n`[~K94]` It would be nice if you could try to run into the problematic situation again and get a more detailed traceback with `thread apply all bt full`\u00a0instead of `bt`\u00a0in `gdb`. This would help me better understand the problem. I sadly yet fail reproduce locally."
+        },
+        {
+            "created_at": "2017-08-03T21:36:53.565Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1311?focusedCommentId=16113539) by Keith Curtis (K94):*\nOkay, to get the new backtrace, attached, I had to install the 0.5.0 version from conda:\n  pyarrow: 0.5.0-np112py35_0 conda-forge\n\nI see there's a lot of threads in there (64?), more than I expected. I ran it from the ipython qtconsole, maybe that has something to do with it. Hope that helps."
+        },
+        {
+            "created_at": "2022-08-27T14:41:55.682Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1311?focusedCommentId=17585931) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

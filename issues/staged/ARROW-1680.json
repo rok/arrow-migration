@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] Timestamp unit change not done in from_pandas() conversion",
+        "body": "***Note**: This issue was originally created as [ARROW-1680](https://issues.apache.org/jira/browse/ARROW-1680). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen calling `Array.from_pandas` with a pandas.Series of timestamps that have 'ns' unit and specifying a type to coerce to with 'us' causes problems.  When the series has timestamps with a timezone, the unit is ignored.  When the series does not have a timezone, it is applied but causes an OverflowError when printing.\r\n\r\n```\n\r\n>>> import pandas as pd\r\n>>> import pyarrow as pa\r\n>>> from datetime import datetime\r\n>>> s = pd.Series([datetime.now()])\r\n>>> s_nyc = s.dt.tz_localize('tzlocal()').dt.tz_convert('America/New_York')\r\n>>> arr = pa.Array.from_pandas(s_nyc, type=pa.timestamp('us', tz='America/New_York'))\r\n>>> arr.type\r\nTimestampType(timestamp[ns, tz=America/New_York])\r\n>>> arr = pa.Array.from_pandas(s, type=pa.timestamp('us'))\r\n>>> arr.type\r\nTimestampType(timestamp[us])\r\n>>> print(arr)\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"pyarrow/array.pxi\", line 295, in pyarrow.lib.Array.__repr__ (/home/bryan/git/arrow/python/build/temp.linux-x86_64-2.7/lib.cxx:26221)\r\n    values = array_format(self, window=10)\r\n  File \"pyarrow/formatting.py\", line 28, in array_format\r\n    values.append(value_format(x, 0))\r\n  File \"pyarrow/formatting.py\", line 49, in value_format\r\n    return repr(x)\r\n  File \"pyarrow/scalar.pxi\", line 63, in pyarrow.lib.ArrayValue.__repr__ (/home/bryan/git/arrow/python/build/temp.linux-x86_64-2.7/lib.cxx:19535)\r\n    return repr(self.as_py())\r\n  File \"pyarrow/scalar.pxi\", line 240, in pyarrow.lib.TimestampValue.as_py (/home/bryan/git/arrow/python/build/temp.linux-x86_64-2.7/lib.cxx:21600)\r\n    return converter(value, tzinfo=tzinfo)\r\n  File \"pyarrow/scalar.pxi\", line 204, in pyarrow.lib.lambda5 (/home/bryan/git/arrow/python/build/temp.linux-x86_64-2.7/lib.cxx:7295)\r\n    TimeUnit_MICRO: lambda x, tzinfo: pd.Timestamp(\r\n  File \"pandas/_libs/tslib.pyx\", line 402, in pandas._libs.tslib.Timestamp.__new__ (pandas/_libs/tslib.c:10051)\r\n  File \"pandas/_libs/tslib.pyx\", line 1467, in pandas._libs.tslib.convert_to_tsobject (pandas/_libs/tslib.c:27665)\r\nOverflowError: Python int too large to convert to C long\r\n```\r\n\r\nA workaround is to manually change values with astype\r\n```\n\r\n>>> arr = pa.Array.from_pandas(s.values.astype('datetime64[us]'))\r\n>>> arr.type\r\nTimestampType(timestamp[us])\r\n>>> print(arr)\r\n<pyarrow.lib.TimestampArray object at 0x7f6a67e0a3c0>\r\n[\r\n  Timestamp('2017-10-17 11:04:44.308233')\r\n]\r\n>>> \r\n```\r\n",
+        "created_at": "2017-10-17T18:22:38.000Z",
+        "updated_at": "2017-10-26T02:27:43.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-10-26T02:27:43.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-10-17T18:24:11.631Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1680?focusedCommentId=16208088) by Bryan Cutler (bryanc):*\nrepro script\r\n\r\n```Java\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nfrom datetime import datetime\r\ns = pd.Series([datetime.now()])\r\ns_nyc = s.dt.tz_localize('tzlocal()').dt.tz_convert('America/New_York')\r\narr = pa.Array.from_pandas(s_nyc, type=pa.timestamp('us', tz='America/New_York'))\r\narr.type\r\narr = pa.Array.from_pandas(s, type=pa.timestamp('us'))\r\narr.type\r\nprint(arr)\r\n```"
+        },
+        {
+            "created_at": "2017-10-17T18:26:59.638Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1680?focusedCommentId=16208093) by Bryan Cutler (bryanc):*\n`[~wesmckinn]` should pyarrow convert the pandas series to the specified unit and timezone in `from_pandas`?  Do you see any potential issues with the workaround using `s.values.astype('datetime64[us]')`?  Thanks!"
+        },
+        {
+            "created_at": "2017-10-20T19:45:07.654Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1680?focusedCommentId=16213124) by Wes McKinney (wesm):*\n`[~bryanc]` we don't have the casts implemented yet. I will prioritize this for 0.8.0 since it's causing an issue for you."
+        },
+        {
+            "created_at": "2017-10-23T22:25:11.435Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1680?focusedCommentId=16215958) by Bryan Cutler (bryanc):*\nThanks `[~wesmckinn]`. I'm also seeing another related issue with dates\r\n\r\n```Java\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nimport datetime\r\n\r\narr = pa.array([datetime.date(2017, 10, 23)])\r\nc = pa.Column.from_array(\"d\", arr)\r\n\r\ns = c.to_pandas()\r\nprint(s)\r\n# 0   2017-10-23\r\n# Name: d, dtype: datetime64[ns]\r\n\r\nresult = pa.Array.from_pandas(s, type=pa.date32())\r\nprint(result)\r\n\"\"\"\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"pyarrow/array.pxi\", line 295, in pyarrow.lib.Array.__repr__ (/home/bryan/git/arrow/python/build/temp.linux-x86_64-2.7/lib.cxx:26221)\r\n  File \"/home/bryan/.local/lib/python2.7/site-packages/pyarrow-0.7.2.dev21+ng028f2cd-py2.7-linux-x86_64.egg/pyarrow/formatting.py\", line 28, in array_format\r\n    values.append(value_format(x, 0))\r\n  File \"/home/bryan/.local/lib/python2.7/site-packages/pyarrow-0.7.2.dev21+ng028f2cd-py2.7-linux-x86_64.egg/pyarrow/formatting.py\", line 49, in value_format\r\n    return repr(x)\r\n  File \"pyarrow/scalar.pxi\", line 63, in pyarrow.lib.ArrayValue.__repr__ (/home/bryan/git/arrow/python/build/temp.linux-x86_64-2.7/lib.cxx:19535)\r\n  File \"pyarrow/scalar.pxi\", line 137, in pyarrow.lib.Date32Value.as_py (/home/bryan/git/arrow/python/build/temp.linux-x86_64-2.7/lib.cxx:20368)\r\nValueError: year is out of range\r\n\"\"\"\r\n```\r\n\r\nThis is a little more troublesome because I can't find a decent workaround. Should I open another jira for this?"
+        },
+        {
+            "created_at": "2017-10-23T22:27:31.527Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1680?focusedCommentId=16215962) by Wes McKinney (wesm):*\nYes, please"
+        },
+        {
+            "created_at": "2017-10-26T02:27:43.913Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1680?focusedCommentId=16219865) by Wes McKinney (wesm):*\nResolved in https://github.com/apache/arrow/commit/54d5c81af0a9cbc6ea551922c795728cd43bd86c"
+        }
+    ]
+}

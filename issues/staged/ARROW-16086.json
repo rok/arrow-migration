@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Python] Calls to do_get ignore Python signal handlers",
+        "body": "***Note**: This issue was originally created as [ARROW-16086](https://issues.apache.org/jira/browse/ARROW-16086). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSimilar to ARROW-15106 but observed from the client, not the server.\r\n\r\nThe Python Flight client blocks the thread and ignores signal handlers. This makes it impossible for the client to handle the signal handler and cancel the query before it has returned a FlightStreamReader.",
+        "created_at": "2022-03-31T23:35:55.000Z",
+        "updated_at": "2022-04-02T15:17:35.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: FlightRPC",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-04-01T21:02:19.277Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16086?focusedCommentId=17516127) by David Li (lidavidm):*\nWhat is FlightStreamHandler here? That's not part of PyArrow.\r\n\r\nWhen I try, it looks like the main thread is stuck in gRPC. Unfortunately, I don't think we can do much about that. While the Python interpreter does appear handle the signal (from looking in a debugger), it can't pass it to the application until control returns to the interpreter thread. And that isn't happening because gRPC appears to call epoll_wait in a loop, ignoring interrupts: <https://github.com/grpc/grpc/blob/5fc3ff82032d0ebc4bf252a170ebe66aacf9ed9d/src/core/lib/iomgr/ev_epoll1_linux.cc#L723-L727>\r\n\r\nWe might be able to override the signal handler in C++ or Cython and forcibly cancel the gRPC call\u2026it might be better, though, for the application to just use a background thread, if you want to do anything besides cancel the gRPC call. (Also doing so would be very tricky, and gRPC is explicitly not signal-safe, IIRC.)"
+        },
+        {
+            "created_at": "2022-04-01T22:11:04.177Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16086?focusedCommentId=17516151) by Alex Bergeron (abergeron):*\nThank you for the clear response.\r\n\r\nRe: FlightStreamHandler - my bad - I've mistyped while referring to the API reference. I meant the result type of do_get: <https://arrow.apache.org/docs/python/generated/pyarrow.flight.FlightClient.html#pyarrow.flight.FlightClient.do_get>\r\n\r\nRunning this call in a separate thread works to ensure that the caller thread is freed up, but it does not cancel the query on the server. In our situation, this is the end goal, so that approach is not viable. Running it in a separate process, using multiprocessing, allows us to terminate the process, killing off the query, but it does come at a significant complexity cost."
+        },
+        {
+            "created_at": "2022-04-02T15:17:35.607Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16086?focusedCommentId=17516327) by David Li (lidavidm):*\nAh so the reason why I suggest a thread is then the main thread is freed up and you can handle KeyboardInterrupt. For instance\r\n```python\n\r\nimport threading\r\nimport time\r\n\r\nimport pyarrow.flight as flight\r\n\r\nclient = flight.connect(\"grpc://localhost:1337\")\r\nstream = client.do_get(flight.Ticket(b\"\"))\r\n\r\ndef _read():\r\n    print(\"Reading\")\r\n    try:\r\n        stream.read_all()\r\n    except flight.FlightCancelledError:\r\n        print(\"Cancelled\")\r\n    print(\"Finished\")\r\n\r\nt = threading.Thread(target=_read)\r\nt.start()\r\ntry:\r\n    time.sleep(60)\r\nexcept KeyboardInterrupt:\r\n    stream.cancel()\r\nprint(\"Done\")\r\n```\r\nYou can Ctrl-C this and it will cancel the call.\r\n\r\nOn the server side, gRPC will refuse to interrupt or cancel a call. You must check `context.is_cancelled()` and break out of the RPC handler yourself, or the server will hang. (That is, even if the client cancels a call, the server needs to manually react to this.)"
+        }
+    ]
+}

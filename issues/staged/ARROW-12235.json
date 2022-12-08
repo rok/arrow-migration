@@ -1,0 +1,21 @@
+{
+    "issue": {
+        "title": "[Rust][DataFusion] LIMIT returns incorrect results when used with several small partitions",
+        "body": "***Note**: This issue was originally created as [ARROW-12235](https://issues.apache.org/jira/browse/ARROW-12235). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI noticed when I was running some queries locally that `LIMIT` was not behaving correctly. For my case, a query with `LIMIT 10` was always returning zero rows. \r\n\r\nI spent some time and I have found a self contained reproducer. If you put the following test in `rust/src/datafusion/execution/context.rs` it will fail.\r\n\r\n\r\n```Java\n\r\n\r\n\r\n    /// Return a RecordBatch with a single Int32 array with values (0..sz)\r\n    fn make_partition(sz: i32) -> RecordBatch {\r\n        let seq_start = 0;\r\n        let seq_end =  sz;\r\n        let values = (seq_start..seq_end).collect::<Vec<_>>();\r\n        let schema = Arc::new(Schema::new(vec![Field::new(\"i\", DataType::Int32, true)]));\r\n        let arr = Arc::new(Int32Array::from(values));\r\n        let arr = arr as ArrayRef;\r\n\r\n        RecordBatch::try_new(schema.clone(),vec![arr]).unwrap()\r\n    }\r\n\r\n    #[tokio::test]\r\n    async fn limit_multi_partitions() -> Result<()> {\r\n        let tmp_dir = TempDir::new()?;\r\n        let mut ctx = create_ctx(&tmp_dir, 1)?;\r\n\r\n        let partitions = vec![\r\n            vec![make_partition(0)],\r\n            vec![make_partition(1)],\r\n            vec![make_partition(2)],\r\n            vec![make_partition(3)],\r\n            vec![make_partition(4)],\r\n            vec![make_partition(5)],\r\n        ];\r\n        let schema = partitions[0][0].schema();\r\n        let provider = Arc::new(MemTable::try_new(schema, partitions).unwrap());\r\n\r\n        ctx.register_table(\"t\", provider)\r\n            .unwrap();\r\n\r\n        // select all rows\r\n        let results = plan_and_collect(&mut ctx, \"SELECT i FROM t\")\r\n            .await\r\n            .unwrap();\r\n\r\n        let num_rows: usize = results.into_iter().map(|b| b.num_rows()).sum();\r\n        assert_eq!(num_rows, 15);\r\n\r\n        for limit in 1..10 {\r\n            let query = format!(\"SELECT i FROM t limit {}\", limit);\r\n            let results = plan_and_collect(&mut ctx, &query)\r\n                .await\r\n                .unwrap();\r\n\r\n            let num_rows: usize = results.into_iter().map(|b| b.num_rows()).sum();\r\n            assert_eq!(num_rows, limit, \"mismatch with query {}\", query);\r\n        }\r\n\r\n        Ok(())\r\n    }\r\n\r\n```",
+        "created_at": "2021-04-06T21:20:37.000Z",
+        "updated_at": "2021-04-07T21:55:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust - DataFusion",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-04-07T21:55:45.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-04-07T21:55:45.138Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12235?focusedCommentId=17316725) by Andrew Lamb (alamb):*\nIssue resolved by pull request 9924\n<https://github.com/apache/arrow/pull/9924>"
+        }
+    ]
+}

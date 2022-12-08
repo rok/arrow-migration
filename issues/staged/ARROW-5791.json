@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[Python] pyarrow.csv.read_csv hangs + eats all RAM",
+        "body": "***Note**: This issue was originally created as [ARROW-5791](https://issues.apache.org/jira/browse/ARROW-5791). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI have quite a sparse dataset in CSV format. A wide table that has several rows but many (32k) columns. Total size ~540K.\r\n\r\nWhen I read the dataset using `pyarrow.csv.read_csv` it hangs, gradually eats all memory and gets killed.\r\n\r\nMore details on the conditions further. Script to run and all mentioned files are under attachments.\r\n\r\n1) `sample_32769_cols.csv` is the dataset that suffers the problem.\r\n\r\n2) `sample_32768_cols.csv` is the dataset that DOES NOT suffer and is read in under 400ms on my machine. It's the same dataset without ONE last column. That last column is no different than others and has empty values.\r\n\r\nThe reason of why exactly this column makes difference between proper execution and hanging failure which looks like some memory leak - no idea.\r\n\r\nI have created flame graph for the case (1) to support this issue resolution (`graph.svg`).\r\n\r\n\u00a0",
+        "created_at": "2019-06-29T23:29:07.000Z",
+        "updated_at": "2019-07-11T21:53:45.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-07-01T18:43:18.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-06-30T00:42:36.465Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5791?focusedCommentId=16875623) by Brian Hulette (bhulette):*\nThanks for the concise bug report! I haven't had a chance to dig into this very far, but I'm sure it's not a coincidence that 32768 == 2^15. 32767 is the max of an unsigned 16-bit integer, so if we're assigning an unsigned int16 to each column somewhere it would overflow once you get beyond 32768 columns (since one column gets 0).\r\n\r\nI'm not sure where exactly that would be happening though. My first inclination was that it would be in the element count for the [vector of fields](https://github.com/apache/arrow/blob/master/format/Schema.fbs#L321), but according to the [flatbuffers page](https://google.github.io/flatbuffers/flatbuffers_internals.html) vectors are prefixed by a 32-bit element count."
+        },
+        {
+            "created_at": "2019-06-30T00:56:53.857Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5791?focusedCommentId=16875624) by Bogdan Klichuk (klichukb):*\n`[~bhulette]` It's a shame I threw away the idea of \"maybe this is just a power of 2\" and didn't simply try. Great point."
+        },
+        {
+            "created_at": "2019-06-30T01:09:35.204Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5791?focusedCommentId=16875626) by Bogdan Klichuk (klichukb):*\nJust to point, I can successfully convert a dataframe (if I read it using Pandas) to pyarrow.Table directly.\r\n```java\n\r\ndf = pandas.read_csv('...', ...)\r\ntable = pyarrow.Table.from_pandas(df)\n```"
+        },
+        {
+            "created_at": "2019-06-30T15:38:16.515Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5791?focusedCommentId=16875813) by Wes McKinney (wesm):*\nEvidently there's an int16 overflow somewhere in the Arrow CSV codebase. An initial grep didn't turn up anything obvious. \r\n\r\nComparisons with other CSV libraries (like pandas) probably are not relevant since there is no code overlap. "
+        },
+        {
+            "created_at": "2019-06-30T17:33:15.269Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5791?focusedCommentId=16875832) by Micah Kornfield (emkornfield@gmail.com):*\nI think I know where this is occurring, will try to patch tonight.  \r\n\r\nDo we want to support more columns or throw an error?"
+        },
+        {
+            "created_at": "2019-06-30T19:01:55.240Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5791?focusedCommentId=16875845) by Wes McKinney (wesm):*\nI think we should support more columns"
+        },
+        {
+            "created_at": "2019-06-30T23:37:21.410Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5791?focusedCommentId=16875885) by Micah Kornfield (emkornfield@gmail.com):*\nMade a PR, this wasn't really and overflow.  Also, added a fixed cap on 1000\\*1024 which should be enough for anyone :)"
+        },
+        {
+            "created_at": "2019-07-01T18:43:18.372Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5791?focusedCommentId=16876419) by Wes McKinney (wesm):*\nIssue resolved by pull request 4762\n<https://github.com/apache/arrow/pull/4762>"
+        },
+        {
+            "created_at": "2019-07-02T08:23:10.461Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5791?focusedCommentId=16876769) by Bogdan Klichuk (klichukb):*\nThanks a lot!\u00a0"
+        }
+    ]
+}

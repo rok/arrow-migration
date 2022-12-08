@@ -1,0 +1,101 @@
+{
+    "issue": {
+        "title": "[Gandiva] Add support for decimal operations",
+        "body": "***Note**: This issue was originally created as [ARROW-3701](https://issues.apache.org/jira/browse/ARROW-3701). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nTo begin with, will add support for 128-bit decimals. There are two parts :\r\n1. llvm_generator needs to understand decimal types (value, precision, scale)\n1. code decimal operations : add/subtract/multiply/divide/mod/..\n    \\*\\* This will be c++ code that can be pre-compiled to emit IR code",
+        "created_at": "2018-11-05T06:35:57.000Z",
+        "updated_at": "2019-01-08T17:26:08.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++ - Gandiva",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2019-01-08T15:32:47.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-11-05T07:56:15.390Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16674787) by Pindikura Ravindra (pravindra):*\n`[~wesmckinn]` `[~cpcloud]` \u00a0 `[~pitrou]` \u00a0[~jacques@dremio.com] `[~praveenbingo]`\r\n\r\n\u00a0\r\n\r\nI've looked at the re-using the code in arrow/util/decimal.h for implementing decimal operations in gandiva. However, it has the following issues :\r\n1. This class is built on a pair of int64s - using a int128 will have better perf.\u00a0\n1. The functions do not make an attempt to avoid overflow.\u00a0\n    \\*\\* sql implementations have rules for each operation that adjust the scale when the result precision exceeds 38. <https://docs.microsoft.com/en-us/sql/t-sql/data-types/precision-scale-and-length-transact-sql?view=sql-server-2017>\n1. The functions do not track overflow\n    \\*\\* It will be nice if there is a warning/error generated when there is overflow.\n   \n   \u00a0\n   \n   I plan to use adapt the code from Apache Impala for this instead. Thoughts ?"
+        },
+        {
+            "created_at": "2018-11-05T08:53:53.998Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16674831) by Wes McKinney (wesm):*\nThe Impala code is not cross platform. We need to make sure that Gandiva will also work on Windows. It may be that decimals work slower on Windows as a result if we need to maintain multiple implementations of things.  "
+        },
+        {
+            "created_at": "2018-11-05T10:20:08.788Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16674918) by Pindikura Ravindra (pravindra):*\nok, I'll make sure that this code works on windows too."
+        },
+        {
+            "created_at": "2018-11-05T10:47:18.566Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16674947) by Antoine Pitrou (apitrou):*\n> This class is built on a pair of int64s - using a int128 will have better perf. \r\n\r\nCan you explain why it would? CPUs generally don't have 128 bit integer support. So any code written using a \"int128\" - which is non-standard - will get translated into 64-bit instructions at the CPU level.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-11-05T11:41:41.814Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16675008) by Pindikura Ravindra (pravindra):*\n> CPUs generally don't have 128 bit integer support. So any code written using a \"int128\" -\r\n\r\n> which is non-standard - will get \u00a0translated into 64-bit instructions at the CPU level.\r\n\r\nI'm assuming the compilers are more efficient at this, but I may be wrong.\r\n\r\n<https://github.com/rust-lang/rfcs/blob/master/text/1504-int128.md#alternatives>\r\n\r\nWith my initial testing for adding decimals - \u00a0the perf with adding i128 is very good (almost same as adding three longs). I haven't tried doing the same with the current Decimal128 - let me give it a try."
+        },
+        {
+            "created_at": "2018-11-05T19:23:38.439Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16675643) by Pindikura Ravindra (pravindra):*\nI ran a simple test on my desktop (macbook pro) to iterate over 10M entries of two input arrays, and perform an arithmetic operation (in a single thread). Compared the perf of arrow/util/Decimal128 with another implementation that does the same operations but with __int128 (instead of two int64).\r\n\r\nThe results were (in ms) :\r\n\n|Operation|Time with 2 64-bit Integers|Time with int128|\r|\n|-|-|-|-|\n|Add|31|28|\r|\n|Subtract|30|27|\r|\n|Multiply|63|28|\r|\n|Divide|409|170|\r<br>\r<br>So, add/subtract are equally efficient. but, multiply and divide perform much better with gcc's __int128.\r<br>\r<br>\u00a0|\n"
+        },
+        {
+            "created_at": "2018-11-05T19:32:42.435Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16675665) by Antoine Pitrou (apitrou):*\nThat sounds like a nice improvement indeed. However, we'll need to keep a standards-compliant fallback path with two int64 for compilers which don't implement a 128-bit integer."
+        },
+        {
+            "created_at": "2018-11-05T19:42:21.766Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16675684) by Antoine Pitrou (apitrou):*\nAlso note that Boost has a 128-bit integer type, though I don't know how fast it is:\r\nhttps://www.boost.org/doc/libs/1_68_0/libs/multiprecision/doc/html/boost_multiprecision/ref/cpp_int_ref.html"
+        },
+        {
+            "created_at": "2018-11-05T20:32:44.447Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16675728) by Jacques Nadeau (jnadeau):*\n> However, we'll need to keep a standards-compliant fallback path with two int64 for compilers which don't implement a 128-bit integer.\r\nI'm\u00a0confused by this comment. Aren't these functions going to be compiled into LLVM IR at build time such that the target platform needs to be supported by LLVM (not the compiling platform). In that case,\u00a0wouldn't we be able to stop worrying\u00a0about compilers on different platforms for these operations?\u00a0We could\u00a0just generate the IR on one\u00a0platform, right? (Assuming that we can use pure IR--which I believe is the most optimal pattern).\r\n\r\nFrom an IR perspective, we\u00a0probably\u00a0want to map down to LLVM's int128 operations since LLVM has that support within its IR and it allows future optimizations to be clean (and LLVM to target/compile as appropriate), right?\r\n\r\nIt seems like we should\u00a0have a very clear delineation in Gandiva between code that is compiled to IR versus code that is compiled for execution (I think Impala uses -ir.cc to identify the former)."
+        },
+        {
+            "created_at": "2018-11-05T20:40:11.617Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16675736) by Wes McKinney (wesm):*\nIf the generated IR is indeed cross-platform, then having IR-only code that shadows other portable (no-LLVM) code seems like a good path forward. "
+        },
+        {
+            "created_at": "2018-11-05T20:53:56.362Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16675746) by Antoine Pitrou (apitrou):*\nLLVM IR is generally not cross-platform, as it will encode platform specificities such as type widths, ABI, etc.\r\n (see LLVM FAQ at <https://llvm.org/docs/FAQ.html#can-i-compile-c-or-c-code-to-platform-independent-llvm-bitcode>)\r\n\r\nPerhaps by being extra-careful it's possible to have IR generated for one platform compile and interface correctly on another platform, but it sounds a bit fragile."
+        },
+        {
+            "created_at": "2018-11-05T20:58:05.459Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16675753) by Antoine Pitrou (apitrou):*\n> From an IR perspective, we probably want to map down to LLVM's int128 operations since LLVM has that support within its IR\r\n\r\nIt's not guaranteed to implement it on all backends, though. Technically, you can define ints of any size in LLVM IR (including \"int73\" or \"int31415\" if you want), but only the most common ones (8, 16, 32, 64) will be generally available. So we would have to check whether backend support for int128 is available on desired platforms."
+        },
+        {
+            "created_at": "2018-11-05T21:59:21.979Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16675804) by Jacques Nadeau (jnadeau):*\nThanks for the explanations/pointers Antoine.\r\n\r\nThis suggest to me that we need to look more closely at when we use C++ as a basis for IR. In cases like decimal operations it seems like it might be better to write operations directly in LLVM ir since it seems like most of the operations are primitive instead of using\u00a0front-end translation. Thoughts?\r\n> only the most common ones (8, 16, 32, 64) will be generally available\r\nIs this documented somewhere?\r\n\r\nWe may have to pick an optimal path for the common linux/modern cpus path and then a lowest common denominator fallback :(\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-11-06T04:16:32.963Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16676112) by Pindikura Ravindra (pravindra):*\n> Also note that Boost has a 128-bit integer type, though I don't know how fast it is:\r\n\r\nRepeated my earlier test with boost int128.\r\n\r\ntypedef boost::multiprecision::number<boost::multiprecision::cpp_int_backend<\r\n    128, 128, boost::multiprecision::signed_magnitude, boost::multiprecision::unchecked,\r\n    void>>\r\n    int128_t;\r\n\r\n\n|Operation|Time with 2 64-bit Integers|Time with boost int128|Time with int128|\r|\n|-|-|-|-|-|\n|Add|31|57|28|\r|\n|Subtract|30|77|27|\r|\n|Multiply|63|60|28|\r|\n|Divide|409|181|170|\r<br>\r<br>Boost implementation is better than the util/Decimal128 impl for divide, but worser for add/subtract. In all cases, int128 performs better.|\n"
+        },
+        {
+            "created_at": "2018-11-06T16:24:49.770Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16676963) by Antoine Pitrou (apitrou):*\n> Is this documented somewhere?\r\n\r\nI don't know. That was the result of testing some years ago. That said, it seems better supported nowadays. If you take the following IR:\r\n```Java\n\r\ndefine i128 @increment(i128 %a) {\r\n    %result = add i128 %a, 1\r\n    ret i128 %result\r\n}\r\n\r\ndefine i128 @square(i128 %a) {\r\n    %result = mul i128 %a, %a\r\n    ret i128 %result\r\n}\r\n\r\ndefine i128 @divide(i128 %a, i128 %b) {\r\n    %result = udiv i128 %a, %b\r\n    ret i128 %result\r\n}\r\n```\r\n\r\nThen compiling it seems to work fine for several targets I tried it with:\r\n```Java\n\r\nllc-6.0 -O3 -march=x86-64 testfile.ir\r\n```\r\n"
+        },
+        {
+            "created_at": "2018-11-07T21:31:55.598Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16678799) by Wes McKinney (wesm):*\nDid you try on Windows? If not I can give it a try"
+        },
+        {
+            "created_at": "2018-11-09T17:00:18.652Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16681704) by Pindikura Ravindra (pravindra):*\n@wesm - I tried the same cmd on my windows 10 home desktop using llc from llvm-4.1. It worked fine."
+        },
+        {
+            "created_at": "2018-12-11T12:25:47.868Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16717008) by Pindikura Ravindra (pravindra):*\nAfter running more benchmarks, I found the following for (divide a/b)\r\n \\* The Decimal128 implementation has pretty consistent performance (between 300 to 400ms, for 10M iterations) whereas the i128 division varies widely (between 100ms to 2000ms) based on the value of b i.e the divisor.\r\n \\* when a and b are both large random numbers, i128 divide (both clang and llvm) is twice as fast as\u00a0 the Decimal128 implementation.\r\n \\* when b is a small number (say, 10 or 100), Decimal128 implementation is about 7 times faster. I think the reason is that the Decimal128 implementation has short-cuts for small integers.\r\n\r\nFor decimal operations, there are several cases where we need to do small divisions (to adjust scale). So, I'm using the Decimal128 implementation for divides.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-12-13T20:13:58.527Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16720561) by Wes McKinney (wesm):*\nWill these benchmarks be in the Arrow codebase somewhere? There may be variability in different hardware, CPUs (e.g. AMD vs Intel)"
+        },
+        {
+            "created_at": "2018-12-14T10:24:06.114Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16721208) by Pindikura Ravindra (pravindra):*\nAs part of my PR, I'm adding more benchmarks to gandiva/benchmarks.cc - this'll exercise both the arrow-decimal code and gandiva-decimal code.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-01-08T15:32:47.250Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3701?focusedCommentId=16737236) by Wes McKinney (wesm):*\nIssue resolved by pull request 2942\n<https://github.com/apache/arrow/pull/2942>"
+        }
+    ]
+}

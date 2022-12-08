@@ -1,0 +1,85 @@
+{
+    "issue": {
+        "title": "[C++][FlightRPC] Expose a way to terminate all calls client side",
+        "body": "***Note**: This issue was originally created as [ARROW-15473](https://issues.apache.org/jira/browse/ARROW-15473). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe want a mechanism to close DoExchange streams from client side in case of long running connections. This would be handy for testing and in case e.g. user wants to disconnect.",
+        "created_at": "2022-01-26T22:58:15.000Z",
+        "updated_at": "2022-02-10T15:37:41.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: FlightRPC",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-01-26T23:04:04.178Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15473?focusedCommentId=17482783) by Rok Mihevc (rokm):*\n`[~lidavidm]` Do you think this is a good idea?"
+        },
+        {
+            "created_at": "2022-01-26T23:07:18.149Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15473?focusedCommentId=17482785) by David Li (lidavidm):*\nHmm, isn't there DoneWriting? Or do you mean to completely shut it down (which should be Cancel)?"
+        },
+        {
+            "created_at": "2022-01-26T23:08:11.913Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15473?focusedCommentId=17482786) by David Li (lidavidm):*\nDoneWriting: <https://github.com/apache/arrow/blob/01855c791056b7f712e6df82acf97ad3ab7b823a/cpp/src/arrow/flight/client.h#L155-L160>\r\n\r\nCancel: <https://github.com/apache/arrow/blob/01855c791056b7f712e6df82acf97ad3ab7b823a/cpp/src/arrow/flight/client.h#L134-L135>\r\n\r\nThis might just need better examples/documentation, to be fair."
+        },
+        {
+            "created_at": "2022-01-27T00:52:52.049Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15473?focusedCommentId=17482818) by Radu Teodorescu (rteodorescu):*\nCancel is certainly helpful (assuming it does a direct client side disconnect and release the threads blocked on read).\r\n\r\nThe scenario I was having in mind is one where the same connection is shared by multiple objects potentially outside of the control of the client shutdown,\r\n\r\nFor example imagine a number of worker threads processing some long lived streams with arbitrary termination logic and we just want to have a central \"red button\" call that terminates the FlightConnection and that automatically disconnects all those streams (just like having a number of threads sharing the same TCP connection - when the connection goes down they are all disconnected)."
+        },
+        {
+            "created_at": "2022-01-27T01:07:25.557Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15473?focusedCommentId=17482823) by David Li (lidavidm):*\n`[~rteodorescu]` just to be clear of a few things: are you talking about multiple concurrent calls on the same client, and a way to cancel all of them at once? That is indeed unimplemented. I'm not sure gRPC even gives us a way to do this; you'd just have to track all your ongoing calls, and Cancel() all of them (which to be fair is a bit of a pain especially once threading comes into play)."
+        },
+        {
+            "created_at": "2022-01-27T12:34:22.242Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15473?focusedCommentId=17483101) by Rok Mihevc (rokm):*\nThis seems related: https://github.com/grpc/grpc/issues/21926"
+        },
+        {
+            "created_at": "2022-01-27T13:46:18.733Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15473?focusedCommentId=17483132) by David Li (lidavidm):*\nAh, good find. Though it seems Google is uninterested, so it doesn't quite help us."
+        },
+        {
+            "created_at": "2022-01-27T14:11:54.834Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15473?focusedCommentId=17483159) by Radu Teodorescu (rteodorescu):*\nRight, I am not very well versed in the GRPC/HTTP stack so my comments might be on the ignorant side, but at the bottom of it all there is TCP socket that can simply be disconnected.\r\n\r\nAgain this is relevant for testing (when simulating connection drops for example) and as a last resort \"abort\" option but it would be a helpful option,"
+        },
+        {
+            "created_at": "2022-01-27T14:16:31.705Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15473?focusedCommentId=17483166) by David Li (lidavidm):*\nI hear you on wanting to test those edge cases. Unfortunately, gRPC doesn't give us access to the socket, and it abstracts that detail away; for instance, gRPC may silently reconnect or disconnect in the background if there are no ongoing calls or if the connection drops. Or depending on load balancing parameters, there might even be multiple sockets underneath (and gRPC can then spread calls between the sockets).\r\n\r\nFor simulating connection drops, it might be better to use something like [toxiproxy](https://github.com/shopify/toxiproxy#reset_peer) to force an actual connection drop? Though yes, adding more components is a bit of a pain."
+        },
+        {
+            "created_at": "2022-01-27T14:16:56.494Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15473?focusedCommentId=17483168) by Rok Mihevc (rokm):*\nSince you are probably working with a testing server - could you have the client ask the server to shut down everything (ARROW-13409)?"
+        },
+        {
+            "created_at": "2022-01-27T14:57:11.582Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15473?focusedCommentId=17483196) by Radu Teodorescu (rteodorescu):*\nThank you everyone, there are certainly a number of options each addressing specific use cases and this conversation was helpful for broadening my understanding of the underlying complexity as well as learning about existing tools and API options.\r\n\r\nI still think that this feature would be useful providing available hooks become available in GRPC but I guess for now we can just leave it open for future reference"
+        },
+        {
+            "created_at": "2022-01-27T15:04:01.262Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15473?focusedCommentId=17483200) by David Li (lidavidm):*\nSounds good. Yes, if gRPC makes the API available, we can likely expose it somehow. (In fact, I've wanted to add FlightClient::Close() anyways.)\r\n\r\nThat said, even if gRPC ever makes it available, it would most likely be a \"graceful\" shutdown that is the equivalent of calling Cancel() on every outstanding RPC, which isn't quite the same as a connection drop, so another solution for testing this use case would still be useful."
+        },
+        {
+            "created_at": "2022-01-27T15:11:32.920Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15473?focusedCommentId=17483206) by Rok Mihevc (rokm):*\nI've asked for an update on https://github.com/grpc/grpc/issues/21926 and we'll follow up if it gets resolved."
+        },
+        {
+            "created_at": "2022-01-27T16:18:16.389Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15473?focusedCommentId=17483249) by Rok Mihevc (rokm):*\n`[~lidavidm]` shall I make a Jira tracking FlightClient::Close()?"
+        },
+        {
+            "created_at": "2022-01-27T16:21:50.076Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15473?focusedCommentId=17483254) by David Li (lidavidm):*\nGood idea, I added ARROW-15487 just now."
+        },
+        {
+            "created_at": "2022-02-10T15:36:04.218Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15473?focusedCommentId=17490336) by Rok Mihevc (rokm):*\n`[~lidavidm]` would it make sense for me to check if I can help with the upstream work on <https://github.com/grpc/grpc/issues/21926> ? Upstream fix seems like the most elegant way to solve this, right?"
+        },
+        {
+            "created_at": "2022-02-10T15:37:41.312Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15473?focusedCommentId=17490337) by David Li (lidavidm):*\n`[~rokm]` yes, ideally we'd solve this upstream."
+        }
+    ]
+}

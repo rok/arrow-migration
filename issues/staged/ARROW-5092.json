@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[C#] Source Link doesn't work with the C# release script",
+        "body": "***Note**: This issue was originally created as [ARROW-5092](https://issues.apache.org/jira/browse/ARROW-5092). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWith the 0.13.0 C# NuGet package,\u00a0[Source Link](https://docs.microsoft.com/en-us/dotnet/standard/library-guidance/sourcelink) doesn't work. The symbols can be downloaded from nuget.org correctly, but when\u00a0Visual Studio tries to download the code, it cannot find the correct files.\r\n\r\nThe following is why it doesn't work:\r\n\r\nThe .NET tooling expects the build of an official release to happen in the context of a\u00a0`git`\u00a0repository. This does 2 things to the produced assets:\r\n1. In the\u00a0`.nupkg`\u00a0file that is generated, the .NET tooling will encode the current git commit's SHA hash into both the\u00a0`Apache.Arrow.nuspec`\u00a0file, and into the compiled\u00a0`Apache.Arrow.dll`\u00a0assembly. Looking at the released version that was published over the weekend:\u00a0<https://www.nuget.org/packages/Apache.Arrow/0.13.0>, this information made it into the\u00a0`.nuspec`\u00a0and the\u00a0`.dll`:\n   \n   ```Java\n   \n   [assembly: AssemblyInformationalVersion(\"0.13.0+57de5c3adffe526f37366bb15c3ff0d4a2e84655\")]\n   \n   <repository type=\"git\" url=\"https://github.com/apache/arrow\" commit=\"57de5c3adffe526f37366bb15c3ff0d4a2e84655\" />\n   ```\n   \n   However, I don't see how the [C# release script](https://github.com/apache/arrow/blob/master/dev/release/post-06-csharp.sh) could have done that. \n   \n1. Also, .NET has a feature called \"Source Link\", which allows for the source code to be automatically downloaded from GitHub when debugging into this library. The way the tooling works today, it requires that the git repository's\u00a0`origin`\u00a0remote is set to\u00a0<https://github.com/apache/arrow.git>. The tooling reads uses the `origin` git remote to encode the GitHub URL into the symbols file in the\u00a0`.snupkg`\u00a0file.\n   \n   This, however, doesn't work with the 0.13.0 release that occurred over the weekend. I tried using the Source Link feature, and it didn't automatically download the source files from GitHub.\n   \n   Looking into the symbols file, I see the Source Link information that was embedded:\n   \n   \n   ```Java\n   \n   1: '/home/kou/work/cpp/arrow.kou/apache-arrow-0.13.0/csharp/src/Apache.Arrow/Flatbuf/FlatBuffers/ByteBuffer.cs' (#19c)            C# (#3)   SHA-1 (#2)     04-64-A0-48-82-EA-F5-B5-50-EC-CA-9F-85-75-E2-95-A4-EC-AB-B3 (#1b7)   \n   2: '/home/kou/work/cpp/arrow.kou/apache-arrow-0.13.0/csharp/src/Apache.Arrow/Flatbuf/FlatBuffers/ByteBufferUtil.cs' (#68f)        C# (#3)   SHA-1 (#2)     F0-4F-28-53-88-A4-E0-6E-F1-1F-17-F6-CD-FE-0E-64-AB-0B-C2-95 (#6aa)   \n   ```\n   \n   ```json\n   \n   {\n       \"documents\": {\n           \"/home/kou/work/cpp/arrow.kou/*\": \"https://raw.githubusercontent.com/kou/arrow/57de5c3adffe526f37366bb15c3ff0d4a2e84655/*\",\n           \"/home/kou/work/cpp/arrow.kou/cpp/submodules/parquet-testing/*\": \"https://raw.githubusercontent.com/apache/parquet-testing/bb7b6abbb3fbeff845646364a4286142127be04c/*\"\n       }\n   }\n   ```\n   \n   Here it appears the `origin`\u00a0remote was set to\u00a0`kou/arrow`, and not\u00a0`apache/arrow`. Also, it appears the\u00a0`apache-arrow-0.13.0`\u00a0folder was under a git repository, and so the sources aren't matched up with the git repository. (Basically that folder shouldn't have appeared in the Documents list that has the\u00a0`.cs`\u00a0file path.) I think this explains how (1) above happened - the build was under a git repository - but this script downloaded an extra copy of the sources into that git repository.\n   \n   I'm wondering how we can fix either this script, or the .NET Tooling, or both, to make this experience better for the next release. I think we need to ensure two things:\n1. The git commit information is set correctly in the\u00a0`.nuspec`\u00a0and the\u00a0`.dll`\u00a0when the release build is run. I think it just happened by pure luck this time. It just so happened that the script was executed in an already established repo, and it just so happened to be on the right commit (or maybe it wasn't the right commit?).\n1. The source link information is set correctly in the symbols file.\n   \n   `[~wesmckinn]` `[~kou]`",
+        "created_at": "2019-04-02T20:34:05.000Z",
+        "updated_at": "2019-06-24T18:59:00.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C#",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-06-23T09:46:26.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-04-02T21:56:28.603Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5092?focusedCommentId=16808182) by Kouhei Sutou (kou):*\nThanks for the description.\r\nCan we specify the followings explicitly instead of auto detection?\r\n- The repository URL (https://github.com/apacha/arrow.git)\n- The commit hash (I hope that we can use tag name such as `apache-arrow-0.13.0` for it)\n- The relative source directory path (`/csharp`)"
+        },
+        {
+            "created_at": "2019-04-02T22:44:33.975Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5092?focusedCommentId=16808212) by Eric Erhardt (eerhardt):*\nI've asked the same things to\u00a0tmat on GitHub (I don't think he is on JIRA), who\u00a0works on the .NET tools here:\u00a0<https://github.com/dotnet/sourcelink/issues/187#issuecomment-479193633>.\u00a0It appears others have similar problems building in Docker containers when the git repo isn't present.\r\n\r\nAs for tag name, I am not sure. I'll ask him as well."
+        },
+        {
+            "created_at": "2019-04-02T23:05:30.347Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5092?focusedCommentId=16808219) by Eric Erhardt (eerhardt):*\ntmat\u00a0replied to my question (cross-posting it here):\r\n\r\n<https://github.com/dotnet/sourcelink/issues/187#issuecomment-479245030>\r\n\u00a0\r\n```\n\r\nCan you use tag names instead of commit hashes?\r\n\r\nNo, we need a commit hash.\n```"
+        },
+        {
+            "created_at": "2019-04-03T00:33:04.401Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5092?focusedCommentId=16808257) by Kouhei Sutou (kou):*\nThanks.\r\nOK. We should get the commit hash from tag by `curl https://api.github.com/repos/apache/arrow/tags | jq '.[] | select(.name==\"apache-arrow-0.13.0\") | .commit.sha'`."
+        },
+        {
+            "created_at": "2019-04-10T03:48:40.290Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5092?focusedCommentId=16814017) by Kouhei Sutou (kou):*\nWe need to create a dummy `.git/` directory in release script.\r\nSee also: https://github.com/dotnet/sourcelink/issues/187#issuecomment-481328742\r\n\r\n> create directory `.git` in the root and in it\n> 1. file `HEAD` that contains the commit SHA\n> 2. file `config` that contains `[remote \"origin\"] url = \\{URL\\`}.\n> 3. empty directories `objects` and `refs`?\r\n"
+        },
+        {
+            "created_at": "2019-06-23T09:46:26.587Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5092?focusedCommentId=16870509) by Yosuke Shiro (shiro615):*\nIssue resolved by pull request 4488\n<https://github.com/apache/arrow/pull/4488>"
+        }
+    ]
+}

@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[R] write_dataset fails with an uninformative message when duplicated column names",
+        "body": "***Note**: This issue was originally created as [ARROW-16783](https://issues.apache.org/jira/browse/ARROW-16783). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n`write_dataset()` fails when the object being written has duplicated column names. This is probably reasonable behaviour, but the error message is misleading:\r\n```r\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\n\r\ndf <- data.frame(\r\n  id = c(\"a\", \"b\", \"c\"),\r\n  x = 1:3, \r\n  x = 4:6,\r\n  check.names = FALSE\r\n)\r\n\r\nwrite_dataset(df, \"df\")\r\n#> Error: 'dataset' must be a Dataset, RecordBatch, Table, arrow_dplyr_query, or data.frame, not \"data.frame\"\r\n```\r\n[`write_dataset()` calls `as_adq()` inside a `tryCatch()` statement](https://github.com/apache/arrow/blob/0d5cf1882228624271062e6c19583c8b0c361a20/r/R/dataset-write.R#L146-L160), so any error from `as_adq()` is swallowed and the error emitted is about the class of the object.\r\n\r\nThe real error comes from here:\r\n```r\n\r\narrow:::as_adq(df)\r\n#> Error in `arrow_dplyr_query()`:\r\n#> ! Duplicated field names\r\n#> \u2716 The following field names were found more than once in the data: \"x\"\r\n```\r\nI'm not sure what your preferred fix is here... two options that come to mind are:\r\n\r\n1. Explicitly check for compatible classes before calling `as_adq()` instead of using `tryCatch()`, allowing `as_adq()` to emit its own errors.\r\n\r\nOR\r\n\r\n2. Check for duplicate column names before the `tryCatch` block\r\n\r\nMy thought is that option 1 is better, as option 2 means that checking for duplicates would happen twice (once inside `write_dataset()` and once again inside `{}as_adq(){`}).\r\n\r\nI'm happy to work a fix if you like!",
+        "created_at": "2022-06-07T20:27:48.000Z",
+        "updated_at": "2022-06-28T21:31:20.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-06-28T19:01:48.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-07T21:14:07.819Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16783?focusedCommentId=17551292) by Will Jones (willjones127):*\nI agree that (1) is the better option. Also, I wonder if we can push the check for compatible classes down into `as_adq()` or `{}arrow_dplyr_query(){`} as well. What do you think of that `[~thisisnic]` `[~npr]` ?"
+        },
+        {
+            "created_at": "2022-06-07T23:03:05.456Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16783?focusedCommentId=17551312) by Andy Teucher (ateucher):*\nGreat idea to push the check down... I opened a PR [here](https://github.com/apache/arrow/pull/13336) where I added the check to `arrow_dplyr_query`. I also added `RecordBatchReader` to the list of supported classes that `write_dataset()` and `arrow_dplyr_query()` can be called on."
+        },
+        {
+            "created_at": "2022-06-08T12:05:33.745Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16783?focusedCommentId=17551580) by Nicola Crane (thisisnic):*\nAgree that (1) is great as that error message is very misleading in this case and the `tryCatch()` is too broad.\r\n\r\nNot sure about pushing the check down as here we explicitly reference the parameter named `dataset` for the error message to make sense, though then if we find a way around that, then sure!\u00a0 I see there's a PR open, so let's continue this discussion there!"
+        },
+        {
+            "created_at": "2022-06-28T19:01:48.630Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16783?focusedCommentId=17559920) by Nicola Crane (thisisnic):*\nIssue resolved by pull request 13336\n<https://github.com/apache/arrow/pull/13336>"
+        }
+    ]
+}

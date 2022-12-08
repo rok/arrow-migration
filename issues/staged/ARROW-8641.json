@@ -1,0 +1,62 @@
+{
+    "issue": {
+        "title": "[Python] Regression in feather: no longer supports permutation in column selection",
+        "body": "***Note**: This issue was originally created as [ARROW-8641](https://issues.apache.org/jira/browse/ARROW-8641). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nA quite annoying regression (original report from https://github.com/pandas-dev/pandas/issues/33878), is that when specifying `columns` to read, this now fails if the order of the columns is not exactly the same as in the file:\r\n\r\n```python\n\r\nIn [27]: table = pa.table([[1, 2, 3], [4, 5, 6], [7, 8, 9]], names=['a', 'b', 'c'])    \r\n\r\nIn [29]: from pyarrow import feather \r\n\r\nIn [30]: feather.write_feather(table, \"test.feather\")   \r\n\r\n# this works fine\r\nIn [32]: feather.read_table(\"test.feather\", columns=['a', 'b'])                                                                                                                                                    \r\nOut[32]: \r\npyarrow.Table\r\na: int64\r\nb: int64\r\n\r\nIn [33]: feather.read_table(\"test.feather\", columns=['b', 'a'])                                                                                                                                                    \r\n---------------------------------------------------------------------------\r\nArrowInvalid                              Traceback (most recent call last)\r\n<ipython-input-33-e01caeabb389> in <module>\r\n----> 1 feather.read_table(\"test.feather\", columns=['b', 'a'])\r\n\r\n~/scipy/repos/arrow/python/pyarrow/feather.py in read_table(source, columns, memory_map)\r\n    237         return reader.read_indices(columns)\r\n    238     elif all(map(lambda t: t == str, column_types)):\r\n--> 239         return reader.read_names(columns)\r\n    240 \r\n    241     column_type_names = [t.__name__ for t in column_types]\r\n\r\n~/scipy/repos/arrow/python/pyarrow/feather.pxi in pyarrow.lib.FeatherReader.read_names()\r\n\r\n~/scipy/repos/arrow/python/pyarrow/error.pxi in pyarrow.lib.check_status()\r\n\r\nArrowInvalid: Schema at index 0 was different: \r\nb: int64\r\na: int64\r\nvs\r\na: int64\r\nb: int64\r\n```",
+        "created_at": "2020-04-30T06:36:45.000Z",
+        "updated_at": "2020-05-12T09:05:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-05-07T16:24:48.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-04-30T14:07:46.760Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8641?focusedCommentId=17096566) by Wes McKinney (wesm):*\nToo bad this was not tested"
+        },
+        {
+            "created_at": "2020-05-06T08:54:56.038Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8641?focusedCommentId=17100599) by Joris Van den Bossche (jorisvandenbossche):*\n`[~wesm]` I was taking a look at this, and so in RecordBatchReader, the `included_indices` are converted into a `inclusion_mask`, and such a mask of course doesn't preserve the ordering of the included indices. \r\n\r\nDo you have a preference of which level to solve this? Do we want `RecordBatchFileReader.ReadRecordBatch` to actually honor the order of the `included_indices` (and so eg reorder the fields of the batch before returning it, to match the `out_schema`). \r\nOr do we want to ignore the order on that level of the IPC reader (and then the feather code could still decide to reorder if it wants to respect the order of the specified columns by the user)?"
+        },
+        {
+            "created_at": "2020-05-06T12:34:29.249Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8641?focusedCommentId=17100760) by Wes McKinney (wesm):*\nProbably easiest to handle this on the Python side. Can we add to 0.17.1?"
+        },
+        {
+            "created_at": "2020-05-06T12:53:23.423Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8641?focusedCommentId=17100772) by Joris Van den Bossche (jorisvandenbossche):*\n> Can we add to 0.17.1?\r\n\r\nThat would be nice, I think, yes\r\n\r\n> Probably easiest to handle this on the Python side\r\n\r\nWe still need to update something in the C++ code (as it is there that the schema mismatch happens, in `Table::FromRecordBatches(schema, batches)`, the schema and batches have the schema in a different order). But so I suppose then you would sort the indices (or ignore their order in another way when creating the out_schema) in the IPC reader, and reorder the columns on the Python side?\r\n"
+        },
+        {
+            "created_at": "2020-05-06T14:29:26.138Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8641?focusedCommentId=17100848) by Wes McKinney (wesm):*\nYes, indeed sounds like we need to sort the \"included_fields\" member of the options\r\n\r\nhttps://github.com/apache/arrow/blob/master/cpp/src/arrow/ipc/options.h#L84"
+        },
+        {
+            "created_at": "2020-05-07T10:07:07.038Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8641?focusedCommentId=17101498) by Joris Van den Bossche (jorisvandenbossche):*\nPull request: https://github.com/apache/arrow/pull/7122\r\n\r\n(JIRA was down when it opened, so didn't get linked here)"
+        },
+        {
+            "created_at": "2020-05-07T10:26:14.388Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8641?focusedCommentId=17101521) by German I. Ramirez-Espinoza (gire):*\nA way to solve this issue is to relax the requirement that the schemas are exactly equal in here:\r\n\r\n<https://github.com/apache/arrow/blob/master/cpp/src/arrow/table.cc#L497>\r\n\r\nand instead require the schema to be a subset of the batches' schema. Checking for a subset includes the case of equality. This approach would also avoid column reordering.\r\n\r\n\u00a0\r\n\r\nI drafted this idea here:\r\n\r\n<https://github.com/gramirezespinoza/arrow/blob/ARROW-8641/cpp/src/arrow/type.cc#L1055>\r\n\r\nand confirmed it solves this issue. The `Table::FromRecordBatches` would look like:\r\n\r\n<https://github.com/gramirezespinoza/arrow/blob/ARROW-8641/cpp/src/arrow/table.cc#L489>\r\n\r\n\u00a0\r\n\r\nIf you find this approach viable, I'd be happy to create a PR."
+        },
+        {
+            "created_at": "2020-05-07T11:59:54.044Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8641?focusedCommentId=17101593) by Joris Van den Bossche (jorisvandenbossche):*\n`[~gire]` thanks for also looking at it!\r\n\r\nEasier view on your changes: https://github.com/apache/arrow/compare/master...gramirezespinoza:ARROW-8641\r\n\r\nNow, I think there is one problem in your current code though: inside `Table::FromRecordBatches`, the order of the columns and the order of the fields in the schema is still different, so `Table::Make(std::move(schema), std::move(columns), num_rows);` is creating a \"wrong\" table (columns in the order as in the file, but the columns names switched order).  \r\n\r\nIn addition, it also doesn't handle duplicated column names, I think."
+        },
+        {
+            "created_at": "2020-05-07T16:24:48.513Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8641?focusedCommentId=17101852) by Wes McKinney (wesm):*\nIssue resolved by pull request 7122\n<https://github.com/apache/arrow/pull/7122>"
+        },
+        {
+            "created_at": "2020-05-10T12:17:18.524Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8641?focusedCommentId=17103770) by German I. Ramirez-Espinoza (gire):*\n`[~jorisvandenbossche]`: thanks for your comments. Although the bug is solved, I finished the implementation of my idea just as a learning exercise and to explore arrow's internals a bit more.\r\n\r\nAfter writing tests for the corrected implementation of my idea I noticed two drawbacks about it:\r\n1. `feather.read_parquet` on pyarrow still couldn't handle duplicated columns\n1. it brakes the test `test_table_from_batches_and_schema` which looks like an important test of basic functionality. The reason is that this code:\n   ```python\n   \n   incompatible_schema = pa.schema([pa.field('a', pa.int64())])\n   with pytest.raises(pa.ArrowInvalid):\n       pa.Table.from_batches([batch], incompatible_schema)\n   ```\n   no longer raises an exception.\n   \n   Naturally, I no longer think mine is such a good idea. I read your resolution and realized that I also didn't take into account the fact that arrow supports multiple feather versions.\n   \n   Anyway, I think it was a fun experience for me (albeit a bit embarrassing at the beginning because of the shabby implementation of my idea).\n   \n   Cheers"
+        },
+        {
+            "created_at": "2020-05-12T09:05:29.687Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8641?focusedCommentId=17105250) by Joris Van den Bossche (jorisvandenbossche):*\nNo embarrassment needed! Happy it was a useful experience, and looking into your patch was actually also a good way for me to better understand what is actually going on / the constraints that were needed ;)"
+        }
+    ]
+}

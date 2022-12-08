@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[R] List column class attributes not preserved in roundtrip",
+        "body": "***Note**: This issue was originally created as [ARROW-10386](https://issues.apache.org/jira/browse/ARROW-10386). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi all - thanks for the improvement addressed in ARROW-9271.\r\n\r\nIn arrow 2.0 spatial data (class sf) now retains metadata at column level, but still does not roundtrip correctly as metadata (attributes) are lost at the level of individual elements of the list-columns; at least I think that is the problem as that is where I can see changes in the metadata.) Is this something that is addressable?\r\n\r\nSee reprex below on what happens + what attributes exist at the element level.\r\n\r\nFWIW a workaround with spatial data using sf would be to convert to WKT before writing it out (sf::st_as_text()). It might be useful to note this somewhere in the docs.\r\n\r\nThis is using arrow 2.0 and sf 0.9-6.\r\n\r\nReproducible example:\r\n\r\n```R\n\r\n\r\n library(arrow)\r\n #> \r\n #> Attaching package: 'arrow'\r\n #> The following object is masked from 'package:utils':\r\n #> \r\n #> timestamp\r\n library(sf)\r\n #> Linking to GEOS 3.8.1, GDAL 3.1.1, PROJ 6.3.1\r\n\r\nfname <- system.file(\"shape/nc.shp\", package=\"sf\")\r\n df_spatial <- st_read(fname)\r\n #> Reading layer `nc' from data source `/Users/petr/Library/R/4.0/library/sf/shape/nc.shp' using driver `ESRI Shapefile'\r\n #> Simple feature collection with 100 features and 14 fields\r\n #> geometry type: MULTIPOLYGON\r\n #> dimension: XY\r\n #> bbox: xmin: -84.32385 ymin: 33.88199 xmax: -75.45698 ymax: 36.58965\r\n #> geographic CRS: NAD27\r\n\r\nwrite_parquet(df_spatial, \"spatial.parquet\")\r\n roundtripped <- read_parquet(\"spatial.parquet\")\r\n roundtripped\r\n #> Simple feature collection with 100 features and 14 fields\r\n #> geometry type: MULTIPOLYGON\r\n #> dimension: arrow_list\r\n #> bbox: xmin: -84.32385 ymin: 33.88199 xmax: -75.45698 ymax: 36.58965\r\n #> geographic CRS: NAD27\r\n #> First 10 features:\r\n #> Error in vapply(lst, class, rep(NA_character_, 3)): values must be length 3,\r\n #> but FUN(X[[1]]) result is length 1\r\n\r\nattributes(roundtripped$geometry[[1]])\r\n #> $class\r\n #> [1] \"arrow_list\" \"vctrs_list_of\" \"vctrs_vctr\" \"list\" \r\n #> \r\n #> $ptype\r\n #> <list<double>[0]>\r\n\r\nattributes(df_spatial$geometry[[1]])\r\n #> $class\r\n #> [1] \"XY\" \"MULTIPOLYGON\" \"sfg\"\r\n```",
+        "created_at": "2020-10-24T19:15:53.000Z",
+        "updated_at": "2021-04-26T13:21:42.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-01-13T23:16:10.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-01-13T23:16:10.637Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10386?focusedCommentId=17264482) by Neal Richardson (npr):*\nIssue resolved by pull request 9182\n<https://github.com/apache/arrow/pull/9182>"
+        },
+        {
+            "created_at": "2021-04-24T21:41:02.817Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10386?focusedCommentId=17331326) by Jared Lander (jaredlander):*\nDid this make it into 3.0.0? I just checked using R 4.0.5 with arrow 3.0.0 and when I write an sf object to parquet, then read it in, the geometry column comes back as a list column, not geometry. The class of the data.frame object is `\"tbl_df\" \"tbl\" \"data.frame\"` and the class of the geometry column is `\"arrow_list\" \"vctrs_list_of\" \"vctrs_vctr\" \"list\"`."
+        },
+        {
+            "created_at": "2021-04-25T13:58:15.906Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10386?focusedCommentId=17331532) by Jonathan Keane (jonkeane):*\nThis fix was included in 3.0.0 so you shouldn't be seeing that same issue still. Do you have or could you make a file / data frame that isn't being preserving the column classes like it should?"
+        },
+        {
+            "created_at": "2021-04-25T18:58:09.708Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10386?focusedCommentId=17331615) by Jared Lander (jaredlander):*\nLast night I had a great example code that showed the problem. Then today I ran it and there is no problem! Hopefully the problem was the aberration. But I had to abandon parquet anyway because writing and reading the files caused massive memory issues (I opened an issue for that)."
+        },
+        {
+            "created_at": "2021-04-26T01:12:30.788Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10386?focusedCommentId=17331668) by Jared Lander (jaredlander):*\nOK, I actually have recreated a similar issue. In the following code, I create an sf object and write it as a dataset to parquet files. I then call open_dataset() on the files.\r\n\r\nIf I collect() the dataset I get back an sf object, no problem.\r\n\r\nBut if I first filter() the dataset then collect() I get an error.\r\n```java\n\r\nlibrary(sf)\r\nlibrary(arrow)\r\nlibrary(dplyr)\r\n\r\nn <- 10000\r\n\r\nfake <- tibble(\r\n    ID=seq(n),\r\n    Date=sample(seq(as.Date('2019-01-01'), as.Date('2021-04-01'), by=1), size=n, replace=TRUE),\r\n    x=runif(n=n, min=-170, max=170),\r\n    y=runif(n=n, min=-60, max=70),\r\n    text1=sample(x=state.name, size=n, replace=TRUE),\r\n    text2=sample(x=state.name, size=n, replace=TRUE),\r\n    text3=sample(x=state.division, size=n, replace=TRUE),\r\n    text4=sample(x=state.region, size=n, replace=TRUE),\r\n    text5=sample(x=state.abb, size=n, replace=TRUE),\r\n    num1=sample(x=state.center$x, size=n, replace=TRUE),\r\n    num2=sample(x=state.center$y, size=n, replace=TRUE),\r\n    num3=sample(x=state.area, size=n, replace=TRUE),\r\n    Rand1=rnorm(n=n),\r\n    Rand2=rnorm(n=n, mean=100, sd=3),\r\n    Rand3=rbinom(n=n, size=10, prob=0.4)\r\n)\r\n\r\n# make it into an sf object\r\nspat <- fake %>% \r\n    st_as_sf(coords=c('x', 'y'), remove=FALSE, crs = 4326)\r\n\r\nclass(spat)\r\nclass(spat$geometry)\r\n\r\n# create new columns for partitioning and write to disk\r\nspat %>% \r\n    mutate(Year=lubridate::year(Date), Month=lubridate::month(Date)) %>% \r\n    group_by(Year, Month) %>% \r\n    write_dataset('data/splits/', format='parquet')\r\n\r\nspat_in <- open_dataset('data/splits/')\r\n\r\nclass(spat_in)\r\n\r\n# it's an sf as expected\r\nspat_in %>% collect() %>% class()\r\nspat_in %>% collect() %>% pull(geometry) %>% class()\r\n\r\n# it even plots\r\nleaflet::leaflet() %>% \r\n    leaflet::addTiles() %>% \r\n    leafgl::addGlPoints(data=spat_in %>% collect())\r\n\r\n# but if we filter first\r\nspat_in %>% \r\n    filter(Year == 2020 & Month == 2) %>% \r\n    collect()\r\n\r\n# we get this error\r\nError in st_geometry.sf(x) : \r\n  attr(obj, \"sf_column\") does not point to a geometry column.\r\nDid you rename it, without setting st_geometry(obj) <- \"newname\"?\r\nIn addition: Warning message:\r\nInvalid metadata$r \n```"
+        },
+        {
+            "created_at": "2021-04-26T13:21:42.033Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10386?focusedCommentId=17332299) by Jonathan Keane (jonkeane):*\nAh ha! Thanks for that additional info. That does look separate (or possibly a place that we need to implement the same thing as we did for single files), I've created https://issues.apache.org/jira/browse/ARROW-12542 to track that. (and I'm looking into the memory ticket you submitted as well. "
+        }
+    ]
+}

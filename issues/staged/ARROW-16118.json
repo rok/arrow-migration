@@ -1,0 +1,24 @@
+{
+    "issue": {
+        "title": "[C++] Reduce memory usage when writing to IPC",
+        "body": "***Note**: This issue was originally created as [ARROW-16118](https://issues.apache.org/jira/browse/ARROW-16118). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWriting a record batch to IPC ([header][buffers]) currently requires O(N\\*B) where N is the average size of the buffer and B the number of buffers in the recordbatch.\r\n\r\nThis is because we need the buffer location and total number of bytes to write the header of the record, which is only known after e.g. knowning by how much the buffers were compressed.\r\n\r\nWhen the writer supports seeking, this memory usage can be reduced to O(N) where N is the average size of a primitive buffer over all fields. This is done using the following pseudo-code implementation:\r\n\r\n\r\n```java\n\r\nstart = writer.seek(current);\r\nempty_locations = create_empty_header(schema)\r\nwrite_header(writer, empty_locations)\r\nlocations = write_buffers(writer, batch)\r\nwriter.seek(start)\r\nwrite_header(writer, locations)\r\n```\r\n\r\nThis has a significantly lower memory footprint. O(N) vs O(N\\*B)\r\n\r\nIt could be interesting for the C++ implementation to support this.",
+        "created_at": "2022-04-05T08:42:00.000Z",
+        "updated_at": "2022-04-21T17:41:05.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-04-05T18:29:37.467Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16118?focusedCommentId=17517637) by Weston Pace (westonpace):*\nOne note is that this will only be possible when using a local filesystem.  Object stores usually do not support modification of files after they have been uploaded.  So we might need to add a flag to a filesystem to ask whether it supports this but that can be useful.  On spinning disk filesystems (i.e. HDD) the seek penalty may cause this to be less (or potentially negative) of a benefit if there is not much RAM pressure.\r\n\r\nHowever, I could see this being useful in cases where we are writing to a very fast solid state drive.\r\n\r\nAnother memory-usage issue that might be related since we are talking about writes is ARROW-14635.  I'd like to move to direct I/O (or at least being smarter about OS page cache) when writing large datasets since we otherwise end up causing the system to swap for no good reason."
+        },
+        {
+            "created_at": "2022-04-21T17:41:05.754Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16118?focusedCommentId=17525893) by Micah Kornfield (emkornfield):*\nAlso, we should be careful how this enabled, since if someone is actually consuming the stream in real-time there would need to be some sort of coordination to ensure bytes aren't sent prematurely."
+        }
+    ]
+}

@@ -1,0 +1,68 @@
+{
+    "issue": {
+        "title": "[C++/Python] Add support for S3 Bucket Versioning",
+        "body": "***Note**: This issue was originally created as [ARROW-17544](https://issues.apache.org/jira/browse/ARROW-17544). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nArrow offers a reasonably capable S3 interface, but it lacks support for S3 Buckets that have versioning enabled.\u00a0 For information about what S3 bucket versioning is, see:\r\n\r\n<https://docs.aws.amazon.com/AmazonS3/latest/userguide/Versioning.html>\r\n\r\nIf Arrow is interacting with a bucket where versioning is enabled, there can be S3 keys that have multiple versions of content stored utilizing the same key name.\u00a0 At the present moment, Arrow does not have the ability to:\r\n1. Access versions of an S3 key rather than just the latest version of an S3 key.\u00a0 There is no ability to specify the VersionId parameter of S3's GetObject API.\n1. Report the VersionId created when a new S3 key is uploaded to a bucket.\n   \n   Along with S3, GCS also supports versioned buckets.\n   \n   <https://cloud.google.com/storage/docs/object-versioning>\n   \n   There are a few shortcomings of the Filesystem interface to support remote file systems that support versioning:\n   \n   1. The parameters for open_input_stream() and open_input_file() do not easily lend themselves to adding an additional parameter of \"version\" because they would be passed to all other implemented filesystems.\u00a0 Most other file systems that exist don't actually support versioning.\n   \n   2. Upon completion of an S3 multipart upload (i.e., close() on an S3FileSystem output stream), there is not currently a way for the user to determine the VersionId or ETag of the S3 key that was created.\u00a0 This is important to know because if there are multiple concurrent writers to S3, it should be possible to identify the written S3 key.\n   \n   Proposed solutions to enable S3 Bucket versioning:\n   \n   1. To allow library callers to read specific versions of an S3 key, extend only the S3FileSystem interface with two new API calls:\n   \n   `open_input_stream_with_version()`\n   \n   `open_input_file_with_version()`\n   \n   Both are like their namesakes from the normal FileSystem interface but take an additional parameter of a \"version,\" which is a string representation of the VersionId returned by S3 when the S3 Key is created.\u00a0 If these functions are called with an empty string for the specified version, the latest version of the S3 key will be returned.\n   \n   I'm a bit reluctant to create these specialized functions just on the S3FileSystem interface, but I also don't think it is appropriate to change open_input_stream() and open_input_file()'s parameter list for all filesystems just for functionality that is only implemented by a small number of filesystems.\n   \n   2. Allow callers to call ReadMetadata() on an S3FileSystem output stream to retrieve the metadata about the S3 key that has been written after the stream has been closed.\u00a0 The metadata will likely include both a VersionId and a value for ETag.",
+        "created_at": "2022-08-28T23:50:52.000Z",
+        "updated_at": "2022-08-30T08:49:53.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-08-28T23:51:50.693Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17544?focusedCommentId=17596925) by Rusty Conover (rustyconover):*\nThis is also related to ARROW-13895"
+        },
+        {
+            "created_at": "2022-08-29T11:18:49.639Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17544?focusedCommentId=17597153) by Antoine Pitrou (apitrou):*\nTwo notes:\r\n\r\n1) I'm lukewarm about adding new method definitions, as it will result in combinatorial explosion (we also need async versions of these APIs as well as FileInfo-taking versions). One possibility would be to add the version as an additional optional argument (e.g. \r\n`const util::optional<std::string>version& =  {}`).\r\n\r\n2) GCS has both generation and metageneration, I'm not sure how to handle that nicely in the API. Should we just ignore the metageneration here? `[~coryan]`"
+        },
+        {
+            "created_at": "2022-08-29T12:19:29.632Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17544?focusedCommentId=17597176) by Carlos O'Ryan (coryan):*\n> 2) GCS has both generation and metageneration, I'm not sure how to handle that nicely in the API. Should we just ignore the metageneration here?\r\n\r\nI think you should ignore it for now, yes.  metageneration changes when the metadata of an object changes, e.g., when you add new labels, or when you change the `contentType` attribute.  And FYI, if object versioning is enabled, then each version has a different metadata and metageneration.\r\n\r\n> 1) I'm lukewarm about adding new method definitions, ... (e.g. `const util::optional<std::string>version& = {}`).\r\n\r\nIt is not my place to design your API, just ignore me if this idea does not work for you. I would go further.  You can expect additional optional parameters, e.g., GCS supports conditional operations (\"read this object if its current generation is N\" or \"write this object if its current generation is M\"), I believe S3 supports those too.  If the objects are encrypted with customer-supplied encryption keys you need to provide them as part of each call.  Some application want to override the retry and backoff policies for some operations.\r\n\r\nThis suggests you need something like a `std::map<..., std::any>> options = {}` as the extra parameter.  This may serve as inspiration:\r\n\r\nhttps://github.com/googleapis/google-cloud-cpp/blob/2b1e12f31ec49e55419f5740c406b707e08ca5e1/google/cloud/options.h#L89\r\n"
+        },
+        {
+            "created_at": "2022-08-29T12:30:29.554Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17544?focusedCommentId=17597181) by Antoine Pitrou (apitrou):*\nThanks for the feedback `[~coryan]`. I agree a general way to pass filesystem-specific options would be good.\r\n\r\nWe could use `std::any` (after we move to C++17) or we could perhaps have a base class `InputStreamOptions` that each filesystem might derive. Or we could have a `std::variant`, with the advantage that people won't pass arbitrary types by mistake.\r\n\r\n`[~bkietz]` What is your opinion on `std::any`?\r\n"
+        },
+        {
+            "created_at": "2022-08-29T13:59:11.414Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17544?focusedCommentId=17597203) by Rusty Conover (rustyconover):*\nGreat comments so far.\r\n\r\nThere is a deficiency in FileInfo right now because it doesn't contain the VersionId information.\u00a0 Are we willing to extend it to contain this additional information?\r\n\r\nThere likely should be a way to specify this file information in a URI/path-based format, but I didn't want to extend the S3 URI parsing code to do it. S3 keys can be any set of Unicode characters < 1024 bytes, so I'm not sure it is valid to treat them as URIs where a ? character denotes the start of the query fields.\u00a0\u00a0\r\n\r\nhttps://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html\r\n\r\nIt is important to be able to pass the VersionId or other request conditional information via the Python Dataset API; I'd like to be sure we're designing with that in mind."
+        },
+        {
+            "created_at": "2022-08-29T14:05:24.847Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17544?focusedCommentId=17597207) by Antoine Pitrou (apitrou):*\nNo, we shouldn't treat filesystem paths as URIs. Paths and URIs are clearly distinct concepts, though unfortunately users often mix them up.\r\n\r\nAs for putting the version in `FileInfo`, that depends: does listing a pseudo-\"directory\" in S3 and GCS also gives each object's version? If so, then I agree it could go in `FileInfo` (note `FileInfo`'s primary purpose is to list directory contents)."
+        },
+        {
+            "created_at": "2022-08-29T14:10:42.139Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17544?focusedCommentId=17597211) by Rusty Conover (rustyconover):*\nS3 splits out \"listing\" into two API methods.\u00a0 One that is bucket versioning aware and one that isn't.\r\n\r\n- List Objects V2 -\u00a0<https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html>\n  \n  That doesn't include the \"versions\" of each S3 key.\u00a0\n  \n- List Object Versions - <https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html>\n  \n  That does list every version of every S3 key.\n  \n  Since there can be hundreds of versions of a single key, listing all versions of keys in a bucket can take much longer than just listing the bucket."
+        },
+        {
+            "created_at": "2022-08-29T14:26:58.390Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17544?focusedCommentId=17597218) by Antoine Pitrou (apitrou):*\n> [ListObjectsV2] That doesn't include the \"versions\" of each S3 key. \r\n\r\nNot even the version id of the latest version?\r\n\r\n> [ListObjectVersions] That does list every version of every S3 key.\r\n\r\nHmm, this looks similar to ListObjectsV2 with a couple unfortunate deviations (such as key-marker/version-id-marker vs. continuation-token).\r\n\r\n\r\nSo perhaps the version should be an optional component of `FileInfo`.\r\n\r\nThen `FileSelector` could later get an optional flag to list all versions."
+        },
+        {
+            "created_at": "2022-08-29T14:34:56.602Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17544?focusedCommentId=17597228) by Antoine Pitrou (apitrou):*\nI'll note that GCS seems nicer since it doesn't have the `ListObjectsV2` vs. `ListObjectVersions` distinction, you can use the same API for both:\r\nhttps://cloud.google.com/storage/docs/json_api/v1/objects/list\r\n"
+        },
+        {
+            "created_at": "2022-08-29T20:06:03.484Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17544?focusedCommentId=17597385) by Rusty Conover (rustyconover):*\nAny thoughts on the attached PR?"
+        },
+        {
+            "created_at": "2022-08-29T20:15:47.191Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17544?focusedCommentId=17597386) by Antoine Pitrou (apitrou):*\nWell, as I said we should avoid creating new methods for this."
+        },
+        {
+            "created_at": "2022-08-29T21:11:56.037Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17544?focusedCommentId=17597398) by Rusty Conover (rustyconover):*\nI agree and wrote as much in the issue, but I'm unclear if there was a decision about expanding the open_input_stream() or open_input_file() parameter list.\u00a0\u00a0\r\n\r\nIf we're waiting for C++17, what's the timeline for that?\r\n\r\nI think if we're to implement InputStreamOptions with specific types per FileSystem type, that likely seems to be very reasonable and less prone to error by users.\r\n\r\nWhat do you think about using ReadMetadata() to retrieve the uploaded S3 key information after the stream is closed?\u00a0 That's also in the PR."
+        },
+        {
+            "created_at": "2022-08-30T08:49:53.682Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17544?focusedCommentId=17597688) by Antoine Pitrou (apitrou):*\n> If we're waiting for C++17, what's the timeline for that?\r\n\r\nIt's being done in https://github.com/apache/arrow/pull/13991\r\n\r\n> I think if we're to implement InputStreamOptions with specific types per FileSystem type, that likely seems to be very reasonable and less prone to error by users.\r\n\r\nProbably, but it also means that options are not portable (for example, passing a version id would be different depending on the actual filesystem type, even though several different filesystem types would implement a version id).\r\n\r\nWe also must think about how to expose those options or parameters to Python.\r\n\r\n> What do you think about using ReadMetadata() to retrieve the uploaded S3 key information after the stream is closed?  That's also in the PR.\r\n\r\nThat sounds a bit ad hoc. We should try to think more generally about which kind of information may be available when closing a file."
+        }
+    ]
+}

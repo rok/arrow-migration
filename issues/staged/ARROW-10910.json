@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[Python] Segmentation Fault when None given to read_table with legacy dataset",
+        "body": "***Note**: This issue was originally created as [ARROW-10910](https://issues.apache.org/jira/browse/ARROW-10910). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n### Code Sample (copy-pasteable)\r\n```python\n\r\nimport pyarrow.parquet as pq\r\n\r\npq.read_table(None)\r\n```\r\n### Description\r\n\r\nThe above snippet will produce a Segmentation Fault, which is highly undesirable. The reason I discovered this, was I had a function that was supposed to return a file path, but on my first iteration I forgot to return. Thus, when I ran my module with\r\n```python\n\r\npq.read_table(generate_fp())\n```\r\nit produced a Segmentation Fault.\r\n### Expected Output\u00a0\r\n\r\nIdeally this will raise an **ValueError**, indicating to the user that **None** is an invalid source/file path. In my opinion, this is much more desirable than a violent segfault.",
+        "created_at": "2020-12-15T00:56:42.000Z",
+        "updated_at": "2021-04-28T09:04:36.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-04-28T09:04:36.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-12-15T10:06:21.529Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10910?focusedCommentId=17249603) by Weston Pace (westonpace):*\nOn version 2.0.0 a TypeError is thrown...\r\n\r\n> TypeError: Expected a path-like, list of path-likes or a list of Datasets instead of the given type: NoneType\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-12-15T17:30:23.134Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10910?focusedCommentId=17249807) by Charles Burkland (chaburkland):*\nThanks to Weston Pace for pointing out this has already been addressed in a later version."
+        },
+        {
+            "created_at": "2020-12-16T09:16:23.486Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10910?focusedCommentId=17250194) by Joris Van den Bossche (jorisvandenbossche):*\n`[~chaburkland]` Thanks for the report. We should indeed avoid such segfaults. Note that with the latest version of pyarrow, by default you already get a nice error:\r\n\r\n```Java\n\r\nIn [16]: pq.read_table(None)\r\n....\r\nTypeError: Expected a path-like, list of path-likes or a list of Datasets instead of the given type: NoneType\r\n```\r\n\r\nbut you can still get the same segfault when using the legacy dataset implementation with `pq.read_table(None, use_legacy_dataset=True)`"
+        },
+        {
+            "created_at": "2020-12-16T09:17:34.407Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10910?focusedCommentId=17250196) by Joris Van den Bossche (jorisvandenbossche):*\n(whoops, I need to learn to refresh my page before answering a TAB I opened the day before ;) Or JIRA should learn to do that automatically)\r\n\r\nSo indeed it's fixed with the default. It should still be an easy fix for the legacy implementation as well."
+        },
+        {
+            "created_at": "2020-12-16T09:19:24.582Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10910?focusedCommentId=17250197) by Joris Van den Bossche (jorisvandenbossche):*\nYou can also get the same segfault with the `ParquetFile` API, so that is something we should certainly still fix, so reopening this issue:\r\n\r\n```Java\n\r\nIn [1]: import pyarrow.parquet as pq\r\n\r\nIn [2]: pq.ParquetFile(None)\r\nSegmentation fault (core dumped)\r\n```"
+        },
+        {
+            "created_at": "2021-04-15T13:02:27.624Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10910?focusedCommentId=17322162) by Alessandro Molina (amol-):*\nIt seems to me that it no longer causes a segfault anymore.\r\n\r\nNor with the legacy implementation:\r\n```python\n\r\n>>> pq.read_table(None, use_legacy_dataset=True)\r\n...\u00a0 \r\nFile \"pyarrow/io.pxi\", line 1474, in pyarrow.lib.get_reader\u00a0 \u00a0 \r\n\u00a0 \u00a0 reader[0] = nf.get_random_access_file()\r\nAttributeError: 'NoneType' object has no attribute 'get_random_access_file\r\n```\r\nNor when explicitly making a `ParquetFile`\r\n```python\n\r\n>>> pq.ParquetFile(None)\r\n ...\r\n\u00a0 File \"pyarrow/io.pxi\", line 1474, in pyarrow.lib.get_reader\r\n\u00a0 \u00a0 reader[0] = nf.get_random_access_file()\r\nAttributeError: 'NoneType' object has no attribute 'get_random_access_file'\r\n```\r\nI guess a possible improvement would be to unsupported arguments in `io.get_native_file` and throw a `ValueError` there instead of propagating the `None`\u00a0 value."
+        },
+        {
+            "created_at": "2021-04-15T13:47:50.978Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10910?focusedCommentId=17322188) by Joris Van den Bossche (jorisvandenbossche):*\nAh, indeed, on master it no longer raises.\r\n\r\nI think we could indeed raise a better error message. And in general adding a test for what segfaulted before is still good to add as well, to prevent it happens again in the future. "
+        },
+        {
+            "created_at": "2021-04-28T09:04:36.515Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10910?focusedCommentId=17334595) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 10054\n<https://github.com/apache/arrow/pull/10054>"
+        }
+    ]
+}

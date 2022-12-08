@@ -1,0 +1,69 @@
+{
+    "issue": {
+        "title": "[C++] Seg fault when running unit tests on fresh Arch Linux install",
+        "body": "***Note**: This issue was originally created as [ARROW-4242](https://issues.apache.org/jira/browse/ARROW-4242). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFirst, let me say I appreciate all the work that has been put into this project. I have been following it with great interest and recently decided to include it in one of my projects.\r\n\r\nHowever, I have run into an issue with a segmentation fault when trying to run the C++ unit tests (which previously worked for me). This issue appears to be something specific to my system (I am running Arch Linux). I can reproduce the issue with the minimal Docker install of Arch:\r\n```\n\r\nFROM archimg/base\r\n\r\nRUN \\\r\n pacman -Sy --noconfirm git cmake gcc make boost autoconf python; \\\r\n git clone --recursive https://github.com/apache/arrow.git; \\\r\n cd arrow/cpp; \\\r\n mkdir build; \\\r\n cd build; \\\r\n cmake -DARROW_BUILD_TESTS=ON ..; \\\r\n make\r\n```\r\nIf you create a Dockerfile with those contents and then run\r\n```\n\r\ndocker build -t mvilim/arch-arrow-test-segfault .\r\ndocker run mvilim/arch-arrow-test-segfault /bin/bash -c \"cd /arrow/cpp/build; make unittest; gcc --version; cmake --version\"\n```\r\nyou should be able to reproduce the issue:\r\n```\n\r\nThe following tests FAILED:\r\n 2 - arrow-array-test (Failed)\r\n 3 - arrow-buffer-test (Failed)\r\n 8 - arrow-stl-test (Failed)\r\n 9 - arrow-type-test (Failed)\r\n 10 - arrow-table-test (Failed)\r\n 15 - arrow-compute-boolean-test (Failed)\r\n 16 - arrow-compute-cast-test (Failed)\r\n 17 - arrow-compute-hash-test (Failed)\r\n 18 - arrow-feather-test (Failed)\r\n 19 - arrow-ipc-read-write-test (Failed)\r\n 20 - arrow-ipc-json-simple-test (Failed)\r\n 21 - arrow-ipc-json-test (Failed)\r\n 24 - arrow-csv-column-builder-test (Failed)\r\n 28 - arrow-io-compressed-test (Failed)\r\n 31 - arrow-io-memory-test (Failed)\n```\r\nIf you run the container interactively and inspect the logs, you will see that all the failures are caused by seg faults.\r\n\r\nI used git bisect to narrow the problem down to commit 7cdab9b06 when the tests were switched to use shared linking by default. Static linking works fine for me (using -DARROW_TEST_LINKAGE=static).\r\n\r\nI also compiled with Clang and -DARROW_USE_ASAN=ON and inspected several of the stack traces. It looks like all the seg faults happen during creation of a shared pointer, but in varied places.\r\n\r\nOn creation of Int32Type:\r\n```\n\r\n./debug/arrow-array-test\r\n AddressSanitizer:DEADLYSIGNAL\r\n =================================================================\r\n ==29563==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000000 (pc 0x558afa951b70 bp 0x7ffcf1c34880 sp 0x7ffcf1c34810 T0)\r\n ==29563==The signal is caused by a READ memory access.\r\n ==29563==Hint: address points to the zero page.\r\n #0 0x558afa951b6f in std::type_info::operator==(std::type_info const&) const /usr/bin/../lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/typeinfo:123:12\r\n #1 0x558afa9b2c16 in std::Sp_counted_ptr_inplace<arrow::Int32Type, std::allocator<arrow::Int32Type>, (_gnu_cxx::_Lock_policy)2>::_M_get_deleter(std::type_info const&) /usr/bin/../lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/bits/shared_ptr_base.h:573:16\r\n #2 0x7fe7b711e6f1 in std::_shared_count<(_gnu_cxx::_Lock_policy)2>::_M_get_deleter(std::type_info const&) const /usr/bin/../lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/bits/shared_ptr_base.h:751:31\r\n #3 0x7fe7b73ec240 in std::_shared_ptr<arrow::Int32Type, (gnu_cxx::_Lock_policy)2>::_shared_ptr<std::allocator<arrow::Int32Type> >(std::_Sp_make_shared_tag, std::allocator<arrow::Int32Type> const&) /usr/bin/../lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/bits/shared_ptr_base.h:1328:28\r\n #4 0x7fe7b73ec1c7 in std::shared_ptr<arrow::Int32Type>::shared_ptr<std::allocator<arrow::Int32Type> >(std::_Sp_make_shared_tag, std::allocator<arrow::Int32Type> const&) /usr/bin/../lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/bits/shared_ptr.h:360:4\r\n #5 0x7fe7b73ec14b in std::shared_ptr<arrow::Int32Type> std::allocate_shared<arrow::Int32Type, std::allocator<arrow::Int32Type> >(std::allocator<arrow::Int32Type> const&) /usr/bin/../lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/bits/shared_ptr.h:706:14\r\n #6 0x7fe7b73cd323 in std::shared_ptr<arrow::Int32Type> std::make_shared<arrow::Int32Type>() /usr/bin/../lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/bits/shared_ptr.h:722:14\r\n #7 0x7fe7b73c3f2f in arrow::int32() /home/mvilim/repos/arrow/cpp/src/arrow/type.cc:484:1\r\n #8 0x558afa76cc8d in __cxx_global_var_init.1 /home/mvilim/repos/arrow/cpp/src/arrow/ipc/test-common.h:65:30\r\n #9 0x558afa779ef9 in GLOBAL_sub_I_array_test.cc /home/mvilim/repos/arrow/cpp/src/arrow/array-test.cc\n```\r\nOn creation of a Field:\r\n```\n\r\n#6 0x7f74f1947598 in std::shared_ptr<arrow::Field> std::make_shared<arrow::Field, std::_cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::shared_ptr<arrow::DataType> const&, bool&, std::shared_ptr<arrow::KeyValueMetadata const> const&>(std::_cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::shared_ptr<arrow::DataType> const&, bool&, std::shared_ptr<arrow::KeyValueMetadata const> const&) /usr/bin/../lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/bits/shared_ptr.h:722:14\r\n #7 0x7f74f193e1e3 in arrow::field(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::shared_ptr<arrow::DataType> const&, bool, std::shared_ptr<arrow::KeyValueMetadata const> const&) /home/mvilim/repos/arrow/cpp/src/arrow/type.cc:556:10\r\n #8 0x56079cb90206 in arrow::TestField_TestMetadataConstruction_Test::TestBody() /home/mvilim/repos/arrow/cpp/src/arrow/type-test.cc:68:13\n```\r\nOn creation of an Array:\r\n```\n\r\n#6 0x7f8da9f9300f in std::shared_ptr<arrow::NumericArray<arrow::Int32Type> > std::make_shared<arrow::NumericArray<arrow::Int32Type>, std::shared_ptr<arrow::ArrayData> const&>(std::shared_ptr<arrow::ArrayData> const&) /usr/bin/../lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/bits/shared_ptr.h:722:14\r\n #7 0x7f8da9f86fc2 in arrow::Status arrow::internal::ArrayDataWrapper::Visit<arrow::Int32Type>(arrow::Int32Type const&) /home/mvilim/repos/arrow/cpp/src/arrow/array.cc:892:13\r\n #8 0x7f8da9f5a076 in arrow::Status arrow::VisitTypeInline<arrow::internal::ArrayDataWrapper>(arrow::DataType const&, arrow::internal::ArrayDataWrapper*) /home/mvilim/repos/arrow/cpp/src/arrow/visitor_inline.h:46:5\r\n #9 0x7f8da9f2f3d3 in arrow::MakeArray(std::shared_ptr<arrow::ArrayData> const&) /home/mvilim/repos/arrow/cpp/src/arrow/array.cc:905:14\n```\r\nGCC version is 8.2.1 20181127\r\n cmake version is 3.13.2\r\n\r\nI believe the issue is related to linking in some way (because this does not happen with static linking). It is probably my lack of experience in C++ showing, but I am unsure how to proceed in finding the cause of this issue.\r\n\r\nAny help or advice would be appreciated.",
+        "created_at": "2019-01-12T02:18:07.000Z",
+        "updated_at": "2022-08-27T14:41:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-03-04T10:09:03.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-01-12T02:39:14.183Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4242?focusedCommentId=16740976) by Kouhei Sutou (kou):*\nCould you try with old GCC such as GCC 7?\r\n\r\nThere are related error on Debian GNU/Linux sid with GCC 8.2.0-14."
+        },
+        {
+            "created_at": "2019-01-12T14:01:14.080Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4242?focusedCommentId=16741296) by Michael Vilim (mvilim):*\nGCC 7 works without a problem.\r\n\r\nDockerfile:\r\n```\n\r\nFROM archimg/base\r\nRUN \\\r\n pacman -Sy --noconfirm git cmake gcc7 make boost autoconf python; \\\r\n git clone --recursive https://github.com/apache/arrow.git; \\\r\n export CC=/usr/bin/gcc-7; \\\r\n export CXX=/usr/bin/g++-7; \\\r\n cd arrow/cpp; \\\r\n mkdir build; \\\r\n cd build; \\\r\n cmake -DARROW_BUILD_TESTS=ON ..; \\\r\n make\r\n```\r\n\u00a0\r\n```\n\r\ndocker build -t mvilim/arch_arrow_test_segfault7 .\r\ndocker run mvilim/arch_arrow_test_segfault7 /bin/bash -c \"cd /arrow/cpp/build; make unittest; gcc-7 --version; cmake --version\"\r\n```"
+        },
+        {
+            "created_at": "2019-01-12T14:15:35.365Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4242?focusedCommentId=16741299) by Francois Saint-Jacques (fsaintjacques):*\nReminds me of\u00a0collision linking different libstdc++ as reported with tensorflow/torch. See https://github.com/apache/arrow/issues/2637"
+        },
+        {
+            "created_at": "2019-01-12T14:17:41.645Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4242?focusedCommentId=16741300) by Francois Saint-Jacques (fsaintjacques):*\nMy guess would be that one dependency was compiled with gcc7 & libstdc++ of the same version, then you compile with gcc-8 and link with a newer libstdc++."
+        },
+        {
+            "created_at": "2019-01-13T01:52:30.239Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4242?focusedCommentId=16741439) by Michael Vilim (mvilim):*\nI tried analyzing the linking of dependencies, removing the dependencies entirely, and compiling the dependencies from source (to ensure the same libstdc++ was used). I was not able to find anything that worked.\r\n\r\nI then tried to start from a minimally working simple Arrow executable test and add back in pieces of the normal CMake build. I eventually narrowed down a change that caused it to break. Commenting out the std::\\*; in cpp/src/arrow/symbols.map fixed the issue in the original tests. To be honest, I don't really understand why.\r\n\r\nI am able to reproduce the behavior change of disabling exporting of std::\\* between GCC 7 and GCC 8 on Arch Linux independent of Arrow (using a very simple program with a shared library that passes a shared_ptr to a main function). A set of scripts that show this can be found here: <https://github.com/mvilim/gcc-symbol-map-test>\u00a0I have no idea whether this is an issue with GCC, Arch Linux (something like mixed GCC libraries?), or whether the symbol map should not be used in the way it is (declaring std::\\* as local)."
+        },
+        {
+            "created_at": "2019-01-13T21:24:21.544Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4242?focusedCommentId=16741659) by Michael Vilim (mvilim):*\nI tested the use of local std::\\* with GCC 8 in Alpine Linux (edge) and Fedora (28).\r\n\r\nIt succeeds on Alpine, but causes a seg fault on Fedora."
+        },
+        {
+            "created_at": "2019-02-18T15:53:28.080Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4242?focusedCommentId=16771175) by Uwe Korn (uwe):*\nThis is a bug with GCC 8.x and fixed in 8.3: https://gcc.gnu.org/bugzilla//show_bug.cgi?id=87520"
+        },
+        {
+            "created_at": "2019-02-18T16:15:44.933Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4242?focusedCommentId=16771189) by Wes McKinney (wesm):*\nPls reopen if the gcc bugfix does not resolve the problem"
+        },
+        {
+            "created_at": "2019-02-18T16:28:48.409Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4242?focusedCommentId=16771203) by Uwe Korn (uwe):*\nAs this affects quite a lot of distributions, I'm making a small workaround in CMake."
+        },
+        {
+            "created_at": "2019-02-18T18:07:02.432Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4242?focusedCommentId=16771269) by Uwe Korn (uwe):*\nI made an attempt at https://github.com/apache/arrow/pull/3688 but I guess that this is still not going to work."
+        },
+        {
+            "created_at": "2019-03-04T10:09:03.979Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4242?focusedCommentId=16783200) by Uwe Korn (uwe):*\nWe need to wait for the upstream fix, we cannot fix this ourselves. Spent quite some time in looking into workaround but this is a major hurdle for our codebase."
+        },
+        {
+            "created_at": "2019-03-13T20:52:49.341Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4242?focusedCommentId=16792099) by Michael Vilim (mvilim):*\nI was waiting for Arch to release GCC 8.3 to verify that it fixes the problem, but there seems to be some delay there.\r\n\r\nI went ahead and verified that this issue is resolved on Alpine Edge and Fedora 29 (both currently using GCC 8.3).\r\n\r\nThanks!"
+        },
+        {
+            "created_at": "2022-08-27T14:41:40.732Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4242?focusedCommentId=17585780) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

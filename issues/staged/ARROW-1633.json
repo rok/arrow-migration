@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] numpy \"unicode\" arrays not understood",
+        "body": "***Note**: This issue was originally created as [ARROW-1633](https://issues.apache.org/jira/browse/ARROW-1633). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n\n\n```Java\nimport numpy as np\npa.StringArray.from_pandas(np.empty(1, np.unicode))\n```\n\nThrows:\n\n```\n---------------------------------------------------------------------------\nArrowNotImplementedError                  Traceback (most recent call last)\n<ipython-input-68-f9bc946f2c0a> in <module>()\n      1 import numpy as np\n----> 2 pa.StringArray.from_pandas(np.empty(1, np.unicode))\n\narray.pxi in pyarrow.lib.Array.from_pandas()\n\nerror.pxi in pyarrow.lib.check_status()\n\nArrowNotImplementedError: Unsupported numpy type 19\n```\n\nnp.object arrays work, though...",
+        "created_at": "2017-10-02T17:17:13.000Z",
+        "updated_at": "2019-06-03T12:47:33.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-10-05T09:16:53.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-10-02T18:02:06.878Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1633?focusedCommentId=16188525) by Wes McKinney (wesm):*\nThanks. We will fix (patches welcome of course)"
+        },
+        {
+            "created_at": "2017-10-04T02:15:40.047Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1633?focusedCommentId=16190697) by Wes McKinney (wesm):*\nHm, this is a little bit tricky.\n\n- Is NumPy always UCS4 (or is it sometimes UCS2)?\n- Is the appopriate action to convert UCS4 to UTF-8 here or to convert to binary unmodified?\n\nI'm going to move off 0.8.0 as the semantics here bear some discussion. I'd like to understand the use cases a bit better"
+        },
+        {
+            "created_at": "2017-10-04T08:11:45.694Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1633?focusedCommentId=16190958) by Nick White (njw45):*\nSure - I came across this using array literals:\n\n```Java\nnp.array(['a'])\n```\n\nIs a:\n\n```Java\narray(['a'], dtype='<U1')\n```\n\nI just want Arrow to do something sensible, rather than refuse to persist it entirely"
+        },
+        {
+            "created_at": "2017-10-04T13:45:39.742Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1633?focusedCommentId=16191276) by Wes McKinney (wesm):*\nMakes sense. I moved this back to 0.8.0; I think we should be able to reach some sensible resolution in the next few weeks. "
+        },
+        {
+            "created_at": "2017-10-04T22:52:45.414Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1633?focusedCommentId=16192175) by Wes McKinney (wesm):*\nWell so after some spelunking, I discovered these facts:\n\n- Unicode in NumPy is always UCS4 https://github.com/numpy/numpy/blob/c90d7c94fd2077d0beca48fa89a423da2b0bb663/numpy/core/src/multiarray/ucsnarrow.c#L20\n- UCS4 and UTF-32 are in practice the same thing (see \"History\" section in https://en.wikipedia.org/wiki/UTF-32, I don't know why this had to be so complicated, but the first rule of Unicode is that it is not simple)\n- codecvt, while part of the Cpp11 standard, is not supported in gcc 4.8 (our minimum version), so that stinks. So at some point in the future we can use the Cpp standard library for converting things to UTF8 but that day is not today\n- Python 2.7 has UTF32 codecs we can use for converting from UTF32 to UTF8 https://docs.python.org/2.7/c-api/unicode.html#utf-32-codecs. \n- Python 3.6 seems to have the same UTF32 API https://docs.python.org/3.6/c-api/unicode.html#utf-32-codecs\n\nWe aren't supporting ASCII/fixed size binary types from NumPy yet, so we should probably handle these at the same time. We can use the (slow) Python C APIs for now to get UTF8 and maybe replace these with something natively C/Cpp if someone cares enough about perf to do the work"
+        },
+        {
+            "created_at": "2017-10-05T09:16:53.048Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1633?focusedCommentId=16192655) by Uwe Korn (uwe):*\nIssue resolved by pull request 1167\n<https://github.com/apache/arrow/pull/1167>"
+        }
+    ]
+}

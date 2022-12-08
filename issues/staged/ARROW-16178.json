@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "[C++] Add a ThreadLocalState concept built on thread local",
+        "body": "***Note**: This issue was originally created as [ARROW-16178](https://issues.apache.org/jira/browse/ARROW-16178). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe ThreadLocalState is tied to an executor and, on creation, creates a state for every thread in the executor.  In order to quickly access a particular thread's state we need a way  to get a thread index (the index of the thread in the executor).  Historically we used ThreadIndexer and this JIRA introduces a new approach using thread local.\r\n\r\nSimilar to the ThreadIndexer this thread local state concept will fail when the capacity is resized during a run.\r\n\r\nSimilar to the ThreadIndexer this concept won't work too well for serial execution until ARROW-15732 is resolved.",
+        "created_at": "2022-04-13T04:21:51.000Z",
+        "updated_at": "2022-07-15T15:33:39.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: task"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-04-13T07:40:47.013Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16178?focusedCommentId=17521517) by Antoine Pitrou (apitrou):*\nCan we step back a bit and reason about the underlying need here? I suppose it is so that distinct threads computing a given operation operate on different scratch spaces, and also to be able to reconcile those scratch spaces at the end (i.e. merge the results)?"
+        },
+        {
+            "created_at": "2022-04-13T18:29:51.268Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16178?focusedCommentId=17521868) by Weston Pace (westonpace):*\nYes.  Reconciliation is not always needed but you are correct about the scratch spaces.  For example, let's assume we have an int32 array `x` and an expression `x < 20 && x > 10` and we are implementing a filter node.\r\n\r\nThis translates roughly to...\r\n\r\n```\n\r\nconst auto& x = batch.get(\"x\");\r\nauto y = call(\"lt\", {x, 20});\r\nauto z = call(\"gt\", {x, 10});\r\nauto filter = call(\"and\", {y, z});\r\nauto out = call(\"take\", {batch, filter});\r\n```\r\n\r\nFor each batch that passes through the nodel we have to heap-allocate `y`, `z`, `filter`, and `out`.  However, if our max batch size is defined (let's say 10k rows) then we can preallocate `y`, `z` and `filter` at plan creation time.  In fact, since this node has only a single output we can even preallocate `out`.\r\n\r\nAt the moment, for the filter node, this discussion is largely theoretical.  The kernel infrastructure isn't yet ready to receive a preallocated output buffer.  In the hash-join node however (and possibly the aggregate node), this sort of pattern is actively being used and there is a need for a more efficient way of accessing the thread local data."
+        },
+        {
+            "created_at": "2022-07-15T15:32:21.225Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16178?focusedCommentId=17567287) by Neal Richardson (npr):*\nThis issue has been inactive for 3 months, so it has been unassigned and marked as unstarted. If you are still working on this, feel free to reassign yourself and resume progress."
+        }
+    ]
+}

@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[Rust] [Parquet] Refactor file module to help adding sources",
+        "body": "***Note**: This issue was originally created as [ARROW-10135](https://issues.apache.org/jira/browse/ARROW-10135). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently, the Parquet reader is very strongly tied to file system reads. This makes it hard to add other sources. For instance, to implement S3, we would need a reader that loads entire columns at once rather than buffered reads of a few Ko.\r\n\r\nTo improve modularity, we could try to move as much logic as possible to the generic traits (FileReader, RowGroupReader...) and reduce the code in the implementing structs (SerializedFileReader, SerializedRowGroupReader...) to the part that is specific to file/buffered reads.",
+        "created_at": "2020-09-29T13:51:39.000Z",
+        "updated_at": "2020-12-24T19:09:44.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-10-25T20:25:37.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-30T16:19:13.801Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10135?focusedCommentId=17204855) by Andy Grove (andygrove):*\n`[~chaosun]` [~nevi_me] `[~alamb]` `[~jorgecarleitao]` I think you may be interested in this one"
+        },
+        {
+            "created_at": "2020-09-30T16:20:08.206Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10135?focusedCommentId=17204856) by Andy Grove (andygrove):*\nPersonally, I agree with the direction of this. Given that DataFusion is now async, we should at least bear this in mind as we do this refactoring."
+        },
+        {
+            "created_at": "2020-09-30T18:42:15.619Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10135?focusedCommentId=17204955) by Andrew Lamb (alamb):*\nI also agree with keeping as much IO logic in the generic traits. \r\n\r\nHowever, I think you could implement an S3 reader that implements `ParquetReader` and avoid fetching the entire file at once without changing how the parquet reader is implemented. \r\n\r\n\r\nDespite the trait and struct names, which I find confusing,  I don't think `SerializedFileReader` [link](https://github.com/apache/arrow/blob/master/rust/parquet/src/file/reader.rs#L158)  is tied to files per-se \u2013 it is implemented in terms of a `ParquetReader` \r\n\r\nParquetReader is defined as `ParquetReader: Read + Seek + Length + TryClone {} ` \u2013 in other words it is defined in terms of the standard rust IO traits Read and Seek and also requires knowledge of the input length as well as the ability to clone itself (so multiple read streams can be read in parallel).\r\n\r\nIf you implemented ParquetReader for your S3 reader you should be able to read parquet files in a streaming fashion just fine.\r\n\r\n"
+        },
+        {
+            "created_at": "2020-10-01T08:11:03.980Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10135?focusedCommentId=17205356) by R\u00e9mi Dettai (rdettai):*\nHi `[~alamb]` ! Thanks for your insight. The problem when you use S3 (or any http blob storage) is that you typically want to query large chunks at once because each call is costly and has high latency. I am not talking about optimization here, calling tiny ranges from a blob storage is just baaaaad ;) (and using a buffered reader is also very sub-optimal).\r\n\r\nIn the parquet from S3 use case, you'll want to download the footer at once then entire columns at each call. This is not compatible with the standard IO traits that are typically tailored to read only the amount of data that is needed for the current operation: read footer length+magic bytes, deserialize row group header, deserialize page... The problem is the same in the C++ implem, but it was left to the `ParquetFileReader` implementation to fetch those full chunks at once when calling `ReadAt(position,nbytes)` IO interface. This is not the case in Rust, and I don't believe it is a good solution: it is hidden in the implementation how the IO API will be called and nothing guards from updates in the `FileReader` to break it again.\r\n\r\nWhat I'm working on is introducing an intermediate `ChunckReader` trait object that generates \"sliced readers\" implementing the standard IO traits. These \"sliced readers\" will be of the maximum size (e.g. entire footer, entire columns) but the rest of the implementation can keep using normal \"small reads\". These brings together the best of two worlds: the standard FS reader can keep working with its buffered reader with barely no overhead and blob storage clients can get large ranges at once then read the response stream progressively.\r\n\r\n`[~andygrove]` It is not entirely clear to me how to introduce async efficiently into this, but I will try to figure it out as I go."
+        },
+        {
+            "created_at": "2020-10-01T10:14:05.707Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10135?focusedCommentId=17205405) by Andrew Lamb (alamb):*\n`[~rdettai]` \u2013 It seems to me that buffering (either in memory or on the local disk) is going to be required in any general purpose solution when reading from object store. \r\n\r\nEven if you implement a ChunkReader that reads entire column chunks, for many parquet files that will result in a substantial number of calls to S3 (e.g. a 100 column parquet file in 10 row groups will be at least 1001 S3 calls, in a naive implementation).\r\n\r\nAnother way to achieve similar outcome that might result in a less intrusive code change could be to extend SerializedReader to pass \"hints\" somehow to the underlying ParquetReader of what I/O will be necessary soon (e.g. call \"read_hint(chunk_start, chunk_len)\" so you could start the S3 I/O for the entire chunk)\r\n\r\nAdding some way to avoid the SerializedReader's direct use of BufferedReader definitely seems like a good idea (perhaps factor out into `RawSerializedReader` that doesn't doesn't use BufferedReader and then have `SerializedReader` create a RawSerializedReader after first wrapping the input in a BufferedReader. "
+        },
+        {
+            "created_at": "2020-10-02T07:18:14.261Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10135?focusedCommentId=17206012) by R\u00e9mi Dettai (rdettai):*\n`[~alamb]` thanks again for you response, very interesting elements !\r\n\r\nI agree that you might need another mechanism to keep the number of calls to S3 under control. For instance the C++ implementation uses read coalescing. This is not easy to balance though because you will want to:\r\n \\* increase the number of GETs to parallelize downloads and speed up bandwidth\r\n \\* limit the total number of GETs to control overhead and price\r\n \\* avoid reading data from columns that you are not going to use\r\n\r\nThe way I see it, ChunckReader is nothing more than a way to write the \"read_hint(chunk_start, chunk_len)\" and the required indirection between the SerializedReader and the BufferedReader. I'm going to give the implementation a try, it might not be that intrusive if I manage to use traits correctly :)"
+        },
+        {
+            "created_at": "2020-10-02T10:09:52.480Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10135?focusedCommentId=17206083) by Andrew Lamb (alamb):*\n`[~rdettai]` that sounds like a good plan. Good luck and I'll look forward to checking out the PRs.  Thank you for working on this issue. "
+        },
+        {
+            "created_at": "2020-10-25T20:25:37.555Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10135?focusedCommentId=17220381) by Neville Dipale (nevi_me):*\nIssue resolved by pull request 8300\n<https://github.com/apache/arrow/pull/8300>"
+        },
+        {
+            "created_at": "2020-10-25T20:26:27.135Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10135?focusedCommentId=17220382) by Neville Dipale (nevi_me):*\nI'm unable to assign this to Remi"
+        }
+    ]
+}

@@ -1,0 +1,42 @@
+{
+    "issue": {
+        "title": "[Java] Memory leak in Flight DoGet when client cancels",
+        "body": "***Note**: This issue was originally created as [ARROW-7343](https://issues.apache.org/jira/browse/ARROW-7343). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI believe this causes things like ARROW-4765.\r\n\r\n~~If a stream is interrupted or otherwise not drained by the client, the serialized form of the ArrowMessage (DrainableByteBufInputStream) will sit around forever, leaking memory.~~",
+        "created_at": "2019-12-06T21:31:42.000Z",
+        "updated_at": "2020-01-27T13:45:17.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: FlightRPC",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-01-27T13:45:17.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-12-08T15:28:34.229Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7343?focusedCommentId=16990886) by David Li (lidavidm):*\nFound via debugging an internal application:\r\n\r\n1. Client cancels a doGet.\n1. Server doesn't observe this and calls putNext. (or, the cancellation happens in between when the server calls putNext and the client cancels.)\n1. An ArrowMessage is created, retaining references to buffers. The references won't be cleared until `ArrowMessage#asInputStream` is called.\n1. `ServerCallStreamObserverImpl#onNext` finds that the call has been cancelled, _and Flight has set an onCancel handler_ in `FlightService.GetListener.<constructor>`. Thus, it doesn't throw, and returns early (_before_ calling `ServerCallImpl#sendMessage`).\n1. Thus, the message is never freed."
+        },
+        {
+            "created_at": "2019-12-08T15:35:24.580Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7343?focusedCommentId=16990889) by David Li (lidavidm):*\nI don't particularly like this, but one way to fix this is to have GetListener retain (Java) references to ArrowMessage so it can force clean them (perhaps on a rolling basis)."
+        },
+        {
+            "created_at": "2019-12-09T12:50:23.328Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7343?focusedCommentId=16991555) by Wes McKinney (wesm):*\ncc `[~jacques]`"
+        },
+        {
+            "created_at": "2019-12-09T14:09:33.728Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7343?focusedCommentId=16991621) by David Li (lidavidm):*\nI think a reasonable fix is to have a flag on ArrowMessage indicating whether we've transitioned ownership of the buffer to Netty/gRPC; if we send a message and the flag isn't set, then we should immediately clean up the buffers. (I'm wondering if there is a case where we transition ownership to Netty but Netty itself drops the buffers, I don't believe there is such a case.)\r\n\r\nThere are some follow up issues I want to investigate and maybe file:\r\n \\* Is DoPut susceptible to the same issue? (Probably.)\r\n \\* `ServerStreamListener#isCancelled` is rather useless, since gRPC actually maintains two distinct (and only somewhat correlated) flags for whether a call has been cancelled, and only the one one that isn't easily observable by application code actually matters. (Maybe this is worth filing an upstream bug, and maybe we can wrap gRPC to expose stronger semantics - but I'm not sure given the asynchronicity of gRPC.)\r\n \\* In general, we should review how we're wrapping gRPC concepts and either make precise the guarantees we provide relative to gRPC, or make sure we actually expose the full range of gRPC concepts.\r\n \\* Again, maybe we really need an async API, at least in Java; while the sync API is more convenient, it does lead to weird issues like this."
+        },
+        {
+            "created_at": "2019-12-10T16:15:15.642Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7343?focusedCommentId=16992701) by David Li (lidavidm):*\nI've implemented the fix in the linked PR. I also found that DoPut could leak for different reasons (we call gRPC methods that can throw, causing us to skip cleanup), which I've fixed."
+        },
+        {
+            "created_at": "2020-01-27T13:45:17.468Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7343?focusedCommentId=17024347) by David Li (lidavidm):*\nIssue resolved by pull request 6003\n<https://github.com/apache/arrow/pull/6003>"
+        }
+    ]
+}

@@ -1,0 +1,24 @@
+{
+    "issue": {
+        "title": "[C++] Reduce directory and file IO when reading partition parquet dataset with partition key filters",
+        "body": "***Note**: This issue was originally created as [ARROW-15724](https://issues.apache.org/jira/browse/ARROW-15724). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi,\r\nIt seems that Arrow accesses all partitions directories (and even each parquet files), including those clearly not matching with the partition key values in the filter criteria. This may cause multiple time of difference between accessing one partition directly vs accessing with partition key filters,\u00a0\r\nspecially on Network file system, and on local file system when there are lots of partitions, e.g. 1/10th of second vs seconds.\r\n\r\nAttached some Python code to create example dataframe and save parquet datasets with different hive partition structures (/y=/m=/d=, or /y=/m=, or /dk=). And read the datasets with/without filters to reproduce the issue. Observe the run time, and the directories and files which are accessed by the process in Process Monitor on Windows.\r\n\r\nIn the three partition structures, I saw in Process Monitor that all directories are accessed regardless of use_legacy_dataset=True or False. \r\nWhen use_legacy_dataset=False, the parquet files in all directories were opened and closed.\u00a0 \r\nThe argument validate_schema=False made small time difference, but still opens the partition directories, and it's only supported when use_legacy_dataset=True, and not supported/passed in from pandas read_parquet wrapper API.\u00a0\r\n\r\nThe /y=/m= is faster because there is no daily partition so less directories and files.\r\n\r\nThere was a related another stackoverflow question and example <https://stackoverflow.com/questions/66339381/pyarrow-read-single-file-from-partitioned-parquet-dataset-is-unexpectedly-slow>\r\nand there was a comment on the partition discovery:\r\n> It should get discovered automatically. pd.read_parquet calls pyarrow.parquet.read_table and the default partitioning behavior should be to discover hive-style partitions (i.e. the ones you have). The fact that you have to specify this means that discovery is failing. If you could create a reproducible example and submit it to Arrow JIRA it would be helpful.\u00a0\n> \u2013 Pace \u00a0Feb 24 2021 at 18:55\"\r\nWonder if there were some related Jira here already.\r\nI tried passing in partitioning argument, but it didn't help.\u00a0\r\nThe version of pyarrow used were 1.01, 5, and 7.",
+        "created_at": "2022-02-17T20:20:59.000Z",
+        "updated_at": "2022-02-17T23:45:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-17T20:25:23.574Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15724?focusedCommentId=17494208) by David Li (lidavidm):*\nBasically, right now we list all files, then prune them. We need to integrate partitioning during the listing process to avoid this."
+        },
+        {
+            "created_at": "2022-02-17T23:45:54.147Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15724?focusedCommentId=17494296) by Yin (zyd02):*\nDavid, Thanks. Good to know.\u00a0\r\nLooks like both FileSystemDatasetFactory for use_legacy_dataset=False, and ParquetManifest in pyarrow code for use_legacy_dataset=True may take into account of the filtered partition keys without discovering all directories and files. Or maybe they can be cached or passed in for the following calls to be faster.\r\n\r\n\r\n\r\n\r\n\u00a0"
+        }
+    ]
+}

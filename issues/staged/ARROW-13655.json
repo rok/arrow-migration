@@ -1,0 +1,26 @@
+{
+    "issue": {
+        "title": "[C++][Parquet] Reading large Parquet file can give \"MaxMessageSize reached\" error with Thrift 0.14",
+        "body": "***Note**: This issue was originally created as [ARROW-13655](https://issues.apache.org/jira/browse/ARROW-13655). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFrom https://github.com/dask/dask/issues/8027\r\n\r\nApache Thrift introduced a `MaxMessageSize` configuration option (https://github.com/apache/thrift/blob/master/doc/specs/thrift-tconfiguration.md#maxmessagesize) in version 0.14 (THRIFT-5237). \r\n\r\nI think this is the cause of an issue reported originally at https://github.com/dask/dask/issues/8027, where one can get a _\"OSError: Couldn't deserialize thrift: MaxMessageSize reached\"_ error while reading a large Parquet (metadata-only) file. \r\n\r\nIn the original report, the file was writting using the python fastparquet library (which uses the python thrift bindings, which still use Thrift 0.13), but I was able to construct a reproducible code example with pyarrow.\r\n\r\nCreate a large metadata Parquet file with pyarrow in an environment with Arrow built against Thrift 0.13 (eg with a local install from source, or installing pyarrow 2.0 from conda-forge can be installed with libthrift 0.13):\r\n\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\ntable = pa.table({str(i): np.random.randn(10) for i in range(1_000)})\r\npq.write_table(table, \"__temp_file_for_metadata.parquet\")\r\nmetadata = pq.read_metadata(\"__temp_file_for_metadata.parquet\")\r\nmetadata2 = pq.read_metadata(\"__temp_file_for_metadata.parquet\")\r\n\r\n[metadata.append_row_groups(metadata2) for _ in range(4000)]\r\nmetadata.write_metadata_file(\"test_parquet_metadata_large_file.parquet\")\r\n```\r\n\r\nAnd then reading this file again in the same environment works fine, but reading it in an environment with recent Thrift 0.14 (eg installing latest pyarrow with conda-forge) gives the following error:\r\n\r\n```python\n\r\nIn [1]: import pyarrow.parquet as pq\r\n\r\nIn [2]: pq.read_metadata(\"test_parquet_metadata_large_file.parquet\")\r\n...\r\nOSError: Couldn't deserialize thrift: MaxMessageSize reached\r\n```",
+        "created_at": "2021-08-18T13:24:07.000Z",
+        "updated_at": "2021-10-04T10:51:56.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Parquet",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-10-04T10:51:49.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-18T13:26:37.378Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13655?focusedCommentId=17401057) by Joris Van den Bossche (jorisvandenbossche):*\nActually, doing both the writing and reading in an environment with Thrift 0.14 reproduces it as well (eg a clean conda environment with latest pyarrow 5.0 from conda-forge, which installs libthrift 0.14.2). So it seems with recent Thrift, we still allow to write the Parquet file, but can no longer read it ..\r\n\r\n"
+        },
+        {
+            "created_at": "2021-10-04T10:51:49.464Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13655?focusedCommentId=17423885) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 11123\n<https://github.com/apache/arrow/pull/11123>"
+        }
+    ]
+}

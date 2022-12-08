@@ -1,0 +1,73 @@
+{
+    "issue": {
+        "title": "[R] open_dataset - add file_name as column",
+        "body": "***Note**: This issue was originally created as [ARROW-15260](https://issues.apache.org/jira/browse/ARROW-15260). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi. Is it possible to add the file_name as a column to a dataset?\r\n\r\n```r\n\r\nds <- open_dataset(.....)\r\nlist_of_files <- ds$files\r\n```\r\n\r\nThis works, but I need the file_name as a column.\r\nThanks\r\n\r\n\r\n\r\n\u00a0",
+        "created_at": "2022-01-05T18:53:39.000Z",
+        "updated_at": "2022-08-29T22:17:20.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-08-10T00:19:44.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-01-05T18:58:40.895Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15260?focusedCommentId=17469483) by Martin du Toit (martindut):*\nI already add the folders as partitions, but also need the file_name as a column, to group_by and add row_numbers"
+        },
+        {
+            "created_at": "2022-01-06T10:27:15.716Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15260?focusedCommentId=17469823) by Nicola Crane (thisisnic):*\nI'm don't think that that is possible, but could you give me a bit more information about the problem you're trying to solve, or why you need it, as perhaps there may be alternative ways of achieving your goals?"
+        },
+        {
+            "created_at": "2022-01-06T11:13:08.861Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15260?focusedCommentId=17469854) by Martin du Toit (martindut):*\nThe raw data that we receive from clients is structured into various folders. We partition the data based on the folders. The lowest level is a timestamp folder, but there are scenarios where we receive multiple files for a specific timestamp. In order to process the data, in bulk, we need to create a unique row level id for for each file, i.e. group_by various partitions and file_name to add a row_number . If we pickup any issues with the data, we need to be able to pinpoint the exact file where the issue occurred to revert back to the client.\r\n\r\nI hope this makes sense"
+        },
+        {
+            "created_at": "2022-01-06T12:37:35.745Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15260?focusedCommentId=17469877) by Nicola Crane (thisisnic):*\nYeah, that does make sense. As a short-term (and not particularly scalable) solution, I suppose you could do something like:\r\n```r\n\r\nfiles <- list.files(directory, recursive = TRUE, full.names = TRUE)\r\n\r\nfor(file in files){\r\n  data <- read_csv_arrow(file)\r\n  data <- mutate(data, filename = file)\r\n  write_csv_arrow(data, file = file)\r\n}\n```\r\nI also wonder if the code required to solve ARROW-14612 might bring us closer to this being possible. Would be good to hear others' thoughts here."
+        },
+        {
+            "created_at": "2022-01-06T16:26:56.409Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15260?focusedCommentId=17470024) by Weston Pace (westonpace):*\nFrom a C++ perspective we've got many of the pieces needed already.  One challenge is that the datasets API is written to work with \"fragments\" and not \"files\".  For example, a dataset might be an in-memory table in which case we are working with InMemoryFragment and not FileFragment so there is no concept of \"filename\".\r\n\r\nThat being said, the low level ScanBatchesAsync method actually returns a generator of TaggedRecordBatch for this very purpose.  A TaggedRecordBatch is a struct with the record batch as well as the source fragment for that record batch.\r\n\r\nSo if you were to execute scan, you could inspect the fragment and, if it is a FileFragment, you could extract the filename.\r\n\r\nAnother challenge is that R is moving towards more and more access through an exec plan and not directly using a scanner.  In order for that to work we would need to augment the scan results with the filename in C++ before sending into the exec plan.  Luckily, we already do this a bit as well.  We currently augment the scan results with fragment index, batch index, and whether the batch is the last batch in the fragment.\r\n\r\nSince ExecBatch can work with constants efficiently I don't think there will be much performance cost in always including the filename.  So the work remaining is simply to add a new augmented field __fragment_source_name which is always attached if the underlying fragment is a filename.  Then users can get this field if they want by including \"__fragment_source_name\" in the list of columns they query for."
+        },
+        {
+            "created_at": "2022-01-07T10:04:30.349Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15260?focusedCommentId=17470492) by Martin du Toit (martindut):*\nThanks for the feedback `[~westonpace]` , although I must admit, it is a little bit Greek to me. Will it be possible for someone to give me an example of how to do this FileFragment scan in R? `[~thisisnic]` \u00a0"
+        },
+        {
+            "created_at": "2022-01-07T12:14:20.692Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15260?focusedCommentId=17470565) by Nicola Crane (thisisnic):*\nHi `[~martindut]` - I think this is C++ functionality which is not exposed directly in the R layer and that this wouldn't be possible.\u00a0 I will open a ticket for enabling the functionality that Weston mentions for extracting filenames though."
+        },
+        {
+            "created_at": "2022-04-04T10:37:20.941Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15260?focusedCommentId=17516737) by Nicola Crane (thisisnic):*\nThis is now implemented in the C++ via ARROW-15281; however, it'll need some work to bring this functionality into the R code, and could be a bit tricky.  Here are my notes on what I think the tricky bits will be.\r\n\r\nIn Python, we can do something like `scanner = dataset_reader.scanner(dataset, columns=['__filename'])`\r\nIn the R code, the Scanner object looks like the likely analog.  We use `Scanner$create()` to create a Scanner object, and it uses the `projection` field to specify columns.  \r\n\r\nIn the body of `Scanner$create()`, we have this code: `proj <- c(dataset$selected_columns, dataset$temp_columns)` and then later `stopifnot(\"attempting to project with unknown columns\" = all(projection %in% names(proj)))`\r\n\r\nSo we'll need to make some sort of change so that we can select this \"metadata\" kind of column.  \r\n\r\nIt may be complicated further by the fact that this deviates a bit from the usual way of using `dplyr::select()`; i.e. if I set up a basic dataset based on the `mtcars` dataset and try to call `select(mtcars_dataset, cyl, __filenames)`, I get `Error: unexpected input in \"select(my_dataset, cyl, _\"` which is different from the usual `Can't subset columns that don't exist.` error message I might expect, so there may be something around the syntax here too."
+        },
+        {
+            "created_at": "2022-04-04T12:47:50.237Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15260?focusedCommentId=17516796) by Dewey Dunnington (paleolimbot):*\n(JIRA does wild things with italics here, so I'm sticking it in noformat...)\r\n\r\n```\n\r\n\r\nIt looks like we can access {{__filename}} from the {{Scanner}} too, \r\nalthough it's pretty limited what we do with it. Note that in R you will \r\nhave to use backticks in something like dplyr (e.g., {{`__filename`}}, \r\nbecause variables in R can't start with {{_}}. In the dplyr interface \r\nwe make a pretty strong assumption that the schema names are the\r\n available names in the dataset...maybe the best way would be to add\r\n a binding like {{dataset_filename()}} that inserts the correct field\r\n reference (although C++ gives us errors if we try to insert a field \r\nreference to {{__filename}} in an {{Expression}}).\r\n\r\n```\r\n\r\n```R\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\n\r\ntf <- tempfile()\r\nwrite_dataset(mtcars, tf, partitioning = \"cyl\")\r\nds <- open_dataset(tf)\r\n\r\n# works!\r\nscanner <- Scanner$create(\r\n  open_dataset(tf), \r\n  projection = c(\"__filename\", names(ds))\r\n)\r\n\r\nas_tibble(scanner$ToTable())\r\n#> # A tibble: 32 \u00d7 12\r\n#>    `__filename`        mpg  disp    hp  drat    wt  qsec    vs    am  gear  carb\r\n#>    <chr>             <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl>\r\n#>  1 /private/var/fol\u2026  22.8 108      93  3.85  2.32  18.6     1     1     4     1\r\n#>  2 /private/var/fol\u2026  24.4 147.     62  3.69  3.19  20       1     0     4     2\r\n#>  3 /private/var/fol\u2026  22.8 141.     95  3.92  3.15  22.9     1     0     4     2\r\n#>  4 /private/var/fol\u2026  32.4  78.7    66  4.08  2.2   19.5     1     1     4     1\r\n#>  5 /private/var/fol\u2026  30.4  75.7    52  4.93  1.62  18.5     1     1     4     2\r\n#>  6 /private/var/fol\u2026  33.9  71.1    65  4.22  1.84  19.9     1     1     4     1\r\n#>  7 /private/var/fol\u2026  21.5 120.     97  3.7   2.46  20.0     1     0     3     1\r\n#>  8 /private/var/fol\u2026  27.3  79      66  4.08  1.94  18.9     1     1     4     1\r\n#>  9 /private/var/fol\u2026  26   120.     91  4.43  2.14  16.7     0     1     5     2\r\n#> 10 /private/var/fol\u2026  30.4  95.1   113  3.77  1.51  16.9     1     1     5     2\r\n#> # \u2026 with 22 more rows, and 1 more variable: cyl <int>\r\n\r\n# seems that we still can't use __filename in a filter expr\r\nScanner$create(\r\n  open_dataset(tf),\r\n  projection = c(\"__filename\", names(ds)),\r\n  filter = Expression$create(\r\n    \"match_substring\",\r\n    Expression$field_ref(\"__filename\"),\r\n    options = list(pattern = \"cyl=8\")\r\n  )\r\n)\r\n#> Error: Invalid: No match for FieldRef.Name(__filename) in mpg: double\r\n#> disp: double\r\n#> hp: double\r\n#> drat: double\r\n#> wt: double\r\n#> qsec: double\r\n#> vs: double\r\n#> am: double\r\n#> gear: double\r\n#> carb: double\r\n#> cyl: int32\r\n#> /Users/deweydunnington/Desktop/rscratch/arrow/cpp/src/arrow/type.h:1717  CheckNonEmpty(matches, root)\r\n#> /Users/deweydunnington/Desktop/rscratch/arrow/cpp/src/arrow/dataset/scanner.cc:782  ref.FindOne(*scan_options_->dataset_schema)\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-04-04T13:12:40.626Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15260?focusedCommentId=17516808) by Nicola Crane (thisisnic):*\nOh sweet, at least we're closer than I'd thought we were, and works for the basic use-case here (i.e. find out which file this row belongs to)."
+        },
+        {
+            "created_at": "2022-04-04T13:54:50.795Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15260?focusedCommentId=17516837) by Neal Richardson (npr):*\n> although C++ gives us errors if we try to insert a field reference to `__filename` in an `Expression`\r\n\r\nThis is tricky because we (and apparently elsewhere in the C++ code) have logic to filter out secret internal columns like this: https://github.com/apache/arrow/blob/master/r/R/query-engine.R#L159-L163. Sounds like we need to find a safe way to loosen that, or otherwise rethink the implementation.\r\n\r\nIn terms of UX in R, a special helper like `add_filenames <- function() Expression$field_ref(\"__filename\")` that you could call like `mutate(ds, file_col = add_filenames())` might be a reasonable interface to this. "
+        },
+        {
+            "created_at": "2022-04-04T18:54:36.832Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15260?focusedCommentId=17517041) by Weston Pace (westonpace):*\n> seems that we still can't use __filename in a filter expr\r\n\r\nThat's a C++ problem (just filed ARROW-16115)\r\n\r\n> This is tricky because we (and apparently elsewhere in the C++ code) have logic to filter out secret internal columns like this\r\n\r\nIn C++ if the user doesn't specify any projection we default to \"all columns but not augmented columns\".  I think that's the only time we filter out these special columns and I think we want to keep this interpretation."
+        },
+        {
+            "created_at": "2022-04-04T18:58:23.132Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15260?focusedCommentId=17517044) by Weston Pace (westonpace):*\nOh, also, one might think that this query would push the filter down:\r\n\r\n```\n\r\n  filter = Expression$create(\r\n    \"match_substring\",\r\n    Expression$field_ref(\"__filename\"),\r\n    options = list(pattern = \"cyl=8\")\r\n  )\r\n```\r\n\r\nIn other words, you might think we would get the hint and only read files matching that pattern.  This is not the case.  We will read the entire dataset and apply the \"cyl=8\" filter in memory.\r\n\r\nIf we want to pushdown filters on the filename column we will need to add some special logic.  Feel free to create a JIRA."
+        },
+        {
+            "created_at": "2022-08-10T00:19:44.295Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15260?focusedCommentId=17577682) by Neal Richardson (npr):*\nIssue resolved by pull request 12826\n<https://github.com/apache/arrow/pull/12826>"
+        }
+    ]
+}

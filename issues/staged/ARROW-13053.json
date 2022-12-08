@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] Build fails on MacOS Big Sur using homebrewed Arrow libraries",
+        "body": "***Note**: This issue was originally created as [ARROW-13053](https://issues.apache.org/jira/browse/ARROW-13053). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen installing pyarrow 4.0.1 from source, the install step fails with\u00a0\r\n\r\n`error: can't copy 'build/lib.macosx-11.3-arm64-3.9/pyarrow/include/arrow': doesn't exist or not a regular file`\r\n\r\nbecause the headers directory\r\n\r\n`build/lib.macosx-11.3-arm64-3.9/pyarrow/include/arrow`\r\n\r\nis a relative symlink to\u00a0`../Cellar/apache-arrow/4.0.1/include/arrow`\r\n\r\nI believe this is caused by the build system including the header files from `/opt/homebrew/include/arrow`, which is the above symlink:\r\n\r\n{\\{ls -hl /opt/homebrew/include/arrow}}\r\n`lrwxr-xr-x\u00a0 1 dki\u00a0 admin\u00a0 \u00a0 42B Jun\u00a0 8 15:35 /opt/homebrew/include/arrow -> ../Cellar/apache-arrow/4.0.1/include/arrow`\r\n\r\nI was able work around this issue by modifying line 334 in `CMakeLists.txt` from\r\n\r\n`#Always bundle includes`\r\n `file(COPY ${ARROW_INCLUDE_DIR}/arrow DESTINATION ${BUILD_OUTPUT_ROOT_DIRECTORY}/include)`\r\n\r\nto\r\n\r\n`#Always bundle includes`\r\n `get_filename_component(REAL_ARROW_INCLUDE_DIR \"${ARROW_INCLUDE_DIR}/arrow\" REALPATH)`\r\n `file(COPY ${``REAL_ARROW_INCLUDE_DIR``} DESTINATION ${BUILD_OUTPUT_ROOT_DIRECTORY}/include)`\r\n\r\nBut I'm not familiar with CMake, so maybe there is a more appropriate way to fix this.",
+        "created_at": "2021-06-11T11:45:14.000Z",
+        "updated_at": "2021-07-25T20:51:38.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-06-12T22:36:56.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-11T20:30:49.852Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13053?focusedCommentId=17362033) by Kouhei Sutou (kou):*\nThis is a right fix.\r\nCould you open a pull request with this?"
+        },
+        {
+            "created_at": "2021-06-12T13:36:38.737Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13053?focusedCommentId=17362329) by Dorian Kind (ddoskind):*\nSure, I have created a PR:\u00a0https://github.com/apache/arrow/pull/10523"
+        },
+        {
+            "created_at": "2021-06-12T22:36:56.584Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13053?focusedCommentId=17362412) by Kouhei Sutou (kou):*\nIssue resolved by pull request 10523\n<https://github.com/apache/arrow/pull/10523>"
+        },
+        {
+            "created_at": "2021-07-22T14:23:04.897Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13053?focusedCommentId=17385537) by Ryan Williams (rdub):*\nWill pyarrow 5.0.0 be released with this fix? It seems I'm unable to `pip install pyarrow` today, due to this issue. [Here's a separate write-up](https://github.com/python-poetry/poetry/issues/3627#issuecomment-884943058)."
+        },
+        {
+            "created_at": "2021-07-22T14:58:33.516Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13053?focusedCommentId=17385581) by Ryan Williams (rdub):*\nI was able to `pip install` a version of pyarrow by creating a branch from 4.0.1 and cherry-picking in the fix from this issue:\r\n```bash\n\r\ngit clone https://github.com/apache/arrow.git && cd arrow\r\ngit checkout apache-arrow-4.0.1\r\ngit cherry-pick 0e9285b28\r\npip install -e python\r\n```\r\nYou can install [my branch](https://github.com/runsascoded/arrow/tree/macos-4.0.1) directly via:\r\n```bash\n\r\npip install 'pyarrow@git+https://github.com/runsascoded/arrow.git@macos-4.0.1#subdirectory=python'\r\n```\r\nIt seems to work on Python 3.9.5, but I get a linker error\u00a0trying to actually `import pyarrow` in Python 3.8.10:\r\n```none\n\r\n$ python -c 'import pyarrow'\r\nTraceback (most recent call last):\r\n  File \"<string>\", line 1, in <module>\r\n  File \"/Users/ryan/.pyenv/versions/ctbk-3.8.10/lib/python3.8/site-packages/pyarrow/__init__.py\", line 63, in <module>\r\n    import pyarrow.lib as _lib\r\nImportError: dlopen(/Users/ryan/.pyenv/versions/ctbk-3.8.10/lib/python3.8/site-packages/pyarrow/lib.cpython-38-darwin.so, 2): Symbol not found: __Py_FatalErrorFunc\r\n  Referenced from: /opt/homebrew/opt/apache-arrow/lib/libarrow_python.400.dylib\r\n  Expected in: flat namespace\r\n in /opt/homebrew/opt/apache-arrow/lib/libarrow_python.400.dylib\r\n```\r\nI'm not sure what the problem is there.\r\n\r\nNote also that trying to install the upstream 5.0.0 release tag fails because Homebrew only offers 4.0.1, and you'll run into compile errors (and of course, the vanilla 4.0.1 release doesn't include the fix from this issue)."
+        },
+        {
+            "created_at": "2021-07-22T15:15:59.634Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13053?focusedCommentId=17385600) by Dorian Kind (ddoskind):*\n`[~rdub]` \u00a0The linker error probably is rooted in Homebrew's `apache-arrow`\u00a0[dependency on Python 3.9](https://formulae.brew.sh/formula/apache-arrow).\r\n\r\nI get the same error if I try to install the built library into a 3.8 virtualenv, but with a 3.9 environment it works fine.\r\n\r\nIn order to successfully install arrow for Python 3.8 you'd probably also have to compile the the C++ libraries yourself, using the `-DPython3_EXECUTABLE` flag to point to the right Python."
+        }
+    ]
+}

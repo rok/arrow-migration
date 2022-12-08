@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "[Python] accept pyarrow values / scalars in constructor functions ?",
+        "body": "***Note**: This issue was originally created as [ARROW-5295](https://issues.apache.org/jira/browse/ARROW-5295). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently, functions like \\`pyarrow.array` don't accept pyarrow Arrays, or also not scalars of it:\r\n\r\n```Java\n\r\nIn [42]: arr = pa.array([1, 2, 3])\r\n\r\nIn [43]: pa.array(arr)\r\n...\r\nArrowInvalid: Could not convert 1 with type pyarrow.lib.Int64Value: did not recognize Python value type when inferring an Arrow data type\r\n\r\nIn [44]: pa.array(list(arr))\r\n...\r\nArrowInvalid: Could not convert 1 with type pyarrow.lib.Int64Value: did not recognize Python value type when inferring an Arrow data type\r\n```\r\n\r\nDo we want to allow those / recognize those here? (the first case could even have a fastpath, as we don't need to do it element by element).\r\n\r\nAlso scalars are not supported:\r\n\r\n```Java\n\r\nIn [46]: type(arr.sum())\r\nOut[46]: pyarrow.lib.Int64Scalar\r\n\r\nIn [47]: pa.array([arr.sum()])\r\n...\r\nArrowInvalid: Could not convert 6 with type pyarrow.lib.Int64Scalar: did not recognize Python value type when inferring an Arrow data type\r\n```\r\n\r\nAnd also in other functions we don't accept arrow scalars / values:\r\n\r\n```Java\n\r\nIn [48]: string = pa.array(['a'])[0]\r\n\r\nIn [49]: type(string)\r\nOut[49]: pyarrow.lib.StringValue\r\n\r\nIn [50]: pa.field(string, pa.int64())\r\n...\r\nTypeError: expected bytes, pyarrow.lib.StringValue found\r\n```\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2019-05-09T16:23:10.000Z",
+        "updated_at": "2022-05-25T07:23:36.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2019-05-09T16:35:29.418Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5295?focusedCommentId=16836524) by Antoine Pitrou (apitrou):*\nI think allowing Arrays is fine. I'm not sure we want to make Scalars first-class citizens like Numpy scalars, though. At least from an implementation POV, it may add a lot of code all over the place..."
+        },
+        {
+            "created_at": "2019-08-13T13:22:00.941Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5295?focusedCommentId=16906190) by Joris Van den Bossche (jorisvandenbossche):*\nAdditional case (from ARROW-6222): pyarrow Arrays are also not recognized as list-like when converting/inferring a list array:\r\n\r\n```Java\n\r\nIn [43]: pa.array([np.array([1, 1]), np.array([2, 2, 2])])                                                                                                                                                         \r\nOut[43]: \r\n<pyarrow.lib.ListArray object at 0x7f258fa9d0a0>\r\n[\r\n  [\r\n    1,\r\n    1\r\n  ],\r\n  [\r\n    2,\r\n    2,\r\n    2\r\n  ]\r\n]\r\n\r\nIn [44]: pa.array([pa.array([1, 1]), pa.array([2, 2, 2])])                                                                                                                                                         \r\n---------------------------------------------------------------------------\r\nArrowInvalid                              Traceback (most recent call last)\r\n<ipython-input-44-a22e0a500750> in <module>\r\n----> 1 pa.array([pa.array([1, 1]), pa.array([2, 2, 2])])\r\n\r\n~/scipy/repos/arrow/python/pyarrow/array.pxi in pyarrow.lib.array()\r\n\r\n~/scipy/repos/arrow/python/pyarrow/array.pxi in pyarrow.lib._sequence_to_array()\r\n\r\n~/scipy/repos/arrow/python/pyarrow/error.pxi in pyarrow.lib.check_status()\r\n\r\nArrowInvalid: Could not convert [\r\n  1,\r\n  1\r\n] with type pyarrow.lib.Int64Array: did not recognize Python value type when inferring an Arrow data type\r\n```\r\n\r\nSo list (or array) of numpy arrays works, but list of pyarrow arrays not. Again, not the most typical use case of pyarrow Arrays, so not sure we should add this capability.\r\n\r\n(although we might want to find a general solution for array-like objects (eg pytorch.Tensors, see ARROW-6222), and a solution for that (somehow trying to coerce to a numpy array?) might also solve the case of a list of arrow arrays)"
+        },
+        {
+            "created_at": "2019-08-22T22:34:30.474Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5295?focusedCommentId=16913756) by Wes McKinney (wesm):*\nA \"simple\" workaround would be to invoke Scalars' `as_py` method if they're passed in. That would add perf overhead, though, since we'd need to do `isinstance` checks. \r\n\r\nAnother option is to \"sanitize\" inputs (using a helper function) only in the case of failure on the initial try. So the normal use case won't be affected"
+        }
+    ]
+}

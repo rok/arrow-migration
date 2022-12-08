@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] write_table fails silently on S3 errors",
+        "body": "***Note**: This issue was originally created as [ARROW-5072](https://issues.apache.org/jira/browse/ARROW-5072). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n`pyarrow==0.12.1`\r\n\r\n**pyarrow.parquet.write_table** called with where=S3File(...)\u00a0fails silently when encountering errors while writing to S3 (in the example below, boto3 is raising a NoSuchBucket exception). However, instead of using S3File(), calling write_table with where=_<filepath>_ and with filesystem=S3FileSystem() does **not** fail silently and raises, as is expected.\r\n#### Code/Repro\r\n\r\n\u00a0\r\n```java\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nfrom s3fs import S3File, S3FileSystem\r\n\r\n\r\ndf = pd.DataFrame({'col0': []})\r\ns3_filepath = 's3://some-bogus-bucket/df.parquet'\r\n\r\nprint('>> test 1')\r\ntry:\r\n# use S3File --> fails silently\r\npq.write_table(pa.Table.from_pandas(df.copy()),\r\nS3File(S3FileSystem(), s3_filepath, mode='wb'))\r\nexcept Exception:\r\nprint('>>>> Exception raised!')\r\nelse:\r\nprint('>>>> Exception **NOT** raised!')\r\n\r\n\r\nprint('>> test 2')\r\ntry:\r\n# use filepath and S3FileSystem --> raises Exception, as expected\r\npq.write_table(pa.Table.from_pandas(df.copy()),\r\ns3_filepath,\r\nfilesystem=S3FileSystem())\r\nexcept Exception:\r\nprint('>>>> Exception raised!')\r\nelse:\r\nprint('>>>> Exception **NOT** raised!')\n```\r\n\u00a0\r\n#### \u00a0\r\n#### Output\r\n```java\n\r\n>> test 1\r\nException ignored in: <bound method S3File.__del__ of <S3File some-bogus-bucket/df.parquet>>\r\nTraceback (most recent call last):\r\nFile \"<redacted>/lib/python3.6/site-packages/s3fs/core.py\", line 1476, in __del__\r\nself.close()\r\nFile \"<redacted>/lib/python3.6/site-packages/s3fs/core.py\", line 1454, in close\r\nraise_from(IOError('Write failed: %s' % self.path), e)\r\nFile \"<string>\", line 3, in raise_from\r\nOSError: Write failed: some-bogus-bucket/df.parquet\r\n>>>> Exception **NOT** raised!\r\n\r\n>> test 2\r\n>>>> Exception raised!\r\nException ignored in: <bound method S3File.__del__ of <S3File some-bogus-bucket/df.parquet>>\r\nTraceback (most recent call last):\r\nFile \"<redacted>/lib/python3.6/site-packages/s3fs/core.py\", line 1476, in __del__\r\nself.close()\r\nFile \"<redacted>/lib/python3.6/site-packages/s3fs/core.py\", line 1454, in close\r\nraise_from(IOError('Write failed: %s' % self.path), e)\r\nFile \"<string>\", line 3, in raise_from\r\nOSError: Write failed: some-bogus-bucket/df.parquet\r\n```",
+        "created_at": "2019-03-29T19:39:47.000Z",
+        "updated_at": "2019-09-17T17:38:59.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-09-17T17:38:59.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-08-22T22:15:32.982Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5072?focusedCommentId=16913735) by Wes McKinney (wesm):*\nSeems a bit buggy. Added to 0.15.0 in case someone can take a look"
+        },
+        {
+            "created_at": "2019-09-17T14:57:40.727Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5072?focusedCommentId=16931542) by Krisztian Szucs (kszucs):*\nThe root cause originates from s3fs. `S3File` uses buffering, and no S3 request happens until it is closed or flushed:\r\n\r\n```python\n\r\nout = S3File(S3FileSystem(), 's3://some-bogus-bucket/df.parquet', mode='wb')\r\nout.write(b'bbb')  # returns with 3\r\ndel out  # raises exception \r\n```\r\n\r\nIf we would call `out.close()` then it would be flushed, but the file itself is opened outside of arrow, so the caller should be responsible for closing it. We could fall `flush()` on file-like objects, although it works a bit differently with `S3File`:\r\n\r\n```python\n\r\nout.flush()  # doesn't raise\r\nout.flush(force=True)  # raises, but force keyword is S3File / fsspec specific\r\n```\r\n\r\nWhen `S3FileSystem` is used, then the file object is opened and thus closed by arrow, so the exception propagates from `pq.write_table()`:\r\n\r\n```python\n\r\npq.write_table(table, s3_filepath, filesystem=S3FileSystem())  # raises\r\n```\r\n\r\nI'd consider this as an s3fs issue, because `S3File().write()` work on non-existing file (actually I get a non-authorised error, because I don't have S3 credentials set up), and the error is raised on object destruction, from `S3File.___del___()`. \r\n\r\nFrom arrow perspective the provided behaviour is the expected, although we can have a note for this s3fs case in the documentation.\r\n\r\ncc `[~wesmckinn]` `[~pitrou]` `[~mdurant]`\r\n\r\n"
+        },
+        {
+            "created_at": "2019-09-17T15:02:33.448Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5072?focusedCommentId=16931546) by Antoine Pitrou (apitrou):*\nNote our C++ S3 implementation doesn't have this issue, it initiates the write synchronously in order to get early error report about non-existent buckets, etc."
+        },
+        {
+            "created_at": "2019-09-17T15:08:05.188Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5072?focusedCommentId=16931552) by Martin Durant (mdurant):*\nIdeally, you should write within a context like\u00a0\r\n```java\n\r\nwith s3.open(...) as f:\r\n    write_with(f)\n```\r\nActually, the first call of the S3 API happens whenever the first data is sent, which will be when the buffer first fills beyond the configured block size - this is an important optimisation. You are welcome to propose that the method in question, `._initiate_upload()` be called during file instance creation. That could be within s3fs, or fsspec (in which case it will propagate to all file implementations which derive from AbstractBufferedFile).\r\n\r\nNote that once you call `flush(force=True)`, you cannot write any more to the file, this is equivalent to closing it."
+        },
+        {
+            "created_at": "2019-09-17T17:38:59.182Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5072?focusedCommentId=16931691) by Wes McKinney (wesm):*\nClosing as won't fix, since this is a quirk about how s3fs works, and it wouldn't be appropriate for {parquet.write_table}} to close the file"
+        }
+    ]
+}

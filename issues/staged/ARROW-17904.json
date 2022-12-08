@@ -1,0 +1,92 @@
+{
+    "issue": {
+        "title": "[C++] Parquet support read page with crc32 checking",
+        "body": "***Note**: This issue was originally created as [ARROW-17904](https://issues.apache.org/jira/browse/ARROW-17904). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently, C++'s Parquet support write page with checksum, but `ReadPage` doesn't have check any checksum. And I would like to fix it\r\n\r\nI'd like to split this patch to different parts:\r\n1. Implement the crc in DataPageV1, which requires a write crc config, counting crc in read mode, crc verification, migrate testing from parquet mr\n1. Implement crc in DataPageV2 and Dict",
+        "created_at": "2022-09-30T18:29:09.000Z",
+        "updated_at": "2022-10-29T22:13:51.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Parquet",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-03T15:45:23.317Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17612339) by Antoine Pitrou (apitrou):*\nThat would certainly be a welcome addition!"
+        },
+        {
+            "created_at": "2022-10-08T03:04:36.655Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17614332) by Xuwei Fu (mwish):*\n`[~apitrou]` I'm on holidays last week. Now I found that in thirdparty, arrow imports `crc32c`, which is extracted from leveldb's crc library. But seems that our standard uses crc32, which has a different magic number: <https://github.com/apache/parquet-format#checksumming>\r\n\r\nMaybe I can use <boost/crc32.h> here?"
+        },
+        {
+            "created_at": "2022-10-08T08:31:41.602Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17614426) by Antoine Pitrou (apitrou):*\nI think we'd rather avoid a mandatory boost dependency. Surely there's a standalone CRC32 implementation somewhere under a Apache-compatible license that we can vendor?"
+        },
+        {
+            "created_at": "2022-10-08T08:32:00.155Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17614427) by Antoine Pitrou (apitrou):*\nAlso cc `[~kou]`"
+        },
+        {
+            "created_at": "2022-10-08T08:56:49.835Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17614437) by Xuwei Fu (mwish):*\ngandiva already imports boost/crc. And I have a simple draft using it: <https://github.com/apache/arrow/pull/14351> . It's WIP because it requires some testings, and it only implement the case for DATA_PAGE v1. Mind take a look? `[~apitrou]` \u00a0"
+        },
+        {
+            "created_at": "2022-10-08T10:09:42.988Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17614458) by Antoine Pitrou (apitrou):*\nWell, the fact that Gandiva depends on Boost doesn't mean we want to depend on it for other components (many people probably don't enable Gandiva when building Arrow)."
+        },
+        {
+            "created_at": "2022-10-08T11:24:36.924Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17614467) by Xuwei Fu (mwish):*\nkudu/rocksdb/leveldb uses `crc32c` rather than standard `crc32`, maybe because `crc32c` is faster. ClickHouse even uses other checksum functions.\r\n\r\nMySQL uses zlib's crc32 implementions ( <https://github.com/mysql/mysql-server/blob/8.0/storage/innobase/ut/crc32.cc> ), introducing it might need some code updates about arrow's cpuinfo.\r\n\r\nGanvida already includes `boost/crc32`, using it is quiet convinient.\r\n\r\nArrow includes `crc32c` in google, which is pasted from leveldb's crc32. But it's crc32c, which breaks the parquet standard.\r\n\r\nI'm not familiar with other crc32 implementions, maybe there are some faster implementions."
+        },
+        {
+            "created_at": "2022-10-08T23:58:13.327Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17614545) by Kouhei Sutou (kou):*\nIt seems that there are only a few candidates...\r\nhttps://github.com/search?q=crc32+simd\r\nhttps://github.com/ttsuki/arkana may be usable...?\r\n\r\nHow about using zlib's `crc32()` as the first version?\r\nWe can replace it with optimized version in follow-up tasks."
+        },
+        {
+            "created_at": "2022-10-09T04:40:52.134Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17614587) by Xuwei Fu (mwish):*\nIt's ok, I'll try to use zlib. Should I extract the zlib's `crc32` like mysql, or keeping `ARROW_WITH_ZLIB ON` when in arrow and parquet? `[~kou]` `[~apitrou]` \u00a0"
+        },
+        {
+            "created_at": "2022-10-09T22:06:27.710Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17614820) by Kouhei Sutou (kou):*\nCould you add `PARQUET_REQUIRE_CRC32_CHECK` or something like `PARQUERT_REQUIRE_ENCRYPTION`? (See also `cpp/cmake_modules/DefineOptions.cmake` and `cpp/cmake_modules/THirdpartyToolchain.cmake`.) If `PARQUET_REQUIRE_CRC32_CHECK` is enabled, we find zlib and enable this feature.\r\n\r\nWe don't want to bundle zlib's `crc32()` implementation. We use it as just a fallback implementation."
+        },
+        {
+            "created_at": "2022-10-10T03:20:29.594Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17614853) by Xuwei Fu (mwish):*\nIt's ok. I would using another patch to enable `PARQUET_REQUIRE_CRC32_CHECK`, and [#14351](https://github.com/apache/arrow/pull/14351) would be done after that patch is merged"
+        },
+        {
+            "created_at": "2022-10-10T09:03:44.477Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17614981) by Antoine Pitrou (apitrou):*\n> If PARQUET_REQUIRE_CRC32_CHECK is enabled, we find zlib and enable this feature.\r\n\r\nIsn't this overkill? We can vendor a crc32 implementation and always enable this feature. No need for zlib or an optional flag."
+        },
+        {
+            "created_at": "2022-10-10T09:06:17.801Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17614983) by Antoine Pitrou (apitrou):*\nOr we can have Parquet always require zlib."
+        },
+        {
+            "created_at": "2022-10-10T09:16:55.629Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17614990) by Antoine Pitrou (apitrou):*\nAlso, if you're interested in performance, some numbers were published here:\r\nhttps://fastmail.blog/advanced/the-search-for-a-faster-crc32/"
+        },
+        {
+            "created_at": "2022-10-10T11:17:54.041Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17615030) by Xuwei Fu (mwish):*\nI think parquet should always enable `PARQUET_REQUIRE_CRC32_CHECK`, vendoring a crc32 implemention is ok. Because crc32 is a part of standard, and just like encrptor, it should always enabled in cmake. And during using parquet, we can disable it if we want read/write to be faster"
+        },
+        {
+            "created_at": "2022-10-10T14:48:13.423Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17615144) by Gang Wu (wgtmac):*\nVote +1 for vendoring a crc32 implementation.\r\n\r\nOr we can do something similar to the logger implementation which uses CerrLog by default and uses a CMake option to plugin glog. We can port a simple and default crc32 implementation, and use that from zlib if ARROW_WITH_ZLIB is ON if the performance is better."
+        },
+        {
+            "created_at": "2022-10-10T14:52:51.761Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17615146) by Antoine Pitrou (apitrou):*\nLet's keep it simple and just vendor a single \"fast\" implementation, such as the \"slice-by-16\" approach from Cyrus: https://github.com/robn/cyrus-imapd/blob/master/lib/crc32.c"
+        },
+        {
+            "created_at": "2022-10-11T00:46:19.579Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17615403) by Kouhei Sutou (kou):*\nI'm OK with the vendoring approach if we can find a fast simple CRC32 implementation.\r\n\r\n> https://github.com/robn/cyrus-imapd/blob/master/lib/crc32.c\r\n\r\nIf we use Cyrus's implementation, we should use https://github.com/cyrusimap/cyrus-imapd/blob/master/lib/crc32.c not forked one.\r\n\r\nIf we can't find a fast simple CRC32 implementation, I prefer to use (not vendor) the zlib's implementation for maintainability."
+        },
+        {
+            "created_at": "2022-10-22T08:56:19.126Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17904?focusedCommentId=17622589) by Xuwei Fu (mwish):*\n`[~kou]` `[~apitrou]` crc32 from `cyrus-imapd` is introduced in [https://github.com/apache/arrow/pull/14351](https://github.com/apache/arrow/pull/14351,)\r\nMind take a look?"
+        }
+    ]
+}

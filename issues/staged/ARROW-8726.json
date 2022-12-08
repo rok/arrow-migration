@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[C++][Dataset] Mis-specified DirectoryPartitioning incorrectly uses the file name as value",
+        "body": "***Note**: This issue was originally created as [ARROW-8726](https://issues.apache.org/jira/browse/ARROW-8726). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCalling filter + collect on a dataset with a mis-specified partitioning causes a segfault. Though this is clearly input error, it would be nice if there was some guidance that something was wrong with the partitioning.\r\n\r\n```r\n\r\nlibrary(arrow)\r\nlibrary(dplyr)\r\n\r\ndir.create(\"multi_mtcars/one\", recursive = TRUE)\r\ndir.create(\"multi_mtcars/two\", recursive = TRUE)\r\nwrite_parquet(mtcars, \"multi_mtcars/one/mtcars.parquet\")\r\nwrite_parquet(mtcars, \"multi_mtcars/two/mtcars.parquet\")\r\n\r\nds <- open_dataset(\"multi_mtcars\", partitioning = c(\"level\", \"nothing\"))\r\n\r\n# the following will segfault\r\nds %>%\r\n  filter(cyl > 8) %>% \r\n  collect()\r\n```",
+        "created_at": "2020-05-07T00:56:51.000Z",
+        "updated_at": "2020-06-10T13:05:30.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-06-10T13:05:21.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-05-07T12:24:54.184Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8726?focusedCommentId=17101617) by Francois Saint-Jacques (fsaintjacques):*\nThank your for reporting, this should not segfault."
+        },
+        {
+            "created_at": "2020-05-07T15:40:49.730Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8726?focusedCommentId=17101796) by Joris Van den Bossche (jorisvandenbossche):*\n`[~jonkeane]` are you using released 0.17, or the development version?\r\n\r\nI was trying with a python reproducer. And on master, it is not failing with a segfault (of course I am doing not exactly the same, but there also have been quite some changes in the Dataset class since 0.17 already), but still seeing a \"peculiar\" (wrong) behaviour:\r\n\r\n```Java\n\r\nimport pathlib\r\nimport pyarrow.parquet as pq\r\nimport pyarrow.dataset as ds\r\n\r\npath = pathlib.Path(\"temp_dataset\")   \r\n(path / \"one\").mkdir()  \r\n(path / \"two\").mkdir()\r\n\r\ntable = pa.table({'col': [1, 2, 3, 4]})                                                                                                                                                                    \r\npq.write_table(table, str(path / \"one\" / \"data.parquet\"))                                                                                                                                                  \r\npq.write_table(table, str(path / \"two\" / \"data.parquet\"))                                                                                                                                                  \r\n```\r\n\r\ngives:\r\n\r\n```Java\n\r\nIn [14]: ds.dataset(path, partitioning=[\"level\", \"nothing\"]).schema                                                                                                                                                \r\nOut[14]: \r\ncol: int64\r\nlevel: string\r\nnothing: string\r\n\r\nIn [18]: ds.dataset(path, partitioning=[\"level\", \"nothing\"]).to_table().to_pandas()                                                                                                                                \r\nOut[18]: \r\n   col level       nothing\r\n0    1   one  data.parquet\r\n1    2   one  data.parquet\r\n2    3   one  data.parquet\r\n3    4   one  data.parquet\r\n4    1   two  data.parquet\r\n5    2   two  data.parquet\r\n6    3   two  data.parquet\r\n7    4   two  data.parquet\r\n```\r\n\r\nso where for the second partition field, the file name is used ...\r\n\r\nAnd with a third field, I see:\r\n\r\n```Java\n\r\nIn [20]: ds.dataset(path, partitioning=[\"level\", \"nothing\", \"else\"]).to_table().to_pandas()                                                                                                                        \r\n...\r\n~/scipy/repos/arrow/python/pyarrow/_dataset.pyx in pyarrow._dataset.DatasetFactory.finish()\r\n\r\nArrowInvalid: No segments were available for field 'else'; couldn't infer type\r\n```"
+        },
+        {
+            "created_at": "2020-05-07T17:00:10.927Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8726?focusedCommentId=17101883) by Jonathan Keane (jonkeane):*\nThis was with the release version. I'm working on getting the development version installed to try it there."
+        },
+        {
+            "created_at": "2020-05-07T21:08:33.813Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8726?focusedCommentId=17102032) by Jonathan Keane (jonkeane):*\nOk, I've got the latest nightly installed (20200506) and I'm no longer getting the segfault, though when I do filter/collect I get the following:\r\n\r\n```r\n\r\n> ds <- open_dataset(\"multi_mtcars\", partitioning = c(\"level\", \"nothing\"))\r\n> \r\n> ds %>%\r\n+   filter(cyl > 8) %>% \r\n+   collect()\r\nError in Table__to_dataframe(x, use_threads = option_use_threads()) : \r\n  Must have at least one array to create a converter\r\n```\r\n\r\nI get a similar output (with the filename in the mis-specified nothing column) when just collecting without filter:\r\n```r\n\r\n> collect(ds)\r\n# A tibble: 64 x 13\r\n     mpg   cyl  disp    hp  drat    wt  qsec    vs    am  gear  carb level nothing       \r\n   <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <chr> <chr>         \r\n 1  21       6  160    110  3.9   2.62  16.5     0     1     4     4 one   mtcars.parquet\r\n 2  21       6  160    110  3.9   2.88  17.0     0     1     4     4 one   mtcars.parquet\r\n 3  22.8     4  108     93  3.85  2.32  18.6     1     1     4     1 one   mtcars.parquet\r\n 4  21.4     6  258    110  3.08  3.22  19.4     1     0     3     1 one   mtcars.parquet\r\n 5  18.7     8  360    175  3.15  3.44  17.0     0     0     3     2 one   mtcars.parquet\r\n 6  18.1     6  225    105  2.76  3.46  20.2     1     0     3     1 one   mtcars.parquet\r\n 7  14.3     8  360    245  3.21  3.57  15.8     0     0     3     4 one   mtcars.parquet\r\n 8  24.4     4  147.    62  3.69  3.19  20       1     0     4     2 one   mtcars.parquet\r\n 9  22.8     4  141.    95  3.92  3.15  22.9     1     0     4     2 one   mtcars.parquet\r\n10  19.2     6  168.   123  3.92  3.44  18.3     1     0     4     4 one   mtcars.parquet\r\n# \u2026 with 54 more rows\r\n```"
+        },
+        {
+            "created_at": "2020-05-12T08:16:03.564Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8726?focusedCommentId=17105211) by Joris Van den Bossche (jorisvandenbossche):*\nOK, so that's the same problem than what I saw. Updating the issue title to reflect this."
+        },
+        {
+            "created_at": "2020-05-14T20:50:53.769Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8726?focusedCommentId=17107669) by Neal Richardson (npr):*\n`[~jonkeane]` the error is because you've filtered to 0 rows (`all(mtcars$cyl %in% c(4, 6, 8))`); it's not cool, but it's not related to this partitioning."
+        },
+        {
+            "created_at": "2020-06-03T13:51:18.610Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8726?focusedCommentId=17124974) by Francois Saint-Jacques (fsaintjacques):*\nThe empty table conversion will be tracked in ARROW-9028."
+        },
+        {
+            "created_at": "2020-06-03T14:05:30.051Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8726?focusedCommentId=17124984) by Francois Saint-Jacques (fsaintjacques):*\n`[~jorisvandenbossche]`\r\n\r\nWhat would you like to see solved:\r\n\r\n1. The fact that the file name is used as a partition. Should we only consider the directory of the base path? This ambiguity goes away with HivePartitioning since it won't be parsed.\r\n2. The fact that passing an \"extra\" key without value generates an error. The other option would be to default to NullType."
+        },
+        {
+            "created_at": "2020-06-03T14:12:49.095Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8726?focusedCommentId=17124987) by Joris Van den Bossche (jorisvandenbossche):*\nI think at least that the file name itself should never be considered as a possible partition field when using DirectoryPartitioning?\r\n\r\nBut whether it should raise an error or fill with null, not fully sure. I would personally think that raising an error is more useful, as typically this will point to a user mistake."
+        },
+        {
+            "created_at": "2020-06-03T14:27:40.705Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8726?focusedCommentId=17124996) by Francois Saint-Jacques (fsaintjacques):*\nI forgot that it was aptly named `DirectoryPartitioning`, I'll check that ;)"
+        },
+        {
+            "created_at": "2020-06-10T13:05:21.952Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8726?focusedCommentId=17130655) by Francois Saint-Jacques (fsaintjacques):*\nIssue resolved by pull request 7377\n<https://github.com/apache/arrow/pull/7377>"
+        }
+    ]
+}

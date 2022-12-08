@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[Python] Needs a handling for missing columns while reading parquet file ",
+        "body": "***Note**: This issue was originally created as [ARROW-11473](https://issues.apache.org/jira/browse/ARROW-11473). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently there is no way to handle the error raised by missing columns in parquet file.\r\n\r\nIf a column passed is missing, it just raises ArrowInvalid error\r\n```java\n\r\ncolumns=[item1, item2, item3] #item3 is not there in parquet file\r\n\r\npd.read_parquet(file_name, columns = columns)\r\n\r\n> ArrowInvalid: Field named 'item3' not found or not unique in the schema.\n```\r\nThere is no way to handle this. The ArrowInvalid also does not carry any information that can give out the field name so that in next try this filed can be ignored.\r\n\r\nExample :\r\n```java\n\r\nfrom pyarrow.lib import ArrowInvalid \r\n\r\nread_columns = ['a','b','X'] \r\ndf = pd.DataFrame({'a': [1, 2, 3], 'b': ['foo', 'bar', 'jar']}) \r\n\r\nfile_name = '/tmp/my_df.pq' df.to_parquet(file_name) \r\n\r\ntry: \r\n    df = pd.read_parquet(file_name, columns = read_columns) \r\nexcept ArrowInvalid as e: \r\n    inval = e \r\n\r\nprint(inval.args)\r\n>(\"Field named 'X' not found or not unique in the schema.\",)\n```\r\n\u00a0\r\n\r\nYou could parse the message above to get 'X', but that is a bit of hectic solution. It would be great if the error message contained the field name. So, you could do for example :\r\n\r\n\u00a0\r\n```java\n\r\ninval.field \r\n> 'X'\n```\r\nOr a better feature would be to have a error handling in read_table of pyarrow, where something like\u00a0\\`error='ignore'`could be passed. This would then ignore the missing column by checking the schema.\r\n\r\nExample, in case above :\r\n```java\n\r\ndf = pd.read_parquet(file_name, columns = read_columns, error = 'ignore')\n```\r\nWould ignore the missing column 'X'",
+        "created_at": "2021-02-02T16:38:32.000Z",
+        "updated_at": "2021-12-17T17:16:15.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-12-16T13:52:12.420Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11473?focusedCommentId=17460722) by Alenka Frim (alenka):*\nHi `[~jasonkhadka]`, sorry for such a late reply.\r\n\r\nWhat you could do is use the column names from the metadata of the parquet file to get a subset of columns you want to read. Using you example I did it like so:\r\n```python\n\r\nimport pyarrow.parquet as pq\r\nimport pandas as pd\r\n\r\nread_columns = ['a','X']\u00a0\r\ndf = pd.DataFrame({'a': [1, 2, 3], 'b': ['foo', 'bar', 'jar']})\r\n\r\nfile_name = '/tmp/my_df.pq'\r\n\r\ndf.to_parquet(file_name)\r\nm = pq.read_metadata(file_name) # reads only the metadata\r\n\r\n# Get the column names from the schema\r\ndf_columns = m.schema.names\r\n# Do an intersection with the names you want to read\r\ncolumns = list(set(read_columns) & set(df_columns))\r\n\r\npd.read_parquet(file_name, columns = columns)\r\n```\r\n\u00a0\r\nThe output:\r\n```python\n\r\n   a\r\n0  1\r\n1  2\r\n2  3\r\n```"
+        },
+        {
+            "created_at": "2021-12-16T14:17:22.776Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11473?focusedCommentId=17460767) by jason khadka (jasonkhadka):*\n`[~alenkaf]` \u00a0\r\nThanks for the solution. Yeah, definitely better than what I came up with. But still would be better to have an easier way to ignore the missing column, instead of doing all the gymnastic to go around the error:\r\n\r\n```java\ndf = pd.read_parquet(file_name, columns = read_columns, error = 'ignore')\n```"
+        },
+        {
+            "created_at": "2021-12-17T08:06:01.723Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11473?focusedCommentId=17461262) by Alenka Frim (alenka):*\nI am not sure if that would be something to add into the library itself. Validating a schema and returning an error if the field name can not be referenced is a way I would expect it to work. Also it is possible to deal with the error in a straightforward way, I would say. But I can be wrong."
+        },
+        {
+            "created_at": "2021-12-17T17:16:15.139Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11473?focusedCommentId=17461572) by Will Jones (willjones127):*\nHi Jason,\r\n\r\nIf you know the schema ahead of time (it seems like you are expecting a certain column), the datasets module might be useful to you. Any missing columns can be populated with null.\u00a0\r\n\r\n\u00a0\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nimport pyarrow.dataset as ds\r\n\r\nread_columns = ['a','b','X'] \r\ndf = pa.table({'a': pa.array([1, 2, 3]), 'b': pa.array(['foo', 'bar', 'jar'])})\r\n\r\nfile_name = '/tmp/my_df.pq'\r\npq.write_table(df, file_name)\r\n\r\nmy_schema = pa.schema([\r\n    pa.field(\"a\", pa.int64()),\r\n    pa.field(\"b\", pa.utf8()),\r\n    pa.field(\"X\", pa.utf8())\r\n])\r\n\r\ndataset = ds.dataset(file_name, format=\"parquet\", schema=my_schema)\r\ndf = dataset.to_table()\r\nprint(df)\r\n# pyarrow.Table\r\n# a: int64\r\n# b: string\r\n# X: string\r\n# ----\r\n# a: [[1,2,3]]\r\n# b: [[\"foo\",\"bar\",\"jar\"]]\r\n# X: [[null,null,null]] \n```"
+        }
+    ]
+}

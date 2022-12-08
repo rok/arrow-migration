@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] Segfault when reading empty table with category as pandas dataframe",
+        "body": "***Note**: This issue was originally created as [ARROW-5952](https://issues.apache.org/jira/browse/ARROW-5952). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI have two short sample programs which demonstrate the issue:\r\n```java\n\r\nimport pyarrow as pa\r\nimport pandas as pd\r\nempty = pd.DataFrame({'foo':[]},dtype='category')\r\ntable = pa.Table.from_pandas(empty)\r\noutfile = pa.output_stream('bar')\r\nwriter = pa.RecordBatchFileWriter(outfile,table.schema)\r\nwriter.write(table)\r\nwriter.close()\r\n```\r\n```java\n\r\nimport pyarrow as pa\r\npa.ipc.open_file('bar').read_pandas()\r\nSegmentation fault\r\n```\r\n\r\nMy apologies if this was already reported elsewhere, I searched but could not find an issue which seemed to refer to the same behavior.",
+        "created_at": "2019-07-15T17:09:20.000Z",
+        "updated_at": "2019-08-16T02:47:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-16T02:47:44.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-07-30T16:53:30.369Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5952?focusedCommentId=16896323) by Daniel Nugent (nugend):*\nJust wanted to note that it is still present in 0.14.1"
+        },
+        {
+            "created_at": "2019-07-31T09:28:31.050Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5952?focusedCommentId=16896980) by Joris Van den Bossche (jorisvandenbossche):*\n`[~nugend]` Thanks for the report!\r\n\r\nLooking at your example, I noticed that the original table and the table read from the file are different in the following way (building on the code from above):\r\n\r\n```Java\n\r\nnew_table = pa.ipc.open_file('bar').read_all()\r\noriginal_column = table.column(0)\r\nnew_column = new_table.column(0)\r\n```\r\n\r\n```Java\n\r\n>>> original_column \r\n<pyarrow.lib.ChunkedArray object at 0x7f06cc5d1e40>\r\n[\r\n\r\n  -- dictionary:\r\n0 nulls\r\n  -- indices:\r\n    []\r\n]\r\n>>> new_column \r\n<pyarrow.lib.ChunkedArray object at 0x7f06c7029540>\r\n[\r\n\r\n]\r\n>>> len(original_column)\r\n0\r\n>>> len(new_column)\r\n0\r\n>>> len(original_column.chunks)\r\n1\r\n>>> len(new_column.chunks)\r\n0\r\n```\r\n\r\nSo both columns have the same type and a length of 0, but the original column has 1 chunk of length 0, while the table read from file trough IPC has a column consisting of a ChunkedArray with 0 chunks.\r\n\r\nSo in that way, we can reproduce the segfault with a small snippet as follows:\r\n\r\n```Java\n\r\n>>> import pyarrow as pa\r\n>>> array_0_chunks = pa.chunked_array([], pa.dictionary(pa.int8(), pa.null()))\r\n>>> table = pa.table({'a': array_0_chunks}) \r\n>>> table.to_pandas()                                                                                                                                                                                          \r\nSegmentation fault (core dumped)\r\n```\r\n\r\nI am not fully sure if the IPC reading is supposed to create an array with 0 chunks, but I suppose that such a ChunkedArray with 0 chunks is a valid object (for simple types as int64 it also does not segfault). \r\nBut the segfault on the pandas conversion is for sure a bug (it seems that other arrow->python conversions such as `to_pydict` seems to work, so it might be specific to the pandas code)"
+        },
+        {
+            "created_at": "2019-08-13T21:34:44.732Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5952?focusedCommentId=16906634) by Daniel Nugent (nugend):*\nFWIW, I tried to figure out where this was getting handled incorrectly, but I got lost somewhere in the C++ layer. Is there any work going forward on resolving the issue? It's a bit annoying to have to check if the tables are empty before trying to load them."
+        },
+        {
+            "created_at": "2019-08-13T21:59:10.451Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5952?focusedCommentId=16906655) by Wes McKinney (wesm):*\nI marked for 0.15.0. This probably isn't too difficult to fix, but I haven't looked at it yet"
+        },
+        {
+            "created_at": "2019-08-14T11:15:43.237Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5952?focusedCommentId=16907180) by Joris Van den Bossche (jorisvandenbossche):*\nI have been looking into it a bit. The main cause is that for chunked DictionaryArray, we need to access the first chunk to get the \"dictionary values\" (now that those live on the array object instead of on the type). So the code for converting a chunked dictionary array to pandas is not robust against 0 chunks."
+        },
+        {
+            "created_at": "2019-08-16T02:47:44.987Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5952?focusedCommentId=16908656) by Wes McKinney (wesm):*\nIssue resolved by pull request 5081\n<https://github.com/apache/arrow/pull/5081>"
+        }
+    ]
+}

@@ -1,0 +1,36 @@
+{
+    "issue": {
+        "title": "[C++][Dataset] Writing partitions with timestamp type give mis-formatted (integers) directory names",
+        "body": "***Note**: This issue was originally created as [ARROW-11378](https://issues.apache.org/jira/browse/ARROW-11378). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n```Java\n\r\nIn [1]: df = pd.DataFrame({\"dates\": list(pd.date_range(\"2012-01-01\", periods=2, freq=\"D\")) * 5, \"col\": range(10)})\r\n\r\nIn [2]: table = pa.table(df)\r\n\r\nIn [8]: part = ds.partitioning(table.select([\"dates\"]).schema, flavor=\"hive\")\r\n\r\nIn [9]: ds.write_dataset(table, \"test_partition_timestamp\", format=\"parquet\", partitioning=part)\r\n\r\nIn [10]: !ls test_partition_timestamp/\r\n'dates=1325376000000000000'  'dates=1325462400000000000'\r\n```\r\n\r\nSame happens for non-ns timestamp types.\r\n\r\n(didn't directly find an existing issue about it)",
+        "created_at": "2021-01-25T16:11:41.000Z",
+        "updated_at": "2022-10-13T17:51:28.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-02-08T17:41:40.970Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11378?focusedCommentId=17281254) by Joris Van den Bossche (jorisvandenbossche):*\ncc `[~westonpace]`"
+        },
+        {
+            "created_at": "2021-02-16T20:17:21.513Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11378?focusedCommentId=17285462) by Weston Pace (westonpace):*\nWhat would the correct behavior be here?\u00a0 When I search for other tools to see how they handle this scenario it appears that timestamp columns are not allowed to be partition columns [1].\u00a0 This would force the user to convert the column to a more reasonable date32.\r\n\r\nI agree with the reasoning too, if these are truly timestamps (and not just dates encoded as timestamps) then they won't make a suitable partition column (too many values, no chance of any rows sharing the same value).\r\n\r\nIt seems are options are to either forbid this to save the user from themselves (disallow date64 and timestamp columns as partition columns) or allow it and use integers as the values.\r\n\r\nI suppose we could use an ISO-8601 string as the value but that would be somewhat verbose.\r\n\r\nI'll check date32 and see how we are handling that column type.\r\n\r\n\u00a0[1] <https://community.cloudera.com/t5/Support-Questions/Hive-partitions-based-on-date-from-timestamp/td-p/61423>\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-05-04T13:15:48.866Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11378?focusedCommentId=17338982) by David Li (lidavidm):*\nTangentially related, but in ARROW-12644 it seems Spark 1) allows partitioning on a timestamp (though it separates it into day and time parts?) and 2) encodes it as a HH:MM:SS string with URL-encoding, which presents some additional fun for us."
+        },
+        {
+            "created_at": "2021-06-30T21:24:33.660Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11378?focusedCommentId=17372203) by Weston Pace (westonpace):*\nSo it seems that : is indeed an invalid character in Windows filesystems (NTFS, FAT).\u00a0 Rather than introduce a bunch of %3A my preference would be to use strings like 20210630T204219Z which are valid ISO-8601 strings.\r\n\r\nI wonder if I need to introduce an option for Spark compatibility.\r\n\r\nAlso, just checking my logic:\r\n \\* If the timestamp column is timezone=None then assume it is a local date time and just convert to UTC ISO-8601\r\n \\* If the timestamp column is timezone=UTC then same as above.\r\n \\* If the timestamp column is timezone=Other then it is a bit trickier.\u00a0 My preference would be to just return invalid in this case.\u00a0 Otherwise I don't think we can retain the timezone string through a roundtrip without breaking ISO-8601 compatibility.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-10-13T17:51:28.472Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11378?focusedCommentId=17617236) by Apache Arrow JIRA Bot (arrowjira):*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned per [project policy](https://arrow.apache.org/docs/dev/developers/bug_reports.html#issue-assignment). Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

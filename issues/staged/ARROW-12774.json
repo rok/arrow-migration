@@ -1,0 +1,42 @@
+{
+    "issue": {
+        "title": "[C++][Compute] replace_substring_regex() creates invalid arrays => crash",
+        "body": "***Note**: This issue was originally created as [ARROW-12774](https://issues.apache.org/jira/browse/ARROW-12774). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nmin\r\n```python\n\r\narr = pa.array(['A'] * 16)\r\narr2 = pa.compute.replace_substring_regex(arr, pattern=\"X\", replacement=\"Y\")\r\narr2.validate(full=True)\r\n```\r\nExpected results: a valid array\r\n Actual results: `pyarrow.lib.ArrowInvalid: Offset invariant failure: non-monotonic offset at slot 64: 0 < 63`\r\n\r\nSo if you run `arr.diff(arr2)`, you'll get something like:\r\n```java\n\r\nterminate called after throwing an instance of 'std::length_error'\r\n  what():  basic_string::_S_create\r\nAborted (core dumped)\r\n```\r\nThis seems to happen if and only if the input array length is a multiple of 16. That leads to an ugly workaround:\r\n```python\n\r\ndef replace_substring_regex_workaround_12774(\r\n    array: pa.Array,\r\n    *,\r\n    pattern: str,\r\n    replacement: str\r\n) -> pa.Array:\r\n    if len(array) > 0 and len(array) % 16 == 0:\r\n        chunked_array = pa.chunked_array([array.slice(0, 1), array.slice(1)], type=array.type)\r\n        return pa.compute.replace_substring_regex(\r\n            chunked_array,\r\n            pattern=pattern,\r\n            replacement=replacement\r\n        ).combine_chunks()\r\n    else:\r\n        return pa.compute.replace_substring_regex(\r\n            array,\r\n            pattern=pattern,\r\n            replacement=replacement\r\n        )\r\n```",
+        "created_at": "2021-05-13T13:07:26.000Z",
+        "updated_at": "2021-05-27T08:58:31.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-05-15T06:30:16.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-05-13T19:03:58.552Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12774?focusedCommentId=17344079) by Antoine Pitrou (apitrou):*\n`[~niranda]` Perhaps you want to take a quick look at this."
+        },
+        {
+            "created_at": "2021-05-13T19:30:08.187Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12774?focusedCommentId=17344089) by Niranda Perera (niranda):*\n`[~apitrou]` sure"
+        },
+        {
+            "created_at": "2021-05-13T19:40:46.819Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12774?focusedCommentId=17344096) by Eduardo Ponce (edponce):*\nThis error also occurs in `replace_substring` but not in other string transforms, including those that perform regex/match/split operations. It seems there is an offset miscalculation in the **replace** pipeline."
+        },
+        {
+            "created_at": "2021-05-13T19:56:11.126Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12774?focusedCommentId=17344106) by Niranda Perera (niranda):*\n`[~apitrou]` I tried the following test cases in C++\r\n```java\n\r\n// ARROW-12774\r\n  ReplaceSubstringOptions options_regex3{\"X\", \"Y\"};\r\n  this->CheckUnary(\"replace_substring_regex\", R\"([\"AAAAAAAAAAAAAAAA\"])\", this->type(),\r\n                   R\"([\"AAAAAAAAAAAAAAAA\"])\", &options_regex3);\r\n  this->CheckUnary(\"replace_substring_regex\", R\"([\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\"])\", this->type(),\r\n                   R\"([\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\",\"A\"])\", &options_regex3);\r\n```\r\nThe 2nd case fails with the following error.\r\n```java\n\r\n../src/arrow/compute/kernels/test_util.cc:52: Failure\r\nFailed\r\n'actual->ValidateFull()' failed with Invalid: Negative offsets in binary array\r\n../src/arrow/compute/kernels/test_util.cc:90: Failure\r\nFailed\r\nreplace_substring_regex(\u0010) = \u0010 != A\r\n../src/arrow/compute/kernels/test_util.cc:90: Failure\r\nFailed\r\nreplace_substring_regex(\\0) = \\0 != A\r\n../src/arrow/compute/kernels/test_util.cc:90: Failure\r\nFailed\r\nreplace_substring_regex(\\0) = \\0 != A\r\n../src/arrow/compute/kernels/test_util.cc:90: Failure\r\nFailed\r\nreplace_substring_regex(\\0) = \\0 != A\r\n../src/arrow/testing/gtest_util.cc:132: Failure\r\nFailed@@ -0, +0 @@\r\n-\"A\"\r\n-\"A\"\r\n-\"A\"\r\n-\"A\"\r\n+\"\u0010\"\r\n+\"\\0\"\r\n+\"\\0\"\r\n+\"\\0\"\r\nExpected:\r\n  [\r\n    \"A\",\r\n    \"A\",\r\n    \"A\",\r\n    \"A\",\r\n    \"A\"\r\n  ]\r\nActual:\r\n  [\r\n    \"\u0010\",\r\n    \"\\0\",\r\n    \"\\0\",\r\n    \"\\0\",\r\n    \"A\"\r\n  ]\r\n../src/arrow/testing/gtest_util.cc:221: Failure\r\nFailed\r\nGot: \r\n  [\r\n    [\r\n      \"\u0010\",\r\n      \"\\0\",\r\n      \"\\0\",\r\n      \"\\0\",\r\n      \"A\"\r\n    ],\r\n    [\r\n      \"A\",\r\n      \"A\",\r\n      \"A\",\r\n      \"A\",\r\n      \"A\",\r\n      \"A\",\r\n      \"A\",\r\n      \"A\",\r\n      \"A\",\r\n      \"A\",\r\n      \"A\"\r\n    ]\r\n  ]\r\nExpected: \r\n  [\r\n    [\r\n      \"A\",\r\n      \"A\",\r\n      \"A\",\r\n      \"A\",\r\n      \"A\"\r\n    ],\r\n    [\r\n      \"A\",\r\n      \"A\",\r\n      \"A\",\r\n      \"A\",\r\n      \"A\",\r\n      \"A\",\r\n      \"A\",\r\n      \"A\",\r\n      \"A\",\r\n      \"A\",\r\n      \"A\"\r\n    ]\r\n  ]\r\n```\r\nSo, I believe the bug is confirmed. Let me see if I could figure out the reason behind this."
+        },
+        {
+            "created_at": "2021-05-14T01:14:36.984Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12774?focusedCommentId=17344210) by Niranda Perera (niranda):*\nI think I found out the issue. The offset builder is reserved here [1]. So, when there are 16 string elements, only 16 slots are reserved. But it is \"UnsafeAppend\"ed for 17 times. \r\n\r\n\r\nWhen buffers are resized, they are increased in multiples of 64b and 64bytes = 16 ints. So, that seems to be the reason why it is failing on multiples of 16. \r\n\r\n`[~apitrou]` could you please check this PR\u00a0[2] \r\n\r\n[1] <https://github.com/apache/arrow/blob/master/cpp/src/arrow/compute/kernels/scalar_string.cc#L1335>\r\n\r\n\r\n[2] <https://github.com/apache/arrow/pull/10320>"
+        },
+        {
+            "created_at": "2021-05-15T06:30:16.947Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12774?focusedCommentId=17344974) by yibocai#1 (yibocai#1):*\nIssue resolved by pull request 10320\n<https://github.com/apache/arrow/pull/10320>"
+        }
+    ]
+}

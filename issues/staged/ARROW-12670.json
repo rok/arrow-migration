@@ -1,0 +1,26 @@
+{
+    "issue": {
+        "title": "[C++] extract_regex gives bizarre behavior after nulls or non-matches",
+        "body": "***Note**: This issue was originally created as [ARROW-12670](https://issues.apache.org/jira/browse/ARROW-12670). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAfter a non-match, the **subsequent** string may match ... but its data is in the wrong array element.\r\n\r\n```Java\n\r\n>>> pa.compute.extract_regex(pa.array([\"a\", \"b\", \"c\", \"d\"]), pattern=\"(?P<x>[^b])\")\r\n<pyarrow.lib.StructArray object at 0x7f80de918ee0>\r\n-- is_valid:\r\n  [\r\n    true,\r\n    false,\r\n    true,\r\n    true\r\n  ]\r\n-- child 0 type: string\r\n  [\r\n    \"a\",\r\n    \"\",\r\n    \"\",\r\n    \"c\"\r\n  ]\r\n```\r\n\r\nSame if trying to match after `null`:\r\n\r\n```Java\n\r\n>>> pa.compute.extract_regex(pa.array([\"a\", None, \"c\", \"d\", \"e\"]), pattern=\"(?P<x>[^b])\")\r\n<pyarrow.lib.StructArray object at 0x7f80de918ee0>\r\n-- is_valid:\r\n  [\r\n    true,\r\n    false,\r\n    true,\r\n    true,\r\n    true\r\n  ]\r\n-- child 0 type: string\r\n  [\r\n    \"a\",\r\n    \"\",\r\n    \"\",\r\n    \"c\",\r\n    \"d\"\r\n  ]\r\n```\r\n\r\nWorkaround: 1) filter out non-matches; 2) extract only the matching strings; 3) interpolate nulls:\r\n\r\n```python\n\r\ndef _extract_regex_workaround_arrow_12670(\r\n    array: pa.StringArray, *, pattern: str\r\n) -> pa.StructArray:\r\n    ok = pa.compute.match_substring_regex(array, pattern=pattern)\r\n    good = array.filter(ok)\r\n    good_matches = pa.compute.extract_regex(good, pattern=pattern)\r\n\r\n# Build array that looks like [None, 1, None, 2, 3, 4, None, 5]\r\n# ... ok_nonnull: [False, True, False, True, True, True, False, True]\r\n# (not ok.fill_null(False).cast(pa.int8()) because of ARROW-12672 segfault)\r\n    ok_nonnull = pa.compute.and_kleene(ok.is_valid(), ok)\r\n# ... np_ok: [0, 1, 0, 1, 1, 1, 0, 1]\r\n    np_ok = ok_nonnull.cast(pa.int8()).to_numpy(zero_copy_only=False)\r\n# ... np_index: [0, 1, 1, 2, 3, 4, 4, 5]\r\n    np_index = np.cumsum(np_ok, dtype=np.int64) - 1\r\n# ...index_or_null: [None, 1, None, 3, 4, 5, None, 5]\r\n    valid = ok_nonnull.buffers()[1]\r\n    index_or_null = pa.Array.from_buffers(\r\n        pa.int64(), len(array), [valid, pa.py_buffer(np_index)]\r\n    )\r\n\r\n    return good_matches.take(index_or_null)\r\n```",
+        "created_at": "2021-05-06T17:39:20.000Z",
+        "updated_at": "2021-05-11T16:19:17.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-05-11T16:19:17.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-05-10T16:19:23.503Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12670?focusedCommentId=17341991) by Antoine Pitrou (apitrou):*\nThanks for the report!"
+        },
+        {
+            "created_at": "2021-05-11T16:19:17.655Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12670?focusedCommentId=17342711) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 10287\n<https://github.com/apache/arrow/pull/10287>"
+        }
+    ]
+}

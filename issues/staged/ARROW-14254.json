@@ -1,0 +1,88 @@
+{
+    "issue": {
+        "title": "[C++] Return a random sample of rows from a query",
+        "body": "***Note**: This issue was originally created as [ARROW-14254](https://issues.apache.org/jira/browse/ARROW-14254). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nPlease can we have a kernel that returns a random sample of rows? We've had a request to be able to do this in R: https://github.com/apache/arrow-cookbook/issues/83",
+        "created_at": "2021-10-07T14:00:53.000Z",
+        "updated_at": "2022-07-04T17:41:30.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-10-07T14:05:52.129Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14254?focusedCommentId=17425574) by Antoine Pitrou (apitrou):*\nThat's easily decomposed into two different kernels:\r\n- one kernel that generates K random integers between 0 and N (with or without duplicates)\n- the existing Take kernel to index the original array/batch... with random-generated indices"
+        },
+        {
+            "created_at": "2021-10-07T15:23:26.039Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14254?focusedCommentId=17425634) by Neal Richardson (npr):*\nPerhaps, and we do that in R now, but that runs up against various other issues around async query processing and non-deterministic order. There's probably a more optimal way cc `[~westonpace]` `[~aocsa]`"
+        },
+        {
+            "created_at": "2021-10-07T17:27:01.672Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14254?focusedCommentId=17425710) by Weston Pace (westonpace):*\n`[~npr]` Can you expand on the issues you are running into today?  I'm not sure I follow.  Also, there is no kernel that generates random integers (ARROW-12404 would be a prerequisite) so I assume you are generating the random #'s in R?"
+        },
+        {
+            "created_at": "2021-10-07T17:46:11.349Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14254?focusedCommentId=17425712) by Neal Richardson (npr):*\nMaybe it's better now than I remember? We're calling Scanner::TakeRows (https://github.com/apache/arrow/blob/master/cpp/src/arrow/dataset/scanner.cc#L1022) with an array of indices created in R. "
+        },
+        {
+            "created_at": "2021-10-07T17:47:15.970Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14254?focusedCommentId=17425713) by Neal Richardson (npr):*\nAmong the new challenges, now that we can evaluate more complex queries, is that we don't always know how many rows we have in order to know how many to sample."
+        },
+        {
+            "created_at": "2021-10-07T18:15:12.409Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14254?focusedCommentId=17425731) by Weston Pace (westonpace):*\nI haven't done much with TakeRows so it's possible there are issues there but I don't see any open JIRAs.\r\n\r\nScanner::CountRows should tell you the row count information (not for free but for roughly the same cost we would incur in C++).  I'm not sure we can reliably do a \"streaming\" sample.  I think it would always need to be two passes.  We could maybe do a streaming pseudo-sample.  For example, given a target selectivity of 10% we sample 10% from each batch that comes through.  But that isn't the same thing as a 10% sample."
+        },
+        {
+            "created_at": "2021-10-07T19:09:29.988Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14254?focusedCommentId=17425745) by Neal Richardson (npr):*\nI can't do Scanner with joins etc., can I?"
+        },
+        {
+            "created_at": "2021-10-07T19:53:43.010Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14254?focusedCommentId=17425767) by Weston Pace (westonpace):*\nNo.  In that case are you asking for a streaming pseudo-sample as I described before?  I suppose we could create a \"pipeline breaking sample\" which collects the entire table (spilling over as needed) to get the mid-query count, and then emits a sampled output."
+        },
+        {
+            "created_at": "2021-10-27T21:31:22.199Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14254?focusedCommentId=17435068) by Weston Pace (westonpace):*\n`[~npr]` Gentle ping.  I'm still not sure if this JIRA is asking for:\r\n\r\n \\* Generate a random sample of all rows in the dataset (e.g. if the dataset has 1 million rows and I sample 5 then those 5 could come from anywhere in the 1 million and the output will always have 5 rows)\r\n \\* Generate a random sample of each batch that flows through the excecution plan (e.g. if the dataset has 1 million rows and I scan in batches of 100k and take 5 rows from each batch I get 50 rows.  If I scan in a single 1 million row batch I get 5 rows)."
+        },
+        {
+            "created_at": "2021-10-28T17:46:55.623Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14254?focusedCommentId=17435591) by Neal Richardson (npr):*\nThe former: give me N random rows from the dataset. I (as a user) have no idea how you're making batch sizes internally and might not even know that batches are a thing."
+        },
+        {
+            "created_at": "2021-10-28T18:45:43.517Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14254?focusedCommentId=17435627) by Weston Pace (westonpace):*\nI think we'd need two passes then.  First, get the size of the dataset.  Second, some kind of \"streaming take\".  Alternatively, some googling suggests the following alternatives from SQL:\r\n\r\n1. Generate a random value for each row, sort by this column, then use top-k\r\n2. Grab a random percent of rows with something like \"SELECT \\* FROM table WHERE rand() < 0.1\"\r\n3. Some SQL servers have a [TABLESAMPLE](https://docs.microsoft.com/en-us/previous-versions/sql/sql-server-2008-r2/ms189108(v=sql.105)?redirectedfrom=MSDN) command but it looks like that just randomly selects batches (similar to #2) and then applies top-k to that result.  This means you tend to get clusters of values so I don't see what's better than #2.\r\n4. An alternative to 1 & 2, if you don't have rand() implemented, is to hash the index column and then AND it with some mask (this limits the percentages you can apply to 1/power-of-two, but you can then chop down to the requested size)."
+        },
+        {
+            "created_at": "2021-10-28T18:48:55.652Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14254?focusedCommentId=17435628) by Antoine Pitrou (apitrou):*\nApproach 1 sounds reasonable, though I don't understand why sorting is required. Just use a streaming top-k."
+        },
+        {
+            "created_at": "2021-10-28T19:44:28.148Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14254?focusedCommentId=17435644) by Neal Richardson (npr):*\n1 and 2 would satisfy the behavior that [dplyr::slice_sample() supports](https://dplyr.tidyverse.org/reference/slice.html). So if we had random number generating kernels, we could do them."
+        },
+        {
+            "created_at": "2021-10-28T21:21:34.245Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14254?focusedCommentId=17435663) by Weston Pace (westonpace):*\n> Approach 1 sounds reasonable, though I don't understand why sorting is required. Just use a streaming top-k.\r\n\r\nAh, good point.  I had forgotten that top-k implicitly sorted (I was thinking of it more as a head).\r\n\r\n> 1 and 2 would satisfy the behavior that dplyr::slice_sample() supports. So if we had random number generating kernels, we could do them.\r\n\r\nThis would not give the exact same behavior as dplyr::slice_sample.  For example:\r\n \\* slice_sample supports sampling with replacement, neither 1 or 2 would support that.  I think you would need something more like the approach Antoine originally suggested using take but you would need some kind of streaming take.\r\n \\* There would be no support for weight_by\r\n\r\nBoth percentage and exact count would be needed ahead of time.  Whether the user supplies a percentage or an exact count the frontend will need to do two passes.  First to get the count and then second to get the sample.  Getting the count should be a metadata-only scan for reasonable (non-csv) formats.\r\n\r\nI'll add issue links to the dependencies."
+        },
+        {
+            "created_at": "2021-10-28T21:25:11.561Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14254?focusedCommentId=17435664) by Weston Pace (westonpace):*\nIf the # of target rows is low we could also do something like a \"streaming take\" which scans more efficiently (skipping record batches entirely if they aren't included).  That might actually give better performance since a streaming top-k requires scanning the entire dataset."
+        },
+        {
+            "created_at": "2021-10-28T21:33:27.262Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14254?focusedCommentId=17435666) by Neal Richardson (npr):*\nI don't follow why you need 2 scans if you're using a RNG: it's either generate random and take top N, or generate uniform random (0, 1) and take rand < prop, like in your example 2. (The prop version may not give an exact percentage, it's only correct in expectation, but maybe that's good enough.)"
+        },
+        {
+            "created_at": "2021-10-28T21:41:49.780Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14254?focusedCommentId=17435669) by Weston Pace (westonpace):*\n> The prop version may not give an exact percentage\r\n\r\nThis is the only reason you would need two scans (assuming the user provided a percentage).\r\n\r\nIf the user provided an exact number then you are correct.  Top-k alone is fine."
+        },
+        {
+            "created_at": "2021-10-28T21:43:41.175Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14254?focusedCommentId=17435671) by Jonathan Keane (jonkeane):*\nFor what it's worth: when I've seen this kind of action in the wild people almost always want a random N rows and not a random %age. Very typically it's downsampling to something reasonable to do [ML\\|summary stats|exploratory analysis] with, and folks will take 100k or 10k or 1M or whatever they think is reasonable.\r\n\r\nThis is (probably) a separate issue, but one thing where taking some limited number of rows, if we take them always from the beginning and the data shows up in an order (even if the order is not always exactly the same, if it's similar enough to how it's stored, for example) the _randomness_ of the sample won't be good enough for what some people use it for. We might consider a fast (semi)random sample that does this, and then having a more truly random sample that has stronger randomness guarantees.\r\n\r\nThis is (almost definitely) a separate issue (or possibly would automagically work with this work + group_by), another common task here is random samples from some grouped set of rows e.g. \"I want to have a random sample of 100 rows from each day from 1 year ago to today, resulting in 365 000 rows\" "
+        }
+    ]
+}

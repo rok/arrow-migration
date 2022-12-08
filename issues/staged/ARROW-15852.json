@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[JS] Table getByteLength and indexOf don't work",
+        "body": "***Note**: This issue was originally created as [ARROW-15852](https://issues.apache.org/jira/browse/ARROW-15852). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe functions table.getByteLength() and table.indexOf() don't return the correct values.\r\n\r\nThey are bound dynamically to the Table class, in a way I don't fully understand, with the following code:\r\n\r\n<https://github.com/apache/arrow/blob/1b796ec3f9caeb5e86e3348ba940bef8d95915c5/js/src/table.ts#L378-L390>\r\n\r\nThe other functions like that, get(), set(), and isValid() all seem to work.\u00a0 However, getByteLength() and indexOf() return the placeholder/sentinel values of 0 and -1 respectively that are defined in the no-op code here: <https://github.com/apache/arrow/blob/1b796ec3f9caeb5e86e3348ba940bef8d95915c5/js/src/table.ts#L207-L221,> which I assume is to generate the right type definitions, and thus documentation.\r\n\r\nIt's fairly simple for a user to implement the right logic themselves (at least for getByteLength) and it's a quick patch to define the functions normally instead of on the prototype, e.g.:\r\n\r\n\u00a0\r\n```java\n\r\n\u00a0 \u00a0 /**\r\n\u00a0 \u00a0 \u00a0* Get the size in bytes of an element by index.\r\n\u00a0 \u00a0 \u00a0* @param index The index at which to get the byteLength.\r\n\u00a0 \u00a0 \u00a0*/\r\n\u00a0 \u00a0 // @ts-ignore\r\n\u00a0 \u00a0 public getByteLength(index: number): number { return this.data[index].byteLength; }\r\n\u00a0 \u00a0 /**\r\n\u00a0 \u00a0 \u00a0* Get the size in bytes of a table.\r\n\u00a0 \u00a0 \u00a0*/\r\n\u00a0 \u00a0 //@ts-ignore\r\n\u00a0 \u00a0 public getByteLength(): number {\u00a0\r\n\u00a0 \u00a0 \u00a0 \u00a0 return this.data.map((batch) => batch.byteLength).reduce((sum, newLength) => sum + newLength);\r\n\u00a0 \u00a0 } \n```\r\nI'd be happy to send this as a PR if that's an OK alternative to the way it's currently implemented. \r\n\r\nHere's a Github repo of a minimal reproduction of the issue in NodeJS:\r\n<https://github.com/alexkreidler/apache-arrow-js-small-bug>\r\n\u00a0\r\nAnd an observable notebook for in the browser (although I couldn't get ESM working): <https://observablehq.com/@08027ecfa2b2f7bb/arrow-7-canary>\r\n\u00a0\r\nThanks to all for your work on Arrow!\r\n\r\n\u00a0",
+        "created_at": "2022-03-04T18:58:10.000Z",
+        "updated_at": "2022-04-03T17:51:32.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: JavaScript",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-04-01T17:39:23.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-31T19:21:24.929Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15852?focusedCommentId=17515537) by Paul Taylor (paul.e.taylor):*\n`[~timhigins]` Thanks for the report. In running your code, I discovered an oversight we made in the v7.0 refactor.\r\n\r\nThat said, I think your `indexOf()` call is incorrect \u2013 `indexOf()` is the inverse of `get()` such that this should assert true: `table.indexOf(table.get(0)) === 0`\r\n\r\nIn your case (looking up the index of a row), you want to pass the entire row contents to the `table.indexOf()` call like this:\r\n```javascript\n\r\nconst { tableFromArrays } = require('apache-arrow');\r\n\r\nconst t = tableFromArrays({\r\n  a: [0, 1, 2],\r\n  b: [\"foo\", \"bar\", \"baz\"]\r\n});\r\n\r\nconsole.log(t.getByteLength(0));\r\nconsole.log(t.getByteLength(1));\r\n\r\nconsole.log(t.indexOf({a: 0, b: \"foo\"}));\r\nconsole.log(t.indexOf({a: 1, b: \"bar\"}));\r\nconsole.log(t.indexOf({a: 2, b: \"baz\"}));\r\n```"
+        },
+        {
+            "created_at": "2022-04-01T17:39:23.173Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15852?focusedCommentId=17516047) by Dominik Moritz (domoritz):*\nIssue resolved by pull request 12771\n<https://github.com/apache/arrow/pull/12771>"
+        }
+    ]
+}

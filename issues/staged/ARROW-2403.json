@@ -1,0 +1,30 @@
+{
+    "issue": {
+        "title": "[C++] arrow::CpuInfo::model_name_ destructed twice on exit",
+        "body": "***Note**: This issue was originally created as [ARROW-2403](https://issues.apache.org/jira/browse/ARROW-2403). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n```\n\r\nvalgrind --trace-children=yes --track-origins=yes --keep-stacktraces=alloc-and-free python -c 'import pyarrow'\r\n...\r\n==6132== Invalid free() / delete / delete[] / realloc() \r\n==6132== at 0x4C28040: operator delete(void*) (vg_replace_malloc.c:507)\r\n==6132== by 0xBEF47FA: std::basic_string<char, std::char_traits<char>, std::allocator<char> >::~basic_string() (basic_string.h:2943)\r\n==6132== by 0x5E24AA1: __run_exit_handlers (exit.c:78) \r\n==6132== by 0x5E24AF4: exit (exit.c:100) \r\n==6132== by 0x5E0CEB3: (below main) (libc-start.c:276)\r\n==6132== Address 0x9f1f4b0 is 0 bytes inside a block of size 66 free'd\r\n==6132== at 0x4C28040: operator delete(void*) (vg_replace_malloc.c:507)\r\n==6132== by 0xBEF47FA: std::basic_string<char, std::char_traits<char>, std::allocator<char> >::~basic_string() (basic_string.h:2943)\r\n==6132== by 0x5E24AA1: __run_exit_handlers (exit.c:78)\r\n==6132== by 0x5E24AF4: exit (exit.c:100) \r\n==6132== by 0x5E0CEB3: (below main) (libc-start.c:276) \r\n==6132== Block was alloc'd at \r\n==6132== at 0x4C2901B: operator new(unsigned long) (vg_replace_malloc.c:324)\r\n==6132== by 0xBEF46CC: allocate (new_allocator.h:104)\r\n==6132== by 0xBEF46CC: std::string::_Rep::_S_create(unsigned long, unsigned long, std::allocator<char> const&) (basic_string.tcc:1051)\r\n==6132== by 0xBEF4F24: std::string::_Rep::_M_clone(std::allocator<char> const&, unsigned long) (basic_string.tcc:1073)\r\n==6132== by 0xBEF5359: std::string::assign(std::string const&) (basic_string.tcc:693) \r\n==6132== by 0xB18856C: arrow::CpuInfo::Init() (in /path/to/lib/libarrow.so.0) \r\n==6132== by 0xB190F8D: arrow::compute::FunctionContext::FunctionContext(arrow::MemoryPool*) (in /path/to/lib/libarrow.so.0)\r\n==6132== by 0xAD5EC25: __pyx_tp_new_7pyarrow_3lib__FunctionContext(_typeobject*, _object*, _object*) (in /path/to/lib/python3.6/pyarrow/lib.cpython-36m-x86_64-linux-gnu.so)\r\n==6132== by 0x4F0E122: type_call (typeobject.c:895) \r\n==6132== by 0xAD5AF0E: __Pyx_PyObject_Call(_object*, _object*, _object*) [clone .constprop.861] (in /path/to/lib/python3.6/pyarrow/lib.cpython-36m-x86_64-linux-gnu.so)\r\n==6132== by 0xADEC463: PyInit_lib (in /path/to/lib/pyth\r\non3.6/pyarrow/lib.cpython-36m-x86_64-linux-gnu.so)\r\n==6132== by 0x4FA6F17: _PyImport_LoadDynamicModuleWithSpec (importdl.c:159) \r\n==6132== by 0x4FA4F2A: _imp_create_dynamic_impl (import.c:1982)\r\n==6132== by 0x4FA4F2A: _imp_create_dynamic (import.c.h:289)\n```\r\nIt appears that the destructor for this static string is being called twice by `__run_exit_handlers` and I don't know why.\u00a0 Anyone else seen this?\r\n\r\nFor programs which are otherwise normal, this causes (nondeterministic) aborts on exit when glibc detects the double free.\u00a0 It might be specific to pyarrow, I haven't tried reproducing it with a C program that links with libarrow.so yet.",
+        "created_at": "2018-04-05T23:44:50.000Z",
+        "updated_at": "2018-06-29T14:46:06.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-04-07T00:03:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-04-06T14:22:40.685Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2403?focusedCommentId=16428384) by Uwe Korn (uwe):*\nI haven't seen this yet. I had once the problem where other global constants got deallocated twice but that was due to the fact that parquet-cpp was once linked dynamically and once statically in the same process."
+        },
+        {
+            "created_at": "2018-04-06T15:09:10.831Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2403?focusedCommentId=16428436) by Leif Mortenson (leif):*\nI'll take a look at that, thanks.\u00a0 That's the form of problem I have been assuming it is, but what's weird to me is that it's nondeterministic and seems to happen sometimes to boost::regex symbols, sometimes to arrow symbols (like CpuInfo::model_name_), sometimes to other libraries."
+        },
+        {
+            "created_at": "2018-04-07T00:02:51.367Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2403?focusedCommentId=16429152) by Leif Mortenson (leif):*\nOk, my problem was that parquet-cpp was built linking arrow-cpp statically, and then pyarrow was loading both libarrow.so and libparquet.so (which included libarrow.a).\u00a0 Fixed by building with the right cmake option.\u00a0 Thanks, `[~xhochy]`!"
+        }
+    ]
+}

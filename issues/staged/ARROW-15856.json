@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[R] S3FileSystem - open_dataset",
+        "body": "***Note**: This issue was originally created as [ARROW-15856](https://issues.apache.org/jira/browse/ARROW-15856). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi\r\n\r\n\u00a0I can successfully create a S3FileSystem that connects via minio.\u00a0\r\n\r\nI can create a SubTreeFileSystem:\u00a0s3://investmentaccountingdata/rawdata/transactions/transactions-xxx/v1.1/\r\n\r\nI can list the files in the SubTreeFileSystem, and I can open a dataset on from the list of files\r\n```java\n\r\n// code placeholder\r\nlist_files <- sfs$ls(recursive=TRUE)\r\nds <- arrow::open_dataset(sources = list_files, schema = schema_file, format = csv_format, filesystem = sfs)\r\n\r\n```\r\nThis all works fine, if I provide the list of files, but I want to specify a path higher up to be able to include the sub folders as partitions. The code I use works perfectly if I run it on a local disk.\r\n\r\nHow can I do open_dataset, and give a folder as source?\r\n\r\n\u00a0",
+        "created_at": "2022-03-07T11:59:23.000Z",
+        "updated_at": "2022-05-13T18:37:10.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-05-13T18:37:10.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-07T13:15:22.781Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15856?focusedCommentId=17502261) by Dewey Dunnington (paleolimbot):*\nThanks for reporting this! Without a reproducible example it's difficult to know exactly what's happening. I've prepared one below that seems to work but might not reflect your exact case...perhaps you could modify the below reprex to see if you can replicate the failure?\r\n\r\n```R\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\n\r\n# create a directory\r\ndir <- tempfile()\r\ndir.create(dir)\r\nbucket_local <- file.path(dir, \"bucket_name\")\r\ndir.create(bucket_local)\r\n\r\n# start minio in the backround (you can do this from the terminal too)\r\nminio_server <- processx::process$new(\"minio\", args = c(\"server\", dir), supervise = TRUE)\r\nSys.sleep(1)\r\nstopifnot(minio_server$is_alive())\r\n\r\n# make sure we can connect\r\ns3_uri <- \"s3://minioadmin:minioadmin@?scheme=http&endpoint_override=localhost%3A9000\"\r\nbucket <- s3_bucket(s3_uri)\r\n\r\n# write a dataset\r\ndata <- expand.grid(\r\n  letter = letters[1:5],\r\n  number = 1:10\r\n)\r\n\r\ndata %>% \r\n  group_by(letter) %>% \r\n  write_dataset(\r\n    path = file.path(bucket_local, \"dataset-test\"),\r\n    format = \"csv\"\r\n  )\r\n\r\nbucket$ls(\"bucket_name/dataset-test\", recursive = TRUE)\r\n#>  [1] \"bucket_name/dataset-test/letter=a\"           \r\n#>  [2] \"bucket_name/dataset-test/letter=a/part-0.csv\"\r\n#>  [3] \"bucket_name/dataset-test/letter=b\"           \r\n#>  [4] \"bucket_name/dataset-test/letter=b/part-0.csv\"\r\n#>  [5] \"bucket_name/dataset-test/letter=c\"           \r\n#>  [6] \"bucket_name/dataset-test/letter=c/part-0.csv\"\r\n#>  [7] \"bucket_name/dataset-test/letter=d\"           \r\n#>  [8] \"bucket_name/dataset-test/letter=d/part-0.csv\"\r\n#>  [9] \"bucket_name/dataset-test/letter=e\"           \r\n#> [10] \"bucket_name/dataset-test/letter=e/part-0.csv\"\r\n\r\n# make sure open dataset locally works\r\nopen_dataset(file.path(bucket_local, \"dataset-test\"), format = \"csv\") %>% \r\n  collect() %>% \r\n  head()\r\n#> # A tibble: 6 \u00d7 2\r\n#>   number letter\r\n#>    <int> <chr> \r\n#> 1      1 a     \r\n#> 2      2 a     \r\n#> 3      3 a     \r\n#> 4      4 a     \r\n#> 5      5 a     \r\n#> 6      6 a\r\n\r\n# make sure open dataset with remote fs works\r\nopen_dataset(bucket$path(\"bucket_name/dataset-test\"), format = \"csv\") %>% \r\n  collect() %>% \r\n  head()\r\n#> # A tibble: 6 \u00d7 2\r\n#>   number letter\r\n#>    <int> <chr> \r\n#> 1      1 a     \r\n#> 2      2 a     \r\n#> 3      3 a     \r\n#> 4      4 a     \r\n#> 5      5 a     \r\n#> 6      6 a\r\n\r\n\r\n# shut down minio\r\nminio_server$interrupt()\r\n#> [1] TRUE\r\nSys.sleep(1)\r\nstopifnot(!minio_server$is_alive())\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-03-07T13:46:42.395Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15856?focusedCommentId=17502278) by Martin du Toit (martindut):*\nThanks `[~paleolimbot]` , I will try to modify your reprex and get back to you asap"
+        },
+        {
+            "created_at": "2022-03-07T15:41:35.049Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15856?focusedCommentId=17502369) by Martin du Toit (martindut):*\nHi `[~paleolimbot]` \u00a0\r\n\r\nMy problem seems to be the \"minio gateway azure\" that I'm running. If I replicate the folder structure locally, and using your local minio example (thanks), I can open the dataset with partitions as expected. This is the same behavior as if I do it for the local file system.\r\n\r\nAll our files is on Azure blob storage, so I unfortunately have to go that root.\r\n\r\nNot sure what to do now."
+        },
+        {
+            "created_at": "2022-05-13T18:37:10.269Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15856?focusedCommentId=17536833) by Neal Richardson (npr):*\nIf the data is on Azure, there's an open PR to add a filesystem backend for Azure (ARROW-2034). Perhaps using that will be the right solution. "
+        }
+    ]
+}

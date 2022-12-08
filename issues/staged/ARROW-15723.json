@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Python] Segfault  orcWriter write table",
+        "body": "***Note**: This issue was originally created as [ARROW-15723](https://issues.apache.org/jira/browse/ARROW-15723). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\npyarrow segfault when trying to write an orc from a table containing nullArray.\r\n\r\n\u00a0\r\n\r\nfrom pyarrow import orc\r\nimport pyarrow as pa\r\n\r\na = pa.array([1, None, 3, None])\r\nb = pa.array([None, None, None, None])\r\ntable = pa.table(\\{\"int64\": a, \"utf8\": b})\r\norc.write_table(table, 'test.orc')\r\n\r\n\r\nzsh: segmentation fault \u00a0python3",
+        "created_at": "2022-02-17T20:07:34.000Z",
+        "updated_at": "2022-04-13T10:54:31.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-04-13T10:54:31.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-24T16:44:13.685Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15723?focusedCommentId=17497532) by Joris Van den Bossche (jorisvandenbossche):*\nThanks for the report. There are potentially multiple issues here.\r\n\r\nFirst, writing null arrays is not actually supported (yet). When using the OrcWriter API directly, we can see this (using the table from the code snippet above):\r\n\r\n```Java\n\r\nIn [3]: writer = orc.ORCWriter(\"test.orc\")\r\n\r\nIn [4]: writer.write(table)\r\n...\r\nArrowNotImplementedError: Unknown or unsupported Arrow type: null\r\n../src/arrow/adapters/orc/util.cc:1062  GetOrcType(*arrow_child_type)\r\n../src/arrow/adapters/orc/adapter.cc:811  GetOrcType(*(table.schema()))\r\n```\r\n\r\nBut, it seems that for some reason this error is not bubbled up when using `write_table` (which uses this ORCWriter in a context manager).\r\n\r\nThen, it further seems that the segfault comes from trying to write (close) an empty file. This can be reproduced with the following as well:\r\n\r\n```Java\n\r\nIn [1]: from pyarrow import orc\r\n\r\nIn [2]: writer = orc.ORCWriter(\"test.orc\")\r\n\r\nIn [3]: writer.close()\r\nSegmentation fault (core dumped)\r\n```"
+        },
+        {
+            "created_at": "2022-04-07T12:03:16.339Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15723?focusedCommentId=17518835) by Ra\u00fal Cumplido (raulcd):*\nThe segmentation fault is fixed as part of ARROW-16025. I have added a test that ensures the error from null type not being supported is correctly raised."
+        },
+        {
+            "created_at": "2022-04-13T10:54:31.703Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15723?focusedCommentId=17521614) by Ra\u00fal Cumplido (raulcd):*\nThis has been fixed and tested as part of ARROW-16025"
+        }
+    ]
+}

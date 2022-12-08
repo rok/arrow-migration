@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "[Python] Cannot create pandas categorical from table only with nulls",
+        "body": "***Note**: This issue was originally created as [ARROW-18099](https://issues.apache.org/jira/browse/ARROW-18099). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nA pyarrow Table with only null values cannot be instantiated as a Pandas DataFrame with said column as a category. However, pandas does support \"empty\" categoricals. Therefore, a simple patch would be to load the pa.Table as an object first and convert, once in pandas, to a categorical which will be empty. However, that does not solve the pyarrow bug at its root.\r\n\r\n\u00a0\r\n\r\nSample reproducible example\r\n```java\n\r\nimport pyarrow as pa\r\npylist = [{'x': None, '__index_level_0__': 2}, {'x': None, '__index_level_0__': 3}]\r\ntbl = pa.Table.from_pylist(pylist)\r\n\u00a0\r\n\r\n# Errors\r\n\r\ndf_broken = tbl.to_pandas(categories=[\"x\"])\r\n\u00a0\r\n\r\n# Works\r\ndf_works = tbl.to_pandas()\r\ndf_works = df_works.astype({\"x\": \"category\"}) \n```",
+        "created_at": "2022-10-19T13:32:33.000Z",
+        "updated_at": "2022-10-27T13:32:46.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-24T15:00:42.725Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18099?focusedCommentId=17623235) by Alessandro Molina (amol-):*\n`[~jorisvandenbossche]` what is your thinking on this one? The need to be able to convert to pandas categoricals seems reasonable, I'm just not sure it semantically retains the same meaning from the point of view of missing/null values."
+        },
+        {
+            "created_at": "2022-10-24T15:12:25.773Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18099?focusedCommentId=17623241) by Joris Van den Bossche (jorisvandenbossche):*\nThe direct cause of this buggy behaviour is that an \"all-null\" dictionary array seems to have a dictionary of 1 null element:\r\n\r\n```Java\n\r\nIn [13]: arr = pa.array([None, None]).dictionary_encode()\r\n\r\nIn [14]: arr\r\nOut[14]: \r\n<pyarrow.lib.DictionaryArray object at 0x7f8d20ee9690>\r\n\r\n-- dictionary:\r\n1 nulls\r\n-- indices:\r\n  [\r\n    null,\r\n    null\r\n  ]\r\n```\r\n\r\nAnd so when converting that to pandas, it complains about nulls in categories (in contrast to arrow, pandas does not allow nulls in the categories, only in the indices. While in Arrow you can have a \"null\" be represented in two different ways: a null value in the indices, or an actual index pointing to a null value in the dictionary).\r\n\r\nNote that this error can also happen in general when having nulls in the dictionary, not just in the all-null case:\r\n\r\n```Java\n\r\n>>> arr = pa.DictionaryArray.from_arrays(pa.array([0, 1, 0]), pa.array(['a', None]))\r\n>>> arr\r\n<pyarrow.lib.DictionaryArray object at 0x7f8d20e7f370>\r\n\r\n-- dictionary:\r\n  [\r\n    \"a\",\r\n    null\r\n  ]\r\n-- indices:\r\n  [\r\n    0,\r\n    1,\r\n    0\r\n  ]\r\n>>> arr.to_pandas()\r\n...\r\nValueError: Categorical categories cannot be null\r\n```\r\n\r\nSo this is something we can solve in the arrow->pandas conversion: we should remove any nulls from the dictionary (and convert that to nulls in the indices). That should solve both examples.\r\n\r\nOn the actual case of dictionary encoding an all-null array, I do wonder if we shouldn't create a DictionaryArray with an empty dictionary, instead of a dictionary with 1 null element (this is strictly speaking not needed, since there is no value in the indices pointing to this null dictionary value).\r\n"
+        },
+        {
+            "created_at": "2022-10-27T13:32:46.661Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18099?focusedCommentId=17625127) by Damian Barabonkov (damianb):*\nHello,\r\n\r\nAfter debugging this issue, which led me to this [line\\|[https://github.com/apache/arrow/blob/21dbf4ac09583651899232c9a80b3f5d6580a588/python/pyarrow/src/arrow/python/arrow_to_pandas.cc#L2220-L2221],] there two ways to patch this bug.\r\n\r\nFirstly, we could add some post-processing to the output of `DictionaryEncode` to remove `null` values. Secondly, we could change the implementation of `DictionaryEncode` to prune any `null` values and not let any through.\r\n\r\n\u00a0\r\n\r\nIn any case, the `ConvertCategoricals` should not deal will `null` values since that forces `pandas` to error."
+        }
+    ]
+}

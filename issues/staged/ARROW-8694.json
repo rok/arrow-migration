@@ -1,0 +1,38 @@
+{
+    "issue": {
+        "title": "[Python][Parquet] parquet.read_schema() fails when loading wide table created from Pandas DataFrame",
+        "body": "***Note**: This issue was originally created as [ARROW-8694](https://issues.apache.org/jira/browse/ARROW-8694). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nparquet.read_schema() fails when loading wide table schema created from Pandas DataFrame with 50,000 columns. This works ok using pyarrow 0.16.0.\r\n```java\n\r\nimport numpy as np\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nprint(pa.__version__)\r\ndf = pd.DataFrame(({'c' + str(i): np.random.randn(10) for i in range(50000)}))\r\ntable = pa.Table.from_pandas(df)\r\npq.write_table(table, \"test_wide.parquet\")\r\nschema = pq.read_schema('test_wide.parquet')\n```\r\nOutput:\r\n\r\n0.17.0\r\nTraceback (most recent call last):\r\n File \"/GAAL/kisseri/conda_envs/blkmamba-dev/lib/python3.6/site-packages/IPython/core/interactiveshell.py\", line 3319, in run_code\r\n exec(code_obj, self.user_global_ns, self.user_ns)\r\n File \"<ipython-input-29-d5ef2df77263>\", line 9, in <module>\r\n table = pq.read_schema('test_wide.parquet')\r\n File \"/GAAL/kisseri/conda_envs/blkmamba-dev/lib/python3.6/site-packages/pyarrow/parquet.py\", line 1793, in read_schema\r\n return ParquetFile(where, memory_map=memory_map).schema.to_arrow_schema()\r\n File \"/GAAL/kisseri/conda_envs/blkmamba-dev/lib/python3.6/site-packages/pyarrow/parquet.py\", line 210, in __init__\r\n read_dictionary=read_dictionary, metadata=metadata)\r\n File \"pyarrow/_parquet.pyx\", line 1023, in pyarrow._parquet.ParquetReader.open\r\n File \"pyarrow/error.pxi\", line 100, in pyarrow.lib.check_status\r\nOSError: Couldn't deserialize thrift: TProtocolException: Exceeded size limit\r\n\r\n\u00a0",
+        "created_at": "2020-05-04T16:45:35.000Z",
+        "updated_at": "2020-05-06T13:24:48.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-05-05T21:40:23.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-05-04T23:00:38.199Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8694?focusedCommentId=17099408) by Wes McKinney (wesm):*\nThis was introduced by \r\n\r\nhttps://github.com/apache/arrow/commit/6b87c6c9fb00ade7eff909afa4a6a61464cd516c\r\n\r\nIn particular these lines\r\n\r\nhttps://github.com/apache/arrow/commit/6b87c6c9fb00ade7eff909afa4a6a61464cd516c#diff-02e1ce3be950149e04ede2f67bfdebd1R364\r\n\r\nIn your case, the metadata it's trying to deserialize is over 20MB. I'm going to increase the buffer size limits somewhat. \r\n\r\n```Java\n\r\n(gdb) p *len\r\n$2 = 22298417\r\n```\r\n\r\nPlease note, this is _not_ a good use case for the Parquet format. You'll almost certainly get better performance and storage size by using a different data format. "
+        },
+        {
+            "created_at": "2020-05-05T13:19:42.995Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8694?focusedCommentId=17099866) by Eric Kisslinger (ekisslinger):*\nI can't really disagree with the founders of this very useful and innovative technology. However, there are several reputable big-data blogs that state the Parquet is well suited for wide tables with lots of columns (e.g.\u00a0<https://docs.cloudera.com/runtime/7.1.0/impala-reference/topics/impala-parquet.html>). \u00a0One common use case I have is to quickly read ~1000 columns from a ~100,000 column file. This used to be very fast but, performance has slowed over time with newer releases. It might be helpful to have a short section in the docs describing what Parquet is well suited for and what it is not. BTW, I'm finding performance, and storage footprints, of Feather files with the newly supported LZ4 compression to be very impressive."
+        },
+        {
+            "created_at": "2020-05-05T21:40:23.753Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8694?focusedCommentId=17100269) by Wes McKinney (wesm):*\nIssue resolved by pull request 7103\n<https://github.com/apache/arrow/pull/7103>"
+        },
+        {
+            "created_at": "2020-05-05T21:58:41.006Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8694?focusedCommentId=17100282) by Wes McKinney (wesm):*\n`[~ekisslinger]` I don't mean to be argumentative, but where are you finding in https://docs.cloudera.com/runtime/7.1.0/impala-reference/topics/impala-parquet.html that Parquet is \"well suited for wide tables with lots of columns\"? In my experience working directly with the developers of Impala as colleagues, it was not advisable to have files with over 1000 columns. So it would be good to let Cloudera know which part of their documentation is misleading because I don't think this is their intention. \r\n\r\nEDIT: I see that it says \"Parquet is suitable for queries scanning particular columns within a table, for example, to query \u201cwide\u201d tables with many columns, or to perform aggregation operations such as SUM() and AVG() that need to process most or all of the values from a column.\". I think we need to clarify what qualifies as \"wide\" \u2013 in data warehousing world 100 or more columns is considered \"wide\". It would be good for Cloudera to add something to explain how the format falls apart with extremely wide files (e.g. thousands of columns)."
+        },
+        {
+            "created_at": "2020-05-06T13:24:48.240Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8694?focusedCommentId=17100797) by Eric Kisslinger (ekisslinger):*\nThanks for the clarification on what qualifies as \"wide\". That is where my confusion came from. And thanks for increasing the relevant buffer size so that I, and others, can continue to use upcoming versions of pyarrow on existing datasets."
+        }
+    ]
+}

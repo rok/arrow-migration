@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "[JS] Timestamp types are all the same",
+        "body": "***Note**: This issue was originally created as [ARROW-16543](https://issues.apache.org/jira/browse/ARROW-16543). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrent timestamp types are all the same. They have the same representation. And also the same precision.\r\n\r\nFor example, `TimestampSecond` and `TimestampMillisecond` return the values as `1652118180000`. Instead, I would expect the `TimestampSecond` to drop the 3 zeros when returning a value, e.g. `1652118180`. Also, the representation underneath is still an `int32` array. Even though for `TimestampSecond` every second value is `0`, the array still has double the amount of integers.\r\n\r\nI also got an error when trying to read a `Date` as `TimestampNanosecond` - `TypeError: can't convert 1652118180000 to BigInt`.",
+        "created_at": "2022-05-12T09:42:17.000Z",
+        "updated_at": "2022-06-10T08:21:56.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: JavaScript",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-02T02:36:48.130Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16543?focusedCommentId=17545241) by Paul Taylor (paul.e.taylor):*\n`[~terusus]` how did you construct the Timestamp Vectors? The semantic meaning of the type is \"<duration> since the epoch,\" so it's valid for the different duration dtypes to have the same underlying representation."
+        },
+        {
+            "created_at": "2022-06-04T13:14:47.809Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16543?focusedCommentId=17548109) by Teodor Kostov (terusus):*\nHello [~paul.e.taylor]. I used a `Struct` type and a builder.\r\n\r\n```javascript\n\r\nconst myType = new arrow.Struct([\r\n  new arrow.Field('time', new arrow.TimestampSecond()),\r\n  new arrow.Field('value', new arrow.Float64()),\r\n])\r\nconst myBuilder = arrow.makeBuilder({ type: myType, nullValues: [null, undefined] })\r\n...\r\nmyBuilder.append(...)\r\n...\r\nmyBuilder.finish()\r\nconst vector = myBuilder.toVector()\r\n```\r\n\r\nI am using another library that is sensitive to the timestamp format, whether in milliseconds or seconds. And for my application, I do not need the millisecond accuracy. At the same time, I would expect the data not to need any transformation when I get it from the table. I would also expect the table to use the most efficient format to store my data."
+        },
+        {
+            "created_at": "2022-06-10T08:21:56.245Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16543?focusedCommentId=17552616) by Teodor Kostov (terusus):*\nHere is a full test:\r\n\r\n```javascript\n\r\nconst dataType = new arrow.Struct([\r\n  new arrow.Field('time', new arrow.TimestampSecond()),\r\n  new arrow.Field('value', new arrow.Float64()),\r\n])\r\nconst builder = arrow.makeBuilder({ type: dataType, nullValues: [null, undefined] })\r\n\r\nconst date = new Date()\r\nconst timestampSeconds = Math.floor(date.getTime() / 1000)\r\nconst timestamp = timestampSeconds * 1000\r\nbuilder.append({ time: date, value: 1.2 })\r\nbuilder.append({ time: date, value: 3.3 })\r\nbuilder.finish()\r\nconst vector = builder.toVector()\r\n\r\nconst schema = new arrow.Schema(dataType.children)\r\nconst recordBatch = new arrow.RecordBatch(schema, vector.data[0])\r\nconst table = new arrow.Table(recordBatch)\r\n\r\nconsole.log(timestamp)\r\nconsole.log(timestampSeconds)\r\nconsole.log(table.get(0).time)\r\n\r\nconsole.log(table.get(0).time === timestamp) // should be false\r\nconsole.log(table.get(0).time === timestampSeconds) // should be true\r\n```\r\n\u00a0"
+        }
+    ]
+}

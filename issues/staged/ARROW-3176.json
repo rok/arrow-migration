@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[Python] Overflow in Date32 column conversion to pandas",
+        "body": "***Note**: This issue was originally created as [ARROW-3176](https://issues.apache.org/jira/browse/ARROW-3176). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen converting an arrow\u00a0column holding a `Date32Array` to `pandas` there seems to be an overflow at the date `2262-04-12` such that the type and value are wrong. The issue only occurs for columns, not for arrays.\r\n\r\nRunning on debian 9.5 w/ python2 gives\r\n \u00a0\r\n```Java\n\r\nIn [1]: import numpy as np\r\n\r\nIn [2]: import datetime\r\n\r\nIn [3]: import pyarrow as pa\r\n\r\nIn [4]: pa.__version__\r\nOut[4]: '0.10.0'\r\n\r\nIn [5]: arr = pa.array(np.array([datetime.date(2262, 4, 12)], dtype='datetime64[D]'))\r\n\r\nIn [6]: arr.to_pandas(date_as_object=False)\r\nOut[6]: array(['2262-04-12'], dtype='datetime64[D]')\r\n\r\nIn [7]: pa.column('name', arr).to_pandas(date_as_object=False)\r\nOut[7]:\r\n0 1677-09-21 00:25:26.290448384\r\nName: name, dtype: datetime64[ns]\r\n```",
+        "created_at": "2018-09-05T14:19:25.000Z",
+        "updated_at": "2019-09-26T03:19:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-09-26T03:19:25.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-04-24T08:37:27.586Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3176?focusedCommentId=16824911) by Joris Van den Bossche (jorisvandenbossche):*\nNote that the default type changed: it now gives back datetime.date objects, instead of datetime64[D] (https://issues.apache.org/jira/browse/ARROW-3910). So by default you no longer have this problem. But, setting `date_as_object=False` (to have back the old behaviour), you still have the same overflow issue. \r\n\r\nUpdated the original bug report to add this keyword, to keep it a reproducible example."
+        },
+        {
+            "created_at": "2019-04-24T18:22:38.038Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3176?focusedCommentId=16825405) by Wes McKinney (wesm):*\nThis is a limitation with pandas's `datetime64[ns]`. One could argue for overflow checking on the to_pandas code path. There are three options \r\n\r\n- Current behavior (not that big of a deal now since we return `datetime.date` by default now)\n- Raise on overflow\n- Return NULL on overflow\n  \n  None of these options are great but maybe option 2 is the best?"
+        },
+        {
+            "created_at": "2019-04-24T18:28:32.632Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3176?focusedCommentId=16825407) by Joris Van den Bossche (jorisvandenbossche):*\nYes, I think, ideally, arrow should be responsible of checking that the values fit in the range supported by pandas. From the two remaining options, I agree raising is probably the best option.\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-04-24T18:31:37.658Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3176?focusedCommentId=16825413) by Joris Van den Bossche (jorisvandenbossche):*\nActually, I take that back. It seems that it is pandas that is not doing a proper check (assuming that arrow passes datetime64[D] data, similarly as what the Array.to_pandas returns), and it is pandas that converts the datetime64[D] to incorrect datetime64[ns]:\r\n\r\n\u00a0\r\n```Java\n\r\nIn [22]: pd.Series(np.array(['2262-04-12'], dtype='datetime64[D]'))\r\nOut[22]: \r\n0\u00a0\u00a0 1677-09-21 00:25:26.290448384\r\ndtype: datetime64[ns]\n```\r\n\r\nOf course, you still get the \"wrong\" behaviour when using arrow's `to_pandas`, but I might consider this a bug on the pandas side."
+        },
+        {
+            "created_at": "2019-04-24T18:42:15.603Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3176?focusedCommentId=16825426) by Joris Van den Bossche (jorisvandenbossche):*\nThis seems to be a pandas regression: https://github.com/pandas-dev/pandas/issues/26206"
+        },
+        {
+            "created_at": "2019-06-24T01:48:33.254Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3176?focusedCommentId=16870741) by Wes McKinney (wesm):*\nMoved to 1.0.0 as there seems to not be consensus about how to proceed"
+        },
+        {
+            "created_at": "2019-06-24T07:27:37.049Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3176?focusedCommentId=16870886) by Joris Van den Bossche (jorisvandenbossche):*\nI fixed the issue on the pandas side, meaning that you no longer get a incorrect date (eg the \"1677-09-21 00:25:26.290448384\" instead of \"2262-04-12\"), but an error: \r\n\r\n```Java\n\r\nIn [7]: pa.column('name', arr).to_pandas(date_as_object=False) \r\n...\r\nOutOfBoundsDatetime: Out of bounds nanosecond timestamp: 2262-04-12 00:00:00\r\n\r\nIn [8]: pa.column('name', arr).to_pandas(date_as_object=True) \r\nOut[8]: \r\n0    2262-04-12\r\nName: name, dtype: object\r\n```\r\n\r\nsince pandas only supports datetime64[ns] at the moment, I think that is the best we can do: you get an error with dates that are out of bound for datetime64[ns], and in that case you should use the default `date_as_object=True`.\r\n\r\nThis will be fixed in pandas 0.25.0\r\n\r\nFor me, this issue can then be closed as we can rely on this fixed pandas behaviour.  \r\nOne alternative that could be done in pyarrow is to detect out of bound dates, and then always return objects instead of datetime64. But since that is already the default behaviour to always return objects, I personally don't think we should \"ignore\" the user-specified keyword `date_as_object=False` in those cases."
+        },
+        {
+            "created_at": "2019-07-09T16:21:00.919Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3176?focusedCommentId=16881364) by Joris Van den Bossche (jorisvandenbossche):*\nClosing this, given my comment above (tldr: wrong value bug fixed in pandas, will get an error now)"
+        },
+        {
+            "created_at": "2019-09-26T03:15:21.677Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3176?focusedCommentId=16938213) by Micah Kornfield (emkornfield@gmail.com):*\nreopening to assign version fix."
+        }
+    ]
+}

@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[Rust] Arrow examples should use utility to print results",
+        "body": "***Note**: This issue was originally created as [ARROW-8287](https://issues.apache.org/jira/browse/ARROW-8287). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n<https://github.com/apache/arrow/pull/6773> added a utility for printing record batches and the DataFusion examples were updated to use this. We should now do the same for the Arrow examples. This will require moving the utility method from the datafusion crate to the arrow crate.",
+        "created_at": "2020-03-31T14:12:17.000Z",
+        "updated_at": "2020-04-29T22:58:07.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-04-29T22:58:07.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-04-18T17:07:20.604Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8287?focusedCommentId=17086534) by Mark Hildreth (markhildreth):*\nI took this PR hoping it would be a simple intro, but there's actually a bit more here than what meets the eye. Here are my notes.\r\n \\* If the utility methods were moved as-is to the arrow crate, then the public interface of the arrow crate would now include the **prettytable** crate's **Table** struct (as that is what **create_table** returns). This is probably a bit much. I would recommend only expose **print_batches** for now so we could switch out the internal implementation if desired.\r\n \\* Second, the crate used to create the strings used in the output (**prettytable**) has a dependency on the crate **encode_unicode**. The **encode_unicode** crate does some funky stuff with implementing the trait **FromIterator** for **Vec<u8>**. This can cause issues with any code that would use the **arrow** crate that rely on there being only one way to collect an **Iterator<_>** into **Vec<u8>**, which actually [broke some code in a test in the parquet crate,](https://github.com/apache/arrow/blob/8648cd46fd990e5c2e76c265b6f927b84a194ffb/rust/parquet/src/encodings/rle.rs#L832-L833) hence explaining the broken builds.\r\n\r\n```java\n\r\nerror[E0282]: type annotations needed\r\n   --> parquet/src/encodings/rle.rs:833:26\r\n    |\r\n833 | Standard.sample_iter(&mut rng).take(seed_len).collect();\r\n    | ^^^^^^^^^^^ cannot infer type for `T`\r\n \n```\r\nThis was a pretty complicated problem for someone of my Rust experience, I wrote up more information about it in [this reddit thread](https://www.reddit.com/r/rust/comments/g3iqan/crates_implementing_fromiterator_for_std/). We could either; ignore this problem, look for another crate to do tables, or try to change the prettytable crate. **Update:** I have created a [PR for that crate](https://github.com/phsym/prettytable-rs/pull/125) to see if they would want to remove the dependency, but not sure how active the original developer is.\r\n \\* Additionally, the interface for print_batches accepts a vector of multiple RecordBatches. Unfortunately, there is no static guarantee that the RecordBatches have the same schema. The C++/Python and Javascript implementations have created a new logical type called \"Table\" which tries to do this (although some of their APIs also don't seem to provide that guarantee). However, development of such a structure is way outside the scope of this project, so I would be happy to say forget about it and perhaps add an issue to revisit this. As a short-term solution, **print_table** could take a generic iterator of **RecordBatch** types, which if we did end up with a **Table** type later on probably wouldn't need to be changed.\r\n\r\n\u00a0\r\n So, here are my blocking questions:\r\n \\* Stick with the original prettytable crate as is and just add the required type annotations in the Parquet test, or find an alternative? I recommend [using the branch in the PR](https://github.com/markhildreth/prettytable-rs/tree/remove-encode-unicode-dependency), switching back to the actual crate if that crate is merged.\r\n \\* Keep **create_table** public, or make it private? I recommend make it private.\r\n \\* Come up with a better wrapper for a \"Table\" to enforce one-schema-multiple-record batches, or don't worry about this for now? My recommendation is don't worry about it for now, but make **print_table** accept an iterator and to add an issue to think more about creating a **Table** type like other APIs do."
+        },
+        {
+            "created_at": "2020-04-29T22:58:07.802Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8287?focusedCommentId=17095950) by Andy Grove (andygrove):*\nIssue resolved by pull request 6972\n<https://github.com/apache/arrow/pull/6972>"
+        }
+    ]
+}

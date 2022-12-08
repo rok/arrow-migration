@@ -1,0 +1,102 @@
+{
+    "issue": {
+        "title": "[Python] pyarrow.parquet.read_table(...) takes up lots of memory which is not released until program exits",
+        "body": "***Note**: This issue was originally created as [ARROW-6910](https://issues.apache.org/jira/browse/ARROW-6910). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI realize that when I read up a lot of Parquet files using pyarrow.parquet.read_table(...), my program's memory usage becomes very bloated, although I don't keep the table objects after converting them to Pandas DFs.\r\n\r\nYou can try this in an interactive Python shell to reproduce this problem:\r\n\r\n```{python}\r\nfrom tqdm import tqdm\r\nfrom pyarrow.parquet import read_table\r\n\r\nPATH = '/tmp/big.snappy.parquet'\r\n\r\nfor _ in tqdm(range(10)):\r\n    read_table(PATH, use_threads=False, memory_map=False)\r\n    (note that I'm not assigning the read_table(...) result to anything, so I'm not creating any new objects at all)\r\n\r\n```\r\n\r\nDuring the For loop above, if you view the memory usage (e.g. using htop program), you'll see that it keeps creeping up. Either the program crashes during the 10 iterations, or if the 10 iterations complete, the program will still occupy a huge amount of memory, although no objects are kept. That memory is only released when you exit() from Python.\r\n\r\nThis problem means that my compute jobs using PyArrow currently need to use bigger server instances than I think is necessary, which translates to significant extra cost.\r\n\r\n",
+        "created_at": "2019-10-16T23:49:30.000Z",
+        "updated_at": "2019-11-06T20:32:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-10-22T14:47:39.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-17T02:14:27.841Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16953324) by Antoine Pitrou (apitrou):*\nHow do you measure memory usage? \"RSS\"? It may be very well be a false positive."
+        },
+        {
+            "created_at": "2019-10-17T02:18:06.997Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16953328) by Wes McKinney (wesm):*\nLikely duplicate of ARROW-6874"
+        },
+        {
+            "created_at": "2019-10-17T03:10:52.969Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16953357) by V Luong (MBALearnsToCode):*\n`[~wesm]` `[~apitrou]` ARROW-6874's title states that Table.to_pandas() causes the problem. But it seems from my code above that the problem starts from read_table(...) itself, even before converting to Pandas DFs. So I'm not sure if this can be called a duplicate of ARROW-6874."
+        },
+        {
+            "created_at": "2019-10-17T13:43:01.896Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16953748) by Wes McKinney (wesm):*\nI see. Is there something you can do to make the issue more reproducible, like one or more example files? "
+        },
+        {
+            "created_at": "2019-10-17T13:44:28.894Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16953751) by Joris Van den Bossche (jorisvandenbossche):*\n`[~MBALearnsToCode]` If it might not be a duplicate, could you try to provide a reproducible example? "
+        },
+        {
+            "created_at": "2019-10-17T18:31:44.972Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16954005) by Wes McKinney (wesm):*\nI don't think this is a bug. I wrote a script to make and read a ~1+GB file in a loop and look at the process's RSS. Here is a plot of what the process's RSS looks like over the course of 100 iterations\r\n\r\n ![arrow6910.png](https://issues.apache.org/jira/secure/attachment/12983302/arrow6910.png) \r\n\r\nThis suggests this is related to internal behavior of our allocator (jemalloc here) which retains unused heap memory to speed up future in-process allocations rather than releasing the memory to the operating system. I'm not an expert on these kinds of system matters, `[~apitrou]` or others would know more"
+        },
+        {
+            "created_at": "2019-10-17T18:48:08.254Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16954021) by V Luong (MBALearnsToCode):*\n`[~wesm]` `[~jorisvandenbossche]` `[~apitrou]`  I've made a Parquet data set available at s3://public-parquet-test-data/big.snappy.parquet for testing (you can do \"wget http://public-parquet-test-data.s3.amazonaws.com/big.snappy.parquet\" if not using AWS CLI). It's only moderately big. I repeatedly load various files thousands of times during iterative model training jobs that last for days. In 0.14.1 my long-running jobs succeeded, but in 0.15.0 the same jobs crashed after 30 mins or 1 hour. My inspection as shared above indicates that memory usage increases with the number of times read_table(...) is called and memory is not released, so long-running jobs would inevitably die."
+        },
+        {
+            "created_at": "2019-10-17T18:53:44.058Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16954022) by Wes McKinney (wesm):*\nCan you give me an HTTPS link to download that file? I tried `wget https://public-parquet-test-data.s3.amazonaws.com/big.parquet` and it didn't work"
+        },
+        {
+            "created_at": "2019-10-17T18:59:36.402Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16954026) by Wes McKinney (wesm):*\n```Java\n\r\n$ aws s3 cp s3://public-parquet-test-data/big.parquet . --recursive\r\nfatal error: Unable to locate credentials\r\n```\r\n\r\nNot a regular S3 user, sorry"
+        },
+        {
+            "created_at": "2019-10-17T19:01:28.784Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16954029) by V Luong (MBALearnsToCode):*\nok let me check again on another machine `[~wesm]` and let you know"
+        },
+        {
+            "created_at": "2019-10-17T21:51:10.339Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16954134) by V Luong (MBALearnsToCode):*\n`[~wesm]` `[~jorisvandenbossche]` `[~apitrou]` can you try \"wget http://public-parquet-test-data.s3.amazonaws.com/big.snappy.parquet\" now? I'll also edit the code in the description to reproduce the problem."
+        },
+        {
+            "created_at": "2019-10-17T22:29:06.252Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16954147) by V Luong (MBALearnsToCode):*\nUsing the code above, after just 10 iterations of reading up the file with 1 thread, the program has grown to occupy 15-18GB of memory and does not release it."
+        },
+        {
+            "created_at": "2019-10-19T01:29:15.376Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16955038) by Wes McKinney (wesm):*\nI can access it. I'll try to have a closer look in the next couple of days to see if I can determine what is going on. "
+        },
+        {
+            "created_at": "2019-10-19T16:19:23.396Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16955206) by Wes McKinney (wesm):*\nI can confirm that setting the \"dirty_decay_ms\" jemalloc option to 0 causes memory to be released to the OS right away. This is likely to reduce application performance, but it may make sense to make the default option but allow it to be configured at runtime. I'm working on a patch\r\n\r\nsee http://jemalloc.net/jemalloc.3.html"
+        },
+        {
+            "created_at": "2019-10-19T18:16:12.733Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16955242) by V Luong (MBALearnsToCode):*\nGreat, thank you a great deal `[~wesm]`!"
+        },
+        {
+            "created_at": "2019-10-22T14:47:39.368Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16957140) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 5701\n<https://github.com/apache/arrow/pull/5701>"
+        },
+        {
+            "created_at": "2019-11-06T20:03:06.504Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16968654) by V Luong (MBALearnsToCode):*\n`[~apitrou]` `[~wesm]` `[~jorisvandenbossche]` I'm re-testing this issue using the newly-released 0.15.1, with the following code, in an interactive Python 3.7 shell:\r\n\r\n-----\r\nfrom pyarrow.parquet import read_table\r\nimport os\r\nfrom tqdm import tqdm\r\n\r\n\r\nPARQUET_S3_PATH = 's3://public-parquet-test-data/big.snappy.parquet'\r\nPARQUET_HTTP_PATH = 'http://public-parquet-test-data.s3.amazonaws.com/big.snappy.parquet'\r\nPARQUET_TMP_PATH = '/tmp/big.snappy.parquet'\r\n\r\n\r\nos.system('wget --output-document={} {}'.format(PARQUET_TMP_PATH, PARQUET_HTTP_PATH))\r\n\r\n\r\nfor _ in tqdm(range(10)):\r\n    read_table(\r\n        source=PARQUET_TMP_PATH,\r\n        columns=None,\r\n        use_threads=False,\r\n        metadata=None,\r\n        use_pandas_metadata=False,\r\n        memory_map=False,\r\n        filesystem=None,\r\n        filters=None)\r\n-----\r\n\r\nI observe the following mysterious behavior:\r\n- If I don't do anything after the above For loop, the program still occupies 8-10GB of memory and does not release it. I keep it at this idle state for a good 10-15 minutes and confirm that memory is still occupied.\n- Then, I try to do something random, like \"import pyarrow; print(pyarrow.__version__)\" in the interactive shell, and then the memory is immediately released.\n  \n  This behavior remains unintuitive to me, and it seems users still don't have a firm control on the memory used by PyArrow. Each read_table(...) call does not seem memory-neutral by default as of 0.15.1 yet. This means long-running iterative programs, especially ML training involving repeated loading up these files, will inevitably OOM."
+        },
+        {
+            "created_at": "2019-11-06T20:18:44.007Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16968667) by Wes McKinney (wesm):*\nWhat platform are you on? It's possible the background thread reclamation is not enabled in your build\r\n\r\nAdding `import gc; gc.collect()` to your scripts may not be a bad idea"
+        },
+        {
+            "created_at": "2019-11-06T20:20:47.962Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16968670) by Wes McKinney (wesm):*\nIf you can open a new JIRA for further investigation that would be helpful, the original issue you reported is no longer present, as chronicled in the linked pull request"
+        },
+        {
+            "created_at": "2019-11-06T20:24:40.159Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16968675) by V Luong (MBALearnsToCode):*\nok `[~wesm]` let me create a new JIRA ticket for 0.15.1"
+        },
+        {
+            "created_at": "2019-11-06T20:32:29.120Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6910?focusedCommentId=16968683) by Wes McKinney (wesm):*\nThe place to start will be twiddling with the jemalloc conf settings here:\r\n\r\nhttps://github.com/apache/arrow/blob/master/cpp/src/arrow/memory_pool.cc#L48"
+        }
+    ]
+}

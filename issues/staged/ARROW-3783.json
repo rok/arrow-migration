@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[R] Incorrect collection of float type",
+        "body": "***Note**: This issue was originally created as [ARROW-3783](https://issues.apache.org/jira/browse/ARROW-3783). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nRepro from `sparklyr`:\r\n\r\n\u00a0\r\n```java\n\r\nlibrary(sparklyr)\r\nlibrary(arrow)\r\n\r\nsc <- spark_connect(master = \"local\")\r\nDBI::dbGetQuery(sc, \"SELECT cast(1 as float)\")\n```\r\n\u00a0\r\n\r\nActual:\r\n```java\n\r\n  CAST(1 AS FLOAT)\r\n1       1065353216\n```\r\nExpected:\r\n\r\n\u00a0\r\n```java\n\r\n  CAST(1 AS FLOAT)\r\n1                1\n```\r\n\u00a0",
+        "created_at": "2018-11-13T21:22:18.000Z",
+        "updated_at": "2021-03-04T21:41:34.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-02-03T20:12:11.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-23T21:08:30.528Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3783?focusedCommentId=16958252) by Neal Richardson (npr):*\n`[~javierluraschi]` is this still an issue? I don't have spark locally, but this works now:\r\n\r\n```Java\n\r\n> Array$create(1L, type=float32())\r\nArray\r\n<float>\r\n[\r\n  1\r\n]\r\n```\r\n\r\nIt looks like halffloat isn't supported, but that sounds like a different issue\r\n\r\n```Java\n\r\n> Array$create(1L, type=float16())\r\nError in Array__from_vector(x, type) : \r\n  NotImplemented: type not implemented\r\n```"
+        },
+        {
+            "created_at": "2020-02-03T20:12:11.979Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3783?focusedCommentId=17029237) by Neal Richardson (npr):*\nCreated ARROW-7753 for halffloat support but otherwise this seems to have been resolved."
+        },
+        {
+            "created_at": "2021-03-04T17:52:21.560Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3783?focusedCommentId=17295474) by Matthew Summersgill (msummersgill):*\n`[~npr]` \u00a0 \u2013 Just wanted to check and see what the status on this one was. Issue shows closed, and I see there have been some PR's in the past, but it wasn't clear if anything was merged. Regardless, when I attempt to collect a float32 value from Spark to R, I get the following warning. Is something that would make sense for me to open a new issue?\r\n```r\n\r\nstr(collect(SparkR::sql(\"SELECT float('1') AS x;\"))$x[[1]])\r\n## num 1\r\n\r\n## Warning message:In value[[3L]](cond) :  The conversion from Spark DataFrame to R DataFrame was attempted with Arrow optimization because 'spark.sql.execution.arrow.sparkr.enabled' is set to true; however, failed, attempting non-optimization. Reason: Error in checkSchemaInArrow(schema(x)): Arrow optimization in R does not support float type yet.\r\n```"
+        },
+        {
+            "created_at": "2021-03-04T18:09:15.952Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3783?focusedCommentId=17295489) by Neal Richardson (npr):*\nThe error comes from spark: https://github.com/apache/spark/blob/13fd272cd353c8aa40a6030c4c847c2e2f632f68/R/pkg/R/types.R#L98\r\n\r\nLooks like SparkR hasn't kept up with what types are supported in the arrow package, so you may want to open an issue for Spark."
+        },
+        {
+            "created_at": "2021-03-04T20:50:42.740Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3783?focusedCommentId=17295581) by Matthew Summersgill (msummersgill):*\nThanks for pointing me in the right direction, I'll do some testing and see if I can get this resolved on the spark side!"
+        },
+        {
+            "created_at": "2021-03-04T21:23:14.600Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3783?focusedCommentId=17295584) by Matthew Summersgill (msummersgill):*\nThat pointer was spot on, I forked spark, deleted the 3 lines of code, rebuilt SparkR and it just works! I'm opening a PR in spark, but I noticed that there are four other types where SparkR presumes no arrow support.\u00a0 Are these types supported by arrow as well? If so, I'll test and then remove the corresponding error-handlers in the same PR.\r\n\r\n\u00a0\r\n```r\n\r\n  if (any(field_strings == \"BinaryType\")) {\r\n    stop(\"Arrow optimization in R does not support binary type yet.\")\r\n  }\r\n  if (any(startsWith(field_strings, \"ArrayType\"))) {\r\n    stop(\"Arrow optimization in R does not support array type yet.\")\r\n  }\r\n\r\n# Arrow optimization in Spark does not yet support both cases below.\r\n  if (any(startsWith(field_strings, \"StructType\"))) {\r\n    stop(\"Arrow optimization in R does not support nested struct type yet.\")\r\n  }\r\n  if (any(startsWith(field_strings, \"MapType\"))) {\r\n    stop(\"Arrow optimization in R does not support map type yet.\")\r\n  }\r\n```"
+        },
+        {
+            "created_at": "2021-03-04T21:33:12.521Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3783?focusedCommentId=17295588) by Neal Richardson (npr):*\nSupported Arrow types in the R package are in https://arrow.apache.org/docs/r/articles/arrow.html#arrow-to-r, the same section you're editing in ARROW-11864. Map is not supported yet but I would imagine the others are; you could also refer to what sparklyr has implemented."
+        },
+        {
+            "created_at": "2021-03-04T21:41:34.085Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3783?focusedCommentId=17295592) by Matthew Summersgill (msummersgill):*\nPerfect! I will test on those additional types, any feedback you have on the PR for Spark (<https://github.com/apache/spark/pull/31744)>\u00a0is welcome!"
+        }
+    ]
+}

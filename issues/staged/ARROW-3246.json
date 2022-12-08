@@ -1,0 +1,65 @@
+{
+    "issue": {
+        "title": "[Python][Parquet] direct reading/writing of pandas categoricals in parquet",
+        "body": "***Note**: This issue was originally created as [ARROW-3246](https://issues.apache.org/jira/browse/ARROW-3246). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nParquet supports \"dictionary encoding\" of column data in a manner very similar to the concept of Categoricals in pandas. It is natural to use this encoding for a column which originated as a categorical. Conversely, when loading, if the file metadata says that a given column came from a pandas (or arrow) categorical, then we can trust that the whole of the column is dictionary-encoded and load the data directly into a categorical column, rather than expanding the labels upon load and recategorising later.\r\n\r\nIf the data does not have the pandas metadata, then the guarantee cannot hold, and we cannot assume either that the whole column is dictionary encoded or that the labels are the same throughout. In this case, the current behaviour is fine.\r\n\r\n\u00a0\r\n\r\n(please forgive that some of this has already been mentioned elsewhere; this is one of the entries in the list at\u00a0<https://github.com/dask/fastparquet/issues/374>\u00a0as a feature that is useful in fastparquet)",
+        "created_at": "2018-09-17T00:00:18.000Z",
+        "updated_at": "2021-02-17T18:19:35.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-16T13:54:07.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-09-17T01:59:36.756Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3246?focusedCommentId=16616987) by Wes McKinney (wesm):*\nThis can only be implemented in the narrow case where there is metadata indicating that the dictionary in each row group is expected to be the same (as a result of having been written by pandas). Otherwise, in general, the observed dictionaries may not be the same from row group to row group"
+        },
+        {
+            "created_at": "2018-09-17T02:25:58.387Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3246?focusedCommentId=16617003) by Martin Durant (mdurant):*\n> can only be implemented in the narrow case\r\n\r\n\u00a0\r\n\r\nYes, exactly what I was trying to say. However, a great optimisation in that specific case."
+        },
+        {
+            "created_at": "2019-03-12T21:04:32.870Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3246?focusedCommentId=16791008) by Wes McKinney (wesm):*\nI moved this to 0.14. A bit of work will be needed in order to be able to sidestep hashing to categorical. If we can read BYTE_ARRAY columns directly back as Categorical (but have to hash) that is a good first step. "
+        },
+        {
+            "created_at": "2019-08-06T21:57:40.878Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3246?focusedCommentId=16901506) by Wes McKinney (wesm):*\nI've been looking at what's required to write `arrow::DictionaryArray` directly into the appropriate lower-level ColumnWriter class. The trouble with the way the software is layered right now is that there is a \"Chinese wall\" between `TypedColumnWriter<T>` and the Arrow write layer. We can only communicate with this class using the Parquet C types such as `ByteArray` and `FixedLenByteArray`. This is also a performance issue since we cannot write directly into the writer from `arrow::BinaryArray` or similar cases where it might make sense. \r\n\r\nI think the only way to fix the current situation is to add a `TypedColumnWriter<T>::WriteArrow(const ::arrow::Array&)` method and \"push down\" a lot of the logic that's currently in parquet/arrow/writer.cc into the `TypedColumnWriter<T>` implementation. This will enable us to do various write performance optimizations and also address the direct dictionary write issue. This is not a small project, but I would say that it's overdue and will put us on a better footing going forward\r\n\r\ncc `[~xhochy]` `[~hatem]` for any thoughts"
+        },
+        {
+            "created_at": "2019-08-06T22:02:30.998Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3246?focusedCommentId=16901508) by Wes McKinney (wesm):*\nI created ARROW-6152 to cover the initial feature-preserving refactoring. I estimate about a day of effort for that, will report in once I make a little progress"
+        },
+        {
+            "created_at": "2019-08-07T11:19:24.261Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3246?focusedCommentId=16901988) by Hatem Helal (hatem):*\nAdding `TypedColumnWriter<T>::WriteArrow(const ::arrow::Array&)` makes a lot of sense to me. `[~wesmckinn]` do you have a list of cases that you know can be optimized? The main one I'm aware of is the [dictionary array](https://github.com/apache/arrow/blob/master/cpp/src/parquet/arrow/writer.cc#L1079) case, but but I'm curious if there are others arrow types that could be handled more efficiently.\r\n\r\nAs an aside, has it ever been considered to automatically tune the size of the dictionary page? I think for the limited case where of writing `arrow::DictionaryArray` we might want to ensure that the encoder doesn't fallback to plain encoding. That could be handled as a separate feature."
+        },
+        {
+            "created_at": "2019-08-07T17:41:10.021Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3246?focusedCommentId=16902341) by Wes McKinney (wesm):*\nWriting BYTE_ARRAY can also definitely be made more efficient. See logic at\r\n\r\nhttps://github.com/apache/arrow/blob/master/cpp/src/parquet/arrow/writer.cc#L858\r\n\r\nThe dictionary page size issue is usually handled through the WriterProperties\r\n\r\nhttps://github.com/apache/arrow/blob/master/cpp/src/parquet/properties.h#L178\r\n\r\nIf the dictionary is written all at once then this property can be circumvented, that would be my plan."
+        },
+        {
+            "created_at": "2019-08-08T04:03:21.321Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3246?focusedCommentId=16902652) by Wes McKinney (wesm):*\nOK, I was able to get the initial refactor done today. Now we need the plumbing to be able to write dictionary values and indices separately to `DictEncoder<T>`"
+        },
+        {
+            "created_at": "2019-08-08T11:39:55.959Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3246?focusedCommentId=16902896) by Hatem Helal (hatem):*\n>\u00a0 If the dictionary is written all at once then this property can be circumvented, that would be my plan.\r\n\r\nI like that plan.\r\n\u00a0\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-08-09T16:34:30.812Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3246?focusedCommentId=16904020) by Wes McKinney (wesm):*\nMaking some progress on this. It's a can of worms because of the interplay between the ColumnWriter, Encoder, and Statistics types. "
+        },
+        {
+            "created_at": "2019-08-13T02:08:35.556Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3246?focusedCommentId=16905735) by Wes McKinney (wesm):*\nThis has been quite the saga, but I should be able to get a patch up for this tomorrow. I have to decide how to get the dictionary types to be automatically read correctly without setting the `read_dictionary` property"
+        },
+        {
+            "created_at": "2019-08-16T13:54:07.250Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3246?focusedCommentId=16909065) by Wes McKinney (wesm):*\nIssue resolved by pull request 5077\n<https://github.com/apache/arrow/pull/5077>"
+        }
+    ]
+}

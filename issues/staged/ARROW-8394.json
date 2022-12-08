@@ -1,0 +1,65 @@
+{
+    "issue": {
+        "title": "[JS] Typescript compiler errors for arrow d.ts files, when using es2015-esm package",
+        "body": "***Note**: This issue was originally created as [ARROW-8394](https://issues.apache.org/jira/browse/ARROW-8394). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAttempting to use apache-arrow within a web application, but typescript compiler throws the following errors in some of arrow's .d.ts files\r\n\r\nimport \\{ Table } from \"../node_modules/@apache-arrow/es2015-esm/Arrow\";\r\nexport class SomeClass {\r\n.\r\n.\r\nconstructor() {\r\nconst t = Table.from('');\r\n}\r\n**node_modules/@apache-arrow/es2015-esm/column.d.ts:14:22** - error TS2417: Class static side 'typeof Column' incorrectly extends base class static side 'typeof Chunked'. Types of property 'new' are incompatible.\r\n\r\n**node_modules/@apache-arrow/es2015-esm/ipc/reader.d.ts:238:5** - error TS2717: Subsequent property declarations must have the same type. Property 'schema' must be of type 'Schema', but here has type 'Schema'.\r\n\r\n238 schema: Schema;\r\n\r\n**node_modules/@apache-arrow/es2015-esm/recordbatch.d.ts:17:18** - error TS2430: Interface 'RecordBatch' incorrectly extends interface 'StructVector'. The types of 'slice(...).clone' are incompatible between these types.\r\n\r\nthe tsconfig.json file looks like\r\n\r\n{\r\n \"compilerOptions\": {\r\n \"target\":\"ES6\",\r\n \"outDir\": \"dist\",\r\n \"baseUrl\": \"src/\"\r\n },\r\n \"exclude\": [\"dist\"],\r\n \"include\": [\"src/\\*.ts\"]\r\n}",
+        "created_at": "2020-04-10T08:17:04.000Z",
+        "updated_at": "2021-01-03T00:56:27.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: JavaScript",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-10-05T16:55:34.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-04-27T15:14:32.940Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8394?focusedCommentId=17093616) by Phil Price (pprice):*\nThis also happens with `0.17.0` from what I can tell there are two things which I would consider adoption blockers:\r\n1. apache-arrow compiles with typescript@3.5, but typescript@3.6+ has stricter type-checks, and cannot consume the output. A couple of cases I've found that are invalid:\u00a0\n   1. Extension of static `new()` methods with different typed parameter order (column<T> derived from chunked<T> but changes the signature of `new` to takes `string | Field` as the first param over `Data`\n   1. Not passing template types to fields (e.g. `foo: Schema` to `foo: Schema<T>`)\u00a0\n1. Attempting to upgrade `apache-arrow` to typescript@3.8 (or 3.9-beta) falls afoul of a typescript compiler bug (<https://github.com/microsoft/TypeScript/issues/35186>); from my understanding, the compiler is on an error path anyway but bails when trying to print error detail. This makes the upgrade difficult as it's a case of whack-a-mole.\u00a0"
+        },
+        {
+            "created_at": "2020-05-29T19:01:27.713Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8394?focusedCommentId=17119867) by Paul Taylor (paul.e.taylor):*\nThanks `[~pprice]`, I'll look into this. I had to do a bunch of weird things to trick the 3.5 compiler into propagating the types, so I'm hoping I can back some of those out to get it working in 3.9 and simplify the typedefs along the way."
+        },
+        {
+            "created_at": "2020-08-26T16:59:24.560Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8394?focusedCommentId=17185329) by Tim Conkling (timconkling):*\nChiming in with an annoying +1 vote for this issue - is it being investigated?\r\n\r\n\u00a0\r\n\r\nI'm using Apache Arrow to ship dataframes from Python to a browser app, and would _love_ to be able to use TypeScript, but I'm unable to get the project to compile.\r\n\r\n\u00a0\r\n\r\nIncidentally, I also tried downgrading my project's TypeScript version to 3.5, but that results in different errors:\r\n\r\n\r\n```\r\nnode_modules/apache-arrow/ipc/reader.d.ts:238:5 - error TS2717: Subsequent property declarations must have the same type. Property 'schema' must be of type 'Schema<T>', but here has type 'Schema<any>'.\r\n\r\n238 schema: Schema;\r\n ~~~~~~\r\n\r\nnode_modules/apache-arrow/ipc/reader.d.ts:191:5\r\n 191 schema: Schema<T>;\r\n ~~~~~~\r\n 'schema' was also declared here.\r\n\r\nnode_modules/apache-arrow/recordbatch.d.ts:17:18 - error TS2430: Interface 'RecordBatch<T>' incorrectly extends interface 'StructVector<T>'.\r\n Types of property 'slice' are incompatible.\r\n Type '(begin?: number | undefined, end?: number | undefined) => RecordBatch<T>' is not assignable to type '(begin?: number | undefined, end?: number | undefined) => StructVector<T>'.\r\n Type 'RecordBatch<T>' is not assignable to type 'StructVector<T>'.\r\n Types of property 'clone' are incompatible.\r\n Type '(data: Data<Struct<T>>, children?: AbstractVector<any>[] | undefined) => RecordBatch<T>' is not assignable to type '<R extends DataType<Type, any> = Struct<T>>(data: Data<R>, children?: AbstractVector<R>[] | undefined) => VectorType<R>'.\r\n Types of parameters 'data' and 'data' are incompatible.\r\n Type 'Data<R>' is not assignable to type 'Data<Struct<T>>'.\r\n Type 'R' is not assignable to type 'Struct<T>'.\r\n Property 'dataTypes' is missing in type 'DataType<Type, any>' but required in type 'Struct<T>'.\r\n\r\n17 export interface RecordBatch<T extends {\r\n ~~~~~~~~~~~\r\n\r\nnode_modules/apache-arrow/type.d.ts:458:5\r\n 458 dataTypes: T;\r\n ~~~~~~~~~\r\n 'dataTypes' is declared here.\r\n\r\nnode_modules/apache-arrow/recordbatch.d.ts:24:22 - error TS2415: Class 'RecordBatch<T>' incorrectly extends base class 'StructVector<T>'.\r\n\r\n24 export declare class RecordBatch<T extends {\r\n ~~~~~~~~~~~\r\n\r\n\r\nFound 3 errors.\r\n```"
+        },
+        {
+            "created_at": "2020-09-12T10:12:14.278Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8394?focusedCommentId=17194700) by Joao (Costa):*\nHi.\r\n We are also facing issues using apache arrow (@apache-arrow/ts 0.17.0) with Typescript 3.9.x and 4.0.x.\u00a0\r\n Is this being looked into?\r\n\r\nThanks"
+        },
+        {
+            "created_at": "2020-09-12T19:54:03.835Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8394?focusedCommentId=17194835) by Wes McKinney (wesm):*\nDon't think anyone is looking at it. "
+        },
+        {
+            "created_at": "2020-09-13T23:00:46.652Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8394?focusedCommentId=17195136) by Joao (Costa):*\nI'm sorry if this is misplaced or against the practices of the community, but would it be out of place to ask if someone would be interested in a bug bounty for this?\r\nThx"
+        },
+        {
+            "created_at": "2020-09-14T16:34:08.363Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8394?focusedCommentId=17195577) by Tim Conkling (timconkling):*\nThis is intended with all respect - this is a complex project, and I appreciate the work being done on it! - but I'm surprised by this response.\r\n\r\n`[~wesm]`, if nobody is looking at this issue, does that mean that the JavaScript library is not a priority (or not being maintained anymore)?\r\n\r\n(As a user of the project, I'm trying to calibrate my expectations for its future. And as a developer on other open source projects, I recognize that it can be supremely frustrating when others feel entitled to ongoing free support - that's not my intent! :))"
+        },
+        {
+            "created_at": "2020-09-14T17:16:46.036Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8394?focusedCommentId=17195628) by Wes McKinney (wesm):*\nI'm just stating the facts. You are welcome to raise this issue on dev@arrow.apache.org or solicit other JS developers who are making use of the project to help with maintaining it. "
+        },
+        {
+            "created_at": "2020-09-14T18:16:29.084Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8394?focusedCommentId=17195668) by Paul Taylor (paul.e.taylor):*\nI've started work on a branch in my fork here[1], but have been occupied the last few weeks (work, moving, back injury, etc.). There's not much left to do, so I think I should be able to get it finished and PR'd this week.\r\n\r\n1. https://github.com/trxcllnt/arrow/tree/fix/typescript-3.9-errors"
+        },
+        {
+            "created_at": "2020-09-18T05:31:35.022Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8394?focusedCommentId=17198118) by Paul Taylor (paul.e.taylor):*\n`[~pprice]` `[~timconkling]` `[~Costa]` PR is up @ https://github.com/apache/arrow/pull/8216"
+        },
+        {
+            "created_at": "2020-10-05T16:55:34.716Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8394?focusedCommentId=17208185) by Neal Richardson (npr):*\nIssue resolved by pull request 8216\n<https://github.com/apache/arrow/pull/8216>"
+        },
+        {
+            "created_at": "2021-01-03T00:56:27.672Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8394?focusedCommentId=17257623) by Marc Prud'hommeaux (mprudhom):*\nI don't think this has been fixed. I am seeing the same error with 2.0.1. This is also reported elsewhere: <https://github.com/apache/arrow/issues/8812>\r\n\r\nThe particular error I'm seeing is:\r\n```java\n\r\nnode_modules/apache-arrow/interfaces.d.ts:178:5 - error TS2502: '[Type.FixedSizeList]' is referenced directly or indirectly in its own type annotation.178     [Type.FixedSizeList]: T extends type.FixedSizeList ? vecs.FixedSizeListVector<T['valueType']> : never;\r\n        ~~~~~~~~~~~~~~~~~~~~node_modules/apache-arrow/ipc/reader.d.ts:236:5 - error TS2717: Subsequent property declarations must have the same type.  Property 'schema' must be of type 'Schema<T>', but here has type 'Schema<any>'.236     schema: Schema;\r\n        ~~~~~~  node_modules/apache-arrow/ipc/reader.d.ts:189:5\r\n    189     schema: Schema<T>;\r\n            ~~~~~~\r\n    'schema' was also declared here.node_modules/apache-arrow/recordbatch.d.ts:17:18 - error TS2430: Interface 'RecordBatch<T>' incorrectly extends interface 'StructVector<T>'.\r\n  The types of 'slice(...).clone' are incompatible between these types.\r\n    Type '(data: Data<Struct<T>>, children?: AbstractVector<any>[]) => RecordBatch<T>' is not assignable to type '<R extends DataType<Type, any> = Struct<T>>(data: Data<R>, children?: AbstractVector<R>[]) => VectorType<R>'.\r\n      Types of parameters 'data' and 'data' are incompatible.\r\n        Type 'Data<R>' is not assignable to type 'Data<Struct<T>>'.\r\n          Type 'R' is not assignable to type 'Struct<T>'.\r\n            Property 'dataTypes' is missing in type 'DataType<Type, any>' but required in type 'Struct<T>'.17 export interface RecordBatch<T extends {\r\n                    ~~~~~~~~~~~  node_modules/apache-arrow/type.d.ts:458:5\r\n    458     dataTypes: T;\r\n            ~~~~~~~~~\r\n    'dataTypes' is declared here.node_modules/apache-arrow/recordbatch.d.ts:24:22 - error TS2415: Class 'RecordBatch<T>' incorrectly extends base class 'StructVector<T>'.24 export declare class RecordBatch<T extends {\r\n                        ~~~~~~~~~~~\r\nFound 4 errors.\n```\r\n\u00a0"
+        }
+    ]
+}

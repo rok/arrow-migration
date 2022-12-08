@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[C++] IPC writer does not write an empty batch in the case of an empty table, which PySpark cannot handle",
+        "body": "***Note**: This issue was originally created as [ARROW-17912](https://issues.apache.org/jira/browse/ARROW-17912). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nMy current work is about Pyspark Cogroup Pandas UDF. And two processes are involved, the JVM one (sender) and the Python one (receiver).\r\n\r\n[Spark is using the Arrow Java `ArrowStreamWriter`](https://github.com/apache/spark/blob/branch-3.3/sql/core/src/main/scala/org/apache/spark/sql/execution/python/CoGroupedArrowPythonRunner.scala#L99) to serialize Arrow tables being sent from the JVM process to the Python process, and ArrowStreamWriter can handle empty tables correctly.\r\n\r\n[While cuDF is using the Arrow C++ RecordBatchWriter ](https://github.com/rapidsai/cudf/blob/branch-22.10/java/src/main/native/src/TableJni.cpp#L254)to do the same serialization, but it leads to an error as below on the Python side, where [the Pyspark is calling Pyarrow **Table.from_batches**](https://github.com/apache/spark/blob/branch-3.3/python/pyspark/sql/pandas/serializers.py#L366) to deserialize the arrow stream.\r\n\r\n```\u00a0\r\n\r\n_E \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 File \"/usr/local/spark/python/lib/pyspark.zip/pyspark/sql/pandas/serializers.py\", line 297, in load_stream_\r\n_E \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 [self.arrow_to_pandas(c) for c in pa.Table.from_batches(batch2).itercolumns()]_\r\n_E \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 File \"pyarrow/table.pxi\", line 1609, in pyarrow.lib.Table.from_batches_\r\n_E \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 <font color=\"#de350b\">**ValueError: Must pass schema, or at least one RecordBatch**</font>_\r\n\r\n```",
+        "created_at": "2022-10-02T11:59:09.000Z",
+        "updated_at": "2022-10-05T13:50:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-05T13:50:28.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-02T12:06:41.984Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17912?focusedCommentId=17612091) by Liangcai li (firestarmanllc):*\nAfter some investigation, according to [the code here](https://github.com/apache/arrow/blob/release-8.0.0/cpp/src/arrow/table.cc#L621), it look likes the **_TableBatchReader_** will return null if given an empty table, not an empty batch. So the [RecordBatchWriter will skip the empty table, and write no batch into the stream](https://github.com/apache/arrow/blob/release-8.0.0/cpp/src/arrow/ipc/writer.cc#L964). But the [Pyarrow requires at least one batch ](https://github.com/apache/arrow/blob/release-7.0.0/python/pyarrow/table.pxi#L1936)when the schema is not specified.\r\n\r\n\u00a0\r\n\r\nMaybe we can do something as below to cover the empty table case, by adding a new boolean variable \"{**}_reach_end_{**}\". Then it will align with the Java's behavior.\u00a0\r\n\r\n```\r\n\r\n\u00a0_Status TableBatchReader::ReadNext(std::shared_ptr<RecordBatch>\\* out) {_\r\n_\\*<font color=\"#de350b\">- \u00a0if (absolute_row_position_ == table_.num_rows()) {</font>\\*_\r\n_\\*<font color=\"#00875a\">+ \u00a0if (reach_end) {</font>\\*_\r\n\u00a0 \u00a0 \u00a0_\\*<font color=\"#00875a\">\\*out = nullptr;</font>\\*_\r\n\u00a0 \u00a0 \u00a0_\\*<font color=\"#00875a\">return Status::OK();</font>\\*_\r\n\r\n_@@ -666,6 +668,10 @@ Status TableBatchReader::ReadNext(std::shared_ptr<RecordBatch>\\* out) {_\r\n\u00a0 \u00a0_absolute_row_position_ += chunksize;_\r\n\u00a0 \u00a0{_}\\*out = RecordBatch::Make(table{_}.schema(), chunksize, std::move(batch_data));_\r\n\r\n<font color=\"#00875a\">**_+ \u00a0if (absolute_row_position_ == table_.num_rows()) {**</font>\r\n**<font color=\"#00875a\">_+ \u00a0 \u00a0reach_end = true;_</font>**\r\n**<font color=\"#00875a\">_+ \u00a0}_</font>**\r\n**<font color=\"#00875a\">_+_</font>**\r\n\u00a0 \u00a0_return Status::OK();_\r\n\u00a0_}_\r\n\r\n```"
+        },
+        {
+            "created_at": "2022-10-03T11:29:04.627Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17912?focusedCommentId=17612249) by David Li (lidavidm):*\nHmm, I'd rather not adjust the C++ side. Why not provide the schema on the Python side? Or else, the C++ side can explicitly write out an empty batch. But I don't think it makes sense to adjust behavior for all programs."
+        },
+        {
+            "created_at": "2022-10-03T11:30:33.754Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17912?focusedCommentId=17612250) by David Li (lidavidm):*\nLooks like PySpark should have the schema in ArrowStreamSerializer, it's just discarding it"
+        },
+        {
+            "created_at": "2022-10-03T13:13:58.760Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17912?focusedCommentId=17612284) by Liangcai li (firestarmanllc):*\nThx a lot for review.\r\n\r\n\u2014 Why not provide the schema on the Python side?\u00a0\r\n\r\nOne Pyspark serializer may read batches with different schemas, so better to infer the \"local\" schema from a batch, not a \"global\" schema for all the read batches. [Cogroup is one of this kind of cases.](https://github.com/apache/spark/blob/branch-3.3/python/pyspark/sql/pandas/serializers.py#L363) The _CogroupUDFSerializer_ will load batches from two tables, and the two tables are likely to have different schemas.\r\n\r\n\u00a0\r\n\r\n\u2014 Or else, the C++ side can explicitly write out an empty batch. But I don't think it makes sense to adjust behavior for all programs.\r\n\r\nJava writer indeed can send out an empty table. And it makes sense I think to transport an empty table for the cases of joining two tables.\u00a0\r\n\r\nBesides, personally this would be a positive change to let C++ IPC work with more cases, just like the Java IPC. Or else, could we have a config to switch between the two behaviors?\r\n\r\n\u00a0\r\n\r\n\u2014 Looks like PySpark should have the schema in ArrowStreamSerializer, it's just discarding it.\r\n\r\nSimilarly, one Pyspark serializer may read batches with different schemas, so better to infer the \"local\" schema from a batch, even it is empty."
+        },
+        {
+            "created_at": "2022-10-03T13:54:09.474Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17912?focusedCommentId=17612300) by David Li (lidavidm):*\nA single Arrow stream has a consistent schema, so you still have a consistent schema for some 'unit' of data.\r\n\r\nThere is a slight difference between a stream with 0 batches and a stream of a single empty batch. Again, I don't think we should change this unilaterally for all consumers. I think either the sender here should explicitly write out an empty batch, or the consumer here should recognize that Arrow streams carry a schema and explicitly specify the schema. If there are batches with other schemas, those are in other streams, so I don't see how that affects the issue at hand."
+        },
+        {
+            "created_at": "2022-10-04T10:11:17.721Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17912?focusedCommentId=17612549) by Liangcai li (firestarmanllc):*\n\u2014 \u00a0I think either the sender here should explicitly write out an empty batch\r\n\r\nNot fully get what this means. Could you share how to do it ?\r\n\r\nDo you mean the current C++ IPC supports write out an empty table ?\r\n\r\n\u00a0\r\n\r\n\u2014 There is a slight difference between a stream with 0 batches and a stream of a single empty batch\r\n\r\nYeah, what I want is just sending out an single empty table, and the Python receiver can get it."
+        },
+        {
+            "created_at": "2022-10-04T10:13:31.570Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17912?focusedCommentId=17612551) by Liangcai li (firestarmanllc):*\nBTW, is it OK that the C++ IPC and Java IPC in the same Arrow library behaves differently at the sender side with an empty table ?"
+        },
+        {
+            "created_at": "2022-10-04T11:45:16.675Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17912?focusedCommentId=17612577) by David Li (lidavidm):*\nThere is no such thing as a 'table' in Java in the first place, nor is there any such concept in Arrow itself. Tables are only a convenience added in some Arrow implementations.\r\n\r\nYou can create an empty record batch of a given schema (e.g. by using MakeArrayOfNull) and explicitly write that out to the stream.\r\n\r\nAgain, there are two different kinds of 'empty'. Either you have a single empty batch, or you have no batches at all. Hence I think it is best to be explicit. I also do not understand why Spark cannot be made to be more robust about this."
+        },
+        {
+            "created_at": "2022-10-05T08:41:53.667Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17912?focusedCommentId=17612897) by Joris Van den Bossche (jorisvandenbossche):*\nI agree with David that it seems this can be solved in pyspark. \r\n\r\nYou referenced https://github.com/apache/spark/blob/5483607910aba0aaf05d029c6c813faa37cb4731/python/pyspark/sql/pandas/serializers.py#L366 where `Table.from_batches` is being called, which requires a schema if `batches` is an empty list. But those batches comes from `ArrowStreamSerializer.load_stream`, which calls `pyarrow.ipc.open_stream` (https://github.com/apache/spark/blob/5483607910aba0aaf05d029c6c813faa37cb4731/python/pyspark/sql/pandas/serializers.py#L95-L97). At that point, you always have the schema from the stream as well (`reader.schema`), so it is just a matter of passing this through to `from_batches`."
+        },
+        {
+            "created_at": "2022-10-05T13:50:55.050Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17912?focusedCommentId=17613009) by Liangcai li (firestarmanllc):*\nThx for all of these, closing ...\u00a0"
+        }
+    ]
+}

@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[C++]\u00a0EXC_BAD_ACCESS in BaseSetBitRunReader<false>::NextRun",
+        "body": "***Note**: This issue was originally created as [ARROW-10881](https://issues.apache.org/jira/browse/ARROW-10881). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n`./release/parquet-encoding-benchmark` fails with\r\n\r\n```Java\n\r\nBM_PlainDecodingFloat/65536                              4206 ns         4206 ns       167354 bytes_per_second=58.0474G/s\r\nerror: libparquet.300.dylib debug map object file '/Users/uwe/Development/arrow/cpp/build/src/parquet/CMakeFiles/parquet_objlib.dir/encoding.cc.o' has changed (actual time is 2020-12-10 22:57:29.000000000, debug map time is 2020-12-10 21:02:52.000000000) since this executable was linked, file will be ignored\r\nProcess 11120 stopped\r\n* thread #1, queue = 'com.apple.main-thread', stop reason = EXC_BAD_ACCESS (code=1, address=0x0)\r\n    frame #0: 0x000000010047fe04 libparquet.300.dylib`arrow::internal::BaseSetBitRunReader<false>::NextRun() + 192\r\nlibparquet.300.dylib`arrow::internal::BaseSetBitRunReader<false>::NextRun:\r\n->  0x10047fe04 <+192>: ldur   x11, [x9, #-0x8]\r\n    0x10047fe08 <+196>: str    x9, [x19]\r\n    0x10047fe0c <+200>: str    x11, [x19, #0x18]\r\n    0x10047fe10 <+204>: rbit   x10, x11\r\nTarget 0: (parquet-encoding-benchmark) stopped.\r\n(lldb) bt\r\n* thread #1, queue = 'com.apple.main-thread', stop reason = EXC_BAD_ACCESS (code=1, address=0x0)\r\n  * frame #0: 0x000000010047fe04 libparquet.300.dylib`arrow::internal::BaseSetBitRunReader<false>::NextRun() + 192\r\n    frame #1: 0x000000010047f808 libparquet.300.dylib`parquet::(anonymous namespace)::PlainEncoder<parquet::PhysicalType<(parquet::Type::type)0> >::PutSpaced(bool const*, int, unsigned char const*, long long) + 336\r\n    frame #2: 0x0000000100008970 parquet-encoding-benchmark`parquet::BM_PlainEncodingSpacedBoolean(benchmark::State&) at encoding_benchmark.cc:249:14 [opt]\r\n    frame #3: 0x000000010000881c parquet-encoding-benchmark`parquet::BM_PlainEncodingSpacedBoolean(state=0x000000016fdfd4b8) at encoding_benchmark.cc:257 [opt]\r\n    frame #4: 0x00000001001614f4 libbenchmark.0.dylib`benchmark::internal::BenchmarkInstance::Run(unsigned long long, int, benchmark::internal::ThreadTimer*, benchmark::internal::ThreadManager*) const + 68\r\n    frame #5: 0x0000000100173ae8 libbenchmark.0.dylib`benchmark::internal::(anonymous namespace)::RunInThread(benchmark::internal::BenchmarkInstance const*, unsigned long long, int, benchmark::internal::ThreadManager*) + 80\r\n    frame #6: 0x00000001001723c8 libbenchmark.0.dylib`benchmark::internal::RunBenchmark(benchmark::internal::BenchmarkInstance const&, std::__1::vector<benchmark::BenchmarkReporter::Run, std::__1::allocator<benchmark::BenchmarkReporter::Run> >*) + 1284\r\n    frame #7: 0x000000010015ee7c libbenchmark.0.dylib`benchmark::RunSpecifiedBenchmarks(benchmark::BenchmarkReporter*, benchmark::BenchmarkReporter*) + 1824\r\n    frame #8: 0x000000010014beec libbenchmark_main.0.dylib`main + 76\r\n    frame #9: 0x000000019e270f54 libdyld.dylib`start + 4\r\n```",
+        "created_at": "2020-12-11T09:29:40.000Z",
+        "updated_at": "2021-01-05T20:13:18.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2021-01-05T18:50:18.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-12-11T10:30:28.123Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10881?focusedCommentId=17247821) by Antoine Pitrou (apitrou):*\nOuch. If you compile in debug mode, perhaps you can get a better backtrace? (and perhaps try to see what happens more precisely)"
+        },
+        {
+            "created_at": "2020-12-11T10:38:02.366Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10881?focusedCommentId=17247828) by Uwe Korn (uwe):*\n`[~apitrou]` I'm just tracking things here, I have to reboot currently after I run things once as I'm running into some weird linker (cache?) issue with gtest, see https://github.com/xhochy/gtest-fail So more of these will come but I can only really work on them once the gtest/linker issue has been fixed."
+        },
+        {
+            "created_at": "2021-01-04T20:12:32.184Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10881?focusedCommentId=17258472) by Uwe Korn (uwe):*\nWith more debug information added, we get this information:\r\n\r\n```Java\n\r\n* thread #1, queue = 'com.apple.main-thread', stop reason = EXC_BAD_ACCESS (code=1, address=0x0)\r\n    frame #0: 0x00000001009a5340 libparquet.300.dylib`arrow::internal::BaseSetBitRunReader<false>::LoadFullWord(this=0x000000016fdfce30) at bit_run_reader.h:264:5\r\n   261 \t    if (Reverse) {\r\n   262 \t      bitmap_ -= 8;\r\n   263 \t    }\r\n-> 264 \t    memcpy(&word, bitmap_, 8);\r\n   265 \t    if (!Reverse) {\r\n   266 \t      bitmap_ += 8;\r\n   267 \t    }\r\nTarget 0: (parquet-encoding-benchmark) stopped.\r\n(lldb) ll\r\nerror: 'll' is not a valid command.\r\n(lldb) p word\r\n(uint64_t) $0 = 6171905360\r\n(lldb) p bitmap_\r\n(const uint8_t *) $1 = 0x0000000000000000\r\n```"
+        },
+        {
+            "created_at": "2021-01-04T20:17:52.492Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10881?focusedCommentId=17258474) by Antoine Pitrou (apitrou):*\nCan you also post the full traceback? That should give accurate line numbers for all frames."
+        },
+        {
+            "created_at": "2021-01-04T20:43:57.297Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10881?focusedCommentId=17258481) by Uwe Korn (uwe):*\nI'll push a PR later that should fix this ;)"
+        },
+        {
+            "created_at": "2021-01-05T18:50:18.832Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10881?focusedCommentId=17259132) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 9097\n<https://github.com/apache/arrow/pull/9097>"
+        }
+    ]
+}

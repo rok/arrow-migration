@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Python] timestamp_as_object support for pa.Table.to_pandas in pyarrow",
+        "body": "***Note**: This issue was originally created as [ARROW-5359](https://issues.apache.org/jira/browse/ARROW-5359). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCreating ticket for issue reported in github(<https://github.com/apache/arrow/issues/4284>)\r\n## pyarrow (Issue with timestamp conversion from arrow to pandas)\r\n\r\npyarrow Table.to_pandas has option date_as_object but does not have similar option for timestamp. When a timestamp column in arrow table is converted to pandas the target datetype is pd.Timestamp and pd.Timestamp does not handle time > 2262-04-11 23:47:16.854775807 and hence in the below scenario the date is transformed to incorrect value. Adding timestamp_as_object option in pa.Table.to_pandas will help in this scenario.\r\n\r\n#Python(3.6.8)\r\n\r\nimport pandas as pd\r\n\r\nimport pyarrow as pa\r\n\r\npd.**version**\r\n'0.24.1'\r\n\r\npa.**version**\r\n'0.13.0'\r\n\r\nimport datetime\r\n\r\ndf = pd.DataFrame(\\{\"test_date\": [datetime.datetime(3000,12,31,12,0),datetime.datetime(3100,12,31,12,0)]})\r\n\r\ndf\r\ntest_date\r\n0 3000-12-31 12:00:00\r\n1 3100-12-31 12:00:00\r\n\r\npa_table = pa.Table.from_pandas(df)\r\n\r\npa_table[0]\r\nColumn name='test_date' type=TimestampType(timestamp[us])\r\n[\r\n[\r\n32535172800000000,\r\n35690846400000000\r\n]\r\n]\r\n\r\npa_table.to_pandas()\r\ntest_date\r\n0 1831-11-22 12:50:52.580896768\r\n1 1931-11-22 12:50:52.580896768",
+        "created_at": "2019-05-16T23:41:47.000Z",
+        "updated_at": "2020-06-19T03:29:21.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-06-19T03:29:16.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-05-11T11:30:20.647Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5359?focusedCommentId=17104355) by Tanguy Fautre (GPSnoopy):*\nI suspect this feature is needed to support Parquet files containing timestamps in ms or us, where entries such as 0001-01-01 00:00 or 9999-12-31 23:59 need to be supported (in our use case, these are MinValue and MaxValue of DateTime in C#).\r\n\r\nThe following code works until `to_pandas()` is called. This latter part tries to convert timestamp[ms] to timestamp[ns] (hence the `safe=False`) and converts 0001-01-01 to 1754-08-30.\r\n\r\n- Python 3.8.2 x64\n- Pandas 1.0.3\n- PyArrow 0.17.0\n  \n  ```python\n  \n  import numpy as np\n  import pandas as pd\n  import pyarrow as pa\n  import pyarrow.parquet as pq\n  \n  df = pd.DataFrame({\n      'id': [1, 2, 3],\n      'dateTime': [np.datetime64('0001-01-01 00:00', 'ms'), np.datetime64('2012-05-02 12:35', 'ms'), np.datetime64('2012-05-03 15:42', 'ms')],\n      'value': [1.1, 2.2, 3.3]})\n  \n  table = pa.Table.from_pandas(df)\n  pq.write_table(table, 'timeseries.parquet')\n  result = pq.read_table('timeseries.parquet')\n  df2 = result.to_pandas(date_as_object = True, safe = False)\n  ```\n  \n  df\n  ```Java\n  \n   \tid \tdateTime \tvalue\n  0 \t1 \t0001-01-01T00:00:00.000 \t1.1\n  1 \t2 \t2012-05-02T12:35:00.000 \t2.2\n  2 \t3 \t2012-05-03T15:42:00.000 \t3.3\n  ```\n  \n  df['dateTime']\n  ```Java\n  \n  0    0001-01-01T00:00:00.000\n  1    2012-05-02T12:35:00.000\n  2    2012-05-03T15:42:00.000\n  Name: dateTime, dtype: object\n  ```\n  \n  table\n  ```Java\n  \n  pyarrow.Table\n  id: int64\n  dateTime: timestamp[ms]\n  value: double\n  ```\n  \n  result\n  ```Java\n  \n  pyarrow.Table\n  id: int64\n  dateTime: timestamp[ms]\n  value: double\n  ```\n  \n  df2\n  ```Java\n  \n   \tid \tdateTime \tvalue\n  0 \t1 \t1754-08-30 22:43:41.128654848 \t1.1\n  1 \t2 \t2012-05-02 12:35:00.000000000 \t2.2\n  2 \t3 \t2012-05-03 15:42:00.000000000 \t3.3\n  ```\n  \n  df2['dateTime']\n  ```Java\n  \n  0   1754-08-30 22:43:41.128654848\n  1   2012-05-02 12:35:00.000000000\n  2   2012-05-03 15:42:00.000000000\n  Name: dateTime, dtype: datetime64[ns]\n  ```"
+        },
+        {
+            "created_at": "2020-05-12T09:09:46.759Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5359?focusedCommentId=17105254) by Joris Van den Bossche (jorisvandenbossche):*\nIndeed, out-of-bounds timetamps (out of bounds for pandas, which only supports 1677 to 2262 right now) is I think the main use case for a `timestamp_as_object` keyword."
+        },
+        {
+            "created_at": "2020-05-13T15:03:38.826Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5359?focusedCommentId=17106379) by Itamar Turner-Trauring (itamarst):*\nI have opened a PR with a fix: https://github.com/apache/arrow/pull/7169"
+        },
+        {
+            "created_at": "2020-06-19T03:29:16.348Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5359?focusedCommentId=17140165) by Wes McKinney (wesm):*\nIssue resolved by pull request 7169\n<https://github.com/apache/arrow/pull/7169>"
+        }
+    ]
+}

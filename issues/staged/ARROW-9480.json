@@ -1,0 +1,30 @@
+{
+    "issue": {
+        "title": "[Rust] [DataFusion] All DataFusion execution plan traits should require Send + Sync",
+        "body": "***Note**: This issue was originally created as [ARROW-9480](https://issues.apache.org/jira/browse/ARROW-9480). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAll DataFusion execution plan traits should require Send + Sync, to prepare for async support.",
+        "created_at": "2020-07-15T14:15:12.000Z",
+        "updated_at": "2020-12-30T10:01:13.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Component: Rust - DataFusion",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2020-08-12T15:17:01.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-08-12T15:17:01.819Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9480?focusedCommentId=17176409) by Andy Grove (andygrove):*\nBased on recent experience testing query execution with async, I no longer feel that this makes sense. Async is good for network io but not for file io. It is better to have a dedicated thread per partition when executing queries. \r\n\r\nAlso, we can't use async with Parquet currently without launching a dedicated thread per partition which pretty much defeats the point of using async in the first place."
+        },
+        {
+            "created_at": "2020-12-30T09:59:52.518Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9480?focusedCommentId=17256415) by Ben Sully (sd2k):*\nI'm running into this issue when experimenting with running a DataFusion engine behind an (async) API. Here's a minimal repro (requires tokio 0.2 and datafusion as deps):\r\n\r\n\u00a0\r\n```java\n\r\nuse datafusion::execution::context::ExecutionContext;\r\n\r\nasync fn query(ctx: &mut ExecutionContext) {\r\n    let df = ctx.sql(\"SELECT * FROM foo LIMIT 10\").unwrap();\r\n    df.collect().await.unwrap();\r\n}\r\n\r\n\r\n#[tokio::main]\r\nasync fn main() {\r\n    let mut ctx = ExecutionContext::new();\r\n    tokio::task::spawn_blocking(|| query(&mut ctx)).await;\r\n}\r\n```\r\nThe compiler complains because the future created to represent `query` is not `Send` or `Sync` because the value created by `ctx.sql` is a `dyn DataFrame`, which is not currently `Send` or `Sync`. This means that even though I want to spawn the task on the blocking thread pool, I can't.\r\n\r\nI have a similar issue when trying to run an async function which uses a `dyn TableProvider` since that isn't Send/Sync either.\r\n\r\nHere's the compiler error:\r\n```java\n\r\n\u276e cargo c                                                                                                                                                                                                   <<<\r\n    Checking datafusion-repro v0.1.0 (/tmp/datafusion-repro)\r\nerror: future cannot be sent between threads safely\r\n   --> src/main.rs:11:5\r\n    |\r\n11  |     tokio::task::spawn_blocking(|| query(&mut ctx)).await;\r\n    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^ future returned by `query` is not `Send`\r\n    |\r\n   ::: /home/ben/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-0.2.24/src/task/blocking.rs:115:12\r\n    |\r\n115 |         R: Send + 'static,\r\n    |            ---- required by this bound in `spawn_blocking`\r\n    |\r\n    = help: the trait `Send` is not implemented for `dyn DataFrame`\r\nnote: future is not `Send` as this value is used across an await\r\n   --> src/main.rs:5:5\r\n    |\r\n4   |     let df = ctx.sql(\"SELECT * FROM foo LIMIT 10\").unwrap();\r\n    |         -- has type `Arc<dyn DataFrame>` which is not `Send`\r\n5   |     df.collect().await.unwrap();\r\n    |     ^^^^^^^^^^^^^^^^^^ await occurs here, with `df` maybe used later\r\n6   | }\r\n    | - `df` is later dropped here\r\n\r\nerror: future cannot be sent between threads safely\r\n   --> src/main.rs:11:5\r\n    |\r\n11  |     tokio::task::spawn_blocking(|| query(&mut ctx)).await;\r\n    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^ future returned by `query` is not `Send`\r\n    |\r\n   ::: /home/ben/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-0.2.24/src/task/blocking.rs:115:12\r\n    |\r\n115 |         R: Send + 'static,\r\n    |            ---- required by this bound in `spawn_blocking`\r\n    |\r\n    = help: the trait `Sync` is not implemented for `dyn DataFrame`\r\nnote: future is not `Send` as this value is used across an await\r\n   --> src/main.rs:5:5\r\n    |\r\n4   |     let df = ctx.sql(\"SELECT * FROM foo LIMIT 10\").unwrap();\r\n    |         -- has type `Arc<dyn DataFrame>` which is not `Send`\r\n5   |     df.collect().await.unwrap();\r\n    |     ^^^^^^^^^^^^^^^^^^ await occurs here, with `df` maybe used later\r\n6   | }\r\n    | - `df` is later dropped here\r\n\r\nerror: aborting due to 2 previous errors\r\n\r\nerror: could not compile `datafusion-repro`\r\n```"
+        },
+        {
+            "created_at": "2020-12-30T10:01:13.931Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9480?focusedCommentId=17256417) by Ben Sully (sd2k):*\n(note that adding `Send + Sync` to the `DataFrame` and `TableProvider` traits fixes this)."
+        }
+    ]
+}

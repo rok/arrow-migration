@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "Dataset API calls with nested parallelism does not progress",
+        "body": "***Note**: This issue was originally created as [ARROW-13088](https://issues.apache.org/jira/browse/ARROW-13088). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nLaunching nested threads using the C++ ThreadPool causes the Dataset API (C++/Python using the SyncScanner/AsyncScanner) to stop progressing. The execution just hangs and keeps waiting. Examples of nested threading:\r\n1. Force turn on parallel column reads in ParquetFileFormat by tweaking the code [here](https://github.com/apache/arrow/blob/master/cpp/src/arrow/dataset/file_parquet.cc#L327)\u00a0to get into nested parallelism (for every scan task launched in parallel to spawn threads internally).\u00a0\n1. Create a simple dataset containing Parquet files of count X (where X >= No. of logical cores).\u00a0\n1. `Just do a dataset.to_table() call.`\n   \n   The execution should stop and go into a kind of a sleep state immediately.",
+        "created_at": "2021-06-15T17:44:33.000Z",
+        "updated_at": "2021-06-17T13:40:32.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-06-17T13:40:32.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-15T17:47:05.075Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13088?focusedCommentId=17363816) by David Li (lidavidm):*\nThis is \"working as intended\" and is exactly why parallelism is disabled there. The current scanner launches one thread per scan task on the thread pool, so any nested uses of the thread pool will deadlock. In 5.0.0 there will be an async scanner which does not launch a thread per scan task, so nested parallelism can be enabled. Indeed, see ARROW-12597 and ARROW-11843 which enable this exact use case."
+        },
+        {
+            "created_at": "2021-06-15T17:49:07.811Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13088?focusedCommentId=17363819) by David Li (lidavidm):*\nHmm, I see you've tried the async scanner - sorry I missed that. Did you try that with ARROW-12597 specifically? This was only just recently merged - otherwise there was still a nested parallelism issue."
+        },
+        {
+            "created_at": "2021-06-15T20:02:28.206Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13088?focusedCommentId=17363893) by Jayjeet Chakraborty (Jayjeet):*\nHi `[~lidavidm]`, The problem with Parquet parallel column conversion seems to have got fixed with ARROW-12597. So, As far as I understood, the OptionalParallelFor if replaced by OptionalParallelForAsync fixes the problem of blocking in nested threading right?\u00a0\r\n\r\nI actually have another use case for a project I am working on, where I have custom scan tasks that return compressed IPC RecordBatches and I want to do a parallel decompression of them but currently, I run into the nested threading issue. Basically, the function I need to fix is the [DecompressBuffers](https://github.com/apache/arrow/blob/master/cpp/src/arrow/ipc/reader.cc#L432) function. If you think replacing the OptionalParallelFor here with OptionalParallelForAsync in this function would fix the blocking issue for this also, I would like to fix it and raise a PR. Thanks a lot."
+        },
+        {
+            "created_at": "2021-06-15T20:04:32.191Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13088?focusedCommentId=17363896) by David Li (lidavidm):*\nYes, that looks like the same issue. OptionalParallelFor spawns a bunch of tasks then blocks on them; if it's called from the thread pool itself, it'll deadlock. The Async variant doesn't have this issue as it doesn't rely on a blocking wait."
+        },
+        {
+            "created_at": "2021-06-15T20:07:25.711Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13088?focusedCommentId=17363898) by Jayjeet Chakraborty (Jayjeet):*\nAwesome. Thanks a lot for the clarification.\u00a0"
+        },
+        {
+            "created_at": "2021-06-15T22:19:32.045Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13088?focusedCommentId=17363929) by Weston Pace (westonpace):*\nThis may be obvious but it isn't \"just\" using OptionalParallelForAsync unfortunately.\u00a0 For example, you change \"return OptionalParallelFor(...)\" with \"return OptionalParallelForAsync(...).result()\"\r\n\r\n\u00a0\r\n\r\nYou will need to make sure you never call \".result()\" or \".Wait()\" on an unfinished future from a thread task.\u00a0 You will have to return the future all the way up the chain.\u00a0 This can end up being quite tricky.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-06-16T20:22:47.924Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13088?focusedCommentId=17364506) by Jayjeet Chakraborty (Jayjeet):*\nThanks for explaining this\u00a0 `[~westonpace]`. Closing this issue."
+        }
+    ]
+}

@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[C++] parquet reader Segfaults with illegal SIMD instruction ",
+        "body": "***Note**: This issue was originally created as [ARROW-15664](https://issues.apache.org/jira/browse/ARROW-15664). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen compiling with `-Os` (or with release type `MinRelSize`), and we run parquet tests (in R at least, though I imagine the pyarrow and C++ will have the same issues!) we get a segfault with an illegal opcode on systems that don't have BMI2 available when trying to read parquet files. (It turns out, the github runners for macos don't have BMI2, so this is easily testable there!)\r\n\r\nSomehow in the optimization combined with the way our runtime detection code works, the runtime detection we normally use for this fails (though it works just fine with `-O2`, `-O3`, etc.).\r\n\r\nWhen diagnosing this, I created a branch + PR that runs our R tests after installing from brew which can reliably cause this to happen: https://github.com/apache/arrow/pull/12364 other test suites that exercise parquet reading would probably have the same issue (or even C++ tests built with `-Os`.\r\n\r\nHere's a coredump:\r\n```Java\n\r\n2491 Thread_829819\r\n+ 2491 thread_start  (in libsystem_pthread.dylib) + 15  [0x7ff801c3e00f]\r\n+   2491 _pthread_start  (in libsystem_pthread.dylib) + 125  [0x7ff801c424f4]\r\n+     2491 void* std::__1::__thread_proxy<std::__1::tuple<std::__1::unique_ptr<std::__1::__thread_struct, std::__1::default_delete<std::__1::__thread_struct> >, arrow::internal::ThreadPool::LaunchWorkersUnlocked(int)::$_3> >(void*)  (in arrow.so) + 380  [0x109203749]\r\n+       2491 arrow::internal::FnOnce<void ()>::operator()() &&  (in arrow.so) + 26  [0x109201f30]\r\n+         2491 arrow::internal::FnOnce<void ()>::FnImpl<std::__1::__bind<arrow::detail::ContinueFuture, arrow::Future<std::__1::shared_ptr<arrow::ChunkedArray> >&, parquet::arrow::(anonymous namespace)::FileReaderImpl::DecodeRowGroups(std::__1::shared_ptr<parquet::arrow::(anonymous namespace)::FileReaderImpl>, std::__1::vector<int, std::__1::allocator<int> > const&, std::__1::vector<int, std::__1::allocator<int> > const&, arrow::internal::Executor*)::$_4&, unsigned long&, std::__1::shared_ptr<parquet::arrow::ColumnReaderImpl> > >::invoke()  (in arrow.so) + 98  [0x108f125c2]\r\n+           2491 parquet::arrow::(anonymous namespace)::FileReaderImpl::DecodeRowGroups(std::__1::shared_ptr<parquet::arrow::(anonymous namespace)::FileReaderImpl>, std::__1::vector<int, std::__1::allocator<int> > const&, std::__1::vector<int, std::__1::allocator<int> > const&, arrow::internal::Executor*)::$_4::operator()(unsigned long, std::__1::shared_ptr<parquet::arrow::ColumnReaderImpl>) const  (in arrow.so) + 47  [0x108f11ed5]\r\n+             2491 parquet::arrow::(anonymous namespace)::FileReaderImpl::ReadColumn(int, std::__1::vector<int, std::__1::allocator<int> > const&, parquet::arrow::ColumnReader*, std::__1::shared_ptr<arrow::ChunkedArray>*)  (in arrow.so) + 273  [0x108f0c037]\r\n+               2491 parquet::arrow::ColumnReaderImpl::NextBatch(long long, std::__1::shared_ptr<arrow::ChunkedArray>*)  (in arrow.so) + 39  [0x108f0733b]\r\n+                 2491 parquet::arrow::(anonymous namespace)::LeafReader::LoadBatch(long long)  (in arrow.so) + 137  [0x108f0794b]\r\n+                   2491 parquet::internal::(anonymous namespace)::TypedRecordReader<parquet::PhysicalType<(parquet::Type::type)1> >::ReadRecords(long long)  (in arrow.so) + 442  [0x108f4f53e]\r\n+                     2491 parquet::internal::(anonymous namespace)::TypedRecordReader<parquet::PhysicalType<(parquet::Type::type)1> >::ReadRecordData(long long)  (in arrow.so) + 471  [0x108f50503]\r\n+                       2491 void parquet::internal::standard::DefLevelsToBitmapSimd<false>(short const*, long long, parquet::internal::LevelInfo, parquet::internal::ValidityBitmapInputOutput*)  (in arrow.so) + 250  [0x108fc2a5a]\r\n+                         2491 long long parquet::internal::standard::DefLevelsBatchToBitmap<false>(short const*, long long, long long, parquet::internal::LevelInfo, arrow::internal::FirstTimeBitmapWriter*)  (in arrow.so) + 63  [0x108fc34da]\r\n+                           2491 ???  (in <unknown binary>)  [0x600001354518]\r\n+                             2491 _sigtramp  (in libsystem_platform.dylib) + 29  [0x7ff801c57e2d]\r\n+                               2491 sigactionSegv  (in libR.dylib) + 649  [0x1042598c9]  main.c:625\r\n+                                 2491 Rstd_ReadConsole  (in libR.dylib) + 2042  [0x10435160a]  sys-std.c:1044\r\n+                                   2491 R_SelectEx  (in libR.dylib) + 308  [0x104350854]  sys-std.c:178\r\n+                                     2491 __select  (in libsystem_kernel.dylib) + 10  [0x7ff801c0de4a]\r\n```\r\n\r\nAnd then a disassembly (where you can see a SHLX that shouldn't be there):\r\n\r\n```Java\n\r\nDump of assembler code from 0x13ac6db00 to 0x13ac6db99ff:\r\n ...\r\n--Type <RET> for more, q to quit, c to continue without paging--\r\n   0x000000013ac6db82:\tmov    $0x8,%ecx\r\n   0x000000013ac6db87:\tsub    %rax,%rcx\r\n   0x000000013ac6db8a:\tlea    0xf1520b(%rip),%rdi        # 0x13bb82d9c\r\n   0x000000013ac6db91:\tmovzbl (%rcx,%rdi,1),%edi\r\n   0x000000013ac6db95:\tmov    %esi,%ebx\r\n   0x000000013ac6db97:\tand    %edi,%ebx\r\n=> 0x000000013ac6db99:\tshlx   %rax,%rbx,%rax\r\n   0x000000013ac6db9e:\tor     0x18(%r15),%al\r\n   0x000000013ac6dba2:\tmov    %al,0x18(%r15)\r\n   0x000000013ac6dba6:\tcmp    %rdx,%rcx\r\n   0x000000013ac6dba9:\tjg     0x13ac6dbf5\r\n   0x000000013ac6dbab:\tmov    %al,(%r14)\r\n   0x000000013ac6dbae:\tinc    %r14\r\n   0x000000013ac6dbb1:\tshrx   %rcx,%rsi,%rax\r\n   0x000000013ac6dbb6:\tmov    %rax,-0x20(%rbp)\r\n   0x000000013ac6dbba:\tsub    %rcx,%rdx\r\n   0x000000013ac6dbbd:\tmov    %rdx,%rbx\r\n   0x000000013ac6dbc0:\tsar    $0x3,%rbx\r\n   0x000000013ac6dbc4:\tand    $0x7,%edx\r\n   0x000000013ac6dbc7:\tcmp    $0x1,%rdx\r\n   0x000000013ac6dbcb:\tsbb    $0xffffffffffffffff,%rbx\r\n   0x000000013ac6dbcf:\tlea    -0x20(%rbp),%rsi\r\n   0x000000013ac6dbd3:\tmov    %r14,%rdi\r\n...\r\n```\r\n\r\nWe discovered this because homebrew alters the default build flags and uses `-Os`, though we should include a test that tests this in our CI as well (at least as a nightly) to catch it earlier: https://github.com/Homebrew/homebrew-core/issues/94724",
+        "created_at": "2022-02-11T13:59:25.000Z",
+        "updated_at": "2022-04-21T19:46:31.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-04-21T19:28:09.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-11T14:03:06.318Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15664?focusedCommentId=17490939) by Antoine Pitrou (apitrou):*\nCan it be reproduced without Homebrew?"
+        },
+        {
+            "created_at": "2022-02-11T14:06:38.696Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15664?focusedCommentId=17490940) by Jonathan Keane (jonkeane):*\nIf you want to build with `MinSizeRel`, you'll need to add \r\nhttps://issues.apache.org/jira/browse/ARROW-15664#\r\n```Java\n\r\nelseif(\"${CMAKE_BUILD_TYPE}\" STREQUAL \"MINSIZEREL\")\r\n  set(CMAKE_C_FLAGS \"${CMAKE_C_FLAGS} ${C_FLAGS_MINSIZEREL}\")\r\n  set(CMAKE_CXX_FLAGS \"${CMAKE_CXX_FLAGS} ${CXX_FLAGS_MINSIZEREL}\")\r\n```\r\n\r\nto https://github.com/apache/arrow/blob/fa699117091917f0992225aff4e8d4c08910162a/cpp/cmake_modules/SetupCxxFlags.cmake#L633-L647 for that to work"
+        },
+        {
+            "created_at": "2022-02-11T20:34:11.394Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15664?focusedCommentId=17491139) by Jonathan Keane (jonkeane):*\n> Can it be reproduced without Homebrew?\r\n\r\nYes, if you build arrow with `CMAKE_RELEASE_TYPE=MinSizeRel` (and possibly even just `-Os`) you can experience the segfault"
+        },
+        {
+            "created_at": "2022-02-14T20:17:30.737Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15664?focusedCommentId=17492197) by Jonathan Keane (jonkeane):*\nhttps://github.com/apache/arrow/pull/12422 has a crossbow build that exercises `-DCMAKE_RELEASE_TYPE=MinSizeRel` outside of brew "
+        },
+        {
+            "created_at": "2022-04-21T18:26:14.906Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15664?focusedCommentId=17525945) by Krisztian Szucs (kszucs):*\n`[~jonkeane]` what's the status of this issue? "
+        },
+        {
+            "created_at": "2022-04-21T18:52:27.015Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15664?focusedCommentId=17525984) by Jonathan Keane (jonkeane):*\nWe have a solution, though there is concern it will impact performance. `[~apitrou]` is taking a look, but we really should merge a fix in before our release. If we don't we'll likely have all of the SIMD optimizations turned off in homebrew."
+        },
+        {
+            "created_at": "2022-04-21T18:56:01.689Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15664?focusedCommentId=17525988) by Antoine Pitrou (apitrou):*\nI'm not really taking a look, it needs someone to actually try to diagnose on a M1 machine."
+        },
+        {
+            "created_at": "2022-04-21T19:08:46.394Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15664?focusedCommentId=17525997) by Jonathan Keane (jonkeane):*\nThis isn't an M1 issue, it's an issue with x86 + using the wrong implementation on machines that don't have avx512. Kou had a suggestion, that I think is \"just\" copy/paste the implementations back to .cc and then add the macro suggested. I can attempt to do just that when I'm done with the other stuff I have on my plate \u2014 I was mostly hopeful that the copy|pasting and getting the macro right was something that would be obvious for you `[~apitrou]`. Alternatively, we could merge the fix from weston as is, and deal with the performance regression separately.  "
+        },
+        {
+            "created_at": "2022-04-21T19:27:55.290Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15664?focusedCommentId=17526014) by Jonathan Keane (jonkeane):*\nAlso, I'm going to close this in favor of ARROW-15678 \u2014 they are ultimately the same thing, and we already have a fix(ish) in a PR for that other one."
+        },
+        {
+            "created_at": "2022-04-21T19:46:31.324Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15664?focusedCommentId=17526051) by Weston Pace (westonpace):*\nI'm going to investigate this more today."
+        }
+    ]
+}

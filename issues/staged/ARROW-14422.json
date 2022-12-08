@@ -1,0 +1,80 @@
+{
+    "issue": {
+        "title": "[Python] Allow parquet::WriterProperties::created_by to be set via pyarrow.ParquetWriter for compatibility with older parquet-mr",
+        "body": "***Note**: This issue was originally created as [ARROW-14422](https://issues.apache.org/jira/browse/ARROW-14422). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nhave a couple of files\u00a0 and using\u00a0 pyarrow.table (0.17)\r\n to save it as parquet on disk (parquet version 1.4)\r\n\r\ncolums\r\n id : string\r\n val : string\r\n\r\n**table = pa.Table.from_pandas(df)** \r\n **pq.write_table(table, \"df.parquet\", version='1.0', flavor='spark', write_statistics=True, )**\r\n\r\nHowever, Hive and Spark does not recognize the parquet version:\r\n\r\n`org.apache.parquet.VersionParser$VersionParseException: Could not parse created_by: parquet-cpp version 1.5.1-SNAPSHOT using format: (.+) version ((.*) )?(build ?(.*))`\r\n \\` at org.apache.parquet.VersionParser.parse(VersionParser.java:112)`\r\n \\` at org.apache.parquet.CorruptStatistics.shouldIgnoreStatistics(CorruptStatistics.java:60)`\r\n \\` at org.apache.parquet.format.converter.ParquetMetadataConverter.fromParquetStatistics(ParquetMetadataConverter.java:263)`\r\n\r\n\u00a0\r\n\r\n**It seems related to this issue:**\r\n\r\nIt appears you've encountered\u00a0PARQUET-349\u00a0which was fixed in 2015 before Arrow was even started. The underlying C++ code does allow this\u00a0`created_by`\u00a0field to be customized\u00a0[source](https://github.com/apache/arrow/blob/4591d76fce2846a29dac33bf01e9ba0337b118e9/cpp/src/parquet/properties.h#L249)\u00a0but the python wrapper does not expose this\u00a0[source](https://github.com/apache/arrow/blob/4591d76fce2846a29dac33bf01e9ba0337b118e9/python/pyarrow/_parquet.pxd#L360).\u00a0\r\n\r\n\u00a0\u00a0\r\n\r\n**EDIT Add infos**\r\n\r\nCurrent python wrapper does NOT expose :\u00a0 created_by builder\u00a0 (when writing parquet on disk)\r\n\r\n<https://github.com/apache/arrow/blob/master/python/pyarrow/_parquet.pxd#L361>\r\n\r\n\u00a0\r\n\r\nBut, this is available in CPP version:\r\n\r\n<https://github.com/apache/arrow/blob/4591d76fce2846a29dac33bf01e9ba0337b118e9/cpp/src/parquet/properties.h#L249>\r\n\r\n<https://github.com/apache/arrow/blob/master/python/pyarrow/_parquet.pxd#L320>\r\n\r\n\u00a0\r\n\r\nThis creates an issue when Hadoop parquet reader reads this pyarrow parquet file:\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n**SO Question here:**\r\n <https://stackoverflow.com/questions/69658140/how-to-save-a-parquet-with-pandas-using-same-header-than-hadoop-spark-parquet?noredirect=1#comment123131862_69658140>\r\n\r\n\u00a0",
+        "created_at": "2021-10-21T17:37:27.000Z",
+        "updated_at": "2022-01-28T02:19:14.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-10-21T19:27:56.563Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14422?focusedCommentId=17432689) by Weston Pace (westonpace):*\nThe python change should be pretty straightforward (although it will add yet another keyword option to a rather long list)\r\n\r\n`[~emkornfield]` do you know off the top of your head if there are any further gotchas that will likely be encountered trying to create files for a parquet-mr version this old?  Is there a compatibility table anywhere with minimum version support?"
+        },
+        {
+            "created_at": "2021-10-22T01:00:18.525Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14422?focusedCommentId=17432754) by Kevin (noelkev0):*\nAlternatively, is there a way to 'overwrite' parquet-mr\u00a0 java Jars files\r\n\r\nin Hadoop from client side (ie Hive ...)"
+        },
+        {
+            "created_at": "2021-10-22T13:18:14.789Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14422?focusedCommentId=17432973) by Joris Van den Bossche (jorisvandenbossche):*\nIn principle, there should be no need to expose this in Python, since you can't actually influence who is creating the file. Of course, if that value gives problems in other software, that could be a reason. But then we should maybe rather consider changing that value in C++. But, this is something we actually already did recently in the 4.0 release (ARROW-7830). So it might be that updating your pyarrow version could also fix the issue."
+        },
+        {
+            "created_at": "2021-10-22T13:52:00.062Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14422?focusedCommentId=17432983) by Kevin (noelkev0):*\nIn fastparquet, there is a flag\nexport=\u201chive\u201d, which makes compatible with parquet-mr reader. As a workaround, using fastparquet,\nalthough keeping pyarrow would be better.\n\n\n\n\n"
+        },
+        {
+            "created_at": "2021-10-22T13:55:34.889Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14422?focusedCommentId=17432985) by Joris Van den Bossche (jorisvandenbossche):*\nUpgrading your pyarrow version is no option?"
+        },
+        {
+            "created_at": "2021-10-22T14:07:00.057Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14422?focusedCommentId=17432998) by Kevin (noelkev0):*\nSure, \nwhich version ?\n(Because cannot see changes in recent).\n\nFYI,\nFastparquet export works well\n``file_scheme`` keyword: hive-style output is a directory with a single metadata file and several data-files.\n70\t\n\n\n"
+        },
+        {
+            "created_at": "2021-10-22T14:12:05.176Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14422?focusedCommentId=17433005) by Joris Van den Bossche (jorisvandenbossche):*\n> which version ?\r\n\r\nI think at minimum to pyarrow 4.0 (as mentioned above, that's the version when we changed what to write to the created_by field)\r\n\r\n> ``file_scheme`` keyword: hive-style output is a directory with a single metadata file and several data-files.\r\n\r\nThat's unrelated to this issue. If you want to write a partitioned hive-style parquet dataset with pyarrow, you can use `pq.write_to_dataset` instead of `pq.write_table`.   \r\nThe reason that fastparquet works for you is because it sets something else in the created_by field."
+        },
+        {
+            "created_at": "2021-10-22T18:39:54.174Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14422?focusedCommentId=17433119) by Weston Pace (westonpace):*\nThe current created_by output won't help.  PARQUET-349 means that the parquet-mr reader will fail unless the created_by string contains the word \"build\".\r\n\r\nI agree that adding the word \"build\" to the C++ created_by string would be another way to solve this issue.  We could change \"parquet-cpp-arrow version 6.0.0-SNAPSHOT\" to \"parquet-cpp-arrow build 6.0.0-SNAPSHOT\" but I don't know how I feel about that either."
+        },
+        {
+            "created_at": "2021-10-22T18:41:04.309Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14422?focusedCommentId=17433120) by Weston Pace (westonpace):*\nActually the regex is \r\n```\n\r\n\"(.+) version ((.*) )?\\\\(build ?(.*)\\\\)\";\r\n```\r\nso we would need \"parquet-cpp-arrow version 6.0.0 (build SNAPSHOT)\""
+        },
+        {
+            "created_at": "2021-10-23T07:38:00.108Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14422?focusedCommentId=17433231) by Kevin (noelkev0):*\nWill it work with Hive 0.13 ?\n\nMaintaining some regression test\nbetween pyarron export and \u201cparquet-mr\u201d maybbebuseful\n\nscheme=\u201chive\u201d in fastparquet is very useful\n\n\n\n\n"
+        },
+        {
+            "created_at": "2021-10-24T03:37:17.492Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14422?focusedCommentId=17433398) by Micah Kornfield (emkornfield):*\n> Maintaining some regression test\n> between pyarron export and \u201cparquet-mr\u201d maybbebuseful\r\nAgreed, there was some proposals but it appears no one has had time to devote to this.\u00a0 I'm not sure in this case since as Weston pointed out, the version of broken parquet and we would likely only test a few versions.\r\n\r\n\u00a0\r\n> I agree that adding the word \"build\" to the C++ created_by string would be another way to solve this issue. We could change \"parquet-cpp-arrow version 6.0.0-SNAPSHOT\" to \"parquet-cpp-arrow build 6.0.0-SNAPSHOT\" but I don't know how I feel about that either.\r\nI'd be more in favor of of adding a build string to C++ then exposing the flag in python (at least if we expose the flag in python (or at least we would need to validate the flag in python to see if it is parseable.\u00a0 In general, I think this is fairly low level so I'd be hesitant to expose it in more places.\u00a0 Using the BUILD field to hold the SHA git hash could be interesting."
+        },
+        {
+            "created_at": "2021-10-24T03:50:00.076Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14422?focusedCommentId=17433400) by Kevin (noelkev0):*\nTo confirm on my side:\n\nThis is a medata-isssue when reading with Hive.\n\n\n0) fastparquet : metadata + parquet files \n Hive can read it.\n\n1) Using Fastparquet metadata (\u201chive\u201d) \nwith pyarrow parquet files , Hive is able to read it correctly.\n\nThis is the fastparquet hive metadata\nhttps://github.com/dask/fastparquet/blob/efd3fd19a9f0dcf91045c31ff4dbb7cc3ec504f2/fastparquet/writer.py#L940\n\n\nAlternatively, it would make sense to add\nexport =\u201chive\u201d  in addition to \u201cspark\u201d\nOR make the spark compatible.\n\n\nThanks\n\n\n"
+        },
+        {
+            "created_at": "2021-10-24T04:57:25.052Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14422?focusedCommentId=17433402) by Micah Kornfield (emkornfield):*\n[fastparquet created_by string](https://github.com/dask/fastparquet/blob/main/fastparquet/util.py#L19) has the \"build\" as part of its string. I'd guess what is happening is that Hive only looks at the metafile and then doesn't try to parse the create_by version in the data files if the metafile is present (it only parse the metafile value)."
+        },
+        {
+            "created_at": "2022-01-21T02:47:10.699Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14422?focusedCommentId=17479790) by nero (amznero):*\nHi there,\r\nI face a related issue when I write a parquet file by PyArrow.\r\n\r\nIn the old version of Hive, it can only recognize the timestamp type stored in INT96, so I use table.write_to_data with `use_deprecated_int96_timestamps=True` option to save the parquet file. But the hive SQL will skip timestamp conversion when the metadata of parquet file is not created_by \"parquet-mr\".\r\n\r\n[hive/ParquetRecordReaderBase.java at f1ff99636a5546231336208a300a114bcf8c5944 \u00b7 apache/hive (github.com)](https://github.com/apache/hive/blob/f1ff99636a5546231336208a300a114bcf8c5944/ql/src/java/org/apache/hadoop/hive/ql/io/parquet/ParquetRecordReaderBase.java#L137-L139)\r\n\r\n\u00a0\r\n\r\nSo I have to save the timestamp columns with timezone info.\r\n\r\nBut when pyarrow.parquet read from a dir which contains parquets created by both PyArrow and parquet-mr, Arrow.Table will ignore the timezone info for parquet-mr file.\r\n\r\n\u00a0\r\n\r\nMaybe PyArrow can expose the created_by option? Or handle timestamp type with timezone which files created by parquet-mr?\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-01-24T14:26:23.064Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14422?focusedCommentId=17481133) by Joris Van den Bossche (jorisvandenbossche):*\n`[~amznero]` that seems like a different issue. Can you open a different JIRA for this? "
+        },
+        {
+            "created_at": "2022-01-28T02:19:14.598Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14422?focusedCommentId=17483520) by nero (amznero):*\n`[~jorisvandenbossche]` I create a new Jira to describe this issue.\r\n\r\n\u00a0\r\n\r\n[ARROW-15492] [Python] handle timestamp type in parquet file for compatibility with older HiveQL - ASF JIRA (apache.org)"
+        }
+    ]
+}

@@ -1,0 +1,52 @@
+{
+    "issue": {
+        "title": "[Java] Add accessors to get type parameters from vector classes",
+        "body": "***Note**: This issue was originally created as [ARROW-1361](https://issues.apache.org/jira/browse/ARROW-1361). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nVector classes contain private copies of each param in the `ArrowType`, but does not have any public api to access them.  So if given a vector you would have to get the `Field` from the and cast to the correct type.  For example, with a `TimeStampMicroTZVector` and trying to get the timezone:\r\n\r\n```\n\r\nif field.getType.isInstanceOf[ArrowType.Timestamp] &&\r\n          field.getType.asInstanceOf[ArrowType.Timestamp].getTimezone\r\n```\r\n\r\nIt would be more convenient to have direct accessors for these type params for the vector types that have parameters:\r\n\r\n- DecimalVector\n- FixedSizeBinaryVector\n- ListVector\n- TimeStamps with timezones\n- FixedSizedListVector\n- Unions\n",
+        "created_at": "2017-08-16T18:41:46.000Z",
+        "updated_at": "2018-04-18T23:41:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2017-08-18T15:37:37.328Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1361?focusedCommentId=16133138) by Jacques Nadeau (jnadeau):*\nI'm not sure your particular use case.... \n\nIn general, I feel like the arrow pojo/field APIs are very inadequate. We built something up at Dremio to try to improve the behavior/consolidate typical handling tasks. We've discussed how much of it would be generally useful but have yet to come up with a solution. Would love your thoughts on whether any portion of what we did would be generally helpful. Our work against Arrow types: https://github.com/dremio/dremio-oss/blob/master/sabot/logical/src/main/java/com/dremio/common/expression/CompleteType.java\n\n"
+        },
+        {
+            "created_at": "2017-08-18T18:43:37.445Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1361?focusedCommentId=16133444) by Bryan Cutler (bryanc):*\nThanks for sharing this `[~jnadeau]`!  If I understand correctly, I would need a visitor to be able to make a call like `public String getTimezone()` from the given ArrowType?  That might be too heavyweight for my purposes, but I can see `CompleteType` being useful in some other cases.\n\nMy use case is in Spark when constructing type specific writers for a given `ValueVector`.  When the vector is a `NullableTimeStampMicroTZVector`, I just want to check the time zone that is set.  Here is a code sample of how I currently do it (pardon the Scala):\n\n```Java\nprivate def createFieldWriter(vector: ValueVector): ArrowFieldWriter = {\n  vector match {\n    ...\n    case vector: NullableTimeStampMicroTZVector =>\n\n      val field = vector.getField()\n      val timeZone = field.getType.asInstanceOf[ArrowType.Timestamp].getTimezone\n      // do something with timeZone\n\n      new TimestampWriter(vector)\n    ...\n```\n\nSince the vector has already been casted, it would be more convenient to just access the timezone from there instead of having to also cast the type.  Then it would simply to this\n \n```Java\nprivate def createFieldWriter(vector: ValueVector): ArrowFieldWriter = {\n  vector match {\n    ...\n    case vector: NullableTimeStampMicroTZVector =>\n\n      val timeZone = vector.getTimezone()\n      // do something with timeZone\n\n      new TimestampWriter(vector)\n    ...\n```"
+        },
+        {
+            "created_at": "2017-08-18T18:44:07.081Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1361?focusedCommentId=16133446) by Bryan Cutler (bryanc):*\nPR: https://github.com/apache/arrow/pull/972"
+        },
+        {
+            "created_at": "2017-08-18T22:36:57.891Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1361?focusedCommentId=16133727) by Jacques Nadeau (jnadeau):*\nRandom idea... what do you think about the idea of making Field be a generic type that allows getType() to return a specific type? For vectors, getField() would return a specific type such as ArrowType.Timestamp for NullableTimeStampMicroTZVector(). This allows us a generic interface that just gets more specific as you drill inward. "
+        },
+        {
+            "created_at": "2017-08-22T23:46:56.087Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1361?focusedCommentId=16137627) by Bryan Cutler (bryanc):*\n`[~jnadeau]`, could you please elaborate a little on what you mean by making `Field` be a generic type?  I'm ok with any alternatives to this, but I think you should be able to get type params from a concrete vector class without having to do a cast or stringing a bunch of calls together."
+        },
+        {
+            "created_at": "2017-08-26T16:06:43.013Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1361?focusedCommentId=16142858) by Jacques Nadeau (jnadeau):*\nI was suggesting something along:\n\n- we make Field into Field<T extends ArrowType>. \n- Field's getType() would change to a return type of T\n- ValueVector would return Field<? extends ArrowType> \n- Each individual vector would return a specific field generic type.\n\nFor example,\n\nclass NullableTimeStampMicroTZVector {\n  Field<Timestamp> getField(){..}\n}\n\nGiven declaration\nNullableTimeStampMicroTZVector t = <>;\n\nThen\nTimeUnit.MICROSECOND == t.getField().getType().getUnit() would compile without any special casting and return true.\n\nI find this a much easier thing to code to (especially if using code generation) as opposed to having specialized method names for each type.\n\nI haven't thought through all the ramifications of this approach but was throwing it out there."
+        },
+        {
+            "created_at": "2017-08-29T04:23:07.965Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1361?focusedCommentId=16144721) by Bryan Cutler (bryanc):*\nThanks for clarifying `[~jnadeau]`, I am fine with that as an API, but I think that changing the definition of `Field` like that would impact a lot of existing code right?\n\nWhat do you think about adding a method `getType()` in each vector to return the specific type instance?  For example, `NullableTimeStampMicroTZVector.getType()` would return `ArrowType.Timestamp`.  It would still do a cast internally, but still pretty simple."
+        },
+        {
+            "created_at": "2017-09-05T14:32:09.438Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1361?focusedCommentId=16153738) by Jacques Nadeau (jnadeau):*\nOn the Field change, I haven't spent that much time looking at it. Definitely could be disruptive so I'm not going that route.\n\nI like the getType() method and prefer that over many differently named methods."
+        },
+        {
+            "created_at": "2017-09-05T22:24:23.780Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1361?focusedCommentId=16154479) by Bryan Cutler (bryanc):*\nOk, that is fine with me but I'll wait for ARROW-1463 to see how we might restructure."
+        }
+    ]
+}

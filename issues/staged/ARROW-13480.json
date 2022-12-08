@@ -1,0 +1,47 @@
+{
+    "issue": {
+        "title": "[C++] [R] [Python] Dataset SyncScanner may freeze on error",
+        "body": "***Note**: This issue was originally created as [ARROW-13480](https://issues.apache.org/jira/browse/ARROW-13480). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWorking on integration with DuckDB, we ran into an issue where it looks like errors are not being propagated fully/correctly with record batch readers using the C-interface. The DuckDB issue where this came up is https://github.com/duckdb/duckdb/issues/2055\r\n\r\nIn the example I'm passing a dataset with either one or two files from R to python. I've specifically mis-specified the schema to get an error The one file version works like I expect percolating the error up:\r\n```r\n\r\n> library(\"arrow\")\r\n> \r\n> venv <- try(reticulate::virtualenv_create(\"arrow-test\"))\r\nvirtualenv: arrow-test\r\n> install_pyarrow(\"arrow-test\", nightly = TRUE)\r\n[output from installing pyarrow ...]\r\n> reticulate::use_virtualenv(\"arrow-test\")\r\n> \r\n> file <- \"arrow/r/inst/v0.7.1.parquet\"\r\n> arrow_table <- arrow::open_dataset(rep(file, 1), schema(x=arrow::null()))\r\n> \r\n> scan <- Scanner$create(arrow_table)\r\n> reader <- scan$ToRecordBatchReader()\r\n> pyreader <- reticulate::r_to_py(reader)\r\n> pytab <- pyreader$read_all()\r\nError in py_call_impl(callable, dots$args, dots$keywords) : \r\n  OSError: NotImplemented: Unsupported cast from double to null using function cast_null\r\n\r\nDetailed traceback:\r\n  File \"pyarrow/ipc.pxi\", line 563, in pyarrow.lib.RecordBatchReader.read_all\r\n  File \"pyarrow/error.pxi\", line 114, in pyarrow.lib.check_status\r\n```\r\n\r\nBut when having 2 (or more) files, the process hangs reading all of the batches:\r\n```r\n\r\n> library(\"arrow\")\r\n> \r\n> venv <- try(reticulate::virtualenv_create(\"arrow-test\"))\r\nvirtualenv: arrow-test\r\n> install_pyarrow(\"arrow-test\", nightly = TRUE)\r\n[output from installing pyarrow ...]\r\n> reticulate::use_virtualenv(\"arrow-test\")\r\n> \r\n> file <- \"arrow/r/inst/v0.7.1.parquet\"\r\n> arrow_table <- arrow::open_dataset(rep(file, 2), schema(x=arrow::null()))\r\n> \r\n> scan <- Scanner$create(arrow_table)\r\n> reader <- scan$ToRecordBatchReader()\r\n> pyreader <- reticulate::r_to_py(reader)\r\n> pytab <- pyreader$read_all()\r\n{hangs forever here}\r\n```",
+        "created_at": "2021-07-28T17:00:49.000Z",
+        "updated_at": "2021-08-26T17:23:16.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-08-26T17:22:49.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-17T14:59:26.816Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13480?focusedCommentId=17400437) by Neal Richardson (npr):*\ncc `[~apitrou]` `[~westonpace]`"
+        },
+        {
+            "created_at": "2021-08-24T18:21:48.000Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13480?focusedCommentId=17403991) by Antoine Pitrou (apitrou):*\nIf you call `pyreader$read_next_batch()`, do you get the error as expected?"
+        },
+        {
+            "created_at": "2021-08-24T18:41:10.500Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13480?focusedCommentId=17403999) by Antoine Pitrou (apitrou):*\nAlso, can you get a gdb backtrace of where the hanging occurs?"
+        },
+        {
+            "created_at": "2021-08-24T18:49:19.550Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13480?focusedCommentId=17404003) by Antoine Pitrou (apitrou):*\nI cannot reproduce using the equivalent code in Python, i.e. the following works here:\r\n```python\n\r\ndef test_dataset_error():\r\n    from pyarrow import dataset as ds\r\n\r\n    c_stream = ffi.new(\"struct ArrowArrayStream*\")\r\n    ptr_stream = int(ffi.cast(\"uintptr_t\", c_stream))\r\n\r\n    fn = \"/home/antoine/arrow/dev/r/inst/v0.7.1.parquet\"\r\n    dataset = ds.dataset([fn, fn],\r\n                         schema=pa.schema({'x': pa.null()}))\r\n    scanner = dataset.scanner()\r\n    reader = scanner.to_reader()\r\n    reader._export_to_c(ptr_stream)\r\n    del reader, dataset, scanner\r\n\r\n    reader_new = pa.ipc.RecordBatchReader._import_from_c(ptr_stream)\r\n    with pytest.raises(OSError,\r\n                       match=\"Unsupported cast from double to null\"):\r\n        reader_new.read_all()\r\n```"
+        },
+        {
+            "created_at": "2021-08-24T18:50:44.312Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13480?focusedCommentId=17404004) by Antoine Pitrou (apitrou):*\nAh, I can reproduce now using a larger number of files."
+        },
+        {
+            "created_at": "2021-08-24T19:15:24.898Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13480?focusedCommentId=17404012) by Antoine Pitrou (apitrou):*\nOk, this is really a dataset bug. I will create a draft PR and let Weston iterate."
+        },
+        {
+            "created_at": "2021-08-26T17:22:49.594Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13480?focusedCommentId=17405386) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 10993\n<https://github.com/apache/arrow/pull/10993>"
+        }
+    ]
+}

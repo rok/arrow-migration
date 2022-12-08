@@ -1,0 +1,145 @@
+{
+    "issue": {
+        "title": "[Python] Extracting Type information from Python Objects",
+        "body": "***Note**: This issue was originally created as [ARROW-15765](https://issues.apache.org/jira/browse/ARROW-15765). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen creating user defined functions or similar exercises where we want to extract the Arrow data types from the type hints, the existing Python API have some limitations.\u00a0\r\n\r\nAn example case is as follows;\r\n```java\n\r\ndef function(array1: pa.Int64Array, arrya2: pa.Int64Array) -> pa.Int64Array:\r\n\u00a0 \u00a0 return pc.call_function(\"add\", [array1, array2])\r\n\u00a0 \n```\r\nWe want to extract the fact that array1 is an `pa.Array` of `pa.Int32Type`.\u00a0\r\n\r\nAt the moment there doesn't exist a straightforward manner to get this done.\u00a0\r\n\r\nSo the idea is to expose this feature to Python.\u00a0",
+        "created_at": "2022-02-23T13:22:11.000Z",
+        "updated_at": "2022-07-12T14:04:50.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-23T13:25:23.229Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17496755) by Vibhatha Lakmal Abeykoon (vibhatha):*\n\u00a0 `[~apitrou]` `[~westonpace]` `[~jorisvandenbossche]` `[~amol-]`\r\n\r\nYour thoughts on this?\u00a0"
+        },
+        {
+            "created_at": "2022-02-23T13:33:43.309Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17496760) by Antoine Pitrou (apitrou):*\nWell, `pa.Int32Type` doesn't exist:\r\n```python\n\r\n>>> ty = pa.int32()\r\n>>> ty.__class__\r\npyarrow.lib.DataType\r\n```\r\n\r\nWe may change this of course. For example, `pa.ListType` does exist."
+        },
+        {
+            "created_at": "2022-02-23T14:07:25.941Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17496784) by Vibhatha Lakmal Abeykoon (vibhatha):*\nAh Yes you're right. Mixed up with the C++ naming.\u00a0\r\n\r\nTo expose this one, I guess we have to extend the classes\r\n```java\n\r\ncdef class Int32Array(IntegerArray):\r\n   pass\n```\r\n\u00a0to something like\u00a0\r\n```java\n\r\ncdef class Int32Array(IntegerArray):\r\n   cdef shared_ptr[CDataType] get_type()\n```\r\n\u00a0And expose it as property to Python?\u00a0\r\n\r\nOr is there a better approach for this?"
+        },
+        {
+            "created_at": "2022-02-23T14:09:59.255Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17496789) by Vibhatha Lakmal Abeykoon (vibhatha):*\nI am referring to the classes here: https://github.com/apache/arrow/blob/0363df1b44274707228af7274102bbe50cdb68be/python/pyarrow/lib.pxd#L317"
+        },
+        {
+            "created_at": "2022-02-23T14:11:52.353Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17496792) by Alessandro Molina (amol-):*\nProbably exposing `name` in `CDataType` would be a starting point. For nested types like lists, struct etc.. we will have to dive into the sub_fields, but for basic types the `name` might already allow to easily identify the type. (We could already use `id` but I guess that's less immediately understandable)"
+        },
+        {
+            "created_at": "2022-02-23T14:13:05.285Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17496797) by Alessandro Molina (amol-):*\n`[~vibhatha]` I'm not sure why you want `CDataType` itself, `Array.type` already provides the `DataType` which is the Python equivalent of `CDataType`"
+        },
+        {
+            "created_at": "2022-02-23T14:18:25.642Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17496801) by Vibhatha Lakmal Abeykoon (vibhatha):*\n`[~amol-]` \u00a0\r\n\r\nYou're right, we can use that. Just tried to show the expected outcome more clearly.\u00a0"
+        },
+        {
+            "created_at": "2022-02-23T14:20:05.931Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17496806) by Vibhatha Lakmal Abeykoon (vibhatha):*\nYes the id would be kind of hard to grasp for the user. One intention is actually making expose to the user, so in their development activities this could be helpful for some advanced use case similar to UDFs. I cannot exactly say what are such cases, but it could be useful.\u00a0"
+        },
+        {
+            "created_at": "2022-02-23T16:12:26.304Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17496876) by Weston Pace (westonpace):*\nPerhaps I am missing some key piece but don't all arrays (Int32Array, Int64Array, etc.) extend Array which already has a type field?\r\n\r\n```\n\r\ncdef class Array(_PandasConvertible):\r\n    cdef:\r\n        shared_ptr[CArray] sp_array\r\n        CArray* ap\r\n\r\n    cdef readonly:\r\n        DataType type\r\n```\r\n\r\nSo couldn't you do `array1.type`?\r\n\r\n```\n\r\n>>> x = pa.array([1, 2, 3])\r\n>>> x.type\r\nDataType(int64)\r\n```"
+        },
+        {
+            "created_at": "2022-02-23T16:16:13.020Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17496877) by Weston Pace (westonpace):*\nAh, from Zulip I see the goal is to go from Int32Array to DataType(int32) without instantiating an instance.  So is this more of a metaprogramming / reflection task?"
+        },
+        {
+            "created_at": "2022-02-23T16:16:57.670Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17496879) by Vibhatha Lakmal Abeykoon (vibhatha):*\nGetting the type from the data, that's totally correct `[~westonpace]` \u00a0, I agree.\u00a0\r\n\r\nThe thing is we need the type information extracted from the function signature, not from the data. So can we use this approach? Did I get it wrong?\u00a0"
+        },
+        {
+            "created_at": "2022-02-23T16:18:21.293Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17496881) by Vibhatha Lakmal Abeykoon (vibhatha):*\n`[~westonpace]` \u00a0\r\nExactly, a reflection task. Need to extract the types before data get's in here. \u00a0"
+        },
+        {
+            "created_at": "2022-02-23T17:38:21.978Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17496942) by Weston Pace (westonpace):*\nIn that case extending classes is not going to help.  There isn't really anything that makes sense to extend from C++ as the object `Int32Array` has no runtime equivalent in C++ (i.e. there is no such thing as reflection in C++).\r\n\r\nI think Joris' suggestion from zulip is simplest.  Let's invert `_array_classes` and `_scalar_classes`"
+        },
+        {
+            "created_at": "2022-02-23T17:41:20.877Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17496945) by Antoine Pitrou (apitrou):*\nLet's step back a bit. Is this about user-defined functions? If so, perhaps someone should actually start working on these and explain what the actual need is?"
+        },
+        {
+            "created_at": "2022-02-23T19:17:44.703Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17497011) by Weston Pace (westonpace):*\nThis is indeed about user-defined functions.  Vibhatha has been working on an implementation.  You can see the current progress here: https://github.com/apache/arrow/compare/master...vibhatha:test-udf-vibhatha\r\n\r\nI suspect the need has to do with registering a function like:\r\n\r\n```Java\n\r\ndef function(array1: pa.Int64Array, arrya2: pa.Int64Array) -> pa.Int64Array:\r\n    return pc.call_function(\"add\", [array1, array2])\r\n```\r\n\r\nwith our function registry (which will want to know the arity and types of each argument).  Vibhatha can probably give a more complete answer."
+        },
+        {
+            "created_at": "2022-02-24T00:18:40.208Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17497082) by Vibhatha Lakmal Abeykoon (vibhatha):*\nAs\u00a0 `[~westonpace]` \u00a0explained, we are working on a UDF PoC. At the moment how you register a function can be as follows;\u00a0\r\n```java\n\r\nimport pyarrow as pa \r\nfrom pyarrow import compute as pc \r\nfrom pyarrow.compute import call_function, register_pyfunction\r\nfrom pyarrow.compute import Arity, InputType \r\n\r\nfunc_doc = {} \r\nfunc_doc[\"summary\"] = \"summary\" \r\nfunc_doc[\"description\"] = \"desc\" \r\nfunc_doc[\"arg_names\"] = [\"number\"] \r\nfunc_doc[\"options_class\"] = \"SomeOptions\" \r\nfunc_doc[\"options_required\"] = False \r\narity = Arity.unary() \r\nfunc_name = \"python_udf\" \r\nin_types = [InputType.array(pa.int64())] \r\nout_type = pa.int64() \r\n\r\ndef simple_function(arrow_array): \r\n    return call_function(\"add\", [arrow_array, 1])  \r\n\r\ncallback = simple_function\r\n\r\nregister_pyfunction(func_name, arity, func_doc, in_types, out_type, callback) \r\n\r\nfunc1 = pc.get_function(func_name)\r\n\r\na1 = pc.call_function(func_name, [pa.array([20])])\n```\r\n\u00a0\r\nWhen registering the function user has to explicitly mention what is the arity and what are the input and output types of the UDF. We can ease this by taking all the information from the type-hints itself. This is only to improve the usability.\r\n\r\nFor instance the user will write the function like this\r\n\r\n\u00a0\r\n```java\n\r\ndef simple_function(arrow_array: pa.Int32Array) -> pa.Int32Array: \r\n    return call_function(\"add\", [arrow_array, 1])  \n```\r\nWhen registering user would only write\r\n```java\n\r\nregister_pyfunction(func_name, simple_function)  \n```\r\nWe will extract the docs from comments or let user pass (optional) and the arity, input and output types by inspecting the function signature.\u00a0\r\n\r\nSpark is already providing that support. When we go this route, we will extract all the information from the UDF signature. At the moment I am using inspect API to extract those information.\u00a0\r\n\u00a0\r\nNext step is to extract from the type hint info: `pa.Int32Array` that this is a `pa.Array` of type `pa.int32()`. This is the objective of this exercise.\r\n\u00a0\r\n`[~apitrou]` \u00a0does it clear things out? Do you need more information to know why we need this feature? \u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-02-24T01:03:10.600Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17497094) by Vibhatha Lakmal Abeykoon (vibhatha):*\nThere can be limitations in places when user just want to use a lambda in a groupby where we expose UDFs. That needs to be handled internally for group by ops.\u00a0"
+        },
+        {
+            "created_at": "2022-02-24T16:37:24.090Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17497523) by Antoine Pitrou (apitrou):*\nNote that this approach limits the expressivity of the type annotations. For example, if you write:\r\n```python\n\r\ndef compute_func(a: pa.ListArray) -> pa.ListArray:\r\n    ...\r\n```\r\n... you are not able to tell what the value type of the list type is. Similarly with parametrized types such as timestamps or decimals."
+        },
+        {
+            "created_at": "2022-02-24T16:56:00.884Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17497545) by Vibhatha Lakmal Abeykoon (vibhatha):*\n`[~apitrou]` \u00a0I see your point. There are pitfalls and limitations to this approach. This is mainly a usability piece. I also have a doubt, is it worth investing time on it if the the applications of this becomes niche. But it feels like a nice to have a feature to at least support some widely used UDF function signatures."
+        },
+        {
+            "created_at": "2022-02-24T17:06:32.055Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17497566) by Vibhatha Lakmal Abeykoon (vibhatha):*\nShould we design this feature or as `[~jorisvandenbossche]` \u00a0and `[~westonpace]` \u00a0suggested, we can use the inverse option to get the type from the Array type and not exposing this to the user? This issue is at the moment mainly focusing on the UDF usability piece rather than improving a core functionality for Arrow Python API. But it could be useful, but beyond the scope of this usecase it is not very clear to me how useful it is going to be to the user.\u00a0\r\n\r\nWhat do you think?\u00a0"
+        },
+        {
+            "created_at": "2022-02-24T17:07:11.970Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17497567) by Antoine Pitrou (apitrou):*\nOf course, another question is: do you need to know the types at all? Without some concrete use cases it's hard to tell."
+        },
+        {
+            "created_at": "2022-02-24T19:58:43.211Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17497696) by Joris Van den Bossche (jorisvandenbossche):*\nIn context of a full query plan, I think it is important to know the output types given the input types, to be able to resolve the types in your full query?\r\n\r\nI am wondering if we could make use of some of the newer typing features, which would allow to do something like\r\n\r\n```python\n\r\ndef simple_function(arrow_array: pa.Array[pa.int32()]) -> pa.Array[pa.int32()]: \r\n    return call_function(\"add\", [arrow_array, 1])  \r\n```\r\n\r\nI think such an object with which you can use [] is called a \"generic\" in typing terminology (https://docs.python.org/3.11/library/typing.html#generics), and it would allow to more easily get the type of the values in the container. On the other hand it creates a bit a separate typing syntax (`pa.Array` is not actually itself a useful class, it's always subclasses you get in practice)."
+        },
+        {
+            "created_at": "2022-02-24T20:50:04.867Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17497720) by Weston Pace (westonpace):*\nFor a concrete use case consider a user that wants to integrate some kind of Arrow native geojson library.  They would have extension types for geojson data types and custom functions that can do things like normalize coordinates to some kind of different reference or format coordinates in a particular way.  In this case the UDFs would be taking in extension arrays for custom data types which I think would have its own typings-based considerations.\r\n\r\nAnother possible example that comes from the TPCx-BB benchmark is doing sentiment analysis on strings (is this user comment a positive comment or a negative comment?)  If we had an arrow-native natural language processing library we could hook in an extract_sentiment operation which took in strings and returns ? (maybe doubles?).\r\n\r\nAs far as I know the type information itself is only used for validation and casting purposes.\r\n\r\nAnother dimension to consider is whether a UDF would care if an array were dictionary encoded or not?  We probably want a way to express that too."
+        },
+        {
+            "created_at": "2022-02-24T21:10:41.241Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17497733) by Antoine Pitrou (apitrou):*\n>\u00a0Another dimension to consider is whether a UDF would care if an array were dictionary encoded or not? We probably want a way to express that too.\r\n\r\nIf you want a UDF to have different implementations based on the parameter types, you can't do that using type annotations.\r\n\r\nWhat you could do is use a two-step approach like in Numba's `generated_jit`:\r\nhttps://numba.pydata.org/numba-doc/dev/user/generated-jit.html\r\n"
+        },
+        {
+            "created_at": "2022-02-25T01:49:13.448Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17497838) by Vibhatha Lakmal Abeykoon (vibhatha):*\nI want to clarify a point, if I have not clearly mentioned the reason for the necessity of the typing information earlier in the thread. If I am not mistaken, here the main issue is not what UDF internally is doing for the data. We just need to register it in the function registry without taking the input and output types from the user explicitly. It is just a nice to have a feature which could look great in terms of presentability and usability with new Python upgrades.\u00a0"
+        },
+        {
+            "created_at": "2022-02-25T02:28:30.675Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17497856) by Vibhatha Lakmal Abeykoon (vibhatha):*\n`[~jorisvandenbossche]` \u00a0the new typing generics look interesting. Is it practical to adopt this now. I am referring to the Python versions we support now. Is it wise to use it in the UDF integration and not do what I am suggesting to do in this jira.\u00a0\r\n\r\n`[~apitrou]` \u00a0Numba jit approach is nice and it looks like an advance feature for UDFs someday. I will keep this in mind.\u00a0\r\n\r\nAs `[~westonpace]` \u00a0suggested, some of our main motivations are to support the user and try to provide user friendly options when we write TPCx-BB queries and similar applications. If the suggestion from `[~jorisvandenbossche]` \u00a0to use advance typing is feasible, is it wise to use that instead of doing this change if it succeeds in solving our underlying problem.\u00a0"
+        },
+        {
+            "created_at": "2022-02-25T12:08:09.701Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17498093) by Antoine Pitrou (apitrou):*\nSomeone could experiment with the typing generic approach indeed and see if it works."
+        },
+        {
+            "created_at": "2022-02-25T17:34:08.765Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17498231) by Vibhatha Lakmal Abeykoon (vibhatha):*\nSure, I will give it a try and post what I find out.\u00a0"
+        },
+        {
+            "created_at": "2022-03-03T14:58:40.954Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17500816) by Vibhatha Lakmal Abeykoon (vibhatha):*\n`[~apitrou]` `[~jorisvandenbossche]` `[~westonpace]` \u00a0\r\n\r\nThis is a very naive attempt on extracting types on a so-called class which extends the Generics. The following example reflects extracting types from such a class.\r\n```java\n\r\nfrom typing import Any, List\r\nimport inspect\r\nfrom typing import TypeVar, Generic\r\n\r\nT = TypeVar('T')\r\n\r\nclass Array(object):\u00a0\r\n\u00a0 \u00a0\u00a0\r\n\u00a0 \u00a0 def __init__(self, data: List[Any]):\r\n\u00a0 \u00a0 \u00a0 \u00a0 self._data = data\r\n\u00a0 \u00a0 \u00a0 \u00a0\u00a0\r\n\u00a0 \u00a0 @property\u00a0\r\n\u00a0 \u00a0 def data(self):\r\n\u00a0 \u00a0 \u00a0 \u00a0 return self._data\r\n\u00a0 \u00a0\u00a0\r\n\u00a0 \u00a0 def __repr__(self):\r\n\u00a0 \u00a0 \u00a0 \u00a0 str1 = \"\"\r\n\u00a0 \u00a0 \u00a0 \u00a0 for datum in self.data:\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 str1 += str(datum) + \", \"\r\n\u00a0 \u00a0 \u00a0 \u00a0 return str1\r\n\u00a0 \u00a0\u00a0\r\nclass ArrayLike(Array, Generic[T]):\r\n\u00a0 \u00a0\u00a0\r\n\u00a0 \u00a0 def __init__(self, data:List[Any]):\r\n\u00a0 \u00a0 \u00a0 \u00a0 super(data)\r\n\u00a0 \u00a0\u00a0\r\nclass DataType(object):\r\n\u00a0 \u00a0\u00a0\r\n\u00a0 \u00a0 def __init__(self):\r\n\u00a0 \u00a0 \u00a0 \u00a0 pass\r\n\u00a0 \u00a0\u00a0\r\nclass Int32Type(DataType):\r\n\u00a0 \u00a0\u00a0\r\n\u00a0 \u00a0 def __init__(self):\r\n\u00a0 \u00a0 \u00a0 \u00a0 self._type_id = \"int32\"\r\n\u00a0 \u00a0\u00a0\r\n\u00a0 \u00a0 @property\r\n\u00a0 \u00a0 def id(self):\r\n\u00a0 \u00a0 \u00a0 \u00a0 return self._type_id\r\n\r\n# test\r\n\r\na : Array = None\r\n\r\ndata : List[int] = [10, 20 , 30]\r\n\r\nb: ArrayLike[Int32Type] = Array(data)\r\n\r\nprint(b)\r\n\r\n# define a function with the generics\r\n\r\ndef sample_udf(array: ArrayLike[Int32Type]) -> ArrayLike[Int32Type]:\r\n\u00a0 \u00a0 return arraysig = inspect.signature(sample_udf)\r\n\r\ninput_types = sig.parameters.values()\r\n\r\nannotations = [val.annotation for val in input_types]\r\n\r\nannotation = annotations[0]\r\n\r\ninner_type = annotation.__args__[0]\r\n\r\nouter_type = annotation.__origin__\r\n\r\nexpr_arg = inner_type == Int32Type\r\n\r\nassert(expr_arg)\r\n\r\nexpr_outer = outer_type == ArrayLike\r\n\r\nassert(expr_outer) \n```"
+        },
+        {
+            "created_at": "2022-03-03T15:08:26.457Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17500821) by Antoine Pitrou (apitrou):*\n`[~vibhatha]` You can post your code on e.g. https://gist.github.com/ instead of editing the same comment several times :-) This will produce less notifications for people who watch this issue."
+        },
+        {
+            "created_at": "2022-03-03T15:16:17.312Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17500828) by Vibhatha Lakmal Abeykoon (vibhatha):*\nSure, the pasting code in the code block was a pain, it didn't capture the newlines.\u00a0\r\nI will follow this method next time. Thanks `[~apitrou]` :)\u00a0"
+        },
+        {
+            "created_at": "2022-07-12T14:04:50.887Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15765?focusedCommentId=17565788) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[Rust][Parquet] SerializedFileWriter writes total_num_rows as zero",
+        "body": "***Note**: This issue was originally created as [ARROW-6901](https://issues.apache.org/jira/browse/ARROW-6901). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe SerializedFileWriter does not update total_num_rows at any point. This results in consistently writing zero as the number of rows in the file.\r\n\r\n\u00a0\r\n\r\nThis code will fail:\r\n```java\n\r\nlet data = vec![vec![1, 2, 3, 4, 5]];\r\nlet file: File = ...;\r\n\r\nlet schema = Rc::new(\r\n    types::Type::group_type_builder(\"schema\")\r\n        .with_fields(&mut vec![Rc::new(\r\n            types::Type::primitive_type_builder(\"col1\", Type::INT32)\r\n                .with_repetition(Repetition::REQUIRED)\r\n                .build()\r\n                .unwrap(),\r\n        )])\r\n        .build()\r\n        .unwrap(),\r\n);\r\nlet props = Rc::new(WriterProperties::builder().build());\r\nlet mut file_writer =\r\n    SerializedFileWriter::new(file.try_clone().unwrap(), schema, props).unwrap();\r\nlet mut rows: i64 = 0;\r\n\r\nfor subset in &data {\r\n    let mut row_group_writer = file_writer.next_row_group().unwrap();\r\n    let col_writer = row_group_writer.next_column().unwrap();\r\n    if let Some(mut writer) = col_writer {\r\n        match writer {\r\n            ColumnWriter::Int32ColumnWriter(ref mut typed) => {\r\n                rows += typed.write_batch(&subset[..], None, None).unwrap() as i64;\r\n            }\r\n            _ => {\r\n                unimplemented!();\r\n            }\r\n        }\r\n        row_group_writer.close_column(writer).unwrap();\r\n    }\r\n    file_writer.close_row_group(row_group_writer).unwrap();\r\n}\r\nfile_writer.close().unwrap();\r\n\r\nlet reader = SerializedFileReader::new(file).unwrap();\r\nassert_eq!(reader.num_row_groups(), data.len());\r\nassert_eq!(reader.metadata().file_metadata().num_rows(), rows, \"row count in metadata not equal to number of rows written\");\r\n```",
+        "created_at": "2019-10-16T09:56:59.000Z",
+        "updated_at": "2019-10-17T09:05:57.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-10-16T23:12:07.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-16T10:07:03.517Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6901?focusedCommentId=16952686) by Matthew Franglen (bw-matthew):*\nOpened a [PR](https://github.com/apache/arrow/pull/5672) to fix this issue. It does change the type of the `total_num_rows` to `i64` to be consistent with the `row_group_metadata`."
+        },
+        {
+            "created_at": "2019-10-16T23:12:07.188Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6901?focusedCommentId=16953263) by Paddy Horan (paddyhoran):*\nIssue resolved by pull request 5672\n<https://github.com/apache/arrow/pull/5672>"
+        }
+    ]
+}

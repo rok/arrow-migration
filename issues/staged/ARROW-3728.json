@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Python] Merging Parquet Files - Pandas Meta in Schema Mismatch",
+        "body": "***Note**: This issue was originally created as [ARROW-3728](https://issues.apache.org/jira/browse/ARROW-3728). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFrom:\u00a0https://stackoverflow.com/questions/53214288/merging-parquet-files-pandas-meta-in-schema-mismatch\r\n\u00a0\r\nI am trying to merge multiple parquet files into one. Their schemas are identical field-wise but my\u00a0`ParquetWriter`\u00a0is complaining that they are not. After some investigation I found that the pandas meta in the schemas are different, causing this error.\r\n\u00a0\r\nSample-\r\n\r\n```python\n\r\nimport pyarrow.parquet as pq\r\n\r\npq_tables=[]\r\nfor file_ in files:\r\n    pq_table = pq.read_table(f'{MESS_DIR}/{file_}')\r\n    pq_tables.append(pq_table)\r\n    if writer is None:\r\n        writer = pq.ParquetWriter(COMPRESSED_FILE, schema=pq_table.schema, use_deprecated_int96_timestamps=True)\r\n    writer.write_table(table=pq_table)\r\n```\r\n\r\nThe error-\r\n\r\n```Java\n\r\nTraceback (most recent call last):\r\n  File \"{PATH_TO}/main.py\", line 68, in lambda_handler\r\n    writer.write_table(table=pq_table)\r\n  File \"/Library/Frameworks/Python.framework/Versions/3.6/lib/python3.6/site-packages/pyarrow/parquet.py\", line 335, in write_table\r\n    raise ValueError(msg)\r\nValueError: Table schema does not match schema used to create file:\r\n```\r\n",
+        "created_at": "2018-11-08T19:26:37.000Z",
+        "updated_at": "2020-07-01T11:39:09.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-11-25T20:37:56.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-11-25T20:37:56.761Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3728?focusedCommentId=16698280) by Wes McKinney (wesm):*\nIssue resolved by pull request 3029\n<https://github.com/apache/arrow/pull/3029>"
+        },
+        {
+            "created_at": "2018-11-29T17:32:04.408Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3728?focusedCommentId=16703544) by David Lee (davlee1972@yahoo.com):*\nI'm finding the same problem as well.. This is similar to: https://jira.apache.org/jira/browse/ARROW-3065\r\n I think the underlying panda schema has changed between pyarrow releases so I can't merge old files with new files.\r\n\r\nOn the topic of merging parquet files.. This is something I do to try to create 128 meg parquet files to match the HDFS blocksize configured in Hadoop.\r\n\r\nIt is not possible to predetermine the size of a parquet file when you mix in dictionary encoding + snappy compression, but you can work around it be merging smaller parquet files together as row groups.\r\n\r\nSave two million rows of data per parquet file. This ends up creating multiple parquet files around 10 megs each after encoding and compression.\r\n Figure out which files should be merged by adding their file sizes together until it the sum comes in just under 128 megs which is between 95% and 100% of 128 \\* 1024 \\* 1024 bytes.\r\n Read each parquet file in as a arrow table and write the arrow table to a new file as a row group. This is both fast and memory efficient since you only need to put two million rows of data in memory at a time.\r\n\r\nOn a separate topic I should probably open up a new issue / enhancement request.\r\n\r\nA. Would it be possible to read a row group out of parquet file, modify it as a panda and then write it back to the original parquet file?\r\n\r\nB. Would it be possible to add a boolean hidden status column to every parquet file? A status of True would mean the row is valid. A status of False would mean the row is deleted. Dremio uses an internal flag in Arrow data sets when doing SQL Union operations. It is more efficient to flag a record as deleted instead of trying to delete it out of a columnar memory format. If we could introduce something for columnar parquet you could in theory update parquet files by flagging the old record as deleted and reinserting the replacement record at the end of the existing file without having to shuffle / re-write the entire file.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-11-29T23:35:46.576Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3728?focusedCommentId=16704034) by Wes McKinney (wesm):*\nThere's a number of possible feature requests and other design considerations here. Can you open some other JIRA issues or start a mailing list discussion?"
+        },
+        {
+            "created_at": "2020-07-01T11:39:09.541Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3728?focusedCommentId=17149349) by Milenko Markovic (Dr. Markovic):*\nI have similar issues. I am trying to merge Parquet files with my code\r\n\r\n\r\n\r\ndef combine_parquet_files(input_folder, target_path):\r\n try:\r\n\u00a0files = []\r\n\u00a0for file_name in os.listdir(input_folder):\r\n\u00a0 files.append(pq.read_table(os.path.join(input_folder, file_name)))\r\n\u00a0 \u00a0with pq.ParquetWriter(target_path,files[0].schema,compression='snappy',use_dictionary= False,data_page_size= 524288,\u00a0write_statistics=True) as writer:\r\n for f in files:\r\n\u00a0writer.write_table(f)\r\n except Exception as e:\r\n print(e)\r\n\r\nIt does not work for small files,20-30k. Why? I tried to change data_page_size but still I go the same output. What does data_page_size actually do?"
+        }
+    ]
+}

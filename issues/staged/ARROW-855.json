@@ -1,0 +1,81 @@
+{
+    "issue": {
+        "title": "Arrow Memory Leak",
+        "body": "***Note**: This issue was originally created as [ARROW-855](https://issues.apache.org/jira/browse/ARROW-855). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nwe create a memory table by arrow and the source data come from HBase.\nCreate a memory table and then drop the table,there will be a memory leak.\nHundreds of times,There will be OutOfMemoryError.\nanyone encounter similar problems?",
+        "created_at": "2017-04-19T07:02:15.000Z",
+        "updated_at": "2022-08-27T14:42:05.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-05-25T06:03:55.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-04-19T14:16:39.774Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-855?focusedCommentId=15974753) by Uwe Korn (uwe):*\nHello, `[~fushengxu]`. Can you provide a code sample how you interact with Arrow and HBase? From your message it is unclear how to reproduce the problem."
+        },
+        {
+            "created_at": "2017-04-20T02:22:36.459Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-855?focusedCommentId=15975929) by xufusheng (fushengxu):*\nOur programming language is scala.\n1.Through HashMap to store pillar\n```Java\nprivate val entries = new util.LinkedHashMap[PillarId, Pillar](32, 0.75f, true)\n```\n2.Pillar encapsulates the data structure of arrow\n```Java\nentries.put(pillarId, newPillar(getFieldDesc(pillarId.tableId, pillarId.colIdx)))\n def newPillar(fieldDesc: FieldDescription): Pillar = {\n    ArrowPillar.getPillar(fieldDesc, root)\n  }\nobject ArrowPillar {\n  @NeedTest\n  def getPillar(field: FieldDescription, allocator: BufferAllocator): Pillar = {\n    field.desc.getType match {\n      case MemoType.Boolean => new ArrowNullableBoolPillar(field, allocator)\n      case MemoType.Short => new ArrowNullableShortPillar(field, allocator)\n      ......\n         }\n  }\n}\ntrait Pillar{\n   def append(value:Option[Any]):Unit\n   ......\n}\n```\n3.The following is our free memory function\n```Java\ndef remove(pillarId: PillarId): Boolean = {\n    entries.synchronized {\n      var pillar = entries.remove(pillarId)\n      if (pillar != null) {\n        pillar.close()\n        pillar = null\n        true\n      } else {\n        false\n      }\n    }\n  }\n```"
+        },
+        {
+            "created_at": "2017-04-20T02:27:45.674Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-855?focusedCommentId=15975933) by Wes McKinney (wesm):*\n`[~fushengxu]` this isn't enough information to advise on the memory leak. Most likely you have code that has failed to call `release()` on ArrowBuf objects. "
+        },
+        {
+            "created_at": "2017-04-20T02:31:35.652Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-855?focusedCommentId=15975938) by Wes McKinney (wesm):*\nIs it possible to post the implementation of the Arrow\\*Pillar classes?"
+        },
+        {
+            "created_at": "2017-04-20T02:53:47.904Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-855?focusedCommentId=15975954) by xufusheng (fushengxu):*\n1.abstract class\n```Java\nabstract class ArrowPillar[V <: ValueVector](val field: FieldDescription, val allocator: BufferAllocator)\n  extends CountablePillar {\n  val vector: V = ArrowPillar.getNewVector(mField.getName, allocator, mField.getType()).asInstanceOf[V]\n  initialSize match {\n    case Some(v) => vector.isInstanceOf[FixedWidthVector] match {\n      case true =>\n        vector.asInstanceOf[FixedWidthVector].allocateNew(v)\n        vector.asInstanceOf[V]\n      case false => vector.allocateNew()\n    }\n    case None => vector.allocateNew()\n  }\n ......\n  def mutator():ValueVector.Mutator = vector.getMutator\n  def accessor():ValueVector.Accessor = vector.getAccessor\n  override def pureDel(index: Int): Unit = {\n    throw new MemoException(\"Don't support this operation now.\")\n  }\n  override def close(): Unit = vector.close()\n  override def clear(): Unit = vector.clear()\n}\n```\n2.one implementation\n```Java\nclass ArrowNullableStringPillar(override val field: FieldDescription, override val allocator: BufferAllocator)\n  extends ArrowPillar[NullableVarCharVector](field, allocator) {\n\n  override def pureSet(index: Int, value: Option[Any]): Unit = {\n    value match {\n      case None => mutator.asInstanceOf[NullableVarCharVector#Mutator].setNull(index)\n      case Some(v) =>\n        val value = v.asInstanceOf[String].getBytes\n        val length = v.asInstanceOf[String].getBytes.length\n        mutator.asInstanceOf[NullableVarCharVector#Mutator].setSafe(index, value, 0, length)\n    }\n  }\n\n  override def pureGet(index: Int): Option[Any] = {\n    if (accessor.isNull(index)) None\n    else\n      Some(accessor.asInstanceOf[NullableVarCharVector#Accessor].get(index))\n  }\n}\n```"
+        },
+        {
+            "created_at": "2017-04-20T02:58:56.663Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-855?focusedCommentId=15975958) by xufusheng (fushengxu):*\nIn fact, it has nothing to do with HBase.Other data sources can also cause memory leaks\n"
+        },
+        {
+            "created_at": "2017-04-25T06:52:11.487Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-855?focusedCommentId=15982459) by xufusheng (fushengxu):*\nHello, `[~xhochy]` and `[~wesmckinn]`,do I need to provide more detailed information?"
+        },
+        {
+            "created_at": "2017-04-25T18:34:15.297Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-855?focusedCommentId=15983414) by Wes McKinney (wesm):*\n`[~julienledem]` `[~jnadeau]` do you have any advice for helping track down a memory leak which may be Arrow-related? "
+        },
+        {
+            "created_at": "2017-04-25T22:12:54.011Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-855?focusedCommentId=15983718) by Julien Le Dem (julienledem):*\n`[~fushengxu]` To verify that your code calls close() or release() in the right places, You can write a unit  test that creates a RootAllocator first (typically in before()) and closes the allocator at the end (in after()). Closing an allocator that still has allocated resources will throw an exception.\nFYI: I have added \\{code\\} blocks in your comments to make them more readable."
+        },
+        {
+            "created_at": "2017-04-25T22:15:54.517Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-855?focusedCommentId=15983728) by Julien Le Dem (julienledem):*\nexample of this: https://github.com/apache/arrow/blob/master/java/vector/src/test/java/org/apache/arrow/vector/file/BaseFileTest.java"
+        },
+        {
+            "created_at": "2017-05-09T08:26:38.325Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-855?focusedCommentId=16002278) by xufusheng (fushengxu):*\nHello, `[~wesmckinn]` `[~julienledem]`,when elementSize = 12800,memory cannot be release. \n<font color=\"red\">\nenvironment\uff1a\nscala\uff1ascala-sdk-2.10.4\njdk:1.7.0_79\narrow:arrow-0.1.0\nthe following is the test code: \n</font>   \n \n \n```Java\nimport java.util.concurrent.ConcurrentHashMap\nimport org.apache.arrow.memory.{RootAllocator, BufferAllocator}\nimport org.apache.arrow.vector.NullableVarBinaryVector\nimport org.scalatest.{BeforeAndAfter, FunSuite}\n\nimport scala.util.Random\n\n\n\nclass ArrowLeakPureSuite extends FunSuite with BeforeAndAfter {\n  val root: BufferAllocator = new RootAllocator(1024 * 1024 * 1024 * 8L)\n  val elementCount = 1024\n  val elementSize = 12800 // when 25600, all is ok.\n  val binaGenerator = new BinaryGenerator(elementSize)\n\n  def pushVector(allocator: BufferAllocator, name: String, length: Int): NullableVarBinaryVector = {\n    val vector = new NullableVarBinaryVector(name, allocator)\n    vector.allocateNew()\n    val mutator = vector.getMutator\n    (0 to length -1).foreach(i =>{\n      val value = binaGenerator.next()\n      mutator.setSafe(i, value, 0, value.length)\n    })\n    vector\n  }\n\n  test(\"leak\") {\n    val vectorCount = 100\n    val entries = new ConcurrentHashMap[String, NullableVarBinaryVector]\n\n    (0 to vectorCount).foreach(i => {\n      val vector = pushVector(root,s\"vector-$i\", elementCount)\n      entries.put(s\"vector-$i\", vector)\n    })\n\n    // Push Finished.\n    println(\"Push Finished.\")\n    Thread.sleep( 10 * 1000)\n    (0 to vectorCount).foreach(i => {\n      val vector = entries.get(s\"vector-$i\")\n      vector.close()\n    })\n\n    // Close Finished, now the data in Memory should be released, However it didn't when elementSize = 12800.\n\n    println(\"Close Finished.\")\n    Thread.sleep( 20 * 1000)\n    println(\"Test Finished.\")\n  }\n\n  trait Generator[T] {\n\n    def next(): T\n\n    def nextStr(): String\n\n  }\n\n  abstract class GeneratorWithRandom[T] extends Generator[T] {\n\n    val random = new Random()\n\n    def nextStr() = next().toString\n  }\n\n  class BinaryGenerator(val length: Int) extends GeneratorWithRandom[Array[Byte]] {\n\n    val binary = new Array[Byte](length)\n\n    def next() = {\n      random.nextBytes(binary)\n      binary\n    }\n\n    override def nextStr() = {\n      new String(binary)\n    }\n  }\n}\n```"
+        },
+        {
+            "created_at": "2017-05-09T13:10:44.702Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-855?focusedCommentId=16002652) by Wes McKinney (wesm):*\nIs this still a problem with arrow-0.3.0? "
+        },
+        {
+            "created_at": "2017-05-09T13:44:04.302Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-855?focusedCommentId=16002694) by Emilio Lahr-Vivaz (elahrvivaz):*\nWon't the buffer allocator hold on to and re-use buffers? You might have to close the allocator to free those resources."
+        },
+        {
+            "created_at": "2017-05-10T02:09:37.507Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-855?focusedCommentId=16003914) by xufusheng (fushengxu):*\n`[~wesmckinn]` the arrow has not been upgraded to version 1.3\uff0cwe are now using arrow-0.1.0"
+        },
+        {
+            "created_at": "2017-05-25T06:03:55.213Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-855?focusedCommentId=16024245) by xufusheng (fushengxu):*\nNot dealing with Multithreading well\uff0c  lead to memory can not be released.It's our own problem,not arrow's problem.\n"
+        },
+        {
+            "created_at": "2022-08-27T14:42:05.747Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-855?focusedCommentId=17586036) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

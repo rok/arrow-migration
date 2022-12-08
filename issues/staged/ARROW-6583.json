@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Rust] Question and Request for Examples of Array Operations",
+        "body": "***Note**: This issue was originally created as [ARROW-6583](https://issues.apache.org/jira/browse/ARROW-6583). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi all, thank you for your excellent work on Arrow.\r\n\r\nAs I was going through the example for the Rust Arrow implementation, specifically the read_csv example\u00a0<https://github.com/apache/arrow/blob/master/rust/arrow/examples/read_csv.rs>\u00a0, as well as the\u00a0generated Rustdocs, and unit tests, it was not quite clear what the intended usage is for operations such as filtering and masking over Arrays.\r\n\r\nOne particular use-case I'm interested in is finding all values in an Array such that x >= N for all x. I came across arrow::compute::array_ops::filter, which seems to be similar to what I want, although it's expecting a mask to already be constructed before performing the filter operation, and it was not obviously visible in the documentation, leading me to believe this might not be idiomatic usage.\r\n\r\nMore generally, is the expectation for Arrays on the Rust side that they are just simple data abstractions, without exposing higher-order methods such as filtering/masking? Is the intent to leave that to users? If I missed some piece of documentation, please let me know. For my use-case I ended up trying something like:\r\n\r\n\r\n```java\n\r\nlet column = batch.column(0).as_any().downcast_ref::<Float64Array>().unwrap();\r\nlet mut builder = BooleanBuilder::new(batch.num_rows());\r\nlet N = 5.0;\r\nfor i in 0..batch.num_rows() {\r\n   if column.value(i).unwrap() > N {\r\n      builder.append_value(true).unwrap();\r\n   } else {\r\n      builder.append_value(false).unwrap();\r\n   }\r\n}\r\n\r\nlet mask = builder.finish();\r\nlet filtered_column = filter(column, mask);\n```\r\n\r\nIf possible, could you provide examples of intended usage of Arrays? Thank you!\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2019-09-17T15:27:29.000Z",
+        "updated_at": "2021-04-26T11:24:20.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-04-26T11:24:19.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-09-17T23:44:46.777Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6583?focusedCommentId=16931920) by Andy Grove (andygrove):*\nHi Arthur,\r\n\r\nYou approach looks functionality correct but rather than building a boolean array and then calling the filter method, it might be simpler and more efficient to just build the new Float64Array directly in your code, but it depends on your use case I guess.\r\n\r\nYou might also be interested in looking at the code in\u00a0`rust/arrow/src/compute/kernels/comparison.rs`\u00a0 where there are methods that take advantage of SIMD for comparing arrays (but not for comparing arrays to literals yet). For example we have `>=` implemented with this method:\r\n\r\n\u00a0\r\n```java\n\r\n/// Perform `left >= right` operation on two arrays. Non-null values are greater than null\r\n/// values.\r\npub fn gt_eq<T>(\r\n    left: &PrimitiveArray<T>,\r\n    right: &PrimitiveArray<T>,\r\n) -> Result<BooleanArray>\r\n \n```\r\nTo answer your last question, I would say the goals of the Rust project are:\r\n1. Allow interop with other Arrow implementations\n1. Provide efficient compute kernels for various operations (some basic ones exist already but I think more will be added over time)\n   \n   In addition to the core Arrow implementation in Rust, there is also the DataFusion crate, which is implementing a SQL query engine using Arrow, supporting query execution against CSV and Parquet files.\n   \n   I hope that helps."
+        },
+        {
+            "created_at": "2019-09-18T00:50:22.170Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6583?focusedCommentId=16931941) by [DELETED] (arthur_mac):*\n`[~andygrove]` thanks for the response, it certainly helps. I'll take a look inside the compute kernels, and if I come up with something reusable, I may send over a PR following the contributor guidelines. \r\n\r\nI have also looked over DataFusion. I don't have really complex queries, mostly I just need to: traverse a column at a time from a RecordBatch, compute some summary statistics, and return offsets that subdivide the Array to do some further computation. The ability to represent missing values is one of the reasons I chose to build on this library.\r\n\r\nI believe the statement of goals is very helpful, and I suggest perhaps placing it in the README or generated docs in case another user might benefit from it.\r\n\r\nI'll return to the mailing list for further questions if need be. Also thanks to Wes as well for earlier direction."
+        },
+        {
+            "created_at": "2020-01-17T18:26:21.477Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6583?focusedCommentId=17018230) by Neville Dipale (nevi_me):*\nHi [~arthur_mac], I'll add some more examples or write up some educational blog posts when we approach 1.0. If you've had more questions or suggestions since, which are related to your original question; please feel free to add them here (or in user the mailing list)."
+        },
+        {
+            "created_at": "2021-04-26T11:24:18.526Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6583?focusedCommentId=17332036) by Andrew Lamb (alamb):*\nMigrated to github: https://github.com/apache/arrow-rs/issues/52"
+        }
+    ]
+}

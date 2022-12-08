@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[C++][Python] installing pyarrow breaks the conda environment",
+        "body": "***Note**: This issue was originally created as [ARROW-14526](https://issues.apache.org/jira/browse/ARROW-14526). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI am working with pyarrow for parquet and feather IO. My environment has the following requirements python=3.8, pandas, geopandas, pyarrow, matplotlib, seaborn, jupyter\r\n\r\nYou can reproduce the env using\r\n```java\n\r\n$ conda create -n testpyarrow python=3.8 pandas geopandas matplotlib seaborn jupyter notebook pyarrow\u00a0\r\n\r\n$ conda activate testpyarrow\n```\r\n_you can skip pyarrow in the above command and then install it separately from conda-forge as instructed in the pyarrow github (**doesn't make a difference**) page using_\r\n```java\n\r\n$ conda install -c conda-forge pyarrow\n```\r\nAfter the env is created and activated, opening a python terminal and try importing to import anything\r\n```java\n\r\n$ python\r\n>>>import pandas\n```\r\nyields\r\n```java\n\r\nIllegal instruction (core dumped)\n```\r\nIf you uninstall pyarrow, all the imports start working. So I have zeroed down that pyarrow is breaking the imports.\r\n\r\nAs it is core dumped I can't trace the issue further. Illegal instruction is raised irrespective of the library I try to import\u00a0 (i.e. seaborn, matplotlib, geopandas, pandas, etc)",
+        "created_at": "2021-10-30T03:32:20.000Z",
+        "updated_at": "2021-11-04T00:05:20.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-01T18:23:36.384Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14526?focusedCommentId=17436966) by Weston Pace (westonpace):*\nIf you have gdb installed can you figure out a bit more information for us?  It should be something like:\r\n\r\n```\n\r\ngdb --args python -c \"import pandas\"\r\n...\r\n(gdb) run\r\n...\r\nProgram received signal SIGSEGV, Segmentation fault.\r\n...\r\n(gdb) disassemble\r\n...\r\n=> 0x00007ffff7d616a7 <+71>:\t???\r\n...\r\n```\r\n\r\nAlternatively, if you can capture and attach a core file that would show the same.  A common cause is an attempt to run some kind of extension (e.g. AVX2) that isn't supported by the processor.  Generally Arrow should detect this and not make such calls but I don't know if we have an Opteron in our CI infrastructure."
+        },
+        {
+            "created_at": "2021-11-03T22:02:16.449Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14526?focusedCommentId=17438314) by Naman (nawasthi):*\nrun: \r\n\r\n\r\n\r\n\u00a0\r\n```java\n\r\nStarting program: somewhere/miniconda3/envs/testpyarrow/bin/python -c import\\ pandas\r\n[Thread debugging using libthread_db enabled]\r\nUsing host libthread_db library \"/lib64/libthread_db.so.1\".\r\nMissing separate debuginfo for somewhere/miniconda3/envs/testpyarrow/lib/python3.8/site-packages/mkl/../../../libiomp5.so\r\nTry: yum --enablerepo='*debug*' install /usr/lib/debug/.build-id/47/5ceda1e8d10732daed7c831a3e2568c761e6d5.debug\r\n[Detaching after fork from child process 9140]\r\nProgram received signal SIGILL, Illegal instruction.\r\n0x00007fffe08f1aeb in arrow::compute::ArraySortOptions::ArraySortOptions(arrow::compute::SortOrder, arrow::compute::NullPlacement) ()\r\n from somewhere/miniconda3/envs/testpyarrow/lib/python3.8/site-packages/pyarrow/libarrow.so.600\r\nMissing separate debuginfos, use: debuginfo-install glibc-2.17-325.el7_9.x86_64\r\n\r\n\r\n```\r\ndisassemble:\r\n\r\n\r\n```java\n\r\nDump of assembler code for function _ZN5arrow7compute16ArraySortOptionsC2ENS0_9SortOrderENS0_13NullPlacementE:\r\n 0x00007fffe08f1ae0 <+0>: mov 0x11e3e09(%rip),%rax # 0x7fffe1ad58f0 <_ZN5arrow7compute8internal12_GLOBAL__N_1L21kArraySortOptionsTypeE>\r\n 0x00007fffe08f1ae7 <+7>: movd %esi,%xmm0\r\n=> 0x00007fffe08f1aeb <+11>: pinsrd $0x1,%edx,%xmm0\r\n 0x00007fffe08f1af1 <+17>: mov %rax,0x8(%rdi)\r\n 0x00007fffe08f1af5 <+21>: mov 0x11c9034(%rip),%rax # 0x7fffe1abab30\r\n 0x00007fffe08f1afc <+28>: movq %xmm0,0x10(%rdi)\r\n 0x00007fffe08f1b01 <+33>: add $0x10,%rax\r\n 0x00007fffe08f1b05 <+37>: mov %rax,(%rdi)\r\n 0x00007fffe08f1b08 <+40>: retq\r\nEnd of assembler dump.\n```\r\nDoes this help?"
+        },
+        {
+            "created_at": "2021-11-03T23:56:40.570Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14526?focusedCommentId=17438349) by Weston Pace (westonpace):*\nYes, that's great.  pinsrd requires (I think) >= SSE4.1 (although Arrow's threshold is SSE4.2).  Opteron 4180 supports only SSE4a.\r\n\r\nI don't know enough about conda, packaging, or simd to say what the correct solution / workaround would be.\r\n\r\nCC `[~apitrou]` `[~kou]`"
+        },
+        {
+            "created_at": "2021-11-04T00:04:34.373Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14526?focusedCommentId=17438351) by Antoine Pitrou (apitrou):*\nRight, the binaries we publish require SSE4.2. If you compile Arrow C++ and PyArrow from source, you are of course free to choose your own instruction set baseline. However, we also require the presence of a POPCNT instruction, because we use the corresponding intrinsics unconditionally. Luckily, it seems the Opteron 4180 should support it.\r\n\r\nWe could also provide an initialization function to bail out with a clear error message: ARROW-6033"
+        }
+    ]
+}

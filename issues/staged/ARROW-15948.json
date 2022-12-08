@@ -1,0 +1,42 @@
+{
+    "issue": {
+        "title": "[C++] strptime rolls-over dates not in range for current month ",
+        "body": "***Note**: This issue was originally created as [ARROW-15948](https://issues.apache.org/jira/browse/ARROW-15948). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI noticed some potentially unexpected behaviour when converting from string to date. Days that are out of bounds for the given month are rolled over into the following month.\r\n\r\nI think the expected behaviour would be to either error (Python) or return NULL/NA (R), but not to roll over dates in the following month.\r\n```r\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\nlibrary(lubridate, warn.conflicts = FALSE)\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\n\r\ndf <- tibble::tibble(string_date = \"1999-02-30\")\r\n\r\n# base R returns NA\r\ndf %>% \r\n  mutate(date = strptime(string_date, format = \"%Y-%m-%d\"))\r\n#> # A tibble: 1 \u00d7 2\r\n#>   string_date date  \r\n#>   <chr>       <dttm>\r\n#> 1 1999-02-30  NA\r\n\r\n# arrow rolls over the 30th of February into the 2nd of March\r\ndf %>% \r\n  arrow_table() %>% \r\n  mutate(date = strptime(string_date, format = \"%Y-%m-%d\")) %>% \r\n  collect()\r\n#> # A tibble: 1 \u00d7 2\r\n#>   string_date date               \r\n#>   <chr>       <dttm>             \r\n#> 1 1999-02-30  1999-03-02 00:00:00\r\n```\r\nThanks Alenka, Joris and Rok for helping me with the Python examples: \r\npandas:\r\n```python\n\r\n>>> import pandas as pd\r\n>>> pd.to_datetime(\"1999-02-30\", format=\"%Y-%m-%d\")\r\n...\r\nValueError: time data 1999-02-30 doesn't match format specified\r\n```\r\ndatetime:\r\n```python\n\r\n>>> import datetime\r\n>>> from datetime import datetime\r\n>>> datetime.strptime(\"1999-02-30\", \"%Y-%m-%d\")\r\n...\r\nValueError: day is out of range for month\r\n```\r\narrow:\r\n```python\n\r\n>>> import pyarrow.compute as pc\r\n>>> print(pc.strptime(\"1999-02-30\", format=\"%Y-%m-%d\", unit=\"s\"))\r\n1999-03-02 00:00:00\r\n```",
+        "created_at": "2022-03-16T11:14:48.000Z",
+        "updated_at": "2022-06-29T17:25:57.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-16T13:25:27.927Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15948?focusedCommentId=17507601) by Joris Van den Bossche (jorisvandenbossche):*\nCopying my comment from the other issue: personally, I don't like that behaviour, but I suppose we get this from the system strptime? (so that might even depend on your OS?)\r\nIt might be interesting to check what date.h's version of strptime does.\r\n\r\n> I think the expected behaviour would be to either error (Python) or return NULL/NA (R), \r\n\r\nI would say it is both: by default error, and optionally return null (after ARROW-15665)\r\n"
+        },
+        {
+            "created_at": "2022-03-16T13:35:44.761Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15948?focusedCommentId=17507614) by Rok Mihevc (rokm):*\nTwo notes:\r\n\r\nPerhaps system strptimes have an option to disable this behaviour?\r\n\r\nSwitching from system to date.h strptime might have performance implications so we should probably benchmark as we change this.\u00a0"
+        },
+        {
+            "created_at": "2022-06-29T16:47:48.566Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15948?focusedCommentId=17560371) by Antoine Pitrou (apitrou):*\nDoes date.h have a strptime? We use a vendored implementation from musl on Windows."
+        },
+        {
+            "created_at": "2022-06-29T16:59:37.099Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15948?focusedCommentId=17560383) by Rok Mihevc (rokm):*\nIt does, but there's this comment: https://github.com/apache/arrow/blob/master/cpp/src/arrow/util/value_parsing.h#L784"
+        },
+        {
+            "created_at": "2022-06-29T17:24:45.833Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15948?focusedCommentId=17560585) by Antoine Pitrou (apitrou):*\nAh, well, let's not use it, then :)"
+        },
+        {
+            "created_at": "2022-06-29T17:25:57.829Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15948?focusedCommentId=17560587) by Rok Mihevc (rokm):*\nBut maybe it's nice to dates? :D"
+        }
+    ]
+}

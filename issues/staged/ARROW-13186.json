@@ -1,0 +1,24 @@
+{
+    "issue": {
+        "title": "[R] Implement type determination more cleanly",
+        "body": "***Note**: This issue was originally created as [ARROW-13186](https://issues.apache.org/jira/browse/ARROW-13186). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn the R package, there are several improvements in data type determination in the 5.0.0 release. The implementation of these improvements used a kludge: They made it possible to store a `Schema`\u00a0in an\u00a0`Expression` object in the R package; when set, this `Schema`\u00a0is retained in derivative `Expression` objects. This was the most convenient way to make the `Schema` available for passing it to the `type_id()`\u00a0method, which requires it. But this introduces a deviation of the R package's `Expression` object from the C++ library's\u00a0`Expression` object, and it makes our type determination functions work differently than the other R functions in `nse_funcs`.\r\n\r\nThe Jira\u00a0issues in which these somewhat kludgy improvements were made are:\r\n \\* allowing a schema to be stored in the `Expression` object, and implementing type determination functions in a way that uses that schema (ARROW-12781)\r\n \\* retaining a schema in derivative `Expression` objects (ARROW-13117)\r\n \\* setting an empty schema in scalar literal `Expression`\u00a0objects (ARROW-13119)\r\n\r\nFrom the perspective of the R package, an ideal way to implement type determination functions would be to call a `type_id` kernel through the `call_function` interface, but this was rejected in\u00a0ARROW-13167. Consider other ways that we might improve this implementation.",
+        "created_at": "2021-06-25T15:04:47.000Z",
+        "updated_at": "2021-06-25T17:45:58.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-25T17:17:20.446Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13186?focusedCommentId=17369591) by Neal Richardson (npr):*\nI did some experimenting and got something that works for the arrow_mask/arrow_eval code paths, but any paths that use tidyselect::eval_select (currently only relocate but presumably others will be added) need slightly different handling and I didn't get the chance to work out a solution there yet.\r\n\r\nThe idea is that we stick the schema as a \"data pronoun\" like thing in the data mask, so that any functions called inside arrow_eval() can call up and find it.\u00a0\r\n\r\n```Java\n\r\ndiff --git a/r/R/dplyr-eval.R b/r/R/dplyr-eval.R\r\nindex de68d2f2c..eda40dc23 100644\r\n--- a/r/R/dplyr-eval.R\r\n+++ b/r/R/dplyr-eval.R\r\n@@ -86,9 +86,6 @@ arrow_mask <- function(.data) {\r\n     f_env[[f]] <- fail\r\n   }\r\n \r\n-  # Assign the schema to the expressions\r\n-  map(.data$selected_columns, ~(.$schema <- .data$.data$schema))\r\n-\r\n# Add the column references and make the mask\r\n   out <- new_data_mask(\r\n     new_environment(.data$selected_columns, parent = f_env),\r\n@@ -98,5 +95,18 @@ arrow_mask <- function(.data) {\r\n# TODO: figure out what rlang::as_data_pronoun does/why we should use it\r\n# (because if we do we get `Error: Can't modify the data pronoun` in mutate())\r\n   out$.data <- .data$selected_columns\r\n+  out$.schema <- .data$.data$schema\r\n   out\r\n }\r\n+\r\n+arrow_eval_schema <- function() {\r\n+  n <- 1\r\n+  env <- parent.frame(n)\r\n+  while(!identical(env, .GlobalEnv)) {\r\n+    if (\".schema\" %in% ls(env, all.names = TRUE)) {\r\n+      return(get(\".schema\", env))\r\n+    }\r\n+    n <- n + 1\r\n+    env <- parent.frame(n)\r\n+  }\r\n+}\r\n```\r\n\r\nThen each of the is\\* functions calls arrow_eval_schema() to get it. \r\n\r\nThe benefit of something like this is that we avoid the cost of tracking/merging schemas when building expressions and only have to grab it when we need it (which is rarely since none of the other compute kernels require it)."
+        },
+        {
+            "created_at": "2021-06-25T17:45:58.309Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13186?focusedCommentId=17369622) by Ian Cook (icook):*\nNice, thanks `[~npr]`.\r\n\r\nYes, using `eval_select` across the board is\u00a0ARROW-12105. I hope to get that done for 5.0.0."
+        }
+    ]
+}

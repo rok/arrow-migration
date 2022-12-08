@@ -1,0 +1,24 @@
+{
+    "issue": {
+        "title": "[Python] csv.ConvertOptions Do Not Pass Through/Retain Nullability from Schema",
+        "body": "***Note**: This issue was originally created as [ARROW-7655](https://issues.apache.org/jira/browse/ARROW-7655). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n\u00a0\r\n\r\nOriginally mentioned in:\u00a0<https://github.com/apache/arrow/issues/6243>\r\n\r\n**High level description of the issue:**\r\n \\* It is possible ([though not documented](https://issues.apache.org/jira/browse/ARROW-7654)) that you may assign the column_types field of ConvertOptions to a Schema object instead of a Dict[str, DataType].\r\n \\* Expected result: the nullable attribute, in addition to the type, of the Fields in the Schema supplied are present on the Schema used when reading CSV data.\r\n \\* Actual result: the Field type information is present, but nullable is lost. All fields are nullable.\r\n\r\n**Minimal reproduction case:**\r\n \\* Use case notes: this is especially noticeable when using pyarrow as a meant to save data with a known schema to parquet as the ParquetWriter will check that the schema of a table being written matches the schema supplied to the writer. If that same schema is used to to read the CSV data and contains a nullable field, a mismatch will be detected resulting in an error which is demonstrated below.\r\n\r\n\u00a0\r\n```java\n\r\n$ cat test.csv \r\n0\r\n1\r\n$ python\r\n>>> import pyarrow\r\n>>> schema = pyarrow.schema([pyarrow.field(name=\"foo\", type=pyarrow.bool_(), nullable=False)])\r\n>>> read_options = csv.ReadOptions(column_names=[\"foo\"])\r\n>>> from pyarrow import csv\r\n>>> read_options = csv.ReadOptions(column_names=[\"foo\"])\r\n>>> convert_options = csv.ConvertOptions(column_types=schema)\r\n>>> table = csv.read_csv(\"test.csv\", convert_options=convert_options, read_options=read_options)\r\n>>> schema\r\nfoo: bool not null\r\n>>> table.schema\r\nfoo: bool\r\n>>> from pyarrow import parquet as pq\r\n>>> writer = pq.ParquetWriter(\"test.parquet\", schema)\r\n>>> writer.write_table(table)\r\nTraceback (most recent call last):\r\n\u00a0 File \"<stdin>\", line 1, in <module>\r\n\u00a0 File \"(REDACTED)/lib/python3.7/site-packages/pyarrow-0.15.1-py3.7-macosx-10.9-x86_64.egg/pyarrow/parquet.py\", line 472, in write_table\r\n\u00a0 \u00a0 raise ValueError(msg)\r\nValueError: Table schema does not match schema used to create file: \r\ntable:\r\nfoo: bool vs. \r\nfile:\r\nfoo: bool not null\r\n>>> pyarrow.__version__\r\n'0.15.1'\r\n>>> exit()\r\n$ python --version\r\nPython 3.7.4\n```\r\n\u00a0\r\n \\* As a side note: if I don't set column_names in read_options when calling read_csv, but I set convert_options with column_types set, type inference is still performed which seems like a bug vs. what the docs state. That seems like a possibly related, but independent bug, and I haven't done a search yet to see if it is an open/known issue but if someone believes it should be filed with a repro case upon reading this I am happy to help! I only realized this when minimizing the repro case as my original code was setting column_names.\r\n\r\n**Potential source of issue:**\r\n \\* \\*\\*I did not yet look at how hard it is to fix, but I note that [here](https://github.com/apache/arrow/blob/ace72c2afa6b7608bca9ba858fdd10b23e7f2dbf/python/pyarrow/_csv.pyx#L411) only the name and type are passed down from a Field.",
+        "created_at": "2020-01-22T16:59:56.000Z",
+        "updated_at": "2020-01-28T10:33:24.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-01-22T17:13:52.061Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7655?focusedCommentId=17021293) by Tim Lantz (tlantz):*\nRe: my side note above, I filed\u00a0https://issues.apache.org/jira/browse/ARROW-7656\u00a0as well. I see that in ARROW-6536 there is discussion on why in the C++ API you need to set both and that makes perfect sense so this is just a documentation thing."
+        },
+        {
+            "created_at": "2020-01-28T10:33:24.201Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7655?focusedCommentId=17025026) by Joris Van den Bossche (jorisvandenbossche):*\nCurrently, I think the `column_types` option is only meant to specify the types, while nullability is part of the Field in a Schema, and is not a fundamental property of the _type_ itself."
+        }
+    ]
+}

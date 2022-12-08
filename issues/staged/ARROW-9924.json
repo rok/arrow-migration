@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[Python] Performance regression reading individual Parquet files using Dataset interface",
+        "body": "***Note**: This issue was originally created as [ARROW-9924](https://issues.apache.org/jira/browse/ARROW-9924). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI haven't investigated very deeply but this seems symptomatic of a problem:\r\n\r\n```Java\n\r\nIn [27]: df = pd.DataFrame({'A': np.random.randn(10000000)})                                                                                                                              \r\n\r\nIn [28]: pq.write_table(pa.table(df), 'test.parquet')                                                                                                                                     \r\n\r\nIn [29]: timeit pq.read_table('test.parquet')                                                                                                                                             \r\n79.8 ms \u00b1 1.25 ms per loop (mean \u00b1 std. dev. of 7 runs, 10 loops each)\r\n\r\nIn [30]: timeit pq.read_table('test.parquet', use_legacy_dataset=True)                                                                                                                    \r\n66.4 ms \u00b1 1.33 ms per loop (mean \u00b1 std. dev. of 7 runs, 10 loops each)\r\n```",
+        "created_at": "2020-09-06T22:05:12.000Z",
+        "updated_at": "2020-09-29T19:29:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-09-29T19:29:40.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-06T22:13:33.077Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9924?focusedCommentId=17191382) by Wes McKinney (wesm):*\nIMHO we should not continue to use the Dataset interface for reading single files by default until the perf regression has been eliminated. "
+        },
+        {
+            "created_at": "2020-09-07T16:37:23.480Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9924?focusedCommentId=17191784) by Antoine Pitrou (apitrou):*\ncc `[~jorisvandenbossche]`"
+        },
+        {
+            "created_at": "2020-09-08T12:47:55.754Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9924?focusedCommentId=17192188) by Joris Van den Bossche (jorisvandenbossche):*\nThere was one other issue about a performance regression (ARROW-9827), for which I have an open PR (fix to not parse statistics when there is no filter specified). Now, I tried a release build of that branch compared to master, and that doesn't seem to make a difference for this case.\r\n\r\n> IMHO we should not continue to use the Dataset interface for reading single files by default until the perf regression has been eliminated. \r\n\r\nThat came up before, and we can certainly still use the old ParquetFile reader if there is eg no `filter` specified (we shouldn't use ParquetDataset for this case, though, as was done before 1.0)\r\n\r\n\u2014\r\n\r\nI did a quick profile (with py-spy), and it _seems_ that the dataset version has a bit more overhead in all kinds of iteration (it uses the RecordBatchReader, and not the `FileReader::ReadTable` which is specifically to read the whole parquet file at once)"
+        },
+        {
+            "created_at": "2020-09-08T16:00:38.991Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9924?focusedCommentId=17192289) by Wes McKinney (wesm):*\nI'd prefer to fix the Datasets implementation rather than kicking the can down the road. It doesn't seem reasonable to pay an extra price when using the interface to read a single file. "
+        },
+        {
+            "created_at": "2020-09-12T19:48:31.191Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9924?focusedCommentId=17194834) by Wes McKinney (wesm):*\nI took a look into this since I was curious what's wrong.\r\n\r\nSo I don't know about this:\r\n\r\n```Java\n\r\nIn [10]: a = pq.read_table('test.parquet', use_legacy_dataset=True)\r\n\r\nIn [11]: b = pq.read_table('test.parquet', use_legacy_dataset=False)\r\n\r\nIn [12]: a[0].num_chunks\r\nOut[12]: 1\r\n\r\nIn [13]: b[0].num_chunks\r\nOut[13]: 306\r\n```\r\n\r\nLooking at the top of the hierarchical perf report for the \"new\" code, the deeply nested layers of iterators strikes me as one thing to think more about whether that's the design we want\r\n\r\nhttps://gist.github.com/wesm/3e3eeb6b7f5f22650f18e69e206c2eb8\r\n\r\nI think the Datasets API may need to make a wiser decision about how to read a file based on the declared intent of the user. If the user calls `ToTable`, then I don't think it makes sense to break the problem up into so many small tasks \u2013 perhaps the default chunk size should be larger than it is (so that streaming readers who are concerned about memory use can shrink the chunksize to something smaller)? \r\n\r\nAnother question: why ProjectRecordBatch and FilterRecordBatch being used? Nothing is being projected nor filtered. "
+        },
+        {
+            "created_at": "2020-09-12T20:16:11.460Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9924?focusedCommentId=17194843) by Wes McKinney (wesm):*\nI found that with a larger dataset with more columns, the slowdown is much worse\r\n\r\nSetup:\r\n\r\n```Java\n\r\ndf = pd.DataFrame({'f{0}'.format(i): np.random.randn(10000000) for i in range(50)})\r\npq.write_table(pa.table(df), 'test.parquet')\r\n```\r\n\r\nSo we have:\r\n\r\n```Java\n\r\nIn [1]: timeit pq.read_table('test.parquet', use_legacy_dataset=True)                                                                             \r\n843 ms \u00b1 40 ms per loop (mean \u00b1 std. dev. of 7 runs, 1 loop each)\r\n\r\nIn [2]: timeit pq.read_table('test.parquet', use_legacy_dataset=False)                                                                            \r\n4.53 s \u00b1 29.3 ms per loop (mean \u00b1 std. dev. of 7 runs, 1 loop each)\r\n```"
+        },
+        {
+            "created_at": "2020-09-12T20:38:17.869Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9924?focusedCommentId=17194853) by Wes McKinney (wesm):*\nThink I found the problem. I expanded the chunk size to 10M so there is a single chunk in both cases and:\r\n\r\n```Java\n\r\nIn [1]: %time a = pq.read_table('test.parquet', use_legacy_dataset=False)                                                                         \r\nCPU times: user 1.5 s, sys: 2.59 s, total: 4.08 s\r\nWall time: 4.09 s\r\n\r\nIn [2]: %time a = pq.read_table('test.parquet', use_legacy_dataset=True)                                                                          \r\nCPU times: user 3.49 s, sys: 5.28 s, total: 8.77 s\r\nWall time: 1.64 s\r\n```\r\n\r\nDigging deeper, another problem is that column decoding is not being parallelized when using the Datasets API, whereas it is when you use `FileReader::ReadTable`. This is likely an artifact of the fact that we have not yet tackled the nested parallelism problem in the Datasets API. It's too bad that our users are now suffering the consequences of this.\r\n\r\nSo there are a two problems here:\r\n\r\n- 32K is too small of a default batch size for quickly reading files into memory. I suggest setting it to ~256K or ~1M rows per batch\n- Parquet row group deserialization is not being parallelized at the column level in `parquet::arrow::FileReader::GetRecordBatchReader`\n  \n  The band-aid solution to this problem will be to use the old code path when no special Datasets features are needed when using `parquet.read_table`, but these two issues do need to be fixed. "
+        },
+        {
+            "created_at": "2020-09-14T17:23:23.364Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9924?focusedCommentId=17195633) by Ben Kietzman (bkietz):*\n> Looking at the top of the hierarchical perf report for the \"new\" code, the deeply nested layers of iterators strikes me as one thing to think more about whether that's the design we want\r\n\r\nTo be clear, is the concern over clarity or performance? IIUC <https://gist.github.com/wesm/3e3eeb6b7f5f22650f18e69e206c2eb8#file-gistfile1-txt-L8-L20> represents minimal cost since 0.65% of runtime was spent managing the Iterator abstraction. If we wanted to replace our abstraction for lazy sequences we could potentially refactor to a `Future<T>`-based iteration. Did you have a replacement in mind?\r\n\r\n> why ProjectRecordBatch and FilterRecordBatch being used? Nothing is being projected nor filtered\r\n\r\nWe don't explicitly elide them when the projection or filter is trivial. I could try to benchmark whether there is a significant performance benefit to adding a special case for trivial projection/filtering, but I'd guess we don't gain anything.\r\n\r\nAnother potential bandaid fix would be to allow column level parallelism when scanning a single file (since no thread contention would be incurred) (combined with increasing batch size)."
+        },
+        {
+            "created_at": "2020-09-14T17:39:43.423Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9924?focusedCommentId=17195647) by Wes McKinney (wesm):*\nMy principle concern is addressing the performance regressions, which are especially grave considering that they affect one of the (if not **the**) most-called user-facing APIs in the whole Arrow project. The other questions we can investigate as follow up matters. "
+        },
+        {
+            "created_at": "2020-09-29T19:29:40.771Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9924?focusedCommentId=17204226) by Wes McKinney (wesm):*\nIssue resolved by pull request 8188\n<https://github.com/apache/arrow/pull/8188>"
+        }
+    ]
+}

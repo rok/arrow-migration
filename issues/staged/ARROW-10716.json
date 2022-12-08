@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[Rust] [DataFusion] Address limitations of logical expression rewrite logic",
+        "body": "***Note**: This issue was originally created as [ARROW-10716](https://issues.apache.org/jira/browse/ARROW-10716). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe have a generic approach to rewriting expressions in operators that worked ok until we got\u00a0 to the CASE expression, which is more complex, and required adding some hacky code to make it work.\r\n\r\nWe should come up with a better design.\r\n\r\nSee the discussion on <https://github.com/apache/arrow/pull/8746> for more context and links to proposed solutions.\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2020-11-24T17:33:30.000Z",
+        "updated_at": "2021-04-26T13:22:59.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust - DataFusion",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-04-26T13:22:59.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-11-24T18:56:34.496Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10716?focusedCommentId=17238316) by Dani\u00ebl Heres (Dandandan):*\nA summary of some points I found when coming up with a new framework for polars (<https://github.com/ritchie46/polars>) that uses some ideas from the Spark catalyst optimizer [1]\r\n\r\nSome points I liked about the design from Spark Catalyst:\r\n \\* Recursion on tree should be only be needed once, and not for each optimization pass. So every rule can be written using simple pattern matching. This can be captured in some kind of framework.\r\n \\* A large nr. of optimization rules should run a nr. of times to reach a fixed point, i.e. running until the logical plan doesn't change anymore. If doing this, it is important that all of your optimization rules only make the tree \"smaller\" in some sense. So either should reduce the nr. of nodes or make the plan \"cheaper\".\u00a0\r\n\r\nThe optimizer I made for Polars is in very early stages, but I did some design and first iterations to come up with a first version of a optimization framework.\r\n \\* In Rust, if elements in your tree are Boxed, you need to clone part of the tree when you want to mutate part of the tree. So simple recursing the tree + mutating it in scala is not possible without changing. You could maybe wrap everything in something like Arc/RC <RefCell>>, but this has a higher overhead. You could also generate a whole new tree every iteration. This will however be quite a bit slower, especially if you would do this per optimization rule which can grow a lot!\r\n\r\nSome points that a first iteration is different than the optimizer in Spark\r\n \\* It uses an tree backed by an arena to efficiently allocate data for the tree and mutate it. This means that if you don't generate new nodes, you don't even allocate, just switch some index to different nodes around. Also a tree in a arena is very nice for the locality of the data.\r\n\r\nThe arena brings a bit more unsafety, as you\u00a0\r\n \\* Uses manual recursion (with pre allocated stack) instead of the call stack to recurse (a bit uglier, but if you only write it once can be worth it for performance).\r\n\r\n \\* In\u00a0Catalyst, only a single optimization rule runs until reaching a fixed point, and then moves to . In the Polars version, all rules run in the inner loop until the whole optimization reaches a fixed point. Benefit is that you don't have to make sure the order of the rules is important. Also it can bring _more_\u00a0 optimizations, as e.g. a rule to evaluate some expressions can have an effect on a rule to propagate nulls that can have an effect on predicate pushdown, etc.\r\n\r\n \\* In\u00a0Catalyst you have to note whether your optimization needs to recurses topdown or bottom up (for example more useful to constant folding as otherwise you would need lots of iterations to fold a complex contant expression). In this optimizer, the optimizer does both itself, by also optimizing a node right after it changed. This means that the optimizer needs to do perform iterations in general, and you need to think less about it.\r\n\r\nTODO for design in Polars:\r\n \\* Some optimization rules can be more expensive than others. It might make sense to keep track of each node individually to check whether it changed\u00a0\r\n \\* Different optimization rules need different input, like the schema/type of a column, etc.\r\n \\* Some optimizations need to keep track of state, this is not yet handled in this optimizer.\r\n\r\n\u00a0[1 ]http://people.csail.mit.edu/matei/papers/2015/sigmod_spark_sql.pdf"
+        },
+        {
+            "created_at": "2021-04-26T13:22:58.069Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10716?focusedCommentId=17332310) by Andrew Lamb (alamb):*\nMigrated to github: https://github.com/apache/arrow-datafusion/issues/116"
+        }
+    ]
+}

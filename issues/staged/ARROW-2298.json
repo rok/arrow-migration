@@ -1,0 +1,81 @@
+{
+    "issue": {
+        "title": "[Python] Add option to not consider NaN to be null when converting to an integer Arrow type",
+        "body": "***Note**: This issue was originally created as [ARROW-2298](https://issues.apache.org/jira/browse/ARROW-2298). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFollow-on work to ARROW-2135",
+        "created_at": "2018-03-12T19:04:04.000Z",
+        "updated_at": "2019-06-25T11:31:53.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-06-25T10:13:46.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-10-11T16:45:48.786Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2298?focusedCommentId=16646743) by Jakub Oko\u0144ski (farnoy):*\nThis is a major blocker for my usecase. Can you please advise how to implement this?\r\n\r\n\u00a0\r\n\r\nIs the conceptual solution as simple as \"when we see a nullable integer field in schema, and numpy type for that field is float64, we treat NaNs as nulls and cast everything else to the integer type\"?"
+        },
+        {
+            "created_at": "2018-10-11T16:47:56.641Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2298?focusedCommentId=16646745) by Wes McKinney (wesm):*\nCan you give an example of the code you want to write and the desired behavior? I don't remember the context of this issue well enough"
+        },
+        {
+            "created_at": "2018-10-11T17:03:02.727Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2298?focusedCommentId=16646764) by Jakub Oko\u0144ski (farnoy):*\nI would like for this to work:\r\n\r\n\u00a0\r\n> `In [1]: import pyarrow`\n> \n> `In [2]: import pandas as pd`\n> \n> `In [3]: df = pd.DataFrame(\\{'a': [None, 1, 2, 3, None]})`\n> \n> `In [4]: df.dtypes`\n> `Out[4]: `\n> `a\u00a0\u00a0\u00a0 float64`\n> `dtype: object`\n> \n> `In [5]: schema = pyarrow.schema([pyarrow.field(name='a', type=pyarrow.int64(), nullable=True)])`\n> \n> `In [6]: pyarrow.Table.from_pandas(df, schema=schema, preserve_index=False)`\n> `---------------------------------------------------------------------------`\n> `ArrowInvalid\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 Traceback (most recent call last)`\n> `<ipython-input-6-c779f0c872bb> in <module>()`\n> `----> 1 pyarrow.Table.from_pandas(df, schema=schema, preserve_index=False)`\n> \n> `...`\n> \n> `ArrowInvalid: ('Floating point value truncated', 'Conversion failed for column a with type float64')`"
+        },
+        {
+            "created_at": "2018-10-11T17:05:52.187Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2298?focusedCommentId=16646768) by Wes McKinney (wesm):*\nSeems reasonable to me. "
+        },
+        {
+            "created_at": "2018-10-11T17:09:45.533Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2298?focusedCommentId=16646771) by Jakub Oko\u0144ski (farnoy):*\nIs the usecase reasonable, or my conceptual solution? Perhaps both? :)\r\n\r\nI think that not every 64-bit signed integer has a representation in np.float64, but this caveat is something pandas users would (IMO) be prepared to live with."
+        },
+        {
+            "created_at": "2018-10-11T17:19:51.773Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2298?focusedCommentId=16646789) by Wes McKinney (wesm):*\nWhen `safe=True` we should verify that the values are in the representable range of integers. Otherwise we perform an unsafe cast if the value is non-null"
+        },
+        {
+            "created_at": "2018-10-11T17:32:37.638Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2298?focusedCommentId=16646805) by Jakub Oko\u0144ski (farnoy):*\nSounds great, but I must admit I'm not intimately familiar with floating point numbers.\r\n\r\n\u00a0\r\n\r\nHow could one detect problems with this conversion?\r\n\r\n\u00a0\r\n> `In [2]: np.array([2**64-1], dtype=np.uint64)`\n> `Out[2]: array([18446744073709551615], dtype=uint64)`\n> \n> `In [3]: np.array([2**64-1], dtype=np.uint64).astype(np.float64)`\n> `Out[3]: array([1.84467441e+19])`\n> \n> `In [4]: np.array([2**64-1], dtype=np.uint64).astype(np.float64).astype(np.uint64)`\n> `Out[4]: array([0], dtype=uint64)`\r\n\u00a0\r\n\r\nIs this something you can implement quickly? If not, can you give me some pointers so that I can implement it in pyarrow?"
+        },
+        {
+            "created_at": "2018-10-11T17:49:41.668Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2298?focusedCommentId=16646821) by Wes McKinney (wesm):*\nCheck out these functions: https://github.com/apache/arrow/blob/master/cpp/src/arrow/python/helpers.cc#L350. There's a float64 and float32 version. We would need to implement a version of these within the cast kernels"
+        },
+        {
+            "created_at": "2018-10-12T16:57:11.433Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2298?focusedCommentId=16648119) by Jakub Oko\u0144ski (farnoy):*\nI've pushed a PR addressing this, but it is just my first attempt - [here](https://github.com/apache/arrow/pull/2750)"
+        },
+        {
+            "created_at": "2018-11-05T13:28:01.032Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2298?focusedCommentId=16675139) by Jakub Oko\u0144ski (farnoy):*\nI've looked into this a bit more and I realized that Arrow already supports what I want to do with pandas nulls and overflows, I just need to set `safe=False` when doing the conversion.\r\n\r\n\u00a0\r\n\r\nStill, I would like to add another parameter to `CastOptions`, called `allow_float_mantissa_overflow`. This one would check for out of range values and return errors.\r\n\r\n\u00a0\r\n\r\nThis however, won't be very useful unless we expand the `safe` parameter in the Python API, so that users could specify, for example:\r\n\r\n\u00a0\r\n\r\n`pyarrow.Table.from_pandas(df, schema=schema, safe=True, safe_allow_float_mantissa_overflow=False)` - this invocation would work with truncated floats, int overflow, truncated timestamps, but it would reject floating point values outside of the allowed range (+/- 1 << 53 for float64, +/- 1 << 24 for float32).\r\n\r\n\u00a0\r\n\r\n`[~wesmckinn]` What do you think of this approach? Would it expose too much to the user?"
+        },
+        {
+            "created_at": "2019-01-08T21:58:17.569Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2298?focusedCommentId=16737566) by Wes McKinney (wesm):*\nI'm unable to get to this for 0.12. Will have to wait for 0.13"
+        },
+        {
+            "created_at": "2019-06-07T11:51:11.392Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2298?focusedCommentId=16858547) by Joris Van den Bossche (jorisvandenbossche):*\n`[~farnoy]` For me, the example you show above works:\r\n```Java\n\r\nIn [33]: schema = pa.schema([)a.field(name='a', type=pa.int64(), nullable=True)])                                                                                                                    \r\n\r\nIn [34]: pa.Table.from_pandas(df, schema=schema, preserve_index=False)                                                                                                                                         \r\nOut[34]: \r\npyarrow.Table\r\na: int64\r\nmetadata\r\n--------\r\n{b'pandas': b'{\"index_columns\": [], \"column_indexes\": [], \"columns\": [{\"name\":'\r\n            b' \"a\", \"field_name\": \"a\", \"pandas_type\": \"int64\", \"numpy_type\": \"'\r\n            b'float64\", \"metadata\": null}], \"creator\": {\"library\": \"pyarrow\", '\r\n            b'\"version\": \"0.13.1.dev313+g997226a9\"}, \"pandas_version\": \"0.24.2'\r\n            b'\"}'}\r\n\r\nIn [35]: table = _                                                                                                                                                                                                  \r\n\r\nIn [36]: table.column('a')                                                                                                                                                                                          \r\nOut[36]: \r\n<Column name='a' type=DataType(int64)>\r\n[\r\n  [\r\n    null,\r\n    1,\r\n    2,\r\n    3,\r\n    null\r\n  ]\r\n]\r\n```\r\n\r\nthis is because in `Table.from_pandas` we assume data are coming from pandas and allow the above. \r\n\r\nUsing just the array API, you can see that with (converting float numpy array to integer arrow array):\r\n\r\n```python\n\r\nIn [41]: pa.array(np.array([1, 2, np.nan], dtype=float), type=pa.int64())                                                                                                                                           \r\n...\r\nArrowInvalid: Floating point value truncated\r\n\r\nIn [42]: pa.array(np.array([1, 2, np.nan], dtype=float), type=pa.int64(), from_pandas=True)                                                                                                                         \r\nOut[42]: \r\n<pyarrow.lib.Int64Array object at 0x7feaeea36548>\r\n[\r\n  1,\r\n  2,\r\n  null\r\n]\r\n```\r\n\r\nDoes that satisfy your use case? \r\n\r\nIt might not help with for very big integers that cannot be represented properly as floats (that will still raise an error about values being truncated), but I think if you are coming from pandas, that use case will not be very frequent, exactly because pandas cannot properly represent that itself."
+        },
+        {
+            "created_at": "2019-06-12T14:45:04.027Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2298?focusedCommentId=16862178) by Jakub Oko\u0144ski (farnoy):*\n`[~jorisvandenbossche]` Is there a difference in your case between using `np.nan` and `None`?"
+        },
+        {
+            "created_at": "2019-06-12T16:47:19.720Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2298?focusedCommentId=16862275) by Joris Van den Bossche (jorisvandenbossche):*\nI am not sure I fully understand your question. I am passing a numpy array to `pa.array`, and creating a numpy array with np.nan or None (`np.array([1, 2, None], dtype=float)` or `np.array([1, 2, np.nan], dtype=float)`) give the same float64 numpy array. \r\n\r\nAlso if you have a pandas object like `pd.Series([1, 2, None])` this will actually be stored as a float array with np.nan."
+        },
+        {
+            "created_at": "2019-06-25T00:34:14.359Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2298?focusedCommentId=16871896) by Wes McKinney (wesm):*\nWhatever issues there were back in October seem to be resolved now. I'm adding some unit tests to assert that that is the case"
+        },
+        {
+            "created_at": "2019-06-25T10:13:46.665Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2298?focusedCommentId=16872230) by Krisztian Szucs (kszucs):*\nIssue resolved by pull request 4682\n<https://github.com/apache/arrow/pull/4682>"
+        }
+    ]
+}

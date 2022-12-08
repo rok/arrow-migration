@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[R] Factor type not preserved in Parquet roundtrip",
+        "body": "***Note**: This issue was originally created as [ARROW-7045](https://issues.apache.org/jira/browse/ARROW-7045). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n```r\n\r\ntest_that(\"Factors are preserved when writing/reading from Parquet\", {\r\n  tf <- tempfile()\r\n  on.exit(unlink(tf))\r\n  df <- data.frame(a = factor(c(\"a\", \"b\")))\r\n  write_parquet(df, tf)\r\n  expect_equivalent(read_parquet(tf), df)\r\n})\r\n```\r\n\r\nFails:\r\n```Java\n\r\n`object` not equivalent to `expected`.\r\nComponent \u201ca\u201d: target is character, current is factor\r\n```\r\n\r\nThis has to do with the translation with Parquet and not the R <--> Arrow type mapping (unlike ARROW-7028). If you write_feather and read_feather, the test passes.",
+        "created_at": "2019-11-01T20:46:44.000Z",
+        "updated_at": "2020-01-08T05:42:04.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-01-08T05:14:15.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-01-06T12:25:03.497Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7045?focusedCommentId=17008799) by Hiroaki Yutani (yutannihilation):*\nI think I found the cause. This is because `ParquetArrowWriterProperties$store_schema()` is not called by default, the first `if` branch in `ParquetArrowWriterProperties$create` below:\r\n\r\n```r\n\r\n  if (!use_deprecated_int96_timestamps && is.null(coerce_timestamps) && !allow_truncated_timestamps) {\r\n    shared_ptr(ParquetArrowWriterProperties, parquet___default_arrow_writer_properties())\r\n  } else {\r\n    builder <- shared_ptr(ParquetArrowWriterPropertiesBuilder, parquet___ArrowWriterProperties___Builder__create())\r\n    builder$store_schema()\r\n    builder$set_int96_support(use_deprecated_int96_timestamps)\r\n    builder$set_coerce_timestamps(coerce_timestamps)\r\n    builder$set_allow_truncated_timestamps(allow_truncated_timestamps)\r\n    shared_ptr(ParquetArrowWriterProperties, parquet___ArrowWriterProperties___Builder__build(builder))\r\n  }\r\n```\r\n(https://github.com/apache/arrow/blob/dd6b17d0cc1a77aaff84c5a4472ac73bc79486af/r/R/parquet.R#L208-L217)\r\n\r\nActually, specifying either of the arguments works. For example:\r\n\r\n```r\n\r\ntest_that(\"Factors are preserved when writing/reading from Parquet\", {\r\n  tf <- tempfile()\r\n  on.exit(unlink(tf))\r\n  df <- data.frame(a = factor(c(\"a\", \"b\")))\r\n  write_parquet(df, tf, allow_truncated_timestamps = TRUE)\r\n  expect_equivalent(read_parquet(tf), df)\r\n})\r\n```\r\n\r\nAccording to https://github.com/apache/arrow/pull/5077 :\r\n\r\n> Add ArrowWriterProperties::store_schema() option which stores the Arrow schema used to create a Parquet file in a special ARROW:schema key in the metadata, so that we can detect that a column was originally DictionaryArray. This option is off by default, but enabled in the Python bindings. We can always make it the default in the future\r\n\r\nI think the R bindings can follow the Python and always use `ParquetArrowWriterPropertiesBuilder` instead of `default_arrow_writer_properties()`. If this sounds good, I'm happy to send a PR for this."
+        },
+        {
+            "created_at": "2020-01-06T15:31:42.073Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7045?focusedCommentId=17008948) by Neal Richardson (npr):*\nNice work. A PR would be great, thanks!"
+        },
+        {
+            "created_at": "2020-01-08T05:14:15.115Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7045?focusedCommentId=17010375) by Neal Richardson (npr):*\nIssue resolved by pull request 6135\n<https://github.com/apache/arrow/pull/6135>"
+        }
+    ]
+}

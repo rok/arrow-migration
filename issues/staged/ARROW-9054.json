@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[C++] Add ScalarAggregateOptions",
+        "body": "***Note**: This issue was originally created as [ARROW-9054](https://issues.apache.org/jira/browse/ARROW-9054). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSee discussion on https://github.com/apache/arrow/pull/7308. MinMax has an option for null behavior, but Sum and Mean do not.",
+        "created_at": "2020-06-06T22:06:44.000Z",
+        "updated_at": "2021-05-21T07:58:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-05-21T01:01:43.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-06-16T15:13:11.805Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9054?focusedCommentId=17136725) by Krisztian Szucs (kszucs):*\nI wonder if it would be better to add specific aggregate behavior in a more generic way. \r\n\r\nIt is certainly possible to add different flags for the aggregate functions and implement conditional aggregation within the kernel, but it requires different implementations for each kernel. How about having conditional aggregations by passing a boolean array as a second argument instead? Couple of examples:\r\n\r\n```Java\n\r\nCount(input)  // keep the default null behaviour\r\nCountIf(input, mask=IsNull(input))\r\nCountIf(input, mask=IsNotNull(input))\r\nMeanIf(input, mask=Compare(input, other, EQUAL))\r\n```\r\n\r\nThis way the user could add custom conditions without further kernel implementations, so it would make the aggregate kernels more flexible and maintainable. I see no performance problems with this approach either since we would process a bitmask similarly to the null checks.\r\n\r\nReferences:\r\n- in ibis all of the reduce operations accept a [condition](https://github.com/ibis-project/ibis/blob/master/ibis/expr/operations.py#L863)\n- or the really handy [aggregate combinators](https://clickhouse-docs.readthedocs.io/en/latest/agg_functions/#aggregate-function-combinators) in clickhouse\n  \n  cc `[~wesm]` `[~npr]` `[~jorisvandenbossche]`"
+        },
+        {
+            "created_at": "2020-06-16T15:26:28.455Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9054?focusedCommentId=17136734) by Wes McKinney (wesm):*\n`[~kszucs]` my desired approach for aggregating data with an unmaterialized filter is through use of selection vectors\r\n\r\nThis is already laying in wait in the `ExecBatch` data structure that is passed to the kernel's exec function\r\n\r\nhttps://github.com/apache/arrow/blob/master/cpp/src/arrow/compute/exec.h#L176"
+        },
+        {
+            "created_at": "2020-06-16T15:34:26.753Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9054?focusedCommentId=17136744) by Krisztian Szucs (kszucs):*\nGreat, the intent looks the same. With that in progress do we still need to implement custom condition-like options for aggregations? I'd assume no.\r\n"
+        },
+        {
+            "created_at": "2020-06-16T15:39:33.033Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9054?focusedCommentId=17136750) by Joris Van den Bossche (jorisvandenbossche):*\n`[~kszucs]` regarding the original topic of this issue: for your suggestion to use a selection vector to deal with skipping nulls, that means that the kernels should change to **not** skip nulls by default, right? (as otherwise there is no way to get this behaviour, unless you let the caller check the null count in advance, but that would already be possible right now as well)"
+        },
+        {
+            "created_at": "2020-06-16T15:46:50.615Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9054?focusedCommentId=17136755) by Wes McKinney (wesm):*\nI think there's still perhaps some value in short-circuiting when encountering non-zero null count when you don't want to skip nulls. This need not be mutually exclusive with the filter-query-processing stuff"
+        },
+        {
+            "created_at": "2020-06-16T15:59:01.969Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9054?focusedCommentId=17136765) by Krisztian Szucs (kszucs):*\n`[~jorisvandenbossche]` Right."
+        },
+        {
+            "created_at": "2020-06-16T16:04:17.779Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9054?focusedCommentId=17136769) by Krisztian Szucs (kszucs):*\nIf I understand correctly by not skipping nulls as the default having short-circuiting is just a matter of the exposed API."
+        },
+        {
+            "created_at": "2020-06-16T16:58:11.955Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9054?focusedCommentId=17136823) by Wes McKinney (wesm):*\nRight. Rather than debate this further, I'm going to assign this to myself if that's okay and I'll work up a patch in the next day or two"
+        },
+        {
+            "created_at": "2020-06-16T17:53:16.633Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9054?focusedCommentId=17137794) by Krisztian Szucs (kszucs):*\nThanks! I simply wasn't sure whether it worth to work on it if we have another solution in mind (if any)."
+        },
+        {
+            "created_at": "2020-06-30T01:25:29.319Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9054?focusedCommentId=17148240) by Wes McKinney (wesm):*\nThis also needs to have a \"minimum # valid values\" option to deal with the differing requirements in how functions like \"sum\" work on 0-length or all-null inputs, see discussion in \r\n\r\nhttps://github.com/apache/arrow/pull/7478#pullrequestreview-439605902"
+        },
+        {
+            "created_at": "2021-05-21T01:01:43.708Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9054?focusedCommentId=17348918) by Kouhei Sutou (kou):*\nIssue resolved by pull request 9758\n<https://github.com/apache/arrow/pull/9758>"
+        }
+    ]
+}

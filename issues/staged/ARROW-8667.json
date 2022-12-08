@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[C++] Add multi-consumer Scheduler API to sit one layer above ThreadPool",
+        "body": "***Note**: This issue was originally created as [ARROW-8667](https://issues.apache.org/jira/browse/ARROW-8667). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI believe we should define an abstraction to allow for custom resource allocation strategies (round robin, even time, etc.) to be devised for situations where there are different thread pool consumers that are working independently of each other.\r\n\r\nConsider the classic nested parallelism scenario:\r\n\r\n- Task A in thread 1 may issue N subtasks that run in parallel\n- Task B in thread 2 may issue K subtasks\n  \n  With our current ThreadPool abstraction, it is easy to conceive scenarios where either Task A or Task B trample each other. \n  \n  One approach to remedy this problem is to have an API like so:\n  \n  ```Java\n  \n  // Inform the scheduler that you want to submit tasks that are \"your tasks\"\n  Consumer* consumer = scheduler->NewConsumer();\n  \n  for (...) {\n    Future<T> fut = scheduler->Submit(consumer, DoWork, ...);\n  }\n  \n  // Join for all tasks to finish.\n  consumer->Finish();\n  ```\n  \n  The idea is that the scheduler would maintain separate task queues for each consumer and e.g. track consumer-specific metrics of interest to determine how tasks are allocated.\n  \n  The scheduler could have different logic to control tasks being assigned to worker threads:\n  \n- Round-robin\n- Even-time allocation (run fewer tasks for consumers with \"slow\" tasks and more tasks from consumers with \"fast\" tasks \u2013 though there are some nuances here like avoiding starving a consumer if they've been doing a lot of \"slow\" tasks and then a \"fast\" consumer shows up)",
+        "created_at": "2020-05-01T18:27:33.000Z",
+        "updated_at": "2022-07-12T14:04:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-23T20:10:50.832Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8667?focusedCommentId=17201065) by Wes McKinney (wesm):*\nThis will probably have to wait until we figure out how to plug into a threading runtime enabling safe nested parallelism"
+        },
+        {
+            "created_at": "2021-06-22T02:24:17.570Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8667?focusedCommentId=17366945) by Weston Pace (westonpace):*\n`[~wesm]` \u00a0 This is probably ready to start working on.\u00a0 however, I'm not certain enough the motivation behind it.\u00a0 For example, is the concern a performance concern?\u00a0 E.g. multiple tasks running at the same time leading to cache/memory thrashing?\u00a0 Is the goal to allow user-level prioritization of workflows?\u00a0 I'm not sure of any current problems that this fix would address so I don't really know how success would be measured."
+        },
+        {
+            "created_at": "2021-06-22T13:03:11.173Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8667?focusedCommentId=17367307) by David Li (lidavidm):*\nIIRC this came up in the Parquet I/O coalescing discussion (\"[Proposal for optimizing Datasets over S3/object storage](https://lists.apache.org/thread.html/r0a513d9e1dc204dde9d3038ccc4f869f8e3dbf12827259e4b630c776%40%3Cdev.arrow.apache.org%3E)\") since one worry was trying to make sure we didn't load files out-of-order (unlike the current async scanner, the design there assumes you always want data in-order) and this was proposed as a solution. In the end I think the need didn't come up/it turned out that we could just submit to the thread pool in the order we wanted and it would generally execute in the order it wanted.\r\n\r\nIf I understand right, we're now looking at work-stealing for the ExecNodes, which would even out any uneven workloads also without requiring high level scheduling like this. If we have separate workloads being run together, I wonder if it might be simpler just to dedicate some of the cores/threads to each task instead of trying to explicitly schedule them."
+        },
+        {
+            "created_at": "2022-07-12T14:04:40.117Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8667?focusedCommentId=17565711) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

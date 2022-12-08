@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[R] Arrow to R fails with embedded nuls in strings",
+        "body": "***Note**: This issue was originally created as [ARROW-6582](https://issues.apache.org/jira/browse/ARROW-6582). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nApologies if this issue isn't categorized or documented appropriately.  Please be gentle! :)\r\n\r\nAs a heavy R user that normally interacts with parquet files using SparklyR, I have recently decided to try to use arrow::read_parquet() on a few parquet files that were on my local machine rather than in hadoop.  I was not able to proceed after several various attempts due to embedded nuls.  For example:\r\n\r\ntry({df <- read_parquet('out_2019-09_data_1.snappy.parquet') })\r\nError in Table__to_dataframe(x, use_threads = option_use_threads()) : \r\n  embedded nul in string: 'INSTALL BOTH LEFT FRONT AND RIGHT FRONT  TORQUE ARMS\\0 ARMS'\r\n\r\nIs there a solution to this?\r\n\r\nI have also hit roadblocks with embedded nuls in the past with csvs using data.table::fread(), but readr::read_delim() seems to handle them gracefully with just a warning after proceeding.\r\n\r\nApologies that I do not have a handy reprex. I don't know if I can even recreate a parquet file with embedded nuls using arrow if it won't let me read one in, and I can't share this file due to company restrictions.\r\n\r\nPlease let me know how I can be of any more help!",
+        "created_at": "2019-09-17T14:32:54.000Z",
+        "updated_at": "2021-02-18T02:35:16.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-01-04T20:48:01.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-09-17T17:12:55.791Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6582?focusedCommentId=16931666) by Neal Richardson (npr):*\nThanks for the report. A few thoughts:\r\n\r\n1. \"embedded nul in string\" is an error coming from R. Since the error is being thrown in `Table__to_dataframe`, that means the Parquet file was already read into Arrow memory successfully, and R is failing to read it from Arrow. That helps isolate the issue.\r\n\r\n2. Given that, you could play around with the `col_select` argument to `read_parquet` and identify which column it is that has the nul, if you don't already know. If you don't happen to need this column for whatever you're trying to do, you could omit it from there and proceed.\r\n\r\n3. If you can identify the offending column, it would be interesting to know what Arrow type it is. To do that, do something like\r\n\r\n```r\n\r\ntab <- read_parquet(file, as_tibble=FALSE)\r\ntab$schema\r\n```\r\n\r\nand report back what type that column is.\r\n\r\n4. Check your system locale and encoding and make sure it aligns with the data in the file. [Googling the error message](https://www.google.com/search?q=embedded+nul+in+string) points to encoding often being implicated.\r\n\r\n5. How are these Parquet files generated? Same host? Or different system, platform, etc.? Does that tell you something useful about the locale/encoding you need to set in R to read the data?\r\n\r\n6. If any of this leads you to a place where you can write out a sufficiently anonymized/obfuscated file that reproduces the error, that would of course be most helpful."
+        },
+        {
+            "created_at": "2019-09-17T18:21:35.987Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6582?focusedCommentId=16931731) by John Cassil (johncassil):*\nThanks Neal!\r\n\r\nI had previously been able to set as_tibble to FALSE and successfully create the <Object containing active binding>, but didn't know I could use schema to see the columns. Actually, my whole purpose for reading in this particular file to begin with was to see the column names in the file, so problem solved! haha\r\n\r\n```R\n\r\n> df$schema\r\narrow::Schema \r\nsquishedVin: string\r\nhashedVin: string\r\ntranDate: date32[day]\r\nrawFieldValue: string\r\ndisplayText: string\r\nodometerReading: double \r\n```\r\n\r\n\r\nI know based on the error that the string is appearing in the rawFieldValue column which it appears that arrow is interpreting as a string type.  \r\n\r\nAs far as encoding issues, I am not strong in understanding encoding issues. To back up just a bit, this happens to be a dump of the raw text that any of hundreds of thousands of sources has given us, so I am guessing that the embedded nul originated due to encoding issues on a partner's server somewhere perhaps in a galaxy far away, many years ago.   The file was actually created by a java process that one of our teams built to export it from hadoop.  I know very little beyond that, and unfortunately am not sure that I could create anything to reproduce the error yet. \r\n\r\nI am curious if you know of any way to use a function to turn this into a dataframe that would bypass Table__to_dataframe...\r\n\r\nThanks so much again!\r\n"
+        },
+        {
+            "created_at": "2019-09-19T17:28:28.335Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6582?focusedCommentId=16933608) by Neal Richardson (npr):*\nMy guess is that (if you needed to solve this problem, which it sounds like you don't), you could try setting different encodings in your R session and see if that handles the string column correctly. Or there's probably a way to get at that column and dump it as is to disk so that you could use some other means of stripping out the nuls. I'm guessing the ultimate fix is to fix the data generating/ETL process so that there aren't nuls there to begin with, though I recognize that that's not always an option.\r\n\r\nI'll keep this open for a bit and think about if there are ways we can make it easier to dump that data from Arrow to a plain text format without going through R first so that one might be able to debug when they get bad data like this, but ultimately the error is coming from R, not arrow."
+        },
+        {
+            "created_at": "2019-09-19T17:47:01.847Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6582?focusedCommentId=16933622) by John Cassil (johncassil):*\nThank you very much for your thoughtful responses and the solution to my original goal.\r\n\r\nThat might be an interesting approach.  If there were a function to export it from Arrow into text on disk, then a user could essentially use Arrow as a method to unpack/uncompress a parquet file into raw text.  I could see that being helpful in other situations beyond this.  I'm not sure.  Your call!"
+        },
+        {
+            "created_at": "2021-01-04T20:48:01.597Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6582?focusedCommentId=17258483) by Neal Richardson (npr):*\nIssue resolved by pull request 8365\n<https://github.com/apache/arrow/pull/8365>"
+        },
+        {
+            "created_at": "2021-01-29T03:14:40.320Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6582?focusedCommentId=17274132) by Ian Cook (icook):*\nFor future reference/testing purposes: attached is a tiny uncompressed Parquet file named `embedded_nul.parquet` that contains a single string column named `x` with a single record containing a one-byte string consisting of an embedded nul. The file was written with Spark 3.0.1 using this PySpark code:\r\n\r\n```python\n\r\nfrom pyspark.sql.types import *\r\nschema = StructType([StructField(\"x\", StringType(), True)])\r\njson = '[{\"x\": \"\\\\u0000\"}]'\r\ndf = spark.read.schema(schema).json(sc.parallelize([json]))\r\ndf.repartition(1).write.parquet('embedded_nul.parquet', compression = 'none')\r\n```"
+        }
+    ]
+}

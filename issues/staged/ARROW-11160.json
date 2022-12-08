@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[Rust] pitfall in xxx_equal functions",
+        "body": "***Note**: This issue was originally created as [ARROW-11160](https://issues.apache.org/jira/browse/ARROW-11160). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFunctions `pub(super) fn xxxx_equal` in\u00a0rust/src/array/equal/ MUST fail if called directly instead of from `equal`.\u00a0 boolean.rs as\u00a0 example:\r\n```java\n\r\nlhs_is_null ||\u00a0(lhs_is_null == rhs_is_null)\r\n && equal_bits(...)\n```\r\n\u00a0\r\n The bug is not seen in tests at present because `equal` shortcuts the condition: zero nulls v.s. nulls\r\n \u00a0\r\n To verify this problem , adds a new test in `mod.rs`\r\n \u00a0\r\n```java\n\r\n#[test]\r\nfn test_direct_call_boolean_equal() {\r\n    let a = BooleanArray::from(vec![Some(true)]).data();\r\n    let b = BooleanArray::from(vec![Some(false)]).data();\r\n    let lhs = a.as_ref();\r\n    let rhs = b.as_ref();\r\n    let lhs_nulls = lhs.null_buffer();\r\n    let rhs_nulls = rhs.null_buffer();\r\n    assert_eq!(boolean::boolean_equal(lhs, rhs, lhs_nulls, rhs_nulls, 0, 0, lhs.len()), false);\r\n}\r\n```",
+        "created_at": "2021-01-07T08:58:11.000Z",
+        "updated_at": "2021-01-16T10:15:34.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-01-14T09:32:43.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-01-07T11:26:09.172Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11160?focusedCommentId=17260431) by Qingyou Meng (mqy):*\nI tried to make some modifications to show possible problems, See\r\n\r\n<https://github.com/apache/arrow/compare/master...mqy:array-equal>\r\n\r\n`[~nevime]` \u00a0what do you think about this?"
+        },
+        {
+            "created_at": "2021-01-08T18:12:34.012Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11160?focusedCommentId=17261502) by Neville Dipale (nevi_me):*\n`[~jorgecarleitao]` \u00a0any thoughts about this? I'll have a look in some detail"
+        },
+        {
+            "created_at": "2021-01-08T19:10:21.502Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11160?focusedCommentId=17261533) by Jorge Leit\u00e3o (jorgecarleitao):*\nHi.\r\n\r\nI am sorry, I can't understand what the issue is:\r\n\r\nThese functions are private implementations, which is why\r\n\r\n1. they are marked as pub(super)\r\n2. they are not exposed in `mod.rs`\r\n3. there is a single public function on the whole equal package, `equal`.\r\n\r\nI can't see how it is a problem to have private functions that require specific conditions to return a useful result.\r\n\r\nSecondly, the test above passes on my computer, so I can't reproduce it :/\r\n\r\nThirdly, we can find the following comment in `mod.rs`:\r\n\r\n```Java\n\r\n// these methods assume the same type, len and null count.\r\n// For this reason, they are not exposed and are instead used\r\n// to build the generic functions below (`equal_range` and `equal`).\r\nuse boolean::boolean_equal;\r\n...\r\n```\r\n\r\nI.e. IMO we are doing everything right:\r\n\r\n1. keep them as implementation details\r\n2. expose only what needs to be exposed (and test it accordingly)\r\n3. document the conditions that need to be fulfilled for the functions to be useful\r\n"
+        },
+        {
+            "created_at": "2021-01-09T04:09:18.616Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11160?focusedCommentId=17261748) by Qingyou Meng (mqy):*\n`[~jorgecarleitao]` \u00a0thanks for taking time to reply!\r\n\r\nFirstly, the test code had wrong data in array `a`, fixed, my bad! This test fails on arrow master.\r\n```java\n\r\n#[test]\r\nfn test_direct_call_boolean_equal() {\r\n    let a = BooleanArray::from(vec![None]).data();\r\n    let b = BooleanArray::from(vec![Some(false)]).data();\r\n    let lhs = a.as_ref();\r\n    let rhs = b.as_ref();\r\n    let lhs_nulls = lhs.null_buffer();\r\n    let rhs_nulls = rhs.null_buffer();\r\n    assert_eq!(boolean::boolean_equal(lhs, rhs, lhs_nulls, rhs_nulls, 0, 0, lhs.len()), false);\r\n}\n```\r\nSecondly, I totally agree with you about private functions and the comment in `mod.rs`, that's great!\r\n\r\nThirdly,\u00a0 it may be less error-prune to update condition from:\r\n```java\n\r\nlhs_is_null ||\u00a0(lhs_is_null == rhs_is_null) && non_null_equal()\n```\r\nto\r\n```java\n\r\nlhs_is_null == rhs_is_null && (lhs_is_null || non_null_equal())\n```\r\nI re-pushed\u00a0<https://github.com/apache/arrow/compare/master...mqy:array-equal>\u00a0 with several files changed, to demonstrating the failures at:\r\n```java\n\r\narray::transform::tests::test_struct\r\n```\r\nPerhaps this is a hint to **possible hidden bug** somewhere, for example\u00a0**MutableArrayData**::extend()? I'm sorry for taking your time again.\r\n\r\n\u00a0"
+        }
+    ]
+}

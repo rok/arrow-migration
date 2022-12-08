@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[C++] and() in a dataset filter",
+        "body": "***Note**: This issue was originally created as [ARROW-13848](https://issues.apache.org/jira/browse/ARROW-13848). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIs it expected that a scanning a dataset that has a filter built with `and()` is much slower than a filter built with `and_kleene()`? Specifically, it seems that `and()` triggers a scan of the full dataset, where as `and_kleene()` takes advantage of the fact that only one directory of the larger dataset needs to be scanned:\r\n\r\n```r\n\r\n> library(arrow)\r\n\r\nAttaching package: \u2018arrow\u2019\r\n\r\nThe following object is masked from \u2018package:utils\u2019:\r\n\r\n    timestamp\r\n\r\n> library(dplyr)\r\n> \r\n> ds <- open_dataset(\"~/repos/ab_store/data/taxi_parquet/\", partitioning = c(\"year\", \"month\"))\r\n> \r\n> system.time({\r\n+ out <- ds %>%\r\n+     filter(arrow_and(total_amount > 100, year == 2015)) %>%\r\n+     select(tip_amount, total_amount, passenger_count) %>%\r\n+     collect()\r\n+ })\r\n   user  system elapsed \r\n 46.634   4.462   6.457 \r\n> \r\n> system.time({\r\n+ out <- ds %>%\r\n+     filter(arrow_and_kleene(total_amount > 100, year == 2015)) %>%\r\n+     select(tip_amount, total_amount, passenger_count) %>%\r\n+     collect()\r\n+ })\r\n   user  system elapsed \r\n  4.633   0.421   0.754 \r\n> \r\n```\r\n\r\nI suspect that it's scanning the whole dataset because if I use a dataset that only has the 2015 folder, I get similar speeds:\r\n```r\n\r\n> ds <- open_dataset(\"~/repos/ab_store/data/taxi_parquet_2015/\", partitioning = c(\"year\", \"month\"))\r\n> \r\n> system.time({\r\n+ out <- ds %>%\r\n+     filter(arrow_and(total_amount > 100, year == 2015)) %>%\r\n+     select(tip_amount, total_amount, passenger_count) %>%\r\n+     collect()\r\n+ })\r\n   user  system elapsed \r\n  4.549   0.404   0.576 \r\n> \r\n> system.time({\r\n+ out <- ds %>%\r\n+     filter(arrow_and_kleene(total_amount > 100, year == 2015)) %>%\r\n+     select(tip_amount, total_amount, passenger_count) %>%\r\n+     collect()\r\n+ })\r\n   user  system elapsed \r\n  4.477   0.412   0.585 \r\n```\r\n\r\nThis does not impact anyone who uses our default collapsing mechanism in the R package, but I bumped into it with a filter that was constructed by duckdb using `and()` instead of `and_kleene()`.",
+        "created_at": "2021-09-01T17:15:18.000Z",
+        "updated_at": "2022-07-07T23:59:20.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-09-02T12:05:06.041Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13848?focusedCommentId=17408769) by David Li (lidavidm):*\nJust a guess, but things like [expression simplification](https://github.com/apache/arrow/blob/425b1cb256040411aca7202faf7124910ac3fdd8/cpp/src/arrow/compute/exec/expression.cc#L611-L669) work with the _kleene kernel, so you probably aren't getting partition pruning."
+        },
+        {
+            "created_at": "2021-09-02T12:41:23.224Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13848?focusedCommentId=17408791) by Neal Richardson (npr):*\nYep that looks like the issue. Seems like the un-kleene versions could also be implemented there, right?"
+        },
+        {
+            "created_at": "2021-09-03T13:53:27.135Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13848?focusedCommentId=17409518) by David Li (lidavidm):*\nIt looks like it should be pretty straightforward, though as a comment there notes, we'll want some more maintainable way of adding simplification passes at some point."
+        },
+        {
+            "created_at": "2021-11-16T14:01:22.464Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13848?focusedCommentId=17444545) by Ben Kietzman (bkietz):*\nThis issue is actually pretty subtle since it touches on the different behavior wrt `null` in `and` vs `and_kleene`. Specifically, given a filter `and_kleene(x == 1, y == 2)` we can entirely skip a partition where `x == 2`; nothing in the partition could possibly satisfy `and_kleene(x == 1, y == 2) -> and_kleene(2 == 1, y == 2) -> and_kleene(false, y == 2) -> false`. By contrast, given the filter `and(x == 1, y == 2)` we **can't** avoid scanning the partition: `and(x == 1, y == 2) -> and(2 == 1, y == 2) -> and(false, y == 2) -> false, _unless y is null_`.\r\n\r\nIn summary, the best simplification we could get out of such conjunctions would be `and(false, any) -> if_else(is_null(any), null, false)` (for which we'd still need to scan the partition). To me this doesn't seem worthwhile by itself.\r\n\r\nWe **could** skip the partition if we happen to also have the guarantee `is_valid(y)`, but we don't currently support such guarantees. See https://issues.apache.org/jira/browse/ARROW-12659"
+        }
+    ]
+}

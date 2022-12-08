@@ -1,0 +1,40 @@
+{
+    "issue": {
+        "title": "[Python] Improve error message when all values in a column are null in a parquet partition",
+        "body": "***Note**: This issue was originally created as [ARROW-17719](https://issues.apache.org/jira/browse/ARROW-17719). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThere is a good bug report about this in <https://stackoverflow.com/a/70568419/10891801> and it still seems to be a problem.\r\n\r\nBasically the error message is pretty bad if all values in a given column of a parquet partition are null. We should either handle this case better or give a better error message.",
+        "created_at": "2022-09-13T23:39:42.000Z",
+        "updated_at": "2022-10-19T03:10:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-14T06:56:23.531Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17719?focusedCommentId=17603912) by Joris Van den Bossche (jorisvandenbossche):*\nYes, that's the consequence of the default of inferring the schema only from the first file. \r\nIf such a cast errors happens for subsequent files, it would indeed be good to hint the user to the fact that there is a mismatching schema and that the solution could be to provide a schema manually."
+        },
+        {
+            "created_at": "2022-09-14T20:19:29.490Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17719?focusedCommentId=17604954) by Philipp Moritz (pcmoritz):*\nHow do you feel about trying to unify the schema from the different files a bit more / make schema inference a bit more powerful? This specific case of nulls could be handled elegantly without raising an error then. We already have a UnifySchemas function that might be usable for this. Concretely I'm proposing to only handle the case where some files have a schema with type null for a given field and others have a non-null type for that field (but all other types are the same).\r\n\r\nI realize that there is a fine line and it is possible to do too much automation here but this seems like it won't cause problems. But let me know if you see possible problems with this.\r\n\r\nIn any case we should also give a better error message because there will be cases that this won't cover (e.g. nulls in a nested field)."
+        },
+        {
+            "created_at": "2022-09-16T04:16:17.997Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17719?focusedCommentId=17605601) by Philipp Moritz (pcmoritz):*\nSo I was digging through the code today and noticed that this was already implemented and the error goes away if I set fragments = kInspectAllFragments in\r\n\r\n<https://github.com/apache/arrow/blob/f8661e032902a963b0a6a46077d72e804d22560d/cpp/src/arrow/dataset/discovery.h#L60>\r\n\r\nIn the file, an efficiency argument is being made to set this parameter to 1 by default. I wonder if we should change the default to kInspectAllFragments \u2013 my understanding is that the schema can be read quickly by seeking to the end of the file and therefore the performance impact should be minimal and correctness is more important than performance. If this is a bottleneck for somebody, they can set the parameter to 1 or specify an explicit schema.\r\n\r\nAny thoughts about this?\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-09-16T04:19:11.984Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17719?focusedCommentId=17605602) by Philipp Moritz (pcmoritz):*\nI noticed the mechanism was introduced in https://issues.apache.org/jira/browse/ARROW-8058 \u2013 do you have thoughts on this `[~fsaintjacques]` or `[~bkietz]` ?\r\n\r\nThe mechanism itself can be useful, but I'm suggesting to set a different default."
+        },
+        {
+            "created_at": "2022-09-16T12:18:09.480Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17719?focusedCommentId=17605791) by Weston Pace (westonpace):*\nThe performance impact is pretty small when you have only a few files.  However, if you have thousands of files, this can significantly impact performance (for these larger datasets even the cost of calling `stat` on each file to get the file info becomes significant).  I'm not strongly against changing the default but maybe it would be better to just do a better job of explaining when the flag is needed so that future users find it more quickly?  I think having all null in a column in earlier files is not a common enough thing to justify hurting performance."
+        },
+        {
+            "created_at": "2022-09-16T12:20:23.193Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17719?focusedCommentId=17605793) by Weston Pace (westonpace):*\nAlthough, I suppose I am thinking of the alternative being to set the default to \"all files\".  Perhaps a default of something like `min(num_files, 32)` would be reasonable."
+        }
+    ]
+}

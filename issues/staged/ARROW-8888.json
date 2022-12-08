@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] Heuristic in dataframe_to_arrays that decides to multithread convert cause slow conversions",
+        "body": "***Note**: This issue was originally created as [ARROW-8888](https://issues.apache.org/jira/browse/ARROW-8888). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen calling pa.Table.from_pandas() the code path that uses the ThreadPoolExecutor in dataframe_to_arrays (called by Table.from_pandas) the conversion is much much slower.\r\n\r\n\u00a0\r\n I have a simple example - but the time difference is much worse with a real table.\r\n\r\n\u00a0\r\n```java\n\r\nPython 3.7.3 | packaged by conda-forge | (default, Dec 6 2019, 08:54:18)\r\n Type 'copyright', 'credits' or 'license' for more information\r\n IPython 7.13.0 \u2013 An enhanced Interactive Python. Type '?' for help.\r\nIn [1]: import pyarrow as pa\r\nIn [2]: import pandas as pd\r\nIn [3]: df = pd.DataFrame({\"A\": [0] * 10000000})\r\nIn [4]: %timeit table = pa.Table.from_pandas(df)\r\n 577 \u00b5s \u00b1 15.3 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 1000 loops each)\r\nIn [5]: %timeit table = pa.Table.from_pandas(df, nthreads=1)\r\n 106 \u00b5s \u00b1 1.65 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 10000 loops each)\r\n```\r\n\u00a0",
+        "created_at": "2020-05-22T08:19:07.000Z",
+        "updated_at": "2020-06-28T14:39:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-06-28T14:39:48.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-06-09T09:11:22.255Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8888?focusedCommentId=17129030) by Joris Van den Bossche (jorisvandenbossche):*\nThere is currently a heuristic based on the number of rows vs number of columns whether to use multithreading or not when it is not specified by the user (<https://github.com/apache/arrow/blob/d00c50a6ca0d88e3458742091c59f0fc5c2fc7de/python/pyarrow/pandas_compat.py#L541-L549).>\r\n\r\nAnd this will probably not be the best decision for all cases. For example, you have only a single column, and the parallelization is done by processing each column in a thread, so clearly in the case of a single column, doing it in a threadpool will only give unnecessary overhead. Also, ints are very cheap (zero-copy) to convert. \r\n\r\nSo I suspect that with more columns and with a more expensive conversion, you will see the benefit of the default multithreading. For example using floats instead of ints and more columns:\r\n\r\n```Java\n\r\nIn [1]: df = pd.DataFrame({key: [0.0] * 1_000_000 for key in range(100)})                                                                                                                                          \r\n\r\nIn [2]: %timeit table = pa.Table.from_pandas(df, nthreads=1)                                                                                                                                                       \r\n1.3 s \u00b1 7.81 ms per loop (mean \u00b1 std. dev. of 7 runs, 1 loop each)\r\n\r\nIn [3]: %timeit table = pa.Table.from_pandas(df, nthreads=None)                                                                                                                                                    \r\n327 ms \u00b1 5.28 ms per loop (mean \u00b1 std. dev. of 7 runs, 1 loop each)\r\n```\r\n\r\n(with this amount of columns but with only ints, using no threads is still faster).\r\n\r\nSo you are certainly welcome to look into the default heuristic to decide how many threads are used, and whether this can be improved (eg ensure that we are not using more threads than there are columns), but it will never be ideal for all possible use cases I think.\r\n"
+        },
+        {
+            "created_at": "2020-06-09T09:12:31.848Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8888?focusedCommentId=17129033) by Joris Van den Bossche (jorisvandenbossche):*\nBTW, you mention that for your real use case, the difference is worse as for the simple example. What are the characteristics of your actual use case? (in terms of number of columns, data types, etc)"
+        },
+        {
+            "created_at": "2020-06-09T09:25:08.426Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8888?focusedCommentId=17129047) by Kevin Glasson (kevinglasson):*\nYeah - so off the top of my head it was about 6 million rows and 40 columns, mostly string objects, mixed in with some timestamps.\r\n\r\nWhen I was profiling it I could see it was spending nearly all of it's time in 'threading'.\r\n\r\nThe reduction was 10x, instead of a write taking 50 minutes it took 4. There could be some other inefficiencies in my code of course but just changing that one flag gave me that massive reduction.\r\n\r\nI can try and share the profiling if I get around to running it again."
+        },
+        {
+            "created_at": "2020-06-09T09:39:17.886Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8888?focusedCommentId=17129062) by Joris Van den Bossche (jorisvandenbossche):*\nTrying with strings, I don't see much speedup in that case by using multithreading, but also not a significant slowdown:\r\n\r\n```Java\n\r\nIn [10]: df = pd.DataFrame({key: ['a'] * 1_000_000 for key in range(10)})                                                                                                                                          \r\n\r\nIn [11]: %timeit table = pa.Table.from_pandas(df)                                                                                                                                                                  \r\n3.43 s \u00b1 12.8 ms per loop (mean \u00b1 std. dev. of 7 runs, 1 loop each)\r\n\r\nIn [12]: %timeit table = pa.Table.from_pandas(df, nthreads=1)                                                                                                                                                      \r\n3.79 s \u00b1 162 ms per loop (mean \u00b1 std. dev. of 7 runs, 1 loop each)\r\n```\r\n\r\nStrings are stored in pandas as Python objects. I am not fully sure how the conversion in arrow is implemented, but so it might be this requires the GIL, and then multithreading won't help.\r\n\r\nSuch a big slowdown as you mention is still strange though, so if you can try to look further into it, that's certainly welcome."
+        },
+        {
+            "created_at": "2020-06-28T14:39:48.542Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8888?focusedCommentId=17147355) by Wes McKinney (wesm):*\nIssue resolved by pull request 7563\n<https://github.com/apache/arrow/pull/7563>"
+        }
+    ]
+}

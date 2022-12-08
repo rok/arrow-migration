@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[C++] Parquet decompresses DataPageV2 pages even if is_compressed==0",
+        "body": "***Note**: This issue was originally created as [ARROW-10353](https://issues.apache.org/jira/browse/ARROW-10353). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAccording to the parquet-format specification, DataPageV2 pages have an is_compressed flag. Even if the column chunk has a decompression codec set, the page is only compressed if this flag is true (this likely enables not compressing some pages where the compression wouldn't save memory).\r\n\r\nHere is the relevant excerpt from parquet.thrift describing the semantics of the is_compressed flag in a DataPageV2:\r\n\r\n_/\\*\\* whether the values are compressed._\r\n _Which means the section of the page between_\r\n _definition_levels_byte_length + repetition_levels_byte_length + 1 and compressed_page_size (included)_\r\n _is compressed with the compression_codec._\r\n _If missing it is considered compressed \\*/_\r\n _7: optional bool is_compressed = 1;_\r\n\r\n\u00a0\r\n\r\nIt seems that the apache parquet cpp library (haven't checked other languages but might have the bug as well) totally disregards this flag and decompresses the page in all cases if a decompressor is set for the column chunk.\r\n\r\nThe erroneous code is in column_reader.cc:\u00a0\r\n\r\nstd::shared_ptr<Page> SerializedPageReader::NextPage()\u00a0\r\n\r\nThis method first decompresses the page if there is a decompressor set and only then does a case distinction on whether this page is a DataPageV2 and has the is_compressed flag. Thus, even if the page would have this flag set to 0, the page would be decompressed anyway.\r\n\r\nThe method that should use the is_compressed flag but doesn't is:\r\n\r\nstd::shared_ptr<Buffer> SerializedPageReader::DecompressPage\r\n\r\nThis method doesn't look at the is_compressed flag at all.\r\n\r\n\u00a0\r\n\r\nThe reason why this bug probably doesn't show in any unit test is that the write implementation seems to do the same mistake: It always compresses the page, even if the page has its is_compressed flag set to false.\r\n\r\n\u00a0",
+        "created_at": "2020-10-20T11:33:24.000Z",
+        "updated_at": "2022-07-21T02:05:52.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-11-10T18:58:49.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-10-20T14:16:58.059Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10353?focusedCommentId=17217628) by Antoine Pitrou (apitrou):*\nThanks for the report. Do you want to submit a PR?"
+        },
+        {
+            "created_at": "2020-10-20T14:35:35.548Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10353?focusedCommentId=17217634) by Wes McKinney (wesm):*\nNote that DataPageV2 is not recommended for production use"
+        },
+        {
+            "created_at": "2020-11-10T18:58:49.439Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10353?focusedCommentId=17229443) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 8629\n<https://github.com/apache/arrow/pull/8629>"
+        }
+    ]
+}

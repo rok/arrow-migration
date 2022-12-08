@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[C++] Random real generator is slow on Arm64 Linux when built with clang",
+        "body": "***Note**: This issue was originally created as [ARROW-12533](https://issues.apache.org/jira/browse/ARROW-12533). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nMany benchmarks run very slow on Arm64 Linux when built with clang.\r\n Most time is spent in preparing test data, not the test itself.\r\n\r\nPer my investigation, it boils down to poor performance of `std::uniform_real_distribution`, which uses software emulated `long double` arithmetic on Arm64 [1].\r\n\r\nApple M1 doesn't have this issue. Clang aarch64 sets `long double` size to 64 bits on MacOS, but 128 on Linux [2].\r\n\r\nGcc aarch64 doesn't have this issue. It doesn't use `long double` to generate random reals [1].\r\n\r\nclang `-ffast-math` option removes the `long double` arithmetic (and adds other simplifications to floating point arithmetic), it improves speed 100x on Arm64 in generating random reals.\r\n\r\nIt may deserve some effort to study if `long double` is really necessary, and if `-ffast-math` is acceptable for generating test bits.\r\n\r\n[1] <https://godbolt.org/z/Y3Tc6MTME>\r\n [2] <https://en.wikipedia.org/wiki/Long_double>",
+        "created_at": "2021-04-25T04:26:43.000Z",
+        "updated_at": "2021-05-11T09:12:11.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-05-11T09:11:24.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-04-25T10:36:38.613Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12533?focusedCommentId=17331496) by Antoine Pitrou (apitrou):*\nWe don't need excellent statistical properties when generating test data. We can reimplement a faster `std::uniform_real_distribution` and/or a faster `std::bernoulli_distribution`. Or we can use `-ffast-math`, but that adds complication to the build chain."
+        },
+        {
+            "created_at": "2021-04-26T20:21:12.716Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12533?focusedCommentId=17332716) by Eduardo Ponce (edponce):*\nWe can limit the size of **long double** in Clang with **-m-long-double-64** (refer to https://clang.llvm.org/docs/ClangCommandLineReference.html#long-double-flags)."
+        },
+        {
+            "created_at": "2021-04-27T02:28:18.275Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12533?focusedCommentId=17332844) by yibocai#1 (yibocai#1):*\n**-m-long-double-64** is not supported on aarch64 clang, looks it's only for x86."
+        },
+        {
+            "created_at": "2021-04-27T02:41:06.237Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12533?focusedCommentId=17332889) by yibocai#1 (yibocai#1):*\nThis issue is gone if using clang's own c++ library libc++.\r\n\r\nMost Linux distros only installs gnu libstdc+. Clang libc+ is not widely used. I tested clang libc++ on ubuntu-18.04 aarch64. The test binary is 100x faster with clang libc++ than gnu libstdc++.\r\nSee https://godbolt.org/z/d79TW53cb, adding '-stdlib=libc++' generates much better code.\r\n\r\n```bash\n\r\n$ sudo apt install libc++-dev libc++abi-dev\r\n\r\n# test gnu libstdc++\r\n$ clang++-10 -O3 test.cc\r\n$ time ./a.out\r\nreal\t0m11.002s\r\nuser\t0m10.998s\r\nsys\t0m0.004s\r\n\r\n# test clang libc++\r\n$ clang++-10 -stdlib=libc++ -O3 test.cc\r\n$ time ./a.out\r\nreal\t0m0.099s\r\nuser\t0m0.095s\r\nsys\t0m0.004s\r\n```"
+        },
+        {
+            "created_at": "2021-04-27T02:47:52.424Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12533?focusedCommentId=17332892) by yibocai#1 (yibocai#1):*\nAs clang libc++ is not adopted widely, I think it makes sense to implement a random real distribution code in Arrow test.\r\n\r\nI looked at <random> implementation in gcc and clang. I plan to port clang libc++ code to Arrow. Clang adopts Apache 2.0 license, and the code looks more optimized than gcc.\r\n\r\nWe need three function/classes.\r\n- `std::generate_canonical` function, produces random reals in `[0, 1)`. This function does the dirty job.\n- `std::uniform_real_distribution` class, calls `std::generate_canonical` to produce reals in any value range.\n- `std::bernoulli_distribution` class, a shallow wrap of `std::uniform_real_distribution`."
+        },
+        {
+            "created_at": "2021-05-11T09:11:24.998Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12533?focusedCommentId=17342438) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 10283\n<https://github.com/apache/arrow/pull/10283>"
+        }
+    ]
+}

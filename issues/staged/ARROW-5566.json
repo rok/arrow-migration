@@ -1,0 +1,48 @@
+{
+    "issue": {
+        "title": "[Python] Overhaul type unification from Python sequence in arrow::py::InferArrowType",
+        "body": "***Note**: This issue was originally created as [ARROW-5566](https://issues.apache.org/jira/browse/ARROW-5566). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI'm working on ARROW-4324 and there's some technical debt lying in arrow/python/inference.cc because the case where NumPy scalars are mixed with non-NumPy Python scalar values, all hell breaks loose. In particular, the innocuous `numpy.nan` is a Python float, not a NumPy float64, so the sequence `[np.float16(1.5), np.nan]` can be converted incorrectly. \r\n\r\nPart of what's messy is that NumPy dtype unification is split from general type unification. This should all be combined together with the NumPy types mapping onto an intermediate value (for unification purposes) that then maps ultimately onto an Arrow type",
+        "created_at": "2019-06-12T03:13:37.000Z",
+        "updated_at": "2020-10-22T09:41:36.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2019-08-13T08:50:28.666Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5566?focusedCommentId=16905960) by Igor Yastrebov (Igor Yastrebov):*\n`[~wesmckinn]` I have found another issue of this type: when you pass a list or a np.array of strings which starts with np.nan to pa.array(), it fails to convert because it expects elements to be floats. Such np.array is easy to obtain in practice if you use values method on a pd.Series of strings with nulls."
+        },
+        {
+            "created_at": "2019-08-13T10:13:36.447Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5566?focusedCommentId=16906041) by Joris Van den Bossche (jorisvandenbossche):*\n[~Igor Yastrebov] that's the expected behaviour of pyarrow, as by default arrow uses `NaN` only as actual float value and not as missing value indicator. But given that pandas uses this as missing value indicator, you can specify you want the \"pandas interpretation\":\r\n\r\n```Java\n\r\nIn [23]: pa.array([np.nan, 'string'])                                                                                                                                                                              \r\n---------------------------------------------------------------------------\r\nArrowInvalid                              Traceback (most recent call last)\r\n<ipython-input-23-ffae557beaf6> in <module>\r\n----> 1 pa.array([np.nan, 'string'])\r\n\r\n~/scipy/repos/arrow/python/pyarrow/array.pxi in pyarrow.lib.array()\r\n\r\n~/scipy/repos/arrow/python/pyarrow/array.pxi in pyarrow.lib._sequence_to_array()\r\n\r\n~/scipy/repos/arrow/python/pyarrow/error.pxi in pyarrow.lib.check_status()\r\n\r\nArrowInvalid: Could not convert string with type str: tried to convert to double\r\n\r\nIn [24]: pa.array([np.nan, 'string'], from_pandas=True)                                                                                                                                                            \r\nOut[24]: \r\n<pyarrow.lib.StringArray object at 0x7f25b585de60>\r\n[\r\n  null,\r\n  \"string\"\r\n]\r\n``` \r\n\r\nIn `pa.array()` you need to specify this manually (when passing an array or list), but in other methods like `Table.from_pandas` or when passing a pandas Series, this is done automatically."
+        },
+        {
+            "created_at": "2019-08-13T10:24:32.413Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5566?focusedCommentId=16906052) by Igor Yastrebov (Igor Yastrebov):*\n`[~jorisvandenbossche]` should it fail on\u00a0pa.array(['string', np.nan]) then? It seems wrong that conversion is dependent on order of elements. It doesn't work this way for pa.array(['string', 1.1]) and\u00a0pa.array([1.1, 'string'])"
+        },
+        {
+            "created_at": "2019-08-13T12:40:16.305Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5566?focusedCommentId=16906151) by Joris Van den Bossche (jorisvandenbossche):*\nAh, yes, indeed, I would expect so. Can you open a new JIRA issue for this?"
+        },
+        {
+            "created_at": "2020-08-20T20:45:32.514Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5566?focusedCommentId=17181437) by Andrew Wieteska (arw2019):*\nThis works fine on 1.0:\r\n```java\n\r\nIn [8]: pa.array([np.float32(3), np.nan]) \r\nOut[8]: \r\n<pyarrow.lib.DoubleArray object at 0x7f0459732fa0>\r\n[\r\n 3,\r\n nan\r\n]\u00a0\r\n\r\n```\r\nWe also already test for this in pyarrow/tests/test_array.py. The\u00a0pa.array(['string', np.nan]) case was handled in ARROW-6227.\u00a0\r\n\r\nI think we can close this\u00a0"
+        },
+        {
+            "created_at": "2020-08-27T11:37:36.184Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5566?focusedCommentId=17185791) by Joris Van den Bossche (jorisvandenbossche):*\n`[~arw2019]` thanks for checking!\r\n\r\nNow, the failing example was used to illustrate a general need to refactor type inference (combine numpy and python type unification). `[~wesm]` `[~kszucs]` that's still a worthwile goal? (and thus to keep this issue open)"
+        },
+        {
+            "created_at": "2020-10-22T09:15:43.194Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5566?focusedCommentId=17218887) by Joris Van den Bossche (jorisvandenbossche):*\n`[~kszucs]` to what extent did you recent refactors \"solve\" this JIRA issue?"
+        },
+        {
+            "created_at": "2020-10-22T09:41:36.318Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5566?focusedCommentId=17218903) by Krisztian Szucs (kszucs):*\n`[~jorisvandenbossche]` My refactors have not touched the inference paths, so I'd say that we should keep this issue open. We want to remove the numpy runtime dependency at some point, where we'll need to update the inference code."
+        }
+    ]
+}

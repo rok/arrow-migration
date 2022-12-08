@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Python] pa.Table.from_pandas doesn't use schema ordering",
+        "body": "***Note**: This issue was originally created as [ARROW-3766](https://issues.apache.org/jira/browse/ARROW-3766). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nPyarrow is sensitive to the order of the columns upon load of partitioned Files.\r\nWith the function `pa.Table.from_pandas(dataframe, schema=my_schema)` we can apply a schema to a dataframe. I noticed that the returned `pa.Table` object does use the ordering of pandas columns rather than the schema columns. Furthermore it is possible to have columns in the schema but not in the DataFrame (and hence in the resulting pa.Table).\r\n\r\nThis behaviour requires a lot of fiddling with the pandas Frame in the first place if we like to write compatible partitioned files. Hence I argue that for `pa.Table.from_pandas`, and any other comparable function, the schema should be the principal source for the Table structure and not the columns and the ordering in the pandas DataFrame. If I specify a schema I simply expect that the resulting Table actually has this schema.\r\n\r\nHere is a little example. If you remove the reordering of df2 everything works fine:\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nimport pandas as pd\r\nimport os\r\nimport numpy as np\r\nimport shutil\r\n\r\nPATH_PYARROW_MANUAL = '/tmp/pyarrow_manual.pa/'\r\n\r\nif os.path.exists(PATH_PYARROW_MANUAL):\r\n    shutil.rmtree(PATH_PYARROW_MANUAL)\r\nos.mkdir(PATH_PYARROW_MANUAL)\r\n\r\narrays = np.array([np.array([0, 1, 2]), np.array([3, 4]), np.nan, np.nan])\r\nstrings = np.array([np.nan, np.nan, 'a', 'b'])\r\n\r\ndf = pd.DataFrame([0, 0, 1, 1], columns=['partition_column'])\r\ndf.index.name='DPRD_ID'\r\ndf['arrays'] = pd.Series(arrays)\r\ndf['strings'] = pd.Series(strings)\r\n\r\nmy_schema = pa.schema([('DPRD_ID', pa.int64()),\r\n                       ('partition_column', pa.int32()),\r\n                       ('arrays', pa.list_(pa.int32())),\r\n                       ('strings', pa.string()),\r\n                       ('new_column', pa.string())])\r\n\r\ndf1 = df[df.partition_column==0]\r\ndf2 = df[df.partition_column==1][['strings', 'partition_column', 'arrays']]\r\n\r\n\r\ntable1 = pa.Table.from_pandas(df1, schema=my_schema)\r\ntable2 = pa.Table.from_pandas(df2, schema=my_schema)\r\n\r\npq.write_table(table1, os.path.join(PATH_PYARROW_MANUAL, '1.pa'))\r\npq.write_table(table2, os.path.join(PATH_PYARROW_MANUAL, '2.pa'))\r\n\r\npd.read_parquet(PATH_PYARROW_MANUAL)\r\n```\r\n\r\nIf \r\n",
+        "created_at": "2018-11-12T08:26:22.000Z",
+        "updated_at": "2018-11-21T18:35:57.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-11-21T16:18:29.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-11-12T14:50:31.590Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3766?focusedCommentId=16683893) by Wes McKinney (wesm):*\nSounds buggy to me. If you pass a schema to `Table.from_pandas` it should be respected"
+        },
+        {
+            "created_at": "2018-11-15T13:47:34.830Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3766?focusedCommentId=16688086) by Krisztian Szucs (kszucs):*\n`[~wesmckinn]` What's the purpose of the `columns` argument - becuse its behaviour is pretty mixed currently? I suppose the column order should match either df.columns or schema.names and the columns argument should just act like a filter."
+        },
+        {
+            "created_at": "2018-11-15T13:50:51.644Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3766?focusedCommentId=16688094) by Wes McKinney (wesm):*\nThe `columns` argument in `Table.from_pandas` is just for column filtering"
+        },
+        {
+            "created_at": "2018-11-21T16:18:29.256Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3766?focusedCommentId=16694893) by Wes McKinney (wesm):*\nIssue resolved by pull request 2979\n<https://github.com/apache/arrow/pull/2979>"
+        }
+    ]
+}

@@ -1,0 +1,46 @@
+{
+    "issue": {
+        "title": "[C++][Parquet] Arrow time32/time64/timestamp ConvertedType not being restored properly",
+        "body": "***Note**: This issue was originally created as [ARROW-5712](https://issues.apache.org/jira/browse/ARROW-5712). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThese values are currently being written as raw INT32 without a logical or converted type set\r\n\r\nExample statistics for `time32('ms')` with `version='2.0'` set\r\n\r\n```Java\n\r\n(Pdb) stats\r\n<pyarrow._parquet.Statistics object at 0x7f6a9dca9f30>\r\n  has_min_max: True\r\n  min: 37800001\r\n  max: 55800001\r\n  null_count: 0\r\n  distinct_count: 0\r\n  num_values: 2\r\n  converted_type: NONE\r\n  physical_type: INT32\r\n```",
+        "created_at": "2019-06-24T16:43:00.000Z",
+        "updated_at": "2019-06-24T18:39:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-06-24T18:28:20.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-06-24T16:44:48.589Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5712?focusedCommentId=16871505) by Wes McKinney (wesm):*\nThis could actually be a regression, `[~tpboudreau]` do you know off hand?"
+        },
+        {
+            "created_at": "2019-06-24T16:48:23.995Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5712?focusedCommentId=16871509) by Wes McKinney (wesm):*\nThis appears to only be an issue with the `converted_type` in the statistics. Since the LogicalType refactor it seems only safe to use `LogicalType` (formerly LogicalAnnotation) in the public API"
+        },
+        {
+            "created_at": "2019-06-24T16:54:30.264Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5712?focusedCommentId=16871515) by Wes McKinney (wesm):*\nI have to dig into this in the course of the other statistics issues I'm working on (ARROW-4139, ARROW-5166)\r\n\r\nnote that the converted type is being restored correctly for UINT64 and UTF8\r\n\r\n\r\n```Java\n\r\n(Pdb) stats\r\n<pyarrow._parquet.Statistics object at 0x7f9b0360cf08>\r\n  has_min_max: True\r\n  min: 10\r\n  max: 11164359321221007157\r\n  null_count: 0\r\n  distinct_count: 0\r\n  num_values: 2\r\n  converted_type: UINT_64\r\n  physical_type: INT64\r\n(Pdb) c\r\n\r\n(Pdb) stats\r\n<pyarrow._parquet.Statistics object at 0x7f9b0360cdc8>\r\n  has_min_max: True\r\n  min: \u00e4hnlich\r\n  max: \u00f6ffentlich\r\n  null_count: 0\r\n  distinct_count: 0\r\n  num_values: 2\r\n  converted_type: UTF8\r\n  physical_type: BYTE_ARRAY\r\n(Pdb) c\r\n```\r\n\r\nBut it's missing for time32/time64/timestamp\r\n\r\n```Java\n\r\n(Pdb) stats\r\n<pyarrow._parquet.Statistics object at 0x7f9b0360cf58>\r\n  has_min_max: True\r\n  min: 37800001\r\n  max: 55800001\r\n  null_count: 0\r\n  distinct_count: 0\r\n  num_values: 2\r\n  converted_type: NONE\r\n  physical_type: INT32\r\n(Pdb) c\r\n```"
+        },
+        {
+            "created_at": "2019-06-24T17:09:53.217Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5712?focusedCommentId=16871525) by Wes McKinney (wesm):*\nOK, so the offending section in question is:\r\n\r\nhttps://github.com/apache/arrow/blob/master/cpp/src/parquet/parquet.thrift#L332\r\n\r\n```Java\n\r\n  // use ConvertedType TIME_MICROS for TIME(isAdjustedToUTC = true, unit = MICROS)\r\n  // use ConvertedType TIME_MILLIS for TIME(isAdjustedToUTC = true, unit = MILLIS)\r\n  7:  TimeType TIME\r\n\r\n  // use ConvertedType TIMESTAMP_MICROS for TIMESTAMP(isAdjustedToUTC = true, unit = MICROS)\r\n  // use ConvertedType TIMESTAMP_MILLIS for TIMESTAMP(isAdjustedToUTC = true, unit = MILLIS)\r\n  8:  TimestampType TIMESTAMP\r\n```\r\n\r\nWhat does `isAdjustedToUTC` even mean for time types? Presently we have no way of generating the \"true\" case for time types from the Arrow API.\r\n"
+        },
+        {
+            "created_at": "2019-06-24T18:28:20.233Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5712?focusedCommentId=16871658) by Wes McKinney (wesm):*\nIt's only restored if isAdjustedToUTC is true, see https://github.com/apache/arrow/pull/4680"
+        },
+        {
+            "created_at": "2019-06-24T18:37:10.054Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5712?focusedCommentId=16871673) by TP Boudreau (tpboudreau):*\nSorry, was AFK unit just now \u2013 I think you've figured it out \u2013 UTC for time since midnight seems nonsensical.\u00a0\u00a0\r\n\r\nIt may be that we can just change the UTC flag to true here (and below for TIME64 types), declaring that Arrow times types are UTC adjusted, and you'll get TIME_MILLIS / TIME_MICROS for converted types and type preserving roundtrips:\r\n\r\n<https://github.com/apache/arrow/blob/master/cpp/src/parquet/arrow/schema.cc#L706>\r\n\r\n(I don't have any notes on why I thought \"false\" was correct for this type.)\r\n\r\nArrow TIME64::NANOS will have to be dealt with differently; I'll have to look at the code to make a recommendation on that.\u00a0 I'll also test the change I mentioned above to see if there's anything I'm missing/forgetting."
+        },
+        {
+            "created_at": "2019-06-24T18:39:25.546Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5712?focusedCommentId=16871674) by TP Boudreau (tpboudreau):*\nI see while I was typing, you closed this.\u00a0 I'll review the PR."
+        }
+    ]
+}

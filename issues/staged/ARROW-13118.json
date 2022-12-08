@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[R] Improve handling of R scalars in some nse_funcs",
+        "body": "***Note**: This issue was originally created as [ARROW-13118](https://issues.apache.org/jira/browse/ARROW-13118). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSome of the functions in `nse_funcs` do not behave properly when passed R scalar input in expressions in dplyr verbs. Some examples:\r\n```r\n\r\nTable$create(x = 1) %>% mutate(as.character(42))\r\nTable$create(x = 1) %>% mutate(is.character((\"foo\")))\r\nTable$create(x = 1) %>% mutate(nchar(\"foo\"))\r\nTable$create(x = 1) %>% mutate(is.infinite(Inf))\r\n```\r\nThis could be resolved by using `build_expr()`\u00a0instead of `Expression$create()`, but\u00a0`build_expr()`\u00a0is somewhat heavy. The only part of it we really need to make this work is this:\r\n```r\n\r\n    args <- lapply(args, function(x) {\r\n      if (!inherits(x, \"Expression\")) {\r\n        x <- Expression$scalar(x)\r\n      }\r\n      x\r\n    })\n```\r\nIf\u00a0`build_expr()`\u00a0is too heavy, we could make a function called `wrap_r_scalar`, like this:\r\n```r\n\r\nwrap_r_scalar <- function(x) {\r\n  if (!inherits(x \"Expression\")) {\r\n    assert_that(\r\n      length(x) == 1,\r\n      msg = \"Literal vectors of length != 1 not supported\"\r\n    )\r\n    Expression$scalar(x)\r\n  } else {\r\n    x\r\n  }\r\n}\r\n```\r\nand use it as needed in various of the `nse_funcs` functions.",
+        "created_at": "2021-06-18T15:14:47.000Z",
+        "updated_at": "2022-10-06T09:09:41.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-18T15:15:29.267Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13118?focusedCommentId=17365552) by Ian Cook (icook):*\n`[~npr]` \u00a0what do you think? Does the solution described above (creating a `wrap_r_scalar` function) seem reasonable?"
+        },
+        {
+            "created_at": "2021-06-21T21:05:38.400Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13118?focusedCommentId=17366837) by Neal Richardson (npr):*\n`build_expr()` isn't that heavy, it's basically a glorified switch statement to handle some special cases + the scalar wrapping you suggest + R function name mapping. So you could use it in more places if you want, though I'm not convinced of the utility\u2013the examples you gave aren't that compelling. Is there a real use case you're trying to support?"
+        },
+        {
+            "created_at": "2021-06-24T16:33:23.539Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13118?focusedCommentId=17368959) by Ian Cook (icook):*\nYes, the examples above are simplistic; a case that better demonstrates the practical need for this is something like the `case_when()` function which we should be able to implement in the R bindings after ARROW-13064 is merged. Users often mix literal scalars and column references/expressions in the `case_when()` arguments."
+        },
+        {
+            "created_at": "2021-07-16T17:19:21.049Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13118?focusedCommentId=17382214) by Ian Cook (icook):*\nThis is solved for the `is.*()` type checking functions in\u00a0<https://github.com/apache/arrow/pull/10724/>. It is not yet solved for all functions in `nse_funcs`."
+        }
+    ]
+}

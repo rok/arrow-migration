@@ -1,0 +1,85 @@
+{
+    "issue": {
+        "title": "BaseVariableWidthVector#setSafe appears to make value offsets inconsistent",
+        "body": "***Note**: This issue was originally created as [ARROW-7254](https://issues.apache.org/jira/browse/ARROW-7254). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe following program writes a file which PyArrow either segfaults (0.14.1) or rejects with an error (0.15.1) `pyarrow.lib.ArrowInvalid: Column 0: Offset invariant failure at: 2 inconsistent value_offsets for null slot0!=4` on reading.\r\n\r\nCalling `setRowCount` again, or calling `setSafe` with a higher index fixes it. While it seems from the new documentation that we should (must?) call `VectorSchemaRoot#setRowCount` at the end, I wouldn't have expected to get an invalid file by calling using `setSafe`, either. \r\n\r\nFull traceback:\r\n```\n\r\n> python3 -c 'import pyarrow as pa; print(pa.ipc.open_stream(open(\"./test.bin\", \"rb\")).read_pandas())'\r\nTraceback (most recent call last):\r\n  File \"<string>\", line 1, in <module>\r\n  File \"/Users/lidavidm/Flight/arrow-5137-auth/java/venv/lib/python3.7/site-packages/pyarrow/ipc.py\", line 46, in read_pandas\r\n    table = self.read_all()\r\n  File \"pyarrow/ipc.pxi\", line 330, in pyarrow.lib._CRecordBatchReader.read_all\r\n  File \"pyarrow/public-api.pxi\", line 321, in pyarrow.lib.pyarrow_wrap_table\r\n  File \"pyarrow/error.pxi\", line 78, in pyarrow.lib.check_status\r\npyarrow.lib.ArrowInvalid: Column 0: Offset invariant failure at: 2 inconsistent value_offsets for null slot0!=4\r\n```\r\n\u00a0\r\nFull program:\r\n```java\n\r\nimport java.io.OutputStream;\r\nimport java.nio.charset.StandardCharsets;\r\nimport java.nio.file.Files;\r\nimport java.nio.file.Paths;\r\nimport java.util.Collections;\r\nimport org.apache.arrow.memory.BufferAllocator;\r\nimport org.apache.arrow.memory.RootAllocator;\r\nimport org.apache.arrow.vector.VarCharVector;\r\nimport org.apache.arrow.vector.VectorSchemaRoot;\r\nimport org.apache.arrow.vector.ipc.ArrowStreamWriter;\r\nimport org.apache.arrow.vector.types.pojo.ArrowType;\r\nimport org.apache.arrow.vector.types.pojo.Field;\r\nimport org.apache.arrow.vector.types.pojo.Schema;\r\n\r\npublic class AsdfTest {\r\n\r\n  public static void main(String[] args) throws Exception {\r\n    Schema schema = new Schema(Collections.singletonList(Field.nullable(\"a\", new ArrowType.Utf8())));\r\n\r\n    try (BufferAllocator allocator = new RootAllocator(Integer.MAX_VALUE);\r\n        VectorSchemaRoot root = VectorSchemaRoot.create(schema, allocator)) {\r\n      root.setRowCount(2);\r\n      VarCharVector v = (VarCharVector) root.getVector(\"a\");\r\n      v.setSafe(0, \"asdf\".getBytes(StandardCharsets.UTF_8));\r\n      try (OutputStream output = Files.newOutputStream(Paths.get(\"./test.bin\"))) {\r\n        ArrowStreamWriter writer = new ArrowStreamWriter(root, null, output);\r\n        writer.writeBatch();\r\n        writer.close();\r\n      }\r\n    }\r\n  }\r\n}\r\n```\r\n\r\n`v.setNull(1)` after `v.setSafe(0, \"asdf\")` does not fix it. Using `set` instead of `setSafe` will fail in Java.\r\n",
+        "created_at": "2019-11-25T19:29:33.000Z",
+        "updated_at": "2019-11-28T02:26:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-11-28T02:26:36.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-11-26T01:32:46.133Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7254?focusedCommentId=16982040) by Liya Fan (fan_li_ya):*\nHi `[~lidavidm]` IMO, the behavior for Java API is as expected: VectorSchemaRoot#setRowCount calls the setValueCount for each underlying vector. However, for BaseVariableWidthVector, the setVectorCount only makes sure there is enough capacity for validity buffer and offset buffer, so there is the possibility that the data buffer does not have enough capacity. That is why we must call setSafe instead of set.\r\n\r\nFor BaseFixedWidthVector, there is no such problem. \r\n\r\nMaybe I don't fully understand your point?"
+        },
+        {
+            "created_at": "2019-11-26T02:05:38.987Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7254?focusedCommentId=16982057) by David Li (lidavidm):*\nThank you [~fan_li_ya] for the explanation. I think what I am confused by is that if you call `setRowCount` and do not manipulate the vector, then it writes valid data, but calling `setSafe` invalidates the vector's _offset_ buffer, as the PyArrow error message notes. (Additionally, calling `setSafe(0); setNull(1)` still leads to this error - it seems `setNull` does not preserve the same invariants as `setSafe`.) But if the expectation is that `setRowCount` must always be the last operation, then I think we can close this.\r\n\r\nI reproduced this after looking at internal code that ran into this error; I think once we have published documentation on how to use VectorSchemaRoot, it will be easier to avoid this, but it seems unfortunate that the Java API makes it easy to get things wrong."
+        },
+        {
+            "created_at": "2019-11-26T03:21:52.990Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7254?focusedCommentId=16982102) by Liya Fan (fan_li_ya):*\n`[~lidavidm]` Thanks a lot for the further clarification. \r\n\r\nAfter investigating the code, I think you have really found a bug in the Java code base!\r\n\r\nThe problem is that the write index of the data buffer is not actually set by the setXXX methods. This is not a problem with common operations, because they use the offset buffer instead of the write index to obtain the data positions.\r\n\r\nFor flighting, this is a problem, as the unloaded buffers use write index to determine how much data to write. Since the write index is not set, no data is actually written in the data buffer, and this makes the file layout invalid."
+        },
+        {
+            "created_at": "2019-11-26T04:41:33.692Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7254?focusedCommentId=16982117) by Liya Fan (fan_li_ya):*\nAdditional investigation shows that the write index is not set because the offset buffers for trailing values are not right (as indicated in the title of this issue).\r\n\r\nIn addition, it seems the write index for data buffer is left unset deliberately, for performance concerns. So we provide a simple fix to the problem, to limit the impact to IPC only: we bring the vector to a consistent state just before unloading. \r\n\r\nPlease see if it looks good. Thank you in advance. "
+        },
+        {
+            "created_at": "2019-11-26T05:15:00.908Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7254?focusedCommentId=16982133) by Micah Kornfield (emkornfield@gmail.com):*\nSorry, I'm not following.  Similar to ValueVector, I would assume any manipulation of VectorSchemaRoot/Value vector to have  setRowCount(2)/setValueCount() called before transferring the data (I agree this is slightly unfortunate, which maybe is a good reason to create builder classes and advocate using those instead?)."
+        },
+        {
+            "created_at": "2019-11-26T05:58:23.691Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7254?focusedCommentId=16982146) by Liya Fan (fan_li_ya):*\nSure. Builder classes are useful here. \r\n\r\nI think it is ok to setValueCount before transferring the data. The problem would arise if we setValueCount and then manipulate it (by setXXX methods)."
+        },
+        {
+            "created_at": "2019-11-26T06:06:35.787Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7254?focusedCommentId=16982153) by Micah Kornfield (emkornfield@gmail.com):*\nManipulating the vector after calling setValueCount isn't really supposed to be supported.  The ValueVector javadoc has this to say:\r\n\r\nThis interface \"should\" strive to guarantee this order of operation:\r\n \\* allocate; mutate; setvaluecount; access; clear (or allocate to start the process over).\r\n\r\n\r\n\r\n"
+        },
+        {
+            "created_at": "2019-11-26T06:47:56.936Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7254?focusedCommentId=16982181) by Liya Fan (fan_li_ya):*\nAgreed with you. This way of using the vector is not recommended. \r\n"
+        },
+        {
+            "created_at": "2019-11-26T13:18:26.676Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7254?focusedCommentId=16982462) by David Li (lidavidm):*\nI agree that the vector is not supposed to be used this way; having the documentation would go a long way to help prevent this. Builder classes also sound reasonable for applications where the overhead is acceptable. \r\n\r\nFor Liya's fix, I guess the question is whether it will be a maintenance or performance burden to accept fixes for cases like this, as otherwise, it's easy to write code that appears to \"work\" in Java up until data is serialized."
+        },
+        {
+            "created_at": "2019-11-27T06:50:47.163Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7254?focusedCommentId=16983212) by Micah Kornfield (emkornfield@gmail.com):*\nI thought this was documented?  Looking at the fix, I think it might potentially be as bad as a 100% performance penalty for sparsely populated arrays, but I didn't investigate too deeply.  After I'm thinking it through, I think we should merge it since if I understand correctly it would not be a performance penalty for \"proper\" uses of the class.  `[~lidavidm]` do you want to finish the review and merge?"
+        },
+        {
+            "created_at": "2019-11-27T08:04:15.616Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7254?focusedCommentId=16983262) by Liya Fan (fan_li_ya):*\n[~emkornfield@gmail.com] This is recorded in the Javadoc (as you have indicated). I have not found any other document discussing this issue (through searching by google). Given that this is an important issue, maybe we should add a section in Columnar.rst to discuss it?\r\n\r\nAgree with you that there would be no extra penalty if the vector is used properly. \r\n\r\nI am sorry I do not fully understand the meaning of \"100% performance penalty\". IMO, the exact penalty for sparse vectors should be: setting the offsets buffer from `lastSetIndex` to `valueCount`."
+        },
+        {
+            "created_at": "2019-11-27T08:11:57.421Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7254?focusedCommentId=16983266) by Micah Kornfield (emkornfield@gmail.com):*\n> I am sorry I do not fully understand the meaning of \"100% performance penalty\". IMO, the exact penalty for sparse vectors should be: setting the offsets buffer from\u00a0`lastSetIndex`\u00a0to\u00a0`valueCount`.\r\nI think if one does setValueCount that call fillHoles and then if only set one element in a large list, setHoles will be called again to fix this?\u00a0 Like I said I only looked at it quickly so I trust your analysis.\r\n\r\n\u00a0\r\n\r\nColumnar.rst is the wrong place for the documentation as it is implementation agnostic.\u00a0 Ji Liu recently added prose documentation for java, we should add it there (the documentation should get published on the next release).\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-11-27T08:28:29.768Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7254?focusedCommentId=16983277) by Liya Fan (fan_li_ya):*\n> Columnar.rst is the wrong place for the documentation as it is implementation agnostic.  Ji Liu recently added prose documentation for java, we should add it there (the documentation should get published on the next release).\r\n\r\nI thought the vector life cycle is general for all language. If it is only specific to Java, I think the prose document is the right place. \r\n "
+        },
+        {
+            "created_at": "2019-11-27T08:38:04.279Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7254?focusedCommentId=16983284) by Micah Kornfield (emkornfield@gmail.com):*\n> I thought the vector life cycle is general for all language. If it is only specific to Java, I think the prose document is the right place.\r\nIts somewhat consistent across Java and C++ (albeit it is explicit in C++).\u00a0 I'm not sure about other languages.\u00a0 Columnar.rst specifically says:\r\n> This document is concerned only with in-memory data representation and serialization details; issues such as coordinating mutation of data structures are left to be handled by implementations.\r\nSo I think the correct way of building it is language specific.\u00a0\u00a0"
+        },
+        {
+            "created_at": "2019-11-27T08:42:06.693Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7254?focusedCommentId=16983288) by Liya Fan (fan_li_ya):*\n[~emkornfield@gmail.com] I see. Thanks for your clarification."
+        },
+        {
+            "created_at": "2019-11-27T14:41:49.302Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7254?focusedCommentId=16983586) by David Li (lidavidm):*\nAh, I see now - ValueVector's javadoc does document this; I was thinking the recently added prose documentation was the only source of this information. Sorry for the mistake.\r\n\r\nI will review the change today, but if we'd rather cancel it as the code pattern here is invalid, I'm OK with that as well."
+        },
+        {
+            "created_at": "2019-11-28T02:26:36.764Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7254?focusedCommentId=16984090) by David Li (lidavidm):*\nIssue resolved by pull request 5898\n<https://github.com/apache/arrow/pull/5898>"
+        }
+    ]
+}

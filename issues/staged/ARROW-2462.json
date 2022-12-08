@@ -1,0 +1,22 @@
+{
+    "issue": {
+        "title": "[C++] Segfault when writing a parquet table containing a dictionary column from Record Batch Stream",
+        "body": "***Note**: This issue was originally created as [ARROW-2462](https://issues.apache.org/jira/browse/ARROW-2462). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nDiscovered this through using pyarrow and dealing with RecordBatch Streams and parquet. The issue can be replicated as follows:\r\n\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\n# create record batch with 1 dictionary column\r\nindices = pa.array([1,0,1,1,0])\r\ndictionary = pa.array(['Foo', 'Bar'])\r\ndict_array = pa.DictionaryArray.from_arrays(indices, dictionary)\r\nrb = pa.RecordBatch.from_arrays( [ dict_array ], [ 'd0' ] )\r\n\r\n# write out using RecordBatchStreamWriter\r\nsink = pa.BufferOutputStream()\r\nwriter = pa.RecordBatchStreamWriter(sink, rb.schema)\r\nwriter.write_batch(rb)\r\nwriter.close()\r\nbuf = sink.get_result()\r\n\r\n# read in and try to write parquet table\r\nreader = pa.open_stream(buf)\r\ntbl = reader.read_all()\r\npq.write_table(tbl, 'dict_table.parquet') # SEGFAULTS\r\n```\r\n\r\nWhen writing record batch streams, if there are no nulls in an array, Arrow will put a placeholder nullptr instead of putting the full bitmap of 1s, when deserializing that stream, the bitmap for the nulls isn't populated and is left to being a nullptr. When attempting to write this table via pyarrow.parquet, you end up [here](https://github.com/apache/parquet-cpp/blob/master/src/parquet/arrow/writer.cc#L963)  in the parquet writer code which attempts to Cast the dictionary to a non-dictionary representation. Since the null count isn't checked before creating a BitmapReader, the BitmapReader is constructed with a nullptr for the bitmap_data, but a non-zero length which then segfaults in the constructor [here](https://github.com/apache/arrow/blob/master/cpp/src/arrow/util/bit-util.h#L415) because bitmap is null.\r\n\r\nSo a simple check of the null count before constructing the BitmapReader avoids the segfault.\r\n\r\nAlready filed [PR 1896](https://github.com/apache/arrow/pull/1896)",
+        "created_at": "2018-04-15T19:31:39.000Z",
+        "updated_at": "2018-07-27T15:52:56.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-05-01T09:22:04.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-05-01T09:22:04.731Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2462?focusedCommentId=16459549) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 1896\n<https://github.com/apache/arrow/pull/1896>"
+        }
+    ]
+}

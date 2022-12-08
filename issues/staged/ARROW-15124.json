@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[R] default TZ parsing woes in CSV reader",
+        "body": "***Note**: This issue was originally created as [ARROW-15124](https://issues.apache.org/jira/browse/ARROW-15124). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI am attempting to use open_dataset() on a large collection of CSV files in which a timestamp column sometimes has a date format and sometimes a timezone format.\r\n\r\nreadr is fine reading these both in with a col_type set to \"timestamp\" (i.e. see below), but arrow_read_csv insists the one must use tz=\"UTC\" while the other must not use tz=\"UTC\" in order for the schema to be valid.\u00a0 Easiest to see this in a simple example:\r\n\r\n\r\n```java\n\r\nx <- tempfile()\r\ndf <- data.frame(time = '2021-02-01T00:00:00Z')\r\nreadr::write_csv(df, x)\r\nschema = arrow::schema(time = timestamp(\"s\", \"\"))\r\n\r\n# ERROR cannot parse w/o tz=\"UTC\" in the schema:\r\narrow::read_csv_arrow(x,schema = schema, skip=1) \r\n\r\ndf2 <- readr::read_csv(x, col_types=\"T\") \u00a0# works fine\n```\r\n```java\n\r\ndf <- data.frame(time = '2021-02-01')\r\nreadr::write_csv(df, x)\r\n## ERROR cannot parse w/ tz=\"UTC\" :\r\nschema = arrow::schema(time = timestamp(\"s\", \"UTC\")) \r\narrow::read_csv_arrow(x,schema = schema, skip=1)\r\n\r\n## Once again, readr has no issues:\r\ndf2 <- readr::read_csv(x, col_types=\"T\")\r\n \n```",
+        "created_at": "2021-12-16T00:39:09.000Z",
+        "updated_at": "2021-12-16T17:22:22.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-12-16T01:33:28.435Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15124?focusedCommentId=17460352) by Weston Pace (westonpace):*\nAre \"2021-02-01T00:00:00Z\" and \"2021-02-01\" the same instant? (readr seems to consider these the same instant in time)\r\n\r\nWould \"2021-02-01T00:00:00-07:00\" and \"2021-02-01\" be the same instant? (readr does not seem to consider these the same instant in time)\r\n\r\nIn other words should values without a datetime be blindly assumed to be UTC?  Or should a new CSV reader argument be added (the time zone to be used when one isn't present)."
+        },
+        {
+            "created_at": "2021-12-16T04:32:00.013Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15124?focusedCommentId=17460411) by Carl Boettiger (cboettig):*\nThanks, I understand the potential ambiguities here, but merely\nlooking ro consistent behavior.\n\nIn the first instance, the data shows a full timestamp with a Z suffix\nindicating the UTC timezone.  I understand why in the case of an\nexplicit timezone it would be acceptable to omit the timezone,\ntimestamp(\"s\", \"\") in the schema, but I feel that it is a bug that I\nget an error when I manually declare the timezone as UTC explicitly,\nas shown in the first example.  Surely I should be allowed to\nprecisely declare the timezone being used?  If I was allowed to use\nUTC in the first example, then this would also entirely resolve the\nissue.\n\nI do see that the second case is less clear-cut \u2013 if we declare a\ndate with no TZ information in the string must be read as a timestamp,\nthis possibly is ambiguous.  However, at least in R, the convention of\ntz=\"\" is defined in as.POSIXct to adopt the local timezone (i.e. as\nconfigured by the operating system), rather than throw an error.  So\nthe behavior of readr is definitely well-defined and expected from the\nperspective of the R user at least, and arguably somewhat sensible at\nleast as a default.\n\nSo resolving the first error is definitely the more important to me \u2013\nI feel I should be able to explicitly declare the tz and not be forced\nto use tz=\"\" in my schema when the data has unambiguous timestamp\nformats.  But from a user perspective I think the second case would be\nmore streamlined if it defaulted to the system setting rather than\nrefusing the coercion, but I'm fine if you want to ignore that case.\n\nDoes that make sense?\n\nApologies I was too brief in the original report (had to get off my train!)\n\n- Carl\n\n\n\n"
+        },
+        {
+            "created_at": "2021-12-16T16:00:01.584Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15124?focusedCommentId=17460827) by Jonathan Keane (jonkeane):*\nThis is tangentially related, but in relation to the second case, it would be good to get feedback on: https://issues.apache.org/jira/browse/ARROW-14442"
+        },
+        {
+            "created_at": "2021-12-16T17:22:22.955Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15124?focusedCommentId=17460895) by Carl Boettiger (cboettig):*\nJust a correction \u2013 this only impacts the development version, 6.0.2, not 6.0.1 (which is more annoying in a way since it means the dev version also breaks existing workflows.)\r\n\r\nThis may be related to https://issues.apache.org/jira/browse/ARROW-15105 , which is fixed in the dev version but not in the current release."
+        }
+    ]
+}

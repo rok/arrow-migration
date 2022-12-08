@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[Java] Unable to read unsigned integers outside signed range for bit width in integration tests",
+        "body": "***Note**: This issue was originally created as [ARROW-1837](https://issues.apache.org/jira/browse/ARROW-1837). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI believe this was introduced recently (perhaps in the refactors), but there was a problem where the integration tests weren't being properly run that hid the error from us\r\n\r\nsee https://github.com/apache/arrow/pull/1294#issuecomment-345553066",
+        "created_at": "2017-11-19T21:58:03.000Z",
+        "updated_at": "2019-06-05T02:20:22.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-06-05T02:20:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-01-25T22:35:42.011Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1837?focusedCommentId=16340222) by Jingyuan Wang (alphalfalfa):*\nWes mentioned in the GitHub issue page:\r\n\r\n------\u00a0\r\n\r\nI found the problem \u2013 one of the primitive integration test files was being clobbered and not run, which was suppressing a failure that should have been raised a long time ago.\r\n\r\nIn the meantime, there was also a regression from the Java refactor, and we are no longer able to fully read unsigned integer types anymore. I will hack the integration tests for now and open a JIRA about fixing,\r\n\r\nhere's an example of trying to read a\u00a0`uint16`\u00a0vector:\r\n\r\n`16:49:51.051 [main] DEBUG io.netty.util.Recycler - -Dio.netty.recycler.ratio: 8 Error accessing files Numeric value (65350) out of range of Java short at [Source: /tmp/tmpwgopllpl/generated_primitive.json; line: 1111, column: 18] 16:49:51.065 [main] ERROR org.apache.arrow.tools.Integration - Error accessing files com.fasterxml.jackson.core.JsonParseException: Numeric value (65350) out of range of Java short`\u00a0"
+        },
+        {
+            "created_at": "2018-01-25T23:11:56.056Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1837?focusedCommentId=16340263) by Jingyuan Wang (alphalfalfa):*\na more complete stack trace\r\n\r\n```none\n\r\nError accessing files\r\nNumeric value (65350) out of range of Java short\r\n at [Source: /tmp/tmp7z9ijgqc/generated_primitive.json; line: 783, column: 18]\r\n17:46:40.350 [main] ERROR org.apache.arrow.tools.Integration - Error accessing files\r\ncom.fasterxml.jackson.core.JsonParseException: Numeric value (65350) out of range of Java short\r\n at [Source: /tmp/tmp7z9ijgqc/generated_primitive.json; line: 783, column: 18]\r\n\tat com.fasterxml.jackson.core.JsonParser._constructError(JsonParser.java:1586)\r\n\tat com.fasterxml.jackson.core.JsonParser.getShortValue(JsonParser.java:1075)\r\n\tat org.apache.arrow.vector.ipc.JsonFileReader$BufferHelper$3.read(JsonFileReader.java:248)\r\n\tat org.apache.arrow.vector.ipc.JsonFileReader$BufferReader.readBuffer(JsonFileReader.java:199)\r\n\tat org.apache.arrow.vector.ipc.JsonFileReader.readIntoBuffer(JsonFileReader.java:491)\r\n\tat org.apache.arrow.vector.ipc.JsonFileReader.readFromJsonIntoVector(JsonFileReader.java:539)\r\n\tat org.apache.arrow.vector.ipc.JsonFileReader.read(JsonFileReader.java:180)\r\n\tat org.apache.arrow.tools.Integration$Command$3.execute(Integration.java:196)\r\n\tat org.apache.arrow.tools.Integration.run(Integration.java:114)\r\n\tat org.apache.arrow.tools.Integration.main(Integration.java:65)\r\n\tSuppressed: java.lang.IllegalStateException: Memory was leaked by query. Memory leaked: (1148)\r\nAllocator(ROOT) 0/1148/1148/2147483647 (res/actual/peak/limit)\r\n\r\n\t\tat org.apache.arrow.memory.BaseAllocator.close(BaseAllocator.java:406)\r\n\t\tat org.apache.arrow.tools.Integration$Command$3.execute(Integration.java:220)\r\n\t\t... 2 common frames omitted\r\n```"
+        },
+        {
+            "created_at": "2018-01-25T23:19:47.731Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1837?focusedCommentId=16340275) by Jingyuan Wang (alphalfalfa):*\nIn the defined Java Vector types, there are two 16-bit types: SmallInt and UInt2. The first one is associated with signed short (Java does not support unsigned short) and the latter is associated with char/Character. I need to look at the code a bit more to understand how these two types are determined to use.\u00a0"
+        },
+        {
+            "created_at": "2018-01-26T02:15:10.323Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1837?focusedCommentId=16340464) by Wes McKinney (wesm):*\nSince Java doesn't have unsigned integer values, I presume that we'll want to return them in `getObject` as a larger signed integer object for now \u2013 as long as unsigned values sent from other applications can be understood correctly. So a `UInt2Vector`\u00a0would return `int` values, `UInt4Vector` return `long` values, and so forth (would `UInt8` have to return `BigInteger`?)\u00a0"
+        },
+        {
+            "created_at": "2018-01-26T19:01:42.987Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1837?focusedCommentId=16341439) by Jingyuan Wang (alphalfalfa):*\nFor Java 8 & 9, Integer and Long can partially handle unsigned values, but looks highly inconvenient. The example I found is to assign the value by parsing a string.\u00a0\r\n\r\nI agree with you on your proposal of promoting unsigned values to to a wider type when retrieved. But I also think this might require other Java developers their opinions as currently UInt2Vector return char/Character. I am not sure about if this vector has any necessary use cases. If so, it is at least confusing\u00a0if not wrong.\u00a0"
+        },
+        {
+            "created_at": "2018-01-30T04:07:46.228Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1837?focusedCommentId=16344472) by Jingyuan Wang (alphalfalfa):*\n`[~icexelloss]`, any opinion on whether UInt2Vector should return char/Character?\u00a0"
+        },
+        {
+            "created_at": "2018-01-30T14:58:09.340Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1837?focusedCommentId=16345174) by Li Jin (icexelloss):*\nWe can check with\u00a0Dremio\u00a0folks whether those are being used. If not we are free to change the them. cc `[~siddteotia]`"
+        },
+        {
+            "created_at": "2018-02-08T00:09:09.988Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1837?focusedCommentId=16356266) by Wes McKinney (wesm):*\nMoving this to 0.10.0. Maybe we can deal with unsigned integers in Java in the next release cycle"
+        },
+        {
+            "created_at": "2018-06-12T20:09:04.983Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1837?focusedCommentId=16510130) by Wes McKinney (wesm):*\n`[~jnadeau]` `[~siddteotia]` any thoughts on what would be involved with better supporting unsigned integers in Java? I think they need to be supported. I'm moving this issue to 0.11 so it does not block 0.10"
+        },
+        {
+            "created_at": "2019-05-31T00:36:15.723Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1837?focusedCommentId=16852493) by Wes McKinney (wesm):*\n[~emkornfield@gmail.com] if you are interested in unsigned integers this would benefit from some attention"
+        },
+        {
+            "created_at": "2019-06-05T02:20:08.553Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1837?focusedCommentId=16856270) by Wes McKinney (wesm):*\nIssue resolved by pull request 4432\n<https://github.com/apache/arrow/pull/4432>"
+        }
+    ]
+}

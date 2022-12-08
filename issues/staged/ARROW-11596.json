@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[Python][Dataset] SIGSEGV when executing scan tasks with Python executors",
+        "body": "***Note**: This issue was originally created as [ARROW-11596](https://issues.apache.org/jira/browse/ARROW-11596). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis crashes for me with a segfault:\r\n```python\n\r\nimport concurrent.futures\r\nimport queue\r\n\r\nimport numpy as np\r\nimport pyarrow as pa\r\nimport pyarrow.dataset as ds\r\nimport pyarrow.fs as fs\r\nimport pyarrow.parquet as pq\r\n\r\n\r\nschema = pa.schema([(\"foo\", pa.float64())])\r\ntable = pa.table([np.random.uniform(size=1024)], schema=schema)\r\npath = \"/tmp/foo.parquet\"\r\npq.write_table(table, path)\r\ndataset = pa.dataset.FileSystemDataset.from_paths(\r\n    [path],\r\n    schema=schema,\r\n    format=ds.ParquetFileFormat(),\r\n    filesystem=fs.LocalFileSystem(),\r\n)\r\n\r\nwith concurrent.futures.ThreadPoolExecutor(2) as executor:\r\n    tasks = dataset.scan()\r\n    q = queue.Queue()\r\n\r\n    def _prebuffer():\r\n        for task in tasks:\r\n            iterator = task.execute()\r\n            next(iterator)\r\n            q.put(iterator)\r\n\r\n    executor.submit(_prebuffer).result()\r\n    next(q.get())\r\n```\r\n\r\n```\n\r\n$ uname -a\r\nLinux chaconne 5.10.4-arch2-1 #1 SMP PREEMPT Fri, 01 Jan 2021 05:29:53 +0000 x86_64 GNU/Linux\r\n$ pip freeze\r\nnumpy==1.20.1\r\npyarrow==3.0.0\r\n```\r\n",
+        "created_at": "2021-02-11T16:28:23.000Z",
+        "updated_at": "2021-03-25T12:55:17.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-03-25T12:55:15.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-02-11T22:04:19.825Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11596?focusedCommentId=17283407) by David Li (lidavidm):*\nThis is because the task.execute() is a generator from _datasets.pyx, and Cython generates code which raises StopIteration without holding the GIL. It's fixed on Cython master, but not in 3.0a6. In the meantime, we can rewrite this to not be a generator..."
+        },
+        {
+            "created_at": "2021-03-25T12:55:15.649Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11596?focusedCommentId=17308665) by Joris Van den Bossche (jorisvandenbossche):*\nIssue resolved by pull request 9480\n<https://github.com/apache/arrow/pull/9480>"
+        }
+    ]
+}

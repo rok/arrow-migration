@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Rust][Parquet] Column writer bug: check dictionary encoder when adding a new data page",
+        "body": "***Note**: This issue was originally created as [ARROW-5129](https://issues.apache.org/jira/browse/ARROW-5129). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAs part of my weekly routine, I glanced over code in Parquet column writer and found that the way we check when to add a new data page is buggy. The idea is checking the current encoder and deciding if we have written enough bytes for a page to construct. The problem is that we only check value encoder, regardless whether or not dictionary encoder is enabled. \r\n\r\nHere is how we do it now: actual check (https://github.com/apache/arrow/blob/master/rust/parquet/src/column/writer.rs#L378) and the buggy function (https://github.com/apache/arrow/blob/master/rust/parquet/src/column/writer.rs#L423). \r\n\r\nIn the case of sparse column and dictionary  encoder we would write a single data page, even though we would have accumulated a large enough number of bytes for more than one page in encoder (value encoder will be empty, so it will always less than constant limit).\r\n\r\nI forgot that parquet-cpp has `current_encoder` as either value encoder or dictionary encoder (https://github.com/apache/parquet-cpp/blob/master/src/parquet/column_writer.cc#L544), but in parquet-rs we have them separate.\r\n\r\nSo the fix could be something like this:\r\n```Java\n\r\n/// Returns true if there is enough data for a data page, false otherwise.\r\n#[inline]\r\nfn should_add_data_page(&self) -> bool {\r\n  match self.dict_encoder {\r\n    Some(ref encoder) => {\r\n      encoder.estimated_data_encoded_size() >= self.props.data_pagesize_limit()\r\n    },\r\n    None => {\r\n      self.encoder.estimated_data_encoded_size() >= self.props.data_pagesize_limit()\r\n    }\r\n  }\r\n}\r\n```",
+        "created_at": "2019-04-05T17:52:03.000Z",
+        "updated_at": "2019-04-22T04:46:47.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-04-14T21:32:00.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-04-05T17:54:18.073Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5129?focusedCommentId=16811108) by Ivan Sadikov (sadikovi):*\nFYI\u00a0 `[~csun]` \u00a0 `[~wesmckinn]`"
+        },
+        {
+            "created_at": "2019-04-14T21:32:00.121Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5129?focusedCommentId=16817447) by Chao Sun (csun):*\nIssue resolved by pull request 4152\n<https://github.com/apache/arrow/pull/4152>"
+        },
+        {
+            "created_at": "2019-04-14T21:32:42.257Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5129?focusedCommentId=16817449) by Chao Sun (csun):*\n`[~andygrove]`: could you add `[~sadikovi]` as contributor and assign this JIRA to him?"
+        }
+    ]
+}

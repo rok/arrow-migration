@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[R] Return BLOB data as list of raw instead of a list of integers",
+        "body": "***Note**: This issue was originally created as [ARROW-17885](https://issues.apache.org/jira/browse/ARROW-17885). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nBLOBs should be mapped to lists of raw in R, not lists of integer. Tested with ec714db3995549309b987fc8112db98bb93102d0.\r\n\r\nlibrary(arrow)\r\n#> Some features are not enabled in this build of Arrow. Run `arrow_info()` for more information.\r\n#>\u00a0\r\n#> Attaching package: 'arrow'\r\n#> The following object is masked from 'package:utils':\r\n#>\u00a0\r\n#> \u00a0 \u00a0 timestamp\r\n\r\ndata <- data.frame(\r\n\u00a0 a = 1:3,\r\n\u00a0 b = 2.5,\r\n\u00a0 c = \"three\",\r\n\u00a0 stringsAsFactors = FALSE\r\n)\r\ndata$d <- blob::blob(as.raw(1:10))\r\n\r\ntbl <- arrow::as_arrow_table(data)\r\nrbr <- arrow::as_record_batch_reader(tbl)\r\n\r\nwaldo::compare(as.data.frame(rbr$read_next_batch()), data)\r\n#> `old$d[[1]]` is an integer vector (1, 2, 3, 4, 5, ...)\r\n#> `new$d[[1]]` is a raw vector (01, 02, 03, 04, 05, ...)\r\n#>\u00a0\r\n#> `old$d[[2]]` is an integer vector (1, 2, 3, 4, 5, ...)\r\n#> `new$d[[2]]` is a raw vector (01, 02, 03, 04, 05, ...)\r\n#>\u00a0\r\n#> `old$d[[3]]` is an integer vector (1, 2, 3, 4, 5, ...)\r\n#> `new$d[[3]]` is a raw vector (01, 02, 03, 04, 05, ...)\r\n",
+        "created_at": "2022-09-29T03:24:16.000Z",
+        "updated_at": "2022-10-11T02:52:15.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-10T20:08:38.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-29T13:04:13.822Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17885?focusedCommentId=17611028) by Dewey Dunnington (paleolimbot):*\nIt looks like we need `infer_type()` and `as_arrow_array()` generics for the blob class (or maybe we could do this more generically for the vctrs list_of class):\r\n\r\n```R\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\n#> Some features are not enabled in this build of Arrow. Run `arrow_info()` for more information.\r\n\r\ninfer_type.blob <- function(x, ...) {\r\n  if (sum(lengths(x)) > .Machine$integer.max) {\r\n    large_binary()\r\n  } else {\r\n    binary()\r\n  }\r\n}\r\n\r\nas_arrow_array.blob <- function(x, ..., type = NULL) {\r\n  as_arrow_array(unclass(x), type = type)\r\n}\r\n\r\ndata <- data.frame(\r\n  a = 1:3,\r\n  b = 2.5,\r\n  c = \"three\",\r\n  stringsAsFactors = FALSE\r\n)\r\ndata$d <- blob::blob(as.raw(1:10))\r\n\r\n(tbl <- arrow::as_arrow_table(data))\r\n#> Table\r\n#> 3 rows x 4 columns\r\n#> $a <int32>\r\n#> $b <double>\r\n#> $c <string>\r\n#> $d <binary>\r\n#> \r\n#> See $metadata for additional Schema metadata\r\ntibble::as_tibble(tbl)\r\n#> # A tibble: 3 \u00d7 4\r\n#>       a     b c              d\r\n#>   <int> <dbl> <chr>     <blob>\r\n#> 1     1   2.5 three <raw 10 B>\r\n#> 2     2   2.5 three <raw 10 B>\r\n#> 3     3   2.5 three <raw 10 B>\r\n```"
+        },
+        {
+            "created_at": "2022-10-10T20:08:38.753Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17885?focusedCommentId=17615293) by Neal Richardson (npr):*\nIssue resolved by pull request 14277\n<https://github.com/apache/arrow/pull/14277>"
+        }
+    ]
+}

@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] Improve performance of serializing object dtype ndarrays",
+        "body": "***Note**: This issue was originally created as [ARROW-1854](https://issues.apache.org/jira/browse/ARROW-1854). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI haven't looked carefully at the hot path for this, but I would expect these statements to have roughly the same performance (offloading the ndarray serialization to pickle)\r\n\r\n```Java\n\r\nIn [1]: import pickle\r\n\r\nIn [2]: import numpy as np\r\n\r\nIn [3]: import pyarrow as pa\r\na\r\nIn [4]: arr = np.array(['foo', 'bar', None] * 100000, dtype=object)\r\n\r\nIn [5]: timeit serialized = pa.serialize(arr).to_buffer()\r\n10 loops, best of 3: 27.1 ms per loop\r\n\r\nIn [6]: timeit pickled = pickle.dumps(arr)\r\n100 loops, best of 3: 6.03 ms per loop\r\n```\r\n\r\n`[~robertnishihara]` `[~pcmoritz]` I encountered this while working on ARROW-1783, but it can likely be resolved independently",
+        "created_at": "2017-11-24T20:15:12.000Z",
+        "updated_at": "2017-12-15T22:15:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2017-11-29T01:06:25.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-11-24T20:40:09.575Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1854?focusedCommentId=16265525) by Robert Nishihara (robertnishihara):*\nYour numbers are much better than what I'm seeing. It looks like the poor performance comes from our handling of lists. Since pyarrow handles the numpy array or objects by first converting it to a list and then serializing it, we can't do better than the list case.\r\n\r\nEDIT: Actually I'm seeing similar numbers (updated below). I think I had compiled without optimizations.\r\n\r\n```Java\n\r\nimport pickle\r\nimport pyarrow as pa\r\nimport numpy as np\r\n\r\nprint(pa.__version__)  # '0.7.2.dev165+ga446fbd.d20171116'\r\n\r\narr = np.array(['foo', 'bar', None] * 100000, dtype=object)\r\narr_list = arr.tolist()\r\n\r\n# Serializing the array.\r\n%timeit pa.serialize(arr).to_buffer()\r\n29.1 ms \u00b1 535 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 10 loops each)\r\n\r\n%timeit pickle.dumps(arr)\r\n7.43 ms \u00b1 196 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 100 loops each)\r\n\r\n\r\n# Serializing the list.\r\n%timeit pa.serialize(arr_list).to_buffer()\r\n27.5 ms \u00b1 669 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 10 loops each)\r\n\r\n%timeit pickle.dumps(arr_list)\r\n5.87 ms \u00b1 160 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 100 loops each)\r\n```"
+        },
+        {
+            "created_at": "2017-11-25T22:50:34.155Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1854?focusedCommentId=16265876) by Wes McKinney (wesm):*\nI'm quite confident we can do better. I think instead of converting an ndarray to a list, we should pickle it and send the pickle as a buffer along with any other buffers that are produced during the serialization pass"
+        },
+        {
+            "created_at": "2017-11-26T05:36:03.379Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1854?focusedCommentId=16265914) by Robert Nishihara (robertnishihara):*\nThat would certainly work. It wouldn't give us any of the benefits of using Arrow, but for numpy arrays of general Python objects, we probably shouldn't expect that anyway.\r\n\r\nIt may be as simple as changing the custom serializer/deserializer. I'll take a quick look at that."
+        },
+        {
+            "created_at": "2017-11-26T05:51:22.205Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1854?focusedCommentId=16265919) by Robert Nishihara (robertnishihara):*\nWe may run into problems when the numpy array can't be pickled/unpickled but it can be cloudpickled/cloudunpickled. E.g.,\r\n\r\n```Java\n\r\nimport numpy as np\r\nimport pickle\r\nimport cloudpickle\r\n\r\nclass Foo(object):\r\n    pass\r\n\r\na = np.array([Foo()])\r\n```\r\n\r\nPickle will succeed at pickling `a`, but it won't be able to unpickle it (in a different process). Cloudpickle will succeed but will be much slower. Our current approach will succeed and will be faster than cloudpickle."
+        },
+        {
+            "created_at": "2017-11-29T01:06:25.344Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1854?focusedCommentId=16269851) by Wes McKinney (wesm):*\nIssue resolved by pull request 1360\n<https://github.com/apache/arrow/pull/1360>"
+        },
+        {
+            "created_at": "2017-12-15T22:15:02.974Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1854?focusedCommentId=16293350) by Brian Bowman (Brian.Bowman@sas.com):*\nI\u2019m out of the office for vacation, followed by the SAS Winter Holiday until Tuesay January 2nd 2018.\r\n\r\n-Brian\r\n\r\nOn Nov 24, 2017, at 3:16 PM, Wes McKinney (JIRA) <jira@apache.org> wrote:\r\n\r\nEXTERNAL\r\n\r\nWes McKinney created ARROW-1854:\r\n-----------------------------------\r\n\r\n            Summary: [Python] Improve performance of serializing object dtype ndarrays\r\n                Key: ARROW-1854\r\n                URL: https://issues.apache.org/jira/browse/ARROW-1854\r\n            Project: Apache Arrow\r\n         Issue Type: Improvement\r\n         Components: Python\r\n           Reporter: Wes McKinney\r\n            Fix For: 0.8.0\r\n\r\n\r\nI haven't looked carefully at the hot path for this, but I would expect these statements to have roughly the same performance (offloading the ndarray serialization to pickle)\r\n\r\n```Java\n\r\nIn [1]: import pickle\r\n\r\nIn [2]: import numpy as np\r\n\r\nIn [3]: import pyarrow as pa\r\na\r\nIn [4]: arr = np.array(['foo', 'bar', None] * 100000, dtype=object)\r\n\r\nIn [5]: timeit serialized = pa.serialize(arr).to_buffer()\r\n10 loops, best of 3: 27.1 ms per loop\r\n\r\nIn [6]: timeit pickled = pickle.dumps(arr)\r\n100 loops, best of 3: 6.03 ms per loop\r\n```\r\n\r\n`[~robertnishihara]` `[~pcmoritz]` I encountered this while working on ARROW-1783, but it can likely be resolved independently\r\n\r\n\r\n\r\n\u2013\r\nThis message was sent by Atlassian JIRA\r\n(v6.4.14#64029)\r\n"
+        }
+    ]
+}

@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] ParquetDataset().read columns argument always returns partition column",
+        "body": "***Note**: This issue was originally created as [ARROW-3861](https://issues.apache.org/jira/browse/ARROW-3861). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI just noticed that no matter which columns are specified on load of a dataset, the partition column is always returned. This might lead to strange behaviour, as the resulting dataframe has more than the expected columns:\r\n```Java\n\r\nimport dask as da\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nimport pandas as pd\r\nimport os\r\nimport numpy as np\r\nimport shutil\r\n\r\nPATH_PYARROW_MANUAL = '/tmp/pyarrow_manual.pa/'\r\n\r\nif os.path.exists(PATH_PYARROW_MANUAL):\r\n    shutil.rmtree(PATH_PYARROW_MANUAL)\r\nos.mkdir(PATH_PYARROW_MANUAL)\r\n\r\narrays = np.array([np.array([0, 1, 2]), np.array([3, 4]), np.nan, np.nan])\r\nstrings = np.array([np.nan, np.nan, 'a', 'b'])\r\n\r\ndf = pd.DataFrame([0, 0, 1, 1], columns=['partition_column'])\r\ndf.index.name='DPRD_ID'\r\ndf['arrays'] = pd.Series(arrays)\r\ndf['strings'] = pd.Series(strings)\r\n\r\nmy_schema = pa.schema([('DPRD_ID', pa.int64()),\r\n                       ('partition_column', pa.int32()),\r\n                       ('arrays', pa.list_(pa.int32())),\r\n                       ('strings', pa.string()),\r\n                       ('new_column', pa.string())])\r\n\r\ntable = pa.Table.from_pandas(df, schema=my_schema)\r\npq.write_to_dataset(table, root_path=PATH_PYARROW_MANUAL, partition_cols=['partition_column'])\r\n\r\ndf_pq = pq.ParquetDataset(PATH_PYARROW_MANUAL).read(columns=['DPRD_ID', 'strings']).to_pandas()\r\n# pd.read_parquet(PATH_PYARROW_MANUAL, columns=['DPRD_ID', 'strings'], engine='pyarrow')\r\ndf_pq\r\n```\r\ndf_pq has column `partition_column`",
+        "created_at": "2018-11-23T11:44:37.000Z",
+        "updated_at": "2020-04-30T08:58:20.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-04-29T02:47:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-11-23T14:12:56.300Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3861?focusedCommentId=16697184) by Wes McKinney (wesm):*\nShould not be too difficult to fix. Patches welcome"
+        },
+        {
+            "created_at": "2019-04-26T08:36:45.888Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3861?focusedCommentId=16826772) by Joris Van den Bossche (jorisvandenbossche):*\n`[~cthi]` note that the way you create and pass the schema (with \"new\" columns and the index column specified) now raises an error. I opened ARROW-5220 for that.  \r\nWhat was your intent to add \"new_column\" to the schema? That it would be created in the actual table?"
+        },
+        {
+            "created_at": "2019-06-13T05:55:11.505Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3861?focusedCommentId=16862735) by Christian Thiel (cthi):*\n`[~jorisvandenbossche]` thanks for the info.\r\n\r\nYes, my intention of \"new_column\" is for it to be added. This is however not primarily related to this issue. The code example above is just my usual\u00a0testcase for my own code which modifies the dataframe to match a schema beforehand.\r\n\r\nIn my opinion the schema should be the single source of truth. Thus columns of the df which are not part of the schema should be dropped or raise an error. Columns which are not in the Dataframe should be added with the invalid value corresponding to the schema dtype (or raise an error again).\r\n\r\nI am not sure how the index should be handled. I really do not like that we cannot specify the dtype there. I believe this is due to the index being saved in the metadata of parquet, which also implies that the information in the index, presumably the most important column, is not so easily available across platforms as a usual column. For all my applications I stopped writing the index to the parquet file and use a regular parquet column instead. If you make sure the column is the first column, the perfomance implication when using s3 are minimal as no seek needs to be performed. This is also supported by the fact that `write_to_dataset` no longer supports index preservation.\r\n\r\nThe only other major thing which is bothering me is that Ints can't be NaN. I really like the pandas Int64 columns. However as this is not supported by parquet yet as far as I know, this is a problem for another day."
+        },
+        {
+            "created_at": "2020-03-17T16:13:29.469Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3861?focusedCommentId=17061025) by Joris Van den Bossche (jorisvandenbossche):*\nThis works now correctly with the new Datasets API:\r\n\r\n```Java\n\r\nIn [26]: pq.ParquetDataset(PATH_PYARROW_MANUAL).read(columns=['DPRD_ID', 'strings']).to_pandas()                                                                                                                                                                                           \r\nOut[26]: \r\n   DPRD_ID strings partition_column\r\n0        0     nan                0\r\n1        1     nan                0\r\n2        2       a                1\r\n3        3       b                1\r\n```\r\n\r\nvs\r\n\r\n```Java\n\r\nIn [28]: import pyarrow.dataset as ds                                                                                                                                                                              \r\n\r\nIn [29]: ds.dataset(PATH_PYARROW_MANUAL).to_table(columns=['DPRD_ID', 'strings']).to_pandas()                                                                                                                      \r\nOut[29]: \r\n   DPRD_ID strings\r\n0        0     nan\r\n1        1     nan\r\n2        2       a\r\n3        3       b\r\n```\r\n\r\nSo once we use the datasets API under the hood in pyarrow.parquet (ARROW-8039), this issue should be solved (might want to add a test for it)"
+        },
+        {
+            "created_at": "2020-04-29T02:47:08.758Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3861?focusedCommentId=17095011) by Francois Saint-Jacques (fsaintjacques):*\nIssue resolved by pull request 7050\n<https://github.com/apache/arrow/pull/7050>"
+        }
+    ]
+}

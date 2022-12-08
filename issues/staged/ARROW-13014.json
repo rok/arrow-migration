@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[Python] Pandas to_feather no longer works - runs out of memory",
+        "body": "***Note**: This issue was originally created as [ARROW-13014](https://issues.apache.org/jira/browse/ARROW-13014). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSince upgrading to 4.0.1 writing to feather files with the pandas to_feather method uses up far, far more memory.\r\n\r\nFor reference I have a dataframe that is around 10gb in size, 25 million rows. Writing a feather file took around 3-4gb of memory in pyarrow versions up to 3.0.0. As of 4.0.1 I don't know how much memory it will take to successfully write - I tried running on a 120gb AWS machine, and that wasn't sufficient.\r\n\r\nI can't provide the dataframe, but I can give an outline of the types / sizes of the columns:\r\n\r\nsize (bytes),type\r\n206663144,int64\r\n206663144,int64\r\n206663144,float64\r\n206663144,float64\r\n2882448709,object\r\n5813798687,object\r\n206663144,float64\r\n206663144,int64\r\n206663144,int64\r\n206663144,int64\r\n206663144,int64\r\n206663144,float64",
+        "created_at": "2021-06-08T19:11:06.000Z",
+        "updated_at": "2021-06-09T13:57:11.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-06-09T13:11:15.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-09T02:34:37.827Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13014?focusedCommentId=17359715) by yibocai#1 (yibocai#1):*\nDuplicates ARROW-12983 ?\r\ncc `[~lidavidm]`\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-06-09T03:31:01.138Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13014?focusedCommentId=17359732) by David Li (lidavidm):*\nHmm, I'll have to give this a try in the morning, but it may be a duplicate, yes - I'd guess this goes through the same code path."
+        },
+        {
+            "created_at": "2021-06-09T09:11:58.230Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13014?focusedCommentId=17359888) by Joris Van den Bossche (jorisvandenbossche):*\n`[~knaveofdiamonds]` you have two \"object\" dtype columns. Do those contain strings? (in which it indeed might be related to ARROW-12983)"
+        },
+        {
+            "created_at": "2021-06-09T09:21:30.086Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13014?focusedCommentId=17359891) by Roland Swingler (knaveofdiamonds):*\n`[~jorisvandenbossche]` - yes those columns contain strings (of reasonable length as well in some cases - i.e. one of the columns is a json-serialized array of numbers, so could be relatively long) ."
+        },
+        {
+            "created_at": "2021-06-09T13:09:54.035Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13014?focusedCommentId=17360051) by David Li (lidavidm):*\nIn that case yes, I think it's a duplicate. Observe:\r\n```python\n\r\n>>> import pyarrow as pa\r\n>>> import pandas as pd\r\n>>> pa.__version__\r\n'4.0.1'\r\n>>> pd.__version__\r\n'1.2.4'\r\n>>> pd.DataFrame({\"str\": [\"a\" * 16384] * (2**17 - 1)}).reset_index().to_feather('/tmp/foo.feather')\r\n# Finishes successfully\r\n>>> pd.DataFrame({\"str\": [\"a\" * 16384] * (2**17 + 1)}).reset_index().to_feather('/tmp/foo.feather')\r\n# Hangs while memory usage shoots up\r\n```"
+        },
+        {
+            "created_at": "2021-06-09T13:12:42.725Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13014?focusedCommentId=17360053) by David Li (lidavidm):*\nThe key thing is that due to the linked bug, a string column can't have either more than 2 GiB of data or 2\\*\\*31 rows when converted from Python/Pandas/etc to PyArrow - so if you could somehow chunk it (either into multiple files, or by slicing and manually writing the file) that should let you get around the issue."
+        },
+        {
+            "created_at": "2021-06-09T13:14:44.880Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13014?focusedCommentId=17360055) by Roland Swingler (knaveofdiamonds):*\n`[~lidavidm]` and others - great - thanks for the explanation & fast responses."
+        },
+        {
+            "created_at": "2021-06-09T13:57:11.326Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13014?focusedCommentId=17360095) by Joris Van den Bossche (jorisvandenbossche):*\nAnother possible workaround for now (instead of chunking) is to manually specify the schema when converting from pandas to arrow, and then specify \"large_string\" for the string columns"
+        }
+    ]
+}

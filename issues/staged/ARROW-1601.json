@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[C++] READ_NEXT_BITSET reads one byte past the last byte on last iteration",
+        "body": "***Note**: This issue was originally created as [ARROW-1601](https://issues.apache.org/jira/browse/ARROW-1601). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n(int) byte_offset_valid_bits = 131072\n(int) bit_offset_valid_bits = 0\n(uint8_t) bitset_valid_bits = '?'\n(int) i = 1048575\n\n(lldb) print \\*num_values\n(int64_t) $0 = 1048576\n\n(lldb) print valid_bits[131072]\nerror: Couldn't apply expression side effects : Couldn't dematerialize a result variable: couldn't read its memory\n(lldb) print valid_bits[131071]\n(uint8_t) $6 = '?'\n\n1048576 / 8 = 131072 (number of values in the array)\n\nLast readable offset is 131071.\n\nIn the last iteration, READ_NEXT_BITSET reads one byte past the last byte of the valid_bits array.\n\nWhen this allocation happens at the end of a block, a crash occurs.\n\nThese macros are used in loops in several places in Arrow and Parquet.\n\nparquet-cpp/src/parquet/arrow/writer.cc:\n\nStatus GenerateLevels(const Array& array, const std::shared_ptr<Field>& field,\n                        int64_t\\* values_offset, ::arrow::Type::type\\* values_type,\n                        int64_t\\* num_values, int64_t\\* num_levels,\n                        std::shared_ptr<Buffer>\\* def_levels,\n                        std::shared_ptr<Buffer>\\* rep_levels,\n                        std::shared_ptr<Array>\\* values_array) {\n[....]\n          const uint8_t\\* valid_bits = array.null_bitmap_data();\n          INIT_BITSET(valid_bits, static_cast<int>(array.offset()));\n          for (int i = 0; i < array.length(); i++) {\n            if (bitset_valid_bits & (1 << bit_offset_valid_bits)) {\n              def_levels_ptr[i] = 1;\n            } else {\n              def_levels_ptr[i] = 0;\n            }\n            READ_NEXT_BITSET(valid_bits);  <-- crashes here on last iteration\n          }\n\narrow/util/bitutil.h:\n\n#define INIT_BITSET(valid_bits_vector, valid_bits_index)        \\\n  int byte_offset_##valid_bits_vector = (valid_bits_index) / 8; \\\n  int bit_offset_##valid_bits_vector = (valid_bits_index) % 8;  \\\n  uint8_t bitset_##valid_bits_vector = valid_bits_vector[byte_offset_##valid_bits_vector];\n\n#define READ_NEXT_BITSET(valid_bits_vector)                                          \\\n  bit_offset_##valid_bits_vector++;                                                  \\\n  if (bit_offset_##valid_bits_vector == 8) {                                         \\\n    bit_offset_##valid_bits_vector = 0;                                              \\\n    byte_offset_##valid_bits_vector++;                                               \\\n    bitset_##valid_bits_vector = valid_bits_vector[byte_offset_##valid_bits_vector]; \\\n  }\n\nA quick fix is to allocate one more byte for null_bitmap_ in ArrayBuilder::Init and ArrayBuilder::Resize in arrow/cpp/src/arrow/builder.cc. \n\nThe capacity of null_bitmap() is changed by this fix.\n\nThe following tests FAILED:\n\t  2 - array-test (Failed)\n\t 14 - feather-test (Failed)\n\nA more extensive fix would require changing how INIT_BITSET and READ_NEXT_BITSET operate where they are used in Parquet and Arrow.\n\n\nTo reproduce this problem:\n\n1) Download the CSV file.\n\nSource: https://catalog.data.gov/dataset?res_format=CSV\n\nState Drug Utilization Data 2016\nhttps://data.medicaid.gov/api/views/3v6v-qk5s/rows.csv?accessType=DOWNLOAD\n\n2) Run FileConvert (see https://github.com/renesugar/FileConvert)\n\n./bin/FileConvert -i ./State_Drug_Utilization_Data_2016.csv -o ./State_Drug_Utilization_Data_2016.parquet \n",
+        "created_at": "2017-09-24T05:13:54.000Z",
+        "updated_at": "2017-09-25T13:04:17.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-09-25T12:27:23.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-09-24T14:01:53.501Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1601?focusedCommentId=16178214) by Wes McKinney (wesm):*\nThank you for diagnosing this. I wasn't aware that an invalid read (that is never used for any logic \u2013 since the loop terminates right after this happens) could cause an application to crash. I think it would be better to fix the macros; I will take a look"
+        },
+        {
+            "created_at": "2017-09-25T12:27:23.624Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1601?focusedCommentId=16178946) by Uwe Korn (uwe):*\nIssue resolved by pull request 1126\n<https://github.com/apache/arrow/pull/1126>"
+        }
+    ]
+}

@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[C++] [Dataset] Scanning dataset with dictionary type hangs",
+        "body": "***Note**: This issue was originally created as [ARROW-7545](https://issues.apache.org/jira/browse/ARROW-7545). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI assume it is an issue on the C++ side of the datasets code, but reproducer in Python. \r\n\r\nI create a small parquet file with a single column of dictionary type. Reading it with `pq.read_table` works fine, reading it with the datasets machinery hangs when scanning:\r\n\r\n```python\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\ndf = pd.DataFrame({'a': pd.Categorical(['a', 'b']*10)})\r\narrow_table = pa.Table.from_pandas(df)\r\n\r\nfilename = \"test.parquet\"\r\npq.write_table(arrow_table, filename)\r\n\r\nfrom pyarrow.fs import LocalFileSystem\r\nfrom pyarrow.dataset import ParquetFileFormat, Dataset, FileSystemDataSourceDiscovery, FileSystemDiscoveryOptions\r\n\r\nfilesystem = LocalFileSystem()\r\nformat = ParquetFileFormat()\r\noptions = FileSystemDiscoveryOptions()\r\n\r\ndiscovery = FileSystemDataSourceDiscovery(\r\n        filesystem, [filename], format, options)\r\ninspected_schema = discovery.inspect()\r\ndataset = Dataset([discovery.finish()], inspected_schema)\r\n\r\n# dataset.schema works fine and gives correct schema\r\ndataset.schema\r\n\r\nscanner_builder = dataset.new_scan()\r\nscanner = scanner_builder.finish()\r\n# this hangs\r\nscanner.to_table()\r\n```",
+        "created_at": "2020-01-10T10:12:27.000Z",
+        "updated_at": "2022-08-27T14:42:02.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-01-14T20:25:33.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-01-10T10:21:19.994Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7545?focusedCommentId=17012681) by Joris Van den Bossche (jorisvandenbossche):*\nSo if the table has a single dictionary column, it hangs. But when there are also other columns, eg with this dataframe (rest of the code is the same):\r\n\r\n```python\n\r\ndf = pd.DataFrame({'a': range(20), 'b': pd.Categorical(['a', 'b']*10)})\r\n```\r\n\r\nit doesn't hang but gives an error:\r\n\r\n```Java\n\r\nArrowInvalid: Column 1 named b expected length 0 but got length 20\r\n```"
+        },
+        {
+            "created_at": "2020-01-14T12:43:59.607Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7545?focusedCommentId=17015062) by Francois Saint-Jacques (fsaintjacques):*\nIt looks like this is a parquet issue unrelated to Dataset. It is triggered by dataset because this path is not used in the python/R \"parquet_to_table\" conversion path. \r\n\r\n\r\n```c++\n\r\ndiff --git a/cpp/src/parquet/column_reader.cc b/cpp/src/parquet/column_reader.cc\r\nindex 69b9bedf6..9af4a25d0 100644\r\n--- a/cpp/src/parquet/column_reader.cc\r\n+++ b/cpp/src/parquet/column_reader.cc\r\n@@ -1349,7 +1349,10 @@ class ByteArrayDictionaryRecordReader : public TypedRecordReader<ByteArrayType>,\r\n \r\n   std::shared_ptr<::arrow::ChunkedArray> GetResult() override {\r\n     FlushBuilder();\r\n-    return std::make_shared<::arrow::ChunkedArray>(result_chunks_, builder_.type());\r\n+    std::vector<std::shared_ptr<::arrow::Array>> result;\r\n+    std::swap(result, result_chunks_);\r\n+    return std::make_shared<::arrow::ChunkedArray>(std::move(result),\r\n+                                                   builder_.type());\r\n   }\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-08-27T14:42:02.133Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7545?focusedCommentId=17586001) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

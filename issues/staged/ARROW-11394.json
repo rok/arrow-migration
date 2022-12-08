@@ -1,0 +1,21 @@
+{
+    "issue": {
+        "title": "[Rust] Slice + Concat incorrect for structs",
+        "body": "***Note**: This issue was originally created as [ARROW-11394](https://issues.apache.org/jira/browse/ARROW-11394). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIf you slice an array and then use it with\u00a0`concat` you get different behaviors when using a primitive array (Float64 in the examples) or a struct array.\r\n\r\nIn the case of a float, the result is what I'd expect \u2013 it concatenates the elements from the slice.\r\n\r\nIn the case of a struct, it is a bit surprising \u2013 the result has the length of the slice, but starts at the beginning of the original array.\r\n```java\n\r\n// #[test]\r\nfn test_repro() {\r\n    // Create float and struct array.\r\n    let float_array: ArrayRef = Arc::new(Float64Array::from(vec![1.0, 2.0, 3.0, 4.0]));\r\n    let struct_array = Arc::new(StructArray::from(vec![(\r\n        Field::new(\"field\", DataType::Float64, true),\r\n        float_array.clone(),\r\n    )]));\r\n\r\n    // Slice the float array and verify result is [3.0, 4.0]\r\n    let float_array_slice_ref = float_array.slice(2, 2);\r\n    let float_array_slice = float_array_slice_ref\r\n        .as_any()\r\n        .downcast_ref::<PrimitiveArray<Float64Type>>()\r\n        .unwrap();\r\n    assert_eq!(float_array_slice, &Float64Array::from(vec![3.0, 4.0]));\r\n\r\n    // Slice the struct array and verify result is [3.0, 4.0]\r\n    let struct_array_slice_ref = struct_array.slice(2, 2);\r\n    let struct_array_slice = struct_array_slice_ref\r\n        .as_any()\r\n        .downcast_ref::<StructArray>()\r\n        .unwrap();\r\n    let struct_array_slice_floats = struct_array_slice\r\n        .column(0)\r\n        .as_any()\r\n        .downcast_ref::<PrimitiveArray<Float64Type>>()\r\n        .unwrap();\r\n    assert_eq!(\r\n        struct_array_slice_floats,\r\n        &Float64Array::from(vec![3.0, 4.0])\r\n    );\r\n\r\n    // Concat the float array, and verify the result is still [3.0, 4.0].\r\n    let concat_float_array_ref =\r\n        arrow::compute::kernels::concat::concat(&[float_array_slice]).unwrap();\r\n    let concat_float_array = concat_float_array_ref\r\n        .as_any()\r\n        .downcast_ref::<PrimitiveArray<Float64Type>>()\r\n        .unwrap();\r\n    assert_eq!(concat_float_array, &Float64Array::from(vec![3.0, 4.0]));\r\n\r\n    // Concat the struct array and expect it to match the float array [3.0, 4.0].\r\n    let concat_struct_array_ref =\r\n        arrow::compute::kernels::concat::concat(&[struct_array_slice]).unwrap();\r\n    let concat_struct_array = concat_struct_array_ref\r\n        .as_any()\r\n        .downcast_ref::<StructArray>()\r\n        .unwrap();\r\n    let concat_struct_array_floats = concat_struct_array\r\n        .column(0)\r\n        .as_any()\r\n        .downcast_ref::<PrimitiveArray<Float64Type>>()\r\n        .unwrap();\r\n    // This is what is actually returned\r\n    assert_eq!(\r\n        concat_struct_array_floats,\r\n        &Float64Array::from(vec![1.0, 2.0])\r\n    );\r\n\r\n    // This is what I'd expect, but fails:\r\n    assert_eq!(\r\n        concat_struct_array_floats,\r\n        &Float64Array::from(vec![3.0, 4.0])\r\n    );\r\n}\n```",
+        "created_at": "2021-01-27T04:57:49.000Z",
+        "updated_at": "2021-03-12T15:29:09.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-01-31T14:37:06.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-01-31T14:37:06.294Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11394?focusedCommentId=17275904) by Jorge Leit\u00e3o (jorgecarleitao):*\nIssue resolved by pull request 9339\n<https://github.com/apache/arrow/pull/9339>"
+        }
+    ]
+}

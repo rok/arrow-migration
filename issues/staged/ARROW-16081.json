@@ -1,0 +1,36 @@
+{
+    "issue": {
+        "title": "[Python] Incorrect results when reading a buffer of boolean values",
+        "body": "***Note**: This issue was originally created as [ARROW-16081](https://issues.apache.org/jira/browse/ARROW-16081). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe following reproducer demonstrates that a buffer of boolean values is not correctly recovered when using pyarrow.\r\n\r\n```python\n\r\nimport pyarrow.parquet as pq\r\nimport pyarrow as pa\r\nimport numpy as np\r\n\r\nif __name__ == \"__main__\":\r\n\r\n    data = np.array([True, False, True, False], dtype=bool)\r\n\r\n    length = len(data)\r\n\r\n    buf = pa.py_buffer(data)\r\n\r\n    array = pa.Array.from_buffers(pa.bool_(), length, [None, buf])\r\n\r\n    np.testing.assert_array_equal(data, array.to_numpy(zero_copy_only=False))\r\n\r\n```",
+        "created_at": "2022-03-31T10:19:52.000Z",
+        "updated_at": "2022-04-04T10:02:48.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-31T11:59:41.216Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16081?focusedCommentId=17515280) by David Li (lidavidm):*\nNumPy's bool [is a byte](https://numpy.org/devdocs/user/basics.types.html) while Arrow's bool [is a bit](https://arrow.apache.org/docs/format/Columnar.html#fixed-size-primitive-layout). Converting it via an array instead of a buffer will work:\r\n```\n\r\n>>> import pyarrow as pa\r\n>>> import numpy as np\r\n>>> data = np.array([True, False, True, False], dtype=bool)\r\n>>> arr = pa.array(data)\r\n>>> arr.to_numpy(zero_copy_only=False)\r\narray([ True, False, \u00a0True, False])\r\n>>> data\r\narray([ True, False, \u00a0True, False])\r\n```"
+        },
+        {
+            "created_at": "2022-03-31T12:32:31.500Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16081?focusedCommentId=17515304) by Jonathan Kenyon (JSKenyon):*\nOK - I think I see the problem. Thanks for the assist! That being said, would this qualify as \"surprising\" behaviour? Buffers work for other types, so bool seems to be a bit of an exception."
+        },
+        {
+            "created_at": "2022-03-31T12:37:16.344Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16081?focusedCommentId=17515308) by David Li (lidavidm):*\nIMO, using buffers directly is a lower-level API and in doing so the user is promising they have ensured the memory layouts match. (And I'm not sure, but types like strings, decimals, etc. may also fail.) And there's no validation possible (Arrow doesn't know what type you intend to interpret it as precisely because a buffer is being used instead of an array). It might help to have some docs about compatibility with various popular libraries (numpy, cudf, etc.) though. CC `[~amol-]` for opinions."
+        },
+        {
+            "created_at": "2022-03-31T12:46:21.240Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16081?focusedCommentId=17515312) by Jonathan Kenyon (JSKenyon):*\nThat is fair - I am maintaining some code I didn't write so I don't necessarily understand the motivation behind using the buffers directly. I have managed to solve my issue (and now understand why zero copy isn't an option for bool values). I actually think using the buffers may be overkill in this case and will look at instead using flattened arrays which I can reshape/establish views over."
+        },
+        {
+            "created_at": "2022-03-31T16:10:36.396Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16081?focusedCommentId=17515417) by Alessandro Molina (amol-):*\nAgree with `[~lidavidm]` when you use buffers, in practice you are deciding to deal with the memory manually, that also means that it's up to the user to know that the content of the buffer actually aligns with the Arrow memory layout.\u00a0\r\n\r\nI think we can add a paragraph pointing that out explicitly in \\`Array.from_buffers` so that people can be aware of the fact that the buffer content must respect the Arrow format\u00a0"
+        }
+    ]
+}

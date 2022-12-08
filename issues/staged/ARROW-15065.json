@@ -1,0 +1,46 @@
+{
+    "issue": {
+        "title": "[Python][R] Expose ReferencedBufferSize to python/R",
+        "body": "***Note**: This issue was originally created as [ARROW-15065](https://issues.apache.org/jira/browse/ARROW-15065). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis could be a method on arrays, chunked arrays, record batches, and tables.  This method takes array offsets into account.\r\n\r\nThis should replace the existing nbytes behavior.  A new method should be created (total_buffer_bytes) that has the old behavior.  We will need clear commenting about the difference between the two of them.  Both can be useful depending on the need.",
+        "created_at": "2021-12-10T18:13:37.000Z",
+        "updated_at": "2022-01-27T23:00:14.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-01-27T23:00:14.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-12-14T09:22:13.407Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15065?focusedCommentId=17459006) by Weston Pace (westonpace):*\nPer ARROW-15053 it seems that the preferred behavior might actually be to replace \"nbytes\" with the ReferencedBufferSize value and make a new method for the existing value.\r\n\r\n`[~jorisvandenbossche]` Does this seem correct?  This would be a backwards-incompatible change."
+        },
+        {
+            "created_at": "2021-12-14T09:50:36.768Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15065?focusedCommentId=17459020) by Joris Van den Bossche (jorisvandenbossche):*\nIt's indeed a backwards incompatible change for `nbytes` in Python, but I think we can consider it as a \"bug\" that right now it doesn't return the actual bytes for the data represented by the array (but the bytes of the full buffer)."
+        },
+        {
+            "created_at": "2021-12-20T08:40:22.495Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15065?focusedCommentId=17462464) by Vibhatha Lakmal Abeykoon (vibhatha):*\n`[~jorisvandenbossche]` \u00a0and `[~westonpace]` \u00a0\r\n\r\nI looked into the code to do this modification. Here I have a few questions related to the functions that need to be exposed to Python.\u00a0\r\n\r\nAs far as I understand, the following methods are not exposed to Python yet.\u00a0\r\nPlease correct me if I am wrong.\u00a0\r\n\r\n```c++\r\n/// Dictionary arrays will always be counted in their entirety\r\n/// even if the array only references a portion of the dictionary.\r\nResult<int64_t> ARROW_EXPORT ReferencedBufferSize(const ArrayData& array_data);\r\n/// \\brief Returns the sum of bytes from all buffer ranges referenced\r\n/// \\see ReferencedBufferSize(const ArrayData& array_data) for details\r\nResult<int64_t> ARROW_EXPORT ReferencedBufferSize(const Array& array_data);\r\n/// \\brief Returns the sum of bytes from all buffer ranges referenced\r\n/// \\see ReferencedBufferSize(const ArrayData& array_data) for details\r\nResult<int64_t> ARROW_EXPORT ReferencedBufferSize(const ChunkedArray& array_data);\r\n/// \\brief Returns the sum of bytes from all buffer ranges referenced\r\n/// \\see ReferencedBufferSize(const ArrayData& array_data) for details\r\nResult<int64_t> ARROW_EXPORT ReferencedBufferSize(const RecordBatch& array_data);\r\n/// \\brief Returns the sum of bytes from all buffer ranges referenced\r\n/// \\see ReferencedBufferSize(const ArrayData& array_data) for details\r\nResult<int64_t> ARROW_EXPORT ReferencedBufferSize(const Table& array_data);\r\n```\r\n\r\nHere \"arrow::util::ReferencedBufferSize\"\u00a0methods needs to be included in Cython bindings. Not quite sure what is the best place to put these into. None of the members in this header `arrow/util/byte_size.h` is included in Cython. **What should be a better place to put these methods?**\r\n\r\nSecondly, each entity represented by these methods\r\n \\* ArrayData\r\n \\* Array\r\n \\* ChunkedArray\r\n \\* RecordBatch\r\n \\* Table\r\n\r\nNeed a method called `get_buffer_size` or a property `buffer_size` in each API. Since we only focus on the actual data buffer, the method name could be vital for user to understand it clearly.\u00a0\r\n\r\nSuggestions: `data_buffer_size`, `buffer_size`\u00a0"
+        },
+        {
+            "created_at": "2021-12-20T10:31:01.973Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15065?focusedCommentId=17462505) by Vibhatha Lakmal Abeykoon (vibhatha):*\nCreated two child tasks for R and Python and started working on Python binding.\u00a0\r\nContinue the conversation [here](https://issues.apache.org/jira/browse/ARROW-15153)."
+        },
+        {
+            "created_at": "2021-12-21T02:48:50.166Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15065?focusedCommentId=17462943) by Vibhatha Lakmal Abeykoon (vibhatha):*\n`[~westonpace]` \u00a0with the updated description, Can we remove the exiting`nbytes` calculation logic with the function `TotalBufferSize`?\u00a0\r\n\r\n\u00a0\r\n/// \\brief The sum of bytes in each buffer referenced by the array\r\n///\r\n/// Note: An array may only reference a portion of a buffer.\r\n/// This method will overestimate in this case and return the\r\n/// byte size of the entire buffer.\r\n/// Note: If a buffer is referenced multiple times then it will\r\n/// only be counted once.\r\nint64_t ARROW_EXPORT TotalBufferSize(const ArrayData& array_data);\r\n/// \\brief The sum of bytes in each buffer referenced by the array\r\n/// \\see TotalBufferSize(const ArrayData& array_data) for details\r\n\u00a0\r\n\r\nLooking into the Python code to do the existing `nbytes` calculation vs the C++ `TotalBufferSize`, there is a dictionary data calculation component which differs them?\r\n\r\nBut I am not 100% sure whether I am getting the logic clearly.\u00a0\r\n\r\nIf these two represents two concepts, should we do a new PR to expose this or use the same PR? Just curious.\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-01-27T14:03:03.977Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15065?focusedCommentId=17483150) by Vibhatha Lakmal Abeykoon (vibhatha):*\n`[~westonpace]` \u00a0child issues are completed shall we mark this complete?"
+        },
+        {
+            "created_at": "2022-01-27T23:00:14.598Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15065?focusedCommentId=17483463) by Weston Pace (westonpace):*\nAll subtasks have been completed."
+        }
+    ]
+}

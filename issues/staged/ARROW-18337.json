@@ -1,0 +1,24 @@
+{
+    "issue": {
+        "title": "[R] Possible undesirable handling of POSIXlt objects",
+        "body": "***Note**: This issue was originally created as [ARROW-18337](https://issues.apache.org/jira/browse/ARROW-18337). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn the course of updating documentation, I noticed that it is possible to create an Arrow array of POSIXlt objects from R, but not a scalar. \r\n\r\nhttps://github.com/apache/arrow/pull/14514#discussion_r1016078081\r\n\r\nThis works:\r\n\r\n```r\n\r\ntm <- as.POSIXlt(c(Sys.time(), Sys.time()))\r\narrow::Array$create(tm)\r\n```\r\n\r\nThis fails:\r\n\r\n```r\n\r\narrow::Scalar$create(as.POSIXlt(Sys.time()))\r\n```\r\n\r\nIt's possible to manually convert a POSIXlt object to a struct scalar like this:\r\n\r\n```r\n\r\ndf <- as.data.frame(unclass(as.POSIXlt(Sys.time())))\r\narrow::Scalar$create(df, \r\n              type = struct(\r\n                sec = float32(), \r\n                min = int32(),\r\n                hour = int32(),\r\n                mday = int32(),\r\n                mon = int32(),\r\n                year = int32(),\r\n                wday = int32(),\r\n                yday = int32(),\r\n                isdst = int32(),\r\n                zone = utf8(),\r\n                gmtoff = int32()\r\n              ))\r\n```\r\n\r\nalthough this does not seem precisely the same as the behaviour of Array$create() which creates an extension type?\r\n\r\nIt was unclear to us ( `[~thisisnic]` and myself) whether the current behaviour was desirable, so it seemed sensible to open an issue! \r\n\r\nRelated issue:\r\n\r\nhttps://issues.apache.org/jira/browse/ARROW-18263\r\n",
+        "created_at": "2022-11-16T06:08:42.000Z",
+        "updated_at": "2022-11-17T14:33:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-11-17T14:33:12.639Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18337?focusedCommentId=17635378) by Dewey Dunnington (paleolimbot):*\nOooof...this is particularly bad since it causes a crash (for me):\r\n\r\n\r\n```java\n\r\n/Users/dewey/Desktop/rscratch/arrow/cpp/src/arrow/result.cc:28: ValueOrDie called on an error: NotImplemented: construction from scalar of type POSIXlt of length 0\r\n```\r\n\r\nThe error seems to be coming from the ValueOrDie here: https://github.com/apache/arrow/blob/master/cpp/src/arrow/scalar.cc#L785-L803\r\n\r\nI tried a rudimentary approach of an `RExtensionScalar` subclass but didn't get anywhere because `Scalar::ToString()` is not virtual (i.e., I can't provide a more reasonable method without exposing an additional R6 class at the R level)."
+        },
+        {
+            "created_at": "2022-11-17T14:33:40.986Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18337?focusedCommentId=17635382) by Dewey Dunnington (paleolimbot):*\nThe backtrace of the ValueOrDie is:\r\n\r\n\r\n```java\n\r\n/Users/dewey/Desktop/rscratch/arrow/cpp/src/arrow/result.cc:28: ValueOrDie called on an error: NotImplemented: construction from scalar of type POSIXlt of length 0\r\n/Users/dewey/Desktop/rscratch/arrow/cpp/src/arrow/array/util.cc:545  VisitTypeInline(*scalar_.type, this)\r\n0   libarrow.1100.0.0.dylib             0x000000011b3a9d0c _ZN5arrow4util7CerrLogD2Ev + 236\r\n1   libarrow.1100.0.0.dylib             0x000000011b3a9c18 _ZN5arrow4util7CerrLogD0Ev + 12\r\n2   libarrow.1100.0.0.dylib             0x000000011b3a9bb4 _ZN5arrow4util8ArrowLogD1Ev + 48\r\n3   libarrow.1100.0.0.dylib             0x000000011b2862a0 _ZN5arrow8internal17InvalidValueOrDieERKNS_6StatusE + 244\r\n4   libarrow.1100.0.0.dylib             0x000000011b28a0d8 _ZNK5arrow6Scalar8ToStringEv + 792\r\n5   arrow.so                            0x000000010c064fac _arrow_Scalar__ToString + 108\r\n6   libR.dylib                          0x0000000102f89be4 R_doDotCall + 1572\r\n```\r\n"
+        }
+    ]
+}

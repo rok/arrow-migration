@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[C++] StackOverflow in merge generator causes segmentation fault in scan",
+        "body": "***Note**: This issue was originally created as [ARROW-16692](https://issues.apache.org/jira/browse/ARROW-16692). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI'm still working to make a minimal reproducer for this, though I can reliably reproduce it below (though that means needing to download a bunch of data first...). I've cleaned out much of the unnecessary code (so this query below is a bit silly, and not what I'm actually trying to do), but haven't been able to make a constructed dataset that reproduces this.\r\n\r\nWorking on some example with the new | more cleaned taxi dataset at `s3://ursa-labs-taxi-data-v2`, I've run into a segfault:\r\n\r\n```Java\n\r\nlibrary(arrow)\r\nlibrary(dplyr)\r\n\r\nds <- open_dataset(\"path/to/new_taxi/\")\r\n\r\nds %>%\r\n  filter(!is.na(pickup_location_id)) %>%\r\n  summarise(n = n()) %>% collect()\r\n```\r\n\r\nMost of the time ends in a segfault (though I have gotten it to work on occasion). I've tried with smaller files | constructed datasets and haven't been able to replicate it yet. One thing that might be important is:  `pickup_location_id` is all NAs | nulls in the first 8 years of the data or so.\r\n\r\nI've attached a backtrace in case that's enough to see what's going on here.\r\n\r\n\r\n",
+        "created_at": "2022-05-31T14:01:37.000Z",
+        "updated_at": "2022-07-26T07:12:04.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-07-25T23:31:32.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-05-31T14:01:56.404Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16692?focusedCommentId=17544407) by Jonathan Keane (jonkeane):*\ncc `[~westonpace]`"
+        },
+        {
+            "created_at": "2022-05-31T14:10:18.874Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16692?focusedCommentId=17544415) by Antoine Pitrou (apitrou):*\nBy the backtrace, it looks like a recursion-induced stack blowup."
+        },
+        {
+            "created_at": "2022-05-31T19:43:17.915Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16692?focusedCommentId=17544577) by Jonathan Keane (jonkeane):*\n> One thing that might be important is: pickup_location_id is all NAs | nulls in the first 8 years of the data or so.\r\n\r\nThis is almost certainly a redherring now that I come back to it; the following **also** segfaults without referencing that specific column.\r\n\r\n```Java\n\r\nds %>%\r\n  filter(pickup_datetime > as.Date(\"2017-01-01\")) %>%\r\n  summarise(n = n()) %>% collect()\r\n```"
+        },
+        {
+            "created_at": "2022-05-31T21:27:04.091Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16692?focusedCommentId=17544616) by Weston Pace (westonpace):*\n> By the backtrace, it looks like a recursion-induced stack blowup.\r\n\r\nYes, I agree.  The culprit seems to be the merged generator, which probably makes sense.  We could fix merged generator but it is going away as part of ARROW-16072.  I've assigned it to myself to test after I finish ARROW-16072."
+        },
+        {
+            "created_at": "2022-06-01T13:24:03.732Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16692?focusedCommentId=17544909) by Jonathan Keane (jonkeane):*\nThanks! Is there a rough timeline for when that work might be done?\r\n\r\nI came across this prepping some demos for a talk next week \u2014 the queries do _sometimes_ complete (and tend to complete more reliable with the bigger queries). But I might need to change what queries I show if we don't think this will be done in the near term."
+        },
+        {
+            "created_at": "2022-06-01T19:56:50.835Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16692?focusedCommentId=17545120) by Weston Pace (westonpace):*\nARROW-16072 will likely not be merged until (maybe) the end of June.\r\n\r\nI'm not sure I could do a short term fix to the merged generator before the end of next week but I can try and take a look on Friday.\r\n\r\n"
+        },
+        {
+            "created_at": "2022-06-01T19:58:00.612Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16692?focusedCommentId=17545121) by Antoine Pitrou (apitrou):*\nAt worse, you could limit the max recursion level to eg. 2000 and raise an error when it's reached. A nice error message is always more helpful than a hard crash."
+        },
+        {
+            "created_at": "2022-07-22T10:17:31.364Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16692?focusedCommentId=17569929) by Ra\u00fal Cumplido (raulcd):*\nThis is a blocker for 9.0.0. Is there something we could do to unblock it? I am just asking because there has not been much activity on this ticket and I am not sure how this is going to affect the release schedule at the moment."
+        },
+        {
+            "created_at": "2022-07-23T00:06:27.282Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16692?focusedCommentId=17570214) by Weston Pace (westonpace):*\nSo the trigger seems to be a large sequence of \"empty\" files.  Either the files are truly empty or (I think) it could be that a pushdown filter of some kind eliminated all of the rows in the file.  This seems to align with `[~jonkeane]`'s reproducer, especially the \"One thing that might be important is: pickup_location_id is all NAs | nulls in the first 8 years of the data or so.\" part.\r\n\r\nThe merge generator logic roughly boils down to...\r\n\r\n```Java\n\r\ndef get_next_batch():\r\n  if current_file is None:\r\n    current_file = get_next_file()\r\n  return get_next_batch_from_file(current_file)\r\n\r\ndef get_next_batch_from_file(file):\r\n  batch = file.read_batch()\r\n  if not batch:\r\n    current_file = None\r\n    return get_next_batch()\r\n  return batch\r\n```\r\n\r\nThe new code looks something like...\r\n\r\n```Java\n\r\ndef get_next_batch():\r\n  while True:\r\n    if current_file is None:\r\n      current_file = get_next_file()\r\n    batch = get_next_batch_from_file(current_file)\r\n    if batch:\r\n      return batch\r\n\r\ndef get_next_batch_from_file(file):\r\n  batch = file.read_batch()\r\n  if not batch:\r\n    current_file = None\r\n    return None\r\n  return batch\r\n```\r\n\r\nHowever, because this is all async, the actual code change looks significantly messier.  Sometimes we call `get_next_batch_from_file` directly instead of going through `get_next_batch` and so we need a new flag to distinguish between the two cases:\r\n\r\n```Java\n\r\ndef get_next_batch_from_file(file, recursive):\r\n  batch = file.read_batch()\r\n  if not batch:\r\n    current_file = None\r\n    if recursive:\r\n      return None\r\n    return get_next_batch()\r\n  return batch\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-07-25T23:31:32.998Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16692?focusedCommentId=17571133) by Weston Pace (westonpace):*\nIssue resolved by pull request 13691\n<https://github.com/apache/arrow/pull/13691>"
+        }
+    ]
+}

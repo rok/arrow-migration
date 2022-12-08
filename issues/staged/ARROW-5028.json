@@ -1,0 +1,85 @@
+{
+    "issue": {
+        "title": "[Python][C++] Creating list<string> with pyarrow.array can overflow child builder",
+        "body": "***Note**: This issue was originally created as [ARROW-5028](https://issues.apache.org/jira/browse/ARROW-5028). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI am sorry if this bugs feels rather long and the reproduction data is large, but I was not able to reduce the data even further while still triggering the problem. I was able to trigger this behavior on master and on `0.11.1`.\r\n\r\n```python\n\r\nimport io\r\nimport os.path\r\nimport pickle\r\n\r\nimport numpy as np\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\n\r\ndef dct_to_table(index_dct):\r\n    labeled_array = pa.array(np.array(list(index_dct.keys())))\r\n    partition_array = pa.array(np.array(list(index_dct.values())))\r\n\r\n    return pa.Table.from_arrays(\r\n        [labeled_array, partition_array], names=['a', 'b']\r\n    )\r\n\r\n\r\ndef check_pq_nulls(data):\r\n    fp = io.BytesIO(data)\r\n    pfile = pq.ParquetFile(fp)\r\n    assert pfile.num_row_groups == 1\r\n    md = pfile.metadata.row_group(0)\r\n    col = md.column(1)\r\n    assert col.path_in_schema == 'b.list.item'\r\n    assert col.statistics.null_count == 0  # fails\r\n\r\n\r\ndef roundtrip(table):\r\n    buf = pa.BufferOutputStream()\r\n    pq.write_table(table, buf)\r\n\r\n    data = buf.getvalue().to_pybytes()\r\n\r\n# this fails:\r\n#   check_pq_nulls(data)\r\n\r\n    reader = pa.BufferReader(data)\r\n    return pq.read_table(reader)\r\n\r\n\r\nwith open(os.path.join(os.path.dirname(__file__), 'dct.pickle'), 'rb') as fp:\r\n    dct = pickle.load(fp)\r\n\r\n\r\n# this does NOT help:\r\n#   pa.set_cpu_count(1)\r\n#   import gc; gc.disable()\r\n\r\ntable = dct_to_table(dct)\r\n\r\n# this fixes the issue:\r\n#   table = pa.Table.from_pandas(table.to_pandas())\r\n\r\ntable2 = roundtrip(table)\r\n\r\nassert table.column('b').null_count == 0\r\nassert table2.column('b').null_count == 0  # fails\r\n\r\n# if table2 is converted to pandas, you can also observe that some values at the end of column b are `['']` which clearly is not present in the original data\r\n```\r\n\r\nI would also be thankful for any pointers on where the bug comes from or on who to reduce the test case.",
+        "created_at": "2019-03-27T14:24:15.000Z",
+        "updated_at": "2019-08-17T20:24:14.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-17T20:24:14.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-03-28T22:17:12.730Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5028?focusedCommentId=16804356) by Wes McKinney (wesm):*\nOne will have to dig into the code to see where the problem is, I don't have an idea off the top of my head"
+        },
+        {
+            "created_at": "2019-03-29T10:39:52.812Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5028?focusedCommentId=16804793) by Marco Neumann (marco.neumann.by):*\nShort update:\r\n\r\nThe error also occurs when:\r\n \\* Converting the arrow table to a batch, serializing the batch to bytes, deserializing it and converting it back to the table. This is in contrast to the Pandas roundtrip.\r\n \\* using parquet 2.0\r\n \\* disabling dictionary encoding\r\n \\* disabling compression (default is SNAPPY)\r\n\r\nDigging deeper, I found out that the NULL value is created in `column_writer.cc` `WriteMiniBatch` to due the condition `def_levels[i] == descr_->max_definition_level()` . The max def level is 3 but for the last entry, the entry in `def_levels` is 0 which seems wrong. The origin of this datais `GenerateLevels` in `writer.cc` but I haven't figured out what is going on there."
+        },
+        {
+            "created_at": "2019-04-05T12:20:57.788Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5028?focusedCommentId=16810752) by Marco Neumann (marco.neumann.by):*\nMore debugging results:\r\n \\* `def_levels` and `rep_levels` have different length (first one is 1 element too short) leading to an out-of-bounds / uninitialized read which explain the `0` seen in the last report\r\n \\* the place where a `rep_levels` entry is created but no data for `def_levels` is `HandleNonNullList` in `writer.cc`\r\n \\* the reason for that is that `inner_length` is negative. It seems to jump from a large number (`16268812`) to a small number (`2`) and then continues from there (6, 13, 17, ...)"
+        },
+        {
+            "created_at": "2019-04-05T15:42:44.563Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5028?focusedCommentId=16810953) by Marco Neumann (marco.neumann.by):*\nSo the original table seems to be broken because the mentioned offset array to be jumping backwards. The following python code can be used to test this:\r\n```Java\n\r\ndef get_offset(chunk, pos):\r\n    b = chunk.buffers()[1]\r\n    x = 0\r\n    for i in range(4):\r\n        x = (x << 8) + b[pos * 4 + 3 - i]\r\n    return x\r\n\r\n\r\ndef check_table(table):\r\n    assert table.num_columns == 2\r\n    column = table.column(1)\r\n\r\n    assert column.data.num_chunks == 1\r\n    chunk = column.data.chunk(0)\r\n\r\n    assert get_offset(chunk, 734168) < get_offset(chunk, 734169)  # fails\r\n```\r\n`[~wesmckinn]` is it guaranteed that the offset should only go forwards? The current data looks like some kind of overflow to me, although it overflows at around 24 bits which is weird."
+        },
+        {
+            "created_at": "2019-04-05T19:49:17.385Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5028?focusedCommentId=16811208) by Wes McKinney (wesm):*\nLooks like a 16-bit or 32-bit overflow somewhere. I'm about to sign off until April 22 but if no one figures it out before then I can have a look after I return from vacation"
+        },
+        {
+            "created_at": "2019-05-31T20:50:00.695Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5028?focusedCommentId=16853414) by Wes McKinney (wesm):*\n[~marco.neumann.by] have you been able to make any progress with this?"
+        },
+        {
+            "created_at": "2019-06-03T08:07:19.531Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5028?focusedCommentId=16854341) by Marco Neumann (marco.neumann.by):*\nSadly not, since the debugging is quite complicated and I feel like I'm blindly digging through the code base."
+        },
+        {
+            "created_at": "2019-07-03T05:15:40.297Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5028?focusedCommentId=16877496) by Micah Kornfield (emkornfield@gmail.com):*\n[~marco.neumann.by] are you building the code from source or using a prepackaged version?"
+        },
+        {
+            "created_at": "2019-07-05T04:48:55.873Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5028?focusedCommentId=16878969) by Micah Kornfield (emkornfield@gmail.com):*\n[~marco.neumann.by] could you provide the original data file in a format other than pickle?"
+        },
+        {
+            "created_at": "2019-07-08T08:07:17.305Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5028?focusedCommentId=16880106) by Marco Neumann (marco.neumann.by):*\n[~emkornfield@gmail.com] sorry for the late reply. I was building the code myself. You can use master or one of the mentioned versions (`0.11.0` or `0.13.0`). Regarding the file format: I've tried to dump this whole thing as json, but that parsing it requires excessive amounts of memory (due to the missing string-instance-deduplication used by pickle) and I wasn't able to read it back. If you have another idea, please let me know."
+        },
+        {
+            "created_at": "2019-07-10T05:44:45.691Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5028?focusedCommentId=16881749) by Micah Kornfield (emkornfield@gmail.com):*\nWould dumping it the Arrow/Feather file format and then compressing it work?"
+        },
+        {
+            "created_at": "2019-07-10T05:50:19.372Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5028?focusedCommentId=16881751) by Micah Kornfield (emkornfield@gmail.com):*\nOr could you just output one text file for keys and one text file for values (each one per line)?  What are the types of the keys/values?  CSV might be another option"
+        },
+        {
+            "created_at": "2019-07-10T08:35:37.811Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5028?focusedCommentId=16881852) by Marco Neumann (marco.neumann.by):*\n**You need a massive machine (>10GB RAM) to run this!**\r\n\r\n [dct.json.gz](dct.json.gz) \r\n\r\n```python\n\r\nimport io\r\nimport json\r\nimport os.path\r\n\r\nimport numpy as np\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\n\r\ndef dct_to_table(index_dct):\r\n    labeled_array = pa.array(np.array(list(index_dct.keys())))\r\n    partition_array = pa.array(np.array(list(index_dct.values())))\r\n\r\n    return pa.Table.from_arrays(\r\n        [labeled_array, partition_array], names=['a', 'b']\r\n    )\r\n\r\n\r\ndef check_pq_nulls(data):\r\n    fp = io.BytesIO(data)\r\n    pfile = pq.ParquetFile(fp)\r\n    assert pfile.num_row_groups == 1\r\n    md = pfile.metadata.row_group(0)\r\n    col = md.column(1)\r\n    assert col.path_in_schema == 'b.list.item'\r\n    assert col.statistics.null_count == 0  # fails\r\n\r\n\r\ndef roundtrip(table):\r\n    buf = pa.BufferOutputStream()\r\n    pq.write_table(table, buf)\r\n\r\n    data = buf.getvalue().to_pybytes()\r\n\r\n# this fails:\r\n#   check_pq_nulls(data)\r\n\r\n    reader = pa.BufferReader(data)\r\n    return pq.read_table(reader)\r\n\r\n\r\nwith open(os.path.join(os.path.dirname(__file__), 'dct.json'), 'rb') as fp:\r\n    dct = json.load(fp)\r\n\r\n\r\n# this does NOT help:\r\n#   pa.set_cpu_count(1)\r\n#   import gc; gc.disable()\r\n\r\ntable = dct_to_table(dct)\r\n\r\n# this fixes the issue:\r\n#   table = pa.Table.from_pandas(table.to_pandas())\r\n\r\ntable2 = roundtrip(table)\r\n\r\nassert table.column('b').null_count == 0\r\nassert table2.column('b').null_count == 0  # fails\r\n\r\n# if table2 is converted to pandas, you can also observe that some values at the end of column b are `['']` which clearly is not present in the original data\r\n```\r\n\r\nThey content is the same as in the pickle file but due to missing object de-duplication, you need way more memory. Luckily, object de-duplication does not seem to be the underlying issue and the bug is still reproducible."
+        },
+        {
+            "created_at": "2019-08-16T17:19:14.356Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5028?focusedCommentId=16909235) by Wes McKinney (wesm):*\nLooking at this. I have a machine with 128GB of RAM so no problem there"
+        },
+        {
+            "created_at": "2019-08-16T17:39:53.701Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5028?focusedCommentId=16909258) by Wes McKinney (wesm):*\nThe root cause here is very strange and seems to not be related to Parquet at all. I'm hoping it'll become clear what's going on soon"
+        },
+        {
+            "created_at": "2019-08-16T17:49:18.189Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5028?focusedCommentId=16909280) by Wes McKinney (wesm):*\nOK, I've got it. This code works and it should not:\r\n\r\n```Java\n\r\nvals = [['x' * 1024]] * ((2 << 20) + 1)\r\narr = pa.array(vals)\r\n```\r\n\r\nThe inner builder is overflowing its 2GB capacity unchecked"
+        },
+        {
+            "created_at": "2019-08-17T20:24:14.097Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5028?focusedCommentId=16909822) by Wes McKinney (wesm):*\nIssue resolved by pull request 5108\n<https://github.com/apache/arrow/pull/5108>"
+        }
+    ]
+}

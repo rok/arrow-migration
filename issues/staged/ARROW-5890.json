@@ -1,0 +1,52 @@
+{
+    "issue": {
+        "title": "[C++][Python] Support ExtensionType arrays in more kernels",
+        "body": "***Note**: This issue was originally created as [ARROW-5890](https://issues.apache.org/jira/browse/ARROW-5890). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFrom a quick test (through Python), it seems that `slice` and `take` work, but the following not:\r\n\r\n- `cast`: it could rely on the casting rules for the storage type. Or do we want that you explicitly have to take the storage array before casting?\n- `dictionary_encode` / `unique`\n  \n",
+        "created_at": "2019-07-09T16:45:39.000Z",
+        "updated_at": "2022-07-29T18:34:14.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-05T14:32:18.171Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5890?focusedCommentId=17394063) by Antoine Pitrou (apitrou):*\nWe should make a list of compute functions that could might support extension types in a generic way. cc `[~icook]`\r\n\r\n`cast` wouldn't work: if you have an extension type representing IPv4 addresses on top of Int32s, the \"cast to string\" function should output the IPv4 addresses in dotted format (\"1.2.3.4\"), not in raw decimal format."
+        },
+        {
+            "created_at": "2021-08-05T14:42:10.950Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5890?focusedCommentId=17394073) by Joris Van den Bossche (jorisvandenbossche):*\nSpecifically for the `cast` case, would we want to have some extension point in the ExtensionType to control the casting? "
+        },
+        {
+            "created_at": "2021-08-05T14:57:35.083Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5890?focusedCommentId=17394093) by Joris Van den Bossche (jorisvandenbossche):*\nIn addition to the `dictionary_encode`/`unique`/`value_counts` from above, some other kernels that could be supported (but are not at the moment):\r\n\r\n- \"equal\" / \"not_equal\" (other comparisons are trickier, as that would rely on the ordering of the storage type being meaningful or not)\n- \"if_else\", \"case_when\", \"choose\", \"coalesce\"\n- \"fill_null\", \"replace_with_mask\"\n- \"is_in\", \"index\", \"index_in\"\n  \n  Already working:\n  \n- \"filter\", \"take\"\n- \"is_null\"\n- \"make_struct\"\n  \n  The sorting-related ones (`sort_indices`, `partition_nth_indices`, etc) are probably tricky, as there is not guaranteed a link between the order of the storage type and the logical type."
+        },
+        {
+            "created_at": "2021-08-05T15:07:52.860Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5890?focusedCommentId=17394102) by Antoine Pitrou (apitrou):*\n> Specifically for the `cast` case, would we want to have some extension point in the ExtensionType to control the casting?\r\n\r\nPerhaps, though I'm not sure what it should look like. Perhaps like this:\r\n\r\n```c++\n\r\nclass ExtensionType {\r\n  // ...\r\n  bool CanCastTo(const DataType& to_type);\r\n\r\n  Result<Datum> CastTo(const Datum& value, std::shared_ptr<DataType> to_type,\r\n                   const CastOptions& options = CastOptions::Safe(),\r\n                   ExecContext* ctx = NULLPTR);\r\n}\r\n```\r\n\r\ncc `[~bkietz]`"
+        },
+        {
+            "created_at": "2021-08-05T15:10:28.281Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5890?focusedCommentId=17394105) by Antoine Pitrou (apitrou):*\ncc `[~lidavidm]`"
+        },
+        {
+            "created_at": "2021-08-05T15:31:17.556Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5890?focusedCommentId=17394122) by David Li (lidavidm):*\nCasts are implemented by registering cast_boolean, cast_int8, ..., right? We could perhaps detect a registered \"cast_extension_ipv4\" or things like that."
+        },
+        {
+            "created_at": "2021-08-05T15:57:48.581Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5890?focusedCommentId=17394142) by Antoine Pitrou (apitrou):*\nThat requires implementers of extension type to implement and register their own cast function, which sounds a bit more annoying."
+        },
+        {
+            "created_at": "2021-09-02T01:05:50.507Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5890?focusedCommentId=17408456) by Clark Zinzow (clarkzinzow):*\n`[~apitrou]` I'm working on a tensor column extension type similar to [this one](https://github.com/CODAIT/text-extensions-for-pandas/blob/dc03278689fe1c5f131573658ae19815ba25f33e/text_extensions_for_pandas/array/arrow_conversion.py) and was hoping to allow users to interpret Parquet columns containing bytes blobs (e.g. images) as tensors by having them provide a schema for those columns, where the column's dtype is a tensor array extension type instantiated with the requisite data (shape, dtype, etc.) to cast that column as a tensor array. Since there isn't a static conversion between the bytes blobs and the underlying extension array dtype (both the shape and the underlying element dtype is parameterizable), it'd be nice if an extension type could register a cast function so we could use the shape and dtype context to properly interpret those bytes blobs."
+        },
+        {
+            "created_at": "2022-07-29T18:34:14.295Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5890?focusedCommentId=17573106) by Clark Zinzow (clarkzinzow):*\nDoes allowing extension type implementers to register a cast function sound reasonable? I might be able to take a stab at this (just casting) in the coming months."
+        }
+    ]
+}

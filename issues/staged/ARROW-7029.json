@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Go] unsafe pointer arithmetic panic w/ Go-1.14-dev",
+        "body": "***Note**: This issue was originally created as [ARROW-7029](https://issues.apache.org/jira/browse/ARROW-7029). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nGo-1.14 (to be released in Feb-2020) has a new analysis pass (enabled with -race) that checks for unsafe pointer arithmetic:\r\n\r\n```Java\n\r\n$> go test -race -run=Example_minimal .\r\n--- FAIL: Example_minimal (0.00s)\r\npanic: runtime error: unsafe pointer arithmetic [recovered]\r\n panic: runtime error: unsafe pointer arithmetic\r\n\r\ngoroutine 1 [running]:\r\ntesting.(*InternalExample).processRunResult(0xc0000adc80, 0x0, 0x0, 0x8927, 0x90a400, 0xc0000b62c0, 0xc0000a48c8)\r\n /home/binet/sdk/go/src/testing/example.go:89 +0x71f\r\ntesting.runExample.func2(0xbf6675c29511646d, 0x20fb5f, 0xc7f780, 0xc0000a2378, 0xc0000a2008, 0xc000086360, 0xc0000adc80, 0xc0000adcb0)\r\n /home/binet/sdk/go/src/testing/run_example.go:58 +0x143\r\npanic(0x90a400, 0xc0000b62c0)\r\n /home/binet/sdk/go/src/runtime/panic.go:915 +0x370\r\ngithub.com/apache/arrow/go/arrow/memory.memory_memset_avx2(0xc00009e200, 0x40, 0x40, 0xc9c000)\r\n /home/binet/work/gonum/src/github.com/apache/arrow/go/arrow/memory/memory_avx2_amd64.go:33 +0xa4\r\ngithub.com/apache/arrow/go/arrow/memory.Set(...)\r\n /home/binet/work/gonum/src/github.com/apache/arrow/go/arrow/memory/memory.go:25\r\ngithub.com/apache/arrow/go/arrow/array.(*builder).init(0xc000084600, 0x20)\r\n /home/binet/work/gonum/src/github.com/apache/arrow/go/arrow/array/builder.go:101 +0x23a\r\ngithub.com/apache/arrow/go/arrow/array.(*Int64Builder).init(0xc000084600, 0x20)\r\n /home/binet/work/gonum/src/github.com/apache/arrow/go/arrow/array/numericbuilder.gen.go:102 +0x60\r\ngithub.com/apache/arrow/go/arrow/array.(*Int64Builder).Resize(0xc000084600, 0x2)\r\n /home/binet/work/gonum/src/github.com/apache/arrow/go/arrow/array/numericbuilder.gen.go:125 +0x8c\r\ngithub.com/apache/arrow/go/arrow/array.(*builder).reserve(0xc000084600, 0x1, 0xc0000ad918)\r\n /home/binet/work/gonum/src/github.com/apache/arrow/go/arrow/array/builder.go:138 +0xdc\r\ngithub.com/apache/arrow/go/arrow/array.(*Int64Builder).Reserve(0xc000084600, 0x1)\r\n /home/binet/work/gonum/src/github.com/apache/arrow/go/arrow/array/numericbuilder.gen.go:113 +0x68\r\ngithub.com/apache/arrow/go/arrow/array.(*Int64Builder).Append(0xc000084600, 0x1)\r\n /home/binet/work/gonum/src/github.com/apache/arrow/go/arrow/array/numericbuilder.gen.go:60 +0x46\r\ngithub.com/apache/arrow/go/arrow_test.Example_minimal()\r\n /home/binet/work/gonum/src/github.com/apache/arrow/go/arrow/example_test.go:39 +0x153\r\ntesting.runExample(0x94714a, 0xf, 0x95d8a8, 0x957614, 0x83, 0x0, 0x0)\r\n /home/binet/sdk/go/src/testing/run_example.go:62 +0x275\r\ntesting.runExamples(0xc0000aded8, 0xc7a2e0, 0xb, 0xb, 0x100)\r\n /home/binet/sdk/go/src/testing/example.go:44 +0x212\r\ntesting.(*M).Run(0xc000100000, 0x0)\r\n /home/binet/sdk/go/src/testing/testing.go:1125 +0x3b4\r\nmain.main()\r\n _testmain.go:130 +0x224\r\nFAIL github.com/apache/arrow/go/arrow 0.009s\r\nFAIL\r\n```\r\n\r\n\u00a0\r\n\r\nsee:\r\n\r\n<https://groups.google.com/forum/#!msg/golang-dev/SzwDoqoRVJA/IvtnBW5oDwAJ>\r\n\r\n\u00a0",
+        "created_at": "2019-10-30T10:10:18.000Z",
+        "updated_at": "2020-03-12T21:13:41.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Go",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-03-12T21:13:41.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-30T10:26:28.462Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7029?focusedCommentId=16962903) by Sebastien Binet (sbinet):*\n`[~stuartcarnie]` \u00a0it seems we'd need to modify this kind of code:\r\n\r\n```Java\n\r\nfunc memory_memset_avx2(buf []byte, c byte) {\r\n\tif len(buf) == 0 {\r\n\t\treturn\r\n\t}\r\n\r\n\tvar (\r\n\t\tp1 = unsafe.Pointer(&buf[0])\r\n\t\tp2 = unsafe.Pointer(uintptr(len(buf))) // !!! line 33 !!!\r\n\t\tp3 = unsafe.Pointer(uintptr(c))\r\n\t)\r\n\tif len(buf) > 2000 || isMultipleOfPowerOf2(len(buf), 256) {\r\n\t\t_memset_avx2(p1, p2, p3)\r\n\t} else {\r\n\t\t_memset_sse4(p1, p2, p3)\r\n\t}\r\n}\r\n```\r\n\r\n(and the according assembly)\r\n"
+        },
+        {
+            "created_at": "2020-01-16T15:42:45.478Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7029?focusedCommentId=17017043) by Sebastien Binet (sbinet):*\n`[~stuartcarnie]`, do you have any insight on how one could re-write the assembly to not stumble on this issue?\r\nGo-1.14 is just around the corner..."
+        },
+        {
+            "created_at": "2020-03-12T21:13:19.571Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7029?focusedCommentId=17058248) by Sebastien Binet (sbinet):*\nalso reported at:\r\n\r\nhttps://issues.apache.org/jira/browse/ARROW-8098\r\n\r\n\u00a0"
+        }
+    ]
+}

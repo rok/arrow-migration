@@ -1,0 +1,94 @@
+{
+    "issue": {
+        "title": "[Python] Non-optimal CSV chunking when no newline at end",
+        "body": "***Note**: This issue was originally created as [ARROW-7661](https://issues.apache.org/jira/browse/ARROW-7661). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe are reading a very simple csv (see below).\r\nThe file is only 245 bytes so way below the default _block_size_ in the _ReadOptions_. Thus we would expect the resulting table to have only one batch. At least, if\u00a0 I understand correctly that a _block_ refers to the number of lines of certain byte size?\u00a0\r\n\r\nThe docs state:\u00a0_This will determine multi-threading granularity as well as the size of individual chunks in the Table._\u00a0For me, that means also the size of individual batches?\u00a0\r\n\r\nPreviously, we thought by fixing the block_size to the total file size, we would ensure that even for files larger than 1MB we get a pa.Table with only one batch. This mini file seems to prove us wrong?\r\n\r\nAdditionally, if I convert back and forth to pandas we get only one batch.\r\n\r\n\u00a0\r\n\r\nTo reproduce:\r\n```java\n\r\nimport os\r\nfrom pyarrow import csv as pc\r\nimport pyarrow as pa\r\npath = \"test.csv\"\r\nread_options = pc.ReadOptions(block_size=os.stat(path).st_size)\r\ndf = pc.read_csv(path, read_options=read_options)\r\nprint(len(df.to_batches()))\r\n# returns 2\r\nprint(pa.Table.from_batches([df.to_batches()[1]]).to_pandas())\r\n# returns the last line of the file\r\npdf = df.to_pandas()\r\nndf = pa.Table.from_pandas(pdf)\r\nprint(len(ndf.to_batches()))\r\n# returns 1\n```\r\ntest.csv:\r\n```java\n\r\n\"Name\",\"Month\",\"Change in %\"\r\n\"Surrey Quays\",\"Sep 18\",\"1.01\"\r\n\"Surrey Quays\",\"Oct 18\",\"0.38\"\r\n\"Surrey Quays\",\"Nov 18\",\"0.97\"\r\n\"Surrey Quays\",\"Dec 18\",\"1.28\"\r\n\"Surrey Quays\",\"Jan 19\",\"2.43\"\r\n\"Surrey Quays\",\"Feb 19\",\"2.49\"\r\n\"Surrey Quays\",\"Mar 19\",\"0.81\"\r\n```\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2020-01-23T11:11:21.000Z",
+        "updated_at": "2020-01-29T11:32:31.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-01-29T11:32:29.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-01-25T05:35:23.320Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17023412) by Takuya Kato (Ktakuya):*\nThe size of `test.csv` file seems to be 246 bytes instead of 245.\r\n```java\n\r\n$ vim /tmp/test.csv\r\n$ cat /tmp/test.csv\r\n\"Name\",\"Month\",\"Change in %\"\r\n\"Surrey Quays\",\"Sep 18\",\"1.01\"\r\n\"Surrey Quays\",\"Oct 18\",\"0.38\"\r\n\"Surrey Quays\",\"Nov 18\",\"0.97\"\r\n\"Surrey Quays\",\"Dec 18\",\"1.28\"\r\n\"Surrey Quays\",\"Jan 19\",\"2.43\"\r\n\"Surrey Quays\",\"Feb 19\",\"2.49\"\r\n\"Surrey Quays\",\"Mar 19\",\"0.81\"\r\n$ ls -l /tmp/test.csv\r\n-rw-r--r-- 1 root root 246 Jan 25 05:29 /tmp/test.csv\n```\r\nThis might be the cause of the problem\r\n```java\n\r\n>>> import os\r\n>>> from pyarrow import csv as pc\r\n>>> import pyarrow as pa\r\n>>> path = \"/tmp/test.csv\"\r\n>>> read_options = pc.ReadOptions(block_size=245)\r\n>>> df = pc.read_csv(path, read_options=read_options)\r\n>>> df.to_batches()\r\n[<pyarrow.lib.RecordBatch object at 0x7fe4bc115138>, <pyarrow.lib.RecordBatch object at 0x7fe4bc085728>]\r\n>>> read_options = pc.ReadOptions(block_size=246)\r\n>>> df = pc.read_csv(path, read_options=read_options)\r\n>>> df.to_batches()\r\n[<pyarrow.lib.RecordBatch object at 0x7fe4af97fb88>]\r\n```"
+        },
+        {
+            "created_at": "2020-01-27T16:59:22.053Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17024498) by Sascha Hofmann (saschahofmann):*\nUnfortunately, it doesn't work with the default setting(=not providing\u00a0_read_options_ which as far as I know defaults to a _block_size_ of 1MB). We also tried setting a buffer or multiplied the actual file size with a factor of 100."
+        },
+        {
+            "created_at": "2020-01-28T11:12:08.229Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17025041) by Joris Van den Bossche (jorisvandenbossche):*\n> > The file is only 245 bytes so way below the default block_size in the ReadOptions. Thus we would expect the resulting table to have only one batch.\r\n\r\nBy default, this is the case, right?\r\n\r\nWhen setting the block_size as in your above example, I actually do get a single batch. If I pass `block_size=os.stat(path).st_size-1` I also get 2 batches (so a similar observation as `[~Ktakuya]`, maybe the `st_size` is not fully reliable for this use case).\r\n\r\n> > We also tried setting a buffer or multiplied the actual file size with a factor of 100.\r\nCan you show an reproducible example of where setting the block_size to something much larger than the file size gives multiple blocks?"
+        },
+        {
+            "created_at": "2020-01-28T11:27:58.057Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17025052) by Sascha Hofmann (saschahofmann):*\nInteresting. I even get 2 batches without setting any block_size."
+        },
+        {
+            "created_at": "2020-01-28T12:07:10.159Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17025066) by Joris Van den Bossche (jorisvandenbossche):*\n```python\n\r\npath = \"test_csv_batch_size.csv\"\r\ndf = pc.read_csv(path)\r\nprint(len(df.to_batches()))\r\n```\r\n\r\ngives 1 for me with the small file you showed above"
+        },
+        {
+            "created_at": "2020-01-28T12:28:50.899Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17025076) by Takuya Kato (Ktakuya):*\nI may have succeeded to reproduce the issue by removing the last newline character of the input file.\r\n```bash\n\r\n$ vim /tmp/test.csv\r\n$ cat /tmp/test.csv\r\n\"Name\",\"Month\",\"Change in %\"\r\n\"Surrey Quays\",\"Sep 18\",\"1.01\"\r\n\"Surrey Quays\",\"Oct 18\",\"0.38\"\r\n\"Surrey Quays\",\"Nov 18\",\"0.97\"\r\n\"Surrey Quays\",\"Dec 18\",\"1.28\"\r\n\"Surrey Quays\",\"Jan 19\",\"2.43\"\r\n\"Surrey Quays\",\"Feb 19\",\"2.49\"\r\n\"Surrey Quays\",\"Mar 19\",\"0.81\"\r\n$ tail -c 1 /tmp/test.csv | xxd\r\n00000000: 0a # ascii newline characeter\r\n$ head -c 245 /tmp/test.csv > /tmp/test2.csv\r\n$ tail -n 1 /tmp/test2.csv\r\n\"Surrey Quays\",\"Mar 19\",\"0.81\"$\r\n$ python3\r\n>>> import os\r\n>>> from pyarrow import csv as pc\r\n>>> path = \"/tmp/test2.csv\"\r\n>>> read_options = pc.ReadOptions(block_size=os.stat(path).st_size)\r\n>>> df = pc.read_csv(path, read_options=read_options)\r\n>>> df.to_batches()\r\n[<pyarrow.lib.RecordBatch object at 0x7f1e99b956d8>, <pyarrow.lib.RecordBatch object at 0x7f1e8d48fb38>]\r\n```\r\nAs Sascha Hofmann noted,\u00a0\u00a0the size of the file is 245 bytes\r\n```bash\n\r\nls -l /tmp/test2.csv\r\n-rw-r--r-- 1 root root 245 Jan 28 13:15 /tmp/test2.csv\r\n```"
+        },
+        {
+            "created_at": "2020-01-28T13:17:45.412Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17025102) by Sascha Hofmann (saschahofmann):*\nCan confirm, I just added a line to my file and get only one batch."
+        },
+        {
+            "created_at": "2020-01-28T13:26:51.403Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17025105) by Joris Van den Bossche (jorisvandenbossche):*\nYou mean having an empty last line in the file?\r\n\r\nBut do you get a single batch also when doing `block_size=os.stat(path).st_size+1`? (on the original small file)"
+        },
+        {
+            "created_at": "2020-01-28T14:16:37.326Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17025140) by Sascha Hofmann (saschahofmann):*\nYes, even if I increase the block_size to a size larger than the file, without a new line in the end I always get two batches. As mentioned, I ran it without providing any read_options which defaults to a block_size of 1MB"
+        },
+        {
+            "created_at": "2020-01-28T15:19:04.828Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17025203) by Joris Van den Bossche (jorisvandenbossche):*\nOK, that shouldn't happen. \r\n\r\nCan you give a bit more details on your system? Which OS? What version of pyarrow?\r\n\r\nAlso, can you check the two batches? Eg is the second one an empty batch? (your example above has 7 rows, how are they put in the batches?)"
+        },
+        {
+            "created_at": "2020-01-28T15:27:45.056Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17025214) by Sascha Hofmann (saschahofmann):*\nWe tried it on arrow 0.14.1, 0.15.0 and 0.15.1. I am on MacOS Catalina (10.15) and installed pyarrow via conda.\u00a0\r\nThe 2nd batch contains the last row."
+        },
+        {
+            "created_at": "2020-01-28T15:38:59.923Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17025222) by Joris Van den Bossche (jorisvandenbossche):*\ncc `[~apitrou]` \r\n\r\nSummary: when reading a small file (with defaults, no options specified), they end up with a Table consisting of 2 batches (with the last row in the 2nd batch). \r\n\r\nI personally can't reproduce this on Linux (checked both master and 0.14.1)"
+        },
+        {
+            "created_at": "2020-01-28T15:42:06.132Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17025223) by Sascha Hofmann (saschahofmann):*\ndid you try to remove the empty line as suggested by `[~Ktakuya]`?"
+        },
+        {
+            "created_at": "2020-01-28T15:44:11.445Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17025227) by Antoine Pitrou (apitrou):*\nOk, I see. It's quite possible the chunking is non-optimal if the file misses an ending newline. We can probably improve that..."
+        },
+        {
+            "created_at": "2020-01-28T15:45:39.992Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17025230) by Joris Van den Bossche (jorisvandenbossche):*\nI don't seem to be able to reproduce it, both with an ending newline or not"
+        },
+        {
+            "created_at": "2020-01-28T15:46:34.693Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17025232) by Sascha Hofmann (saschahofmann):*\nI just tried myself in an alpine container. Seems like it behaves as expected even with the last line removed."
+        },
+        {
+            "created_at": "2020-01-28T15:56:14.108Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17025239) by Antoine Pitrou (apitrou):*\nThe good news is that this was fixed in ARROW-6825 (and will be in 0.16.0). Still, we can add a test for it."
+        },
+        {
+            "created_at": "2020-01-28T15:56:47.600Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17025240) by Sascha Hofmann (saschahofmann):*\nThanks for the help btw. For now, it's already enough that we know to have this newline. Plus we are moving to dockerized env anyway.\u00a0"
+        },
+        {
+            "created_at": "2020-01-29T11:32:29.397Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7661?focusedCommentId=17025821) by Krisztian Szucs (kszucs):*\nIssue resolved by pull request 6305\n<https://github.com/apache/arrow/pull/6305>"
+        }
+    ]
+}

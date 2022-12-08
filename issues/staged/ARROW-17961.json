@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[C++] Add read/write optimization for pyarrow.fs.S3FileSystem",
+        "body": "***Note**: This issue was originally created as [ARROW-17961](https://issues.apache.org/jira/browse/ARROW-17961). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI found large differences in loading time, when loading data \u00a0from aws s3 using `pyarrows.fs.S3FileSystem` compared to `s3fs.S3FileSystem` See example below.\r\n\r\nThe difference comes from `s3fs` optimization, which `pyarrow.fs` is not (yet) using.\r\n```python\n\r\nimport pyarrow.dataset as ds\r\nimport pyarrow.parquet as pq\r\nimport pyarrow.fs as pafs\r\nimport s3fs\r\nimport load_credentials\r\n\r\ncredentials = load_credentials()\r\npath = \"path/to/data\" # folder with about 300 small (~10kb) files\r\n\r\nfs1 = s3fs.S3FileSystem(\r\n\u00a0 \u00a0 anon=False,\r\n\u00a0 \u00a0 key=credentials[\"accessKeyId\"],\r\n\u00a0 \u00a0 secret=credentials[\"secretAccessKey\"],\r\n\u00a0 \u00a0 token=credentials[\"sessionToken\"],\r\n)\r\n\r\nfs2 = pafs.S3FileSystem(\r\n\u00a0 \u00a0 access_key=credentials[\"accessKeyId\"],\r\n\u00a0 \u00a0 secret_key=credentials[\"secretAccessKey\"],\r\n\u00a0 \u00a0 session_token=credentials[\"sessionToken\"],\r\n\u00a0 \u00a0\r\n)\r\n\r\n_ = ds.dataset(path, filesystem=fs1).to_table() # takes about 5 seconds\r\n\r\n_ = ds.dataset(path, filesystem=fs2).to_table() # takes about 25 seconds\r\n\r\n_ = pq.read_table(path, filesyste=fs1) # takes about 5 seconds\r\n\r\n_ = pq.read_table(path, filesytem=fs2) # takes about 10 seconds\r\n```\r\n\u00a0",
+        "created_at": "2022-10-07T09:09:05.000Z",
+        "updated_at": "2022-10-11T12:13:58.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-07T09:15:15.283Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17961?focusedCommentId=17613978) by Antoine Pitrou (apitrou):*\nWhich \"optimization\" is that?"
+        },
+        {
+            "created_at": "2022-10-07T12:07:59.065Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17961?focusedCommentId=17614053) by Jacob Wujciak-Jens (assignUser):*\nThings like readahead and metadata caching cc `[~lidavidm]` for details"
+        },
+        {
+            "created_at": "2022-10-07T16:33:12.904Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17961?focusedCommentId=17614148) by David Li (lidavidm):*\n`[~westonpace]` probably has better context here, but from what I understand, s3fs does readahead by default; PyArrow's filesystems do not. And since I don't think we enable pre-buffering by default, and the Parquet reader issues a separate I/O call for each column chunk, that's `O(row groups * columns)` read operations, which presumably get absorbed by s3fs's readahead, but which lead to individual HTTP requests on the PyArrow filesystem. (This is mostly an educated guess, I haven't actually sat down and profiled.)"
+        },
+        {
+            "created_at": "2022-10-07T16:37:54.535Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17961?focusedCommentId=17614153) by David Li (lidavidm):*\nThat said assuming that is the cause, I don't think we necessarily want to implement readahead, I think we just need to have better integration between the file readers and the I/O layer. Somewhat related, ARROW-17917 and ARROW-17913 as similar issues, where the I/O strategy needs to depend on the characteristics of the underlying filesystem"
+        },
+        {
+            "created_at": "2022-10-07T17:52:38.633Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17961?focusedCommentId=17614189) by Weston Pace (westonpace):*\nI think David's right.  If you know you're going to read the entire parquet file then you can be more efficient about it.  If the file is only 10kb then for peak performance you should only issue one read request.\r\n\r\nHowever, this will use much more RAM if you have large files (e.g. multiple GBs) and will have worse performance if you only want to read parts of those large files (e.g. column selection).\r\n\r\nSo I agree there is room for optimization.  It's just not going to be clear cut and simple."
+        },
+        {
+            "created_at": "2022-10-10T07:33:05.735Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17961?focusedCommentId=17614936) by Joris Van den Bossche (jorisvandenbossche):*\nWe (somewhat inconsistently) enabled pre-buffer by default in `pq.read_table`, but not in `ds.dataset`. So I suppose that is also the difference you see between those (from 25 to 10s using pyarrow.fs.S3FileSystem), but so even with pre-buffer enabled, it's still a bit slower than s3fs (for this specific case of course)."
+        }
+    ]
+}

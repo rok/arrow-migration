@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[C++] Add cast option to return null for values that can't convert",
+        "body": "***Note**: This issue was originally created as [ARROW-18241](https://issues.apache.org/jira/browse/ARROW-18241). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI am importing a dataset with arrow, and then converting variable types. But I got an error message because the `arrow` implementation of `as.integer` can't handle empty strings (which is legal in base R). Is this a bug?\r\n```r\n\r\n#In R\r\n'' %>% as.integer()\r\n\r\n[1] NA\r\n\r\n\u00a0\r\n\r\n#in arrow\r\n\r\nq <- data.table(x=c('','1','2'))\r\nq %>% write_dataset('q')\r\nq2 <- 'q' %>% open_dataset %>% mutate(x=as.integer(x)) %>% collect\r\n\r\nError in `collect()`:\r\n! Invalid: Failed to parse string: '' as a scalar of type int32\r\nRun `rlang::last_error()` to see where the error occurred.\r\n```\r\nUpdate: tryed to preprocess x with `ifelse` but it also did not work.\r\n```r\n\r\n'q' %>% open_dataset %>% mutate(x= ifelse(x=='',NA,x)) %>% mutate(x=as.integer(x)) %>% collect\r\nError in `collect()`:\r\n! NotImplemented: Function 'if_else' has no kernel matching input types (bool, bool, string)\r\nRun `rlang::last_error()` to see where the error occurred.\r\n```",
+        "created_at": "2022-11-03T16:16:54.000Z",
+        "updated_at": "2022-11-07T17:00:57.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-11-04T01:40:36.558Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18241?focusedCommentId=17628622) by Neal Richardson (npr):*\nTwo observations:\r\n\r\n1. This isn't just about empty strings: cast string to int raises an error on any string that doesn't parse. I believe this was raised before but I can't seem to find an issue about it (that is, adding an option to return NA for values that don't parse instead of erroring). I agree this would be a nice option to have.\r\n\r\n```Java\n\r\n> arrow_table(x=\"a\") %>% mutate(x = as.integer(x)) %>% collect()\r\nError in `compute.arrow_dplyr_query()`:\r\n! Invalid: Failed to parse string: 'a' as a scalar of type int32\r\n```\r\n\r\n2. The ifelse workaround will work, and it should work as you typed it on the development version of the package. On the released version, you can make it work by explicitly making the NA be a string so the types match:\r\n\r\n```Java\n\r\narrow_table(a=c(\"1\", \"\", \"3\")) %>% \r\n  mutate(x = as.integer(ifelse(a == \"\", NA_character_, a))) %>% \r\n  collect()\r\n\r\n# A tibble: 3 \u00d7 2\r\n  a         x\r\n  <chr> <int>\r\n1 \"1\"       1\r\n2 \"\"       NA\r\n3 \"3\"       3\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-11-04T11:42:37.658Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18241?focusedCommentId=17628902) by Lucas Mation (lucasmation):*\n`[~npr]` , tks.\u00a0\r\n\r\n1)\r\n\r\n\"I agree this would be a nice option to have.\" > sure. But should be the default behavior, as that is what happens in base R, no?\r\n\r\n2)\u00a0\r\n\r\n\" it should work as you typed it on the development version\" > tested. Works. Tks.\r\n\r\n{<sub>}\"On the released version, you can make it work by explicitly making the NA be a string so the types match{</sub>}\" > tested works.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-11-04T11:45:19.189Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18241?focusedCommentId=17628905) by Neal Richardson (npr):*\n> \"I agree this would be a nice option to have.\" > sure. But should be the default behavior, as that is what happens in base R, no?\r\n\r\nSorry, that was ambiguous. We would need the C++ cast function to support an option to return nulls for values that can't be converted, rather than just error. If/when that option exists, then yes, we would make that default in R.\r\n\r\nI'll rename this ticket to be about that feature."
+        },
+        {
+            "created_at": "2022-11-07T17:00:57.268Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18241?focusedCommentId=17629916) by Neal Richardson (npr):*\nThere are some string functions we could perhaps use to construct this, like `ascii_is_decimal`, and do something like `ifelse(ascii_is_decimal(x), x, NA_character_)` before doing the `cast()`."
+        }
+    ]
+}

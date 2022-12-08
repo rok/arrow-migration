@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[CI][Crossbow] Nightly spark integration job fails",
+        "body": "***Note**: This issue was originally created as [ARROW-6429](https://issues.apache.org/jira/browse/ARROW-6429). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSee https://circleci.com/gh/ursa-labs/crossbow/2310. Either fix, skip job and create followup Jira to unskip, or delete job.",
+        "created_at": "2019-09-03T19:25:17.000Z",
+        "updated_at": "2019-10-07T17:36:08.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Continuous Integration",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-10-07T17:36:07.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-09-09T16:16:18.789Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6429?focusedCommentId=16925875) by Neal Richardson (npr):*\n`[~bryanc]` can you take a look, or suggest someone else?"
+        },
+        {
+            "created_at": "2019-09-10T00:34:10.255Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6429?focusedCommentId=16926208) by Bryan Cutler (bryanc):*\nI will take a look, but it might be a few days until I can get to it."
+        },
+        {
+            "created_at": "2019-09-11T18:05:23.921Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6429?focusedCommentId=16927871) by Bryan Cutler (bryanc):*\nThe failure seems to be caused from the removal of pyarrow.Column in favor of pyarrow.ChunkedArray. Spark iterates over columns of a pyarrow.Table, calls `to_pandas()` on each column, and assumes the result is a pd.Series. If the column is actually a pyarrow.ChunkedArray, then `to_pandas()` can be a numpy.array. `[~wesmckinn]` `[~pitrou]` I know in the pydoc it says the returned value can either be a pandas.Series or numpy.array, but is there anyway to ensure it is the former or is that the job of the caller?"
+        },
+        {
+            "created_at": "2019-09-11T21:57:22.529Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6429?focusedCommentId=16928029) by Wes McKinney (wesm):*\nI'd be OK with always return `pandas.Series` but I'm not sure what are the implications of this change"
+        },
+        {
+            "created_at": "2019-09-15T06:02:37.606Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6429?focusedCommentId=16929909) by Bryan Cutler (bryanc):*\nAfter ARROW-6557 there seems to be another issue with timestamps <https://github.com/apache/arrow/pull/5373#issuecomment-531264154.>\u00a0 I'll look into this soon."
+        },
+        {
+            "created_at": "2019-09-19T19:38:19.103Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6429?focusedCommentId=16933714) by Bryan Cutler (bryanc):*\n`[~wesm]` the issue with the timestamp test failures looks to be because calling `to_pandas` on a pyarrow ChunkedArray with a tz aware timestamp type removes the tz from the resulting dtype. The behavior before was a pyarrow Column keeps the tz but the pyarrow Array removes when converting to a numpy array.\r\n\r\nWith Arrow 0.14.1\r\n```java\n\r\nIn [4]: import pyarrow as pa \r\n   ...: a = pa.array([1], type=pa.timestamp('us', tz='America/Los_Angeles'))  \r\n   ...: c = pa.Column.from_array('ts', a) \r\n\r\nIn [5]: c.to_pandas()                                                                                                        \r\nOut[5]: \r\n0   1969-12-31 16:00:00.000001-08:00\r\nName: ts, dtype: datetime64[ns, America/Los_Angeles]\r\n\r\nIn [6]: a.to_pandas()                                                                                                        \r\nOut[6]: array(['1970-01-01T00:00:00.000001'], dtype='datetime64[us]')\r\n```\r\nWith current master\r\n```java\n\r\n>>> import pyarrow as pa\r\n>>> a = pa.array([1], type=pa.timestamp('us', tz='America/Los_Angeles'))\r\n>>> a.to_pandas()\r\n0   1970-01-01 00:00:00.000001\r\ndtype: datetime64[ns]\r\n```\r\nAfter manually adding the timezone back in the series dtype (and fixing the Java compilation), all tests pass and the spark integration run finished. I wasn't able to look into why the timezone is being removed though. Should I open up a jira for this?\r\n\r\nedit: I made ARROW-6652 since it is not just a Spark issue"
+        },
+        {
+            "created_at": "2019-09-22T01:08:44.508Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6429?focusedCommentId=16935173) by Wes McKinney (wesm):*\nThis may be fixed in master now, need to confirm"
+        },
+        {
+            "created_at": "2019-09-22T04:53:44.512Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6429?focusedCommentId=16935210) by Bryan Cutler (bryanc):*\nI believe I need to add a patch so Spark can compile with Arrow Java. I'm working on this now."
+        },
+        {
+            "created_at": "2019-10-07T17:35:39.663Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6429?focusedCommentId=16946068) by Bryan Cutler (bryanc):*\nTests are passing since ARROW-6686 was merged, I'll resolve this now"
+        }
+    ]
+}

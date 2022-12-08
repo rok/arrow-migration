@@ -1,0 +1,52 @@
+{
+    "issue": {
+        "title": "[C++] Allow specifying of alignment in MemoryPool's allocations ",
+        "body": "***Note**: This issue was originally created as [ARROW-17836](https://issues.apache.org/jira/browse/ARROW-17836). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFor spilling, I need to create buffers that are 512-byte aligned. The task is to augment MemoryPool to allow for specifying alignment explicitly when allocating (but keep the default the same).",
+        "created_at": "2022-09-24T02:31:29.000Z",
+        "updated_at": "2022-11-17T01:13:44.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-27T09:09:03.033Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17836?focusedCommentId=17609923) by Antoine Pitrou (apitrou):*\nNote that alignment is already 64 bytes by default... which is 512 bits. Does it not suffice?"
+        },
+        {
+            "created_at": "2022-09-27T14:42:59.363Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17836?focusedCommentId=17610098) by Weston Pace (westonpace):*\nI suspect this was a typo and meant to be 512 bytes.  The current spilling PR is using direct I/O and so I believe the motivation is the logical block size of the disk."
+        },
+        {
+            "created_at": "2022-09-27T15:46:18.769Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17836?focusedCommentId=17610133) by Antoine Pitrou (apitrou):*\nWell, the direct IO PR handles alignment internally. Is there a plan to handle it differently?"
+        },
+        {
+            "created_at": "2022-09-27T15:46:35.964Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17836?focusedCommentId=17610134) by Sasha Krassovsky (sakras):*\nHi yes sorry about that, that was a typo. I definitely meant bytes, I\u2019ve updated the description.\u00a0"
+        },
+        {
+            "created_at": "2022-09-27T15:47:46.991Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17836?focusedCommentId=17610135) by Sasha Krassovsky (sakras):*\nThat Direct IO PR could probably reuse this functionality, but the motivation for this PR is for spilling in the hash join"
+        },
+        {
+            "created_at": "2022-09-27T15:49:33.335Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17836?focusedCommentId=17610136) by Antoine Pitrou (apitrou):*\nI see, thanks."
+        },
+        {
+            "created_at": "2022-09-27T15:54:51.684Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17836?focusedCommentId=17610137) by Weston Pace (westonpace):*\nYes, the direct I/O PR offers a generic filesystem interface and thus has to potentially memcpy / buffer incoming data to satisfy alignment.  The difference with spilling is that we are already doing a memcpy higher up in the chain.  When we spill, we take the data we need to spill and partition it.\r\n\r\nFor example, if we want to add spill to sorting, and we pretend we are sorting by date, and we've accumulated too much data we might then partition into decade sized buckets and persist to disk.  Then, once all the data has arrived, we can process a single decade at a time (with the hope that one decade of data is small enough to fit in memory).\r\n\r\nThat's a rough description, and there are corner cases, but the point is we already have to do a memcpy in order to handle the partitioning (partitioning is unfortunately a rather row-oriented operation) and so we want to go ahead and satisfy the alignment requirement at that point.  This way, when we are ready to spill, we don't have to worry about alignment and we can just use direct I/O without any extra memcpy."
+        },
+        {
+            "created_at": "2022-09-27T15:56:23.450Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17836?focusedCommentId=17610138) by Antoine Pitrou (apitrou):*\nOk, question: is adding alignment to ArrayBuilder needed for spilling, or is it sufficient to add support in MemoryPool, BufferBuilder and PoolBuffer?"
+        },
+        {
+            "created_at": "2022-09-27T16:01:22.168Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17836?focusedCommentId=17610139) by Sasha Krassovsky (sakras):*\nI added it so that I could have MakeRandomBatches specify alignment requirements so that I could test individual components of the spilling PR.\u00a0"
+        }
+    ]
+}

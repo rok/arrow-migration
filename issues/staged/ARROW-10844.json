@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Rust] [DataFusion] join of two DataFrames is not possible",
+        "body": "***Note**: This issue was originally created as [ARROW-10844](https://issues.apache.org/jira/browse/ARROW-10844). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe complete failing test:\r\n\r\n\u00a0\r\n```java\n\r\nuse std::sync::Arc;\r\n\r\nuse arrow::{array::{Int32Array, StringArray}, record_batch::RecordBatch};\r\nuse arrow::datatypes::{DataType, Field, Schema};\r\n\r\nuse datafusion::{datasource::MemTable, prelude::JoinType};\r\nuse datafusion::error::Result;\r\n\r\nuse datafusion::execution::context::ExecutionContext;\r\n\r\n#[tokio::test]\r\nasync fn join() -> Result<()> {\r\n    let schema1 = Arc::new(Schema::new(vec![\r\n        Field::new(\"a\", DataType::Utf8, false),\r\n        Field::new(\"b\", DataType::Int32, false),\r\n    ]));\r\n    let schema2 = Arc::new(Schema::new(vec![\r\n        Field::new(\"a\", DataType::Utf8, false),\r\n        Field::new(\"c\", DataType::Int32, false),\r\n    ]));\r\n\r\n    // define data.\r\n    let batch1 = RecordBatch::try_new(\r\n        schema1.clone(),\r\n        vec![\r\n            Arc::new(StringArray::from(vec![\"a\", \"b\", \"c\", \"d\"])),\r\n            Arc::new(Int32Array::from(vec![1, 10, 10, 100])),\r\n        ],\r\n    )?;\r\n    // define data.\r\n    let batch2 = RecordBatch::try_new(\r\n        schema2.clone(),\r\n        vec![\r\n            Arc::new(StringArray::from(vec![\"a\", \"b\", \"c\", \"d\"])),\r\n            Arc::new(Int32Array::from(vec![1, 10, 10, 100])),\r\n        ],\r\n    )?;\r\n\r\n    let mut ctx = ExecutionContext::new();\r\n\r\n    let table1 = MemTable::new(schema1, vec![vec![batch1]])?;\r\n    let table2 = MemTable::new(schema2, vec![vec![batch2]])?;\r\n\r\n    ctx.register_table(\"aa\", Box::new(table1));\r\n\r\n    let df1 = ctx.table(\"aa\")?;\r\n\r\n    ctx.register_table(\"aaa\", Box::new(table2));\r\n\r\n    let df2 = ctx.table(\"aaa\")?;\r\n\r\n    let a = df1.join(df2, JoinType::Inner, &[\"a\"], &[\"a\"])?;\r\n\r\n    let batches = a.collect().await?;\r\n    assert_eq!(batches.len(), 1);\r\n\r\n    Ok(())\r\n}\r\n```\r\n\u00a0\r\n\r\nWhen the create dataframes via `ctx.table`, they receive a clone of the \\`ExecutionContextState` If at a later stage the context receives a new table, that table will not be part of the state on the first DataFrame. On a Join op, the left DataFrame's state is passed to the newly created DataFrame, which is then used in collect(). Because the right side has a table not in the state of the left, the execution fails.\r\n\r\n\u00a0\r\n\r\nWe may need an Arc<Mutex<`ExecutionContextState`>> to share a common mutable state across multiple DataFrames. Alternatively, not require tables to be registered in the context to be used by DataFrames.\r\n\r\nNote that the current example in `DataFrame::join` docs works because the table is registered for both DataFrames.",
+        "created_at": "2020-12-08T07:36:18.000Z",
+        "updated_at": "2020-12-24T18:54:51.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust - DataFusion",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-12-16T21:30:26.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-12-08T07:43:20.826Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10844?focusedCommentId=17245717) by Jorge Leit\u00e3o (jorgecarleitao):*\ncc `[~andygrove]`"
+        },
+        {
+            "created_at": "2020-12-08T19:16:44.433Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10844?focusedCommentId=17246096) by Jorge Leit\u00e3o (jorgecarleitao):*\nThis is not a problem. I misunderstood the issue. Sorry for the confusion."
+        },
+        {
+            "created_at": "2020-12-08T19:26:13.475Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10844?focusedCommentId=17246101) by Jorge Leit\u00e3o (jorgecarleitao):*\nI re-opened the issue with a complete example. There is indeed a problem of how we share context state between DataFrames. cc `[~alamb]` , as you probably get affected by this."
+        },
+        {
+            "created_at": "2020-12-16T21:30:26.159Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10844?focusedCommentId=17250649) by Andrew Lamb (alamb):*\nIssue resolved by pull request 8911\n<https://github.com/apache/arrow/pull/8911>"
+        }
+    ]
+}

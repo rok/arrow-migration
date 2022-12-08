@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Java] Arrow to JDBC ArrowVectorIterator with does not terminate with empty result set",
+        "body": "***Note**: This issue was originally created as [ARROW-16035](https://issues.apache.org/jira/browse/ARROW-16035). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nUsing an ArrowVectorIterator built from a JDBC Result Set that is empty causes the iterator to never terminate.\u00a0\r\n```java\n\r\nArrowVectorIterator iterator =\r\n    JdbcToArrow.sqlToArrowVectorIterator(conn.createStatement()\r\n        .executeQuery(\"select 1 from table1 where false\"), config); \n```\r\n\u00a0\r\n\r\nIt appears as though this is due to the implementation of the [hasNext()](https://github.com/apache/arrow/blob/master/java/adapter/jdbc/src/main/java/org/apache/arrow/adapter/jdbc/ArrowVectorIterator.java#L158) method.\r\n\r\nThe expectation is that the `isAfterLast()` method on a JDBC result set return true when the result set is empty. However, according to the [JDBC documentation](https://docs.oracle.com/en/java/javase/11/docs/api/java.sql/java/sql/ResultSet.html#isAfterLast()) it will always return false when the result set is empty.\u00a0\r\n> Returns:`{}true{`}\u00a0if the cursor is after the last row;\u00a0`false`\u00a0if the cursor is at any other position or the result set contains no rows\r\n\u00a0",
+        "created_at": "2022-03-26T00:55:30.000Z",
+        "updated_at": "2022-07-27T12:59:06.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-05-03T12:06:55.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-05-02T15:42:11.644Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16035?focusedCommentId=17530790) by @toddfarmer:*\nThank you for your bug report - validated as described."
+        },
+        {
+            "created_at": "2022-05-03T12:06:55.901Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16035?focusedCommentId=17531163) by David Li (lidavidm):*\nIssue resolved by pull request 13049\n<https://github.com/apache/arrow/pull/13049>"
+        },
+        {
+            "created_at": "2022-05-04T23:39:08.393Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16035?focusedCommentId=17531982) by Jonathan Swenson (jswenson):*\nJust a heads up, the isLast method is not necessarily supported by all JDBC ResultSet implementations and is called out as optional in the JDBC documentation.\r\n> Note: Support for the isLast method is optional for ResultSets with a result set type of TYPE_FORWARD_ONLY\r\nAdditionally it can be somewhat expensive as it may require fetching ahead\r\n> Note: Calling the method isLast may be expensive because the JDBC driver might need to fetch ahead one row in order to determine whether the current row is the last row in the result set.\r\n<https://docs.oracle.com/en/java/javase/11/docs/api/java.sql/java/sql/ResultSet.html#isLast()>\r\n\r\n\u00a0\r\n\r\nThe previous implementation, using isAfterLast() supposedly is expected to be implemented by all JDBC drivers, or at least is not called out as optional.\r\n\r\n\u00a0\r\n\r\ncc @toddfarmer I'm not sure if this will further reduce the number of JDBC drivers that are supported.\u00a0"
+        },
+        {
+            "created_at": "2022-05-09T20:20:10.338Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16035?focusedCommentId=17534011) by @toddfarmer:*\n`[~jswenson]` : Thanks for your review and comments!\u00a0 Here's my thinking:\r\n\r\nI understand the comment about ResultSet.isLast() being optional only for TYPE_FORWARD_ONLY ResultSets.\u00a0 I see the same note about optional support in the [documentation for isAfterLast()](https://docs.oracle.com/en/java/javase/11/docs/api/java.sql/java/sql/ResultSet.html#isAfterLast()):\r\n```java\n\r\nboolean\u00a0isAfterLast() throws\u00a0SQLException\r\n\r\nRetrieves whether the cursor is after the last row in this\u00a0ResultSet\u00a0object.\r\n\r\nNote:Support for the\u00a0isAfterLast\u00a0method is optional for\u00a0ResultSets with a result set type of\u00a0TYPE_FORWARD_ONLY \n```\r\nWhile it's possible that a JDBC driver offers support for one of the above methods, but not the other, I considered them effectively equivalent for our purposes.\u00a0 Both are optional in the same context, one is potentially expensive, the other ambiguous in the case of empty results.\u00a0 In the event of a JDBC driver electing to not support these methods, there is no mechanism prior to the first time the underlying ResultSet is read to assess whether an empty ResultSet has been supplied - we literally have to call ResultSet.next() to see what gets returned.\u00a0 That doesn't happen during initialization of the ArrowVectorIterator object - it only happens when\u00a0ArrowVectorIterator.next() is called.\u00a0 That effectively means that there is no way to support ArrowVectorIterator.hasNext() without first calling ArrowVectorIterator.next() - at least in the context where the JDBC driver vendor has elected to not implement the optional methods.\r\n\r\nWe could elect to have ArrowVectorIterator.hasNext() return true until ArrowVectorIterator.next() has been called, and rely entirely on the added \"readComplete\" variable to indicate when the ResultSet has been fully read or not.\u00a0 That would result in the following strange behavior, though:\r\n```java\n\r\nArrowVectorIterator iter = JdbcToArrow.sqlToArrowVectorIterator(emptyResultSet, config);\r\nboolean willBeTrue = iter.hasNext();  // always true until next() is called\r\nVectorSchemaRoot root = iter.next();  // reads ResultSet for first time, discovers it's empty\r\nint willBeZero = root.getRowCount();  // no rows!\r\nboolean willBeFalse = iter.hasNext(); // now is false after reading ResultSet\n```\r\nEffectively, this would make ArrowVectorIterator _always_ return at least one VectorSchemaRoot, even when the underlying ResultSet is empty.\u00a0 I'm not entirely clear whether this is acceptable.\r\n\r\nWhile not really related to your overall point, I'm having difficulty identifying a context in which ResultSet.isLast() would be expensive, while ResultSet.isAfterLast() would not be."
+        },
+        {
+            "created_at": "2022-05-09T20:36:55.362Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16035?focusedCommentId=17534014) by @toddfarmer:*\nI have growing confidence that the behavior I describe above is actually desired, after reviewing the [Java Iterator documentation](https://docs.oracle.com/javase/8/docs/api/java/util/Iterator.html), which says:\r\n```java\n\r\nReturns\u00a0true\u00a0if the iteration has more elements. (In other words, returns\u00a0true\u00a0if\u00a0next()\u00a0would return an element rather than throwing an exception.) \n```\r\nCalling ArrowVectorIterator.next() for the first time on an empty ResultSet does not throw an exception, and does return a VectorSchemaRoot object.\u00a0 That it happens to represent (possibly zero) vectors, each with zero rows is immaterial."
+        },
+        {
+            "created_at": "2022-05-09T23:23:25.787Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16035?focusedCommentId=17534049) by Jonathan Swenson (jswenson):*\nThanks @toddfarmer I didn't realize that isAfterLast is also optional. I now see that using isAfterLast was discussed back when it was added as well. Avoiding using these optional features is likely desirable, but this doesn't add any _extra_ incompatibility.\r\n\r\nI'm looking into using the JDBC -> arrow functionality with a variety of different JDBC drivers in the future, but I'm currently not aware of which JDBC drivers implement all of these optional features.\u00a0\r\n\r\nI believe that the \"empty\" vector schema root makes sense as it can also return schema metadata about the (empty) result set which mirrors the JDBC ResultSet metadata associated with running a SQL query JDBC query.\u00a0"
+        }
+    ]
+}

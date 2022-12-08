@@ -1,0 +1,40 @@
+{
+    "issue": {
+        "title": "[C++] Implement work-stealing scheduler / multiple queues in ThreadPool",
+        "body": "***Note**: This issue was originally created as [ARROW-10117](https://issues.apache.org/jira/browse/ARROW-10117). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis involves a change from a single task queue shared amongst all threads to a per-thread task queue and the ability for idle threads to take tasks from other threads' queues (work stealing). \r\n\r\nAs part of this, the task submission API would need to be evolved in some fashion to allow for tasks related to a particular workload to end up in the same task queue",
+        "created_at": "2020-09-28T14:21:26.000Z",
+        "updated_at": "2022-07-12T14:04:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-05-17T22:41:52.199Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10117?focusedCommentId=17346470) by Weston Pace (westonpace):*\nI'm a little confused by the word \"workload\" in the second paragraph.\u00a0 Traditional work stealing attempts to keep tasks together based on thread/core to preserve cache coherency.\u00a0 This is what appears to be described in the first paragraph.\r\n\r\n\u00a0\r\n\r\nIn the second paragraph are you asking for the capability to also group tasks based on workload?\u00a0 If so, I'm not sure what the benefit would be.\u00a0 If not, I don't think we'll end up needing to modify the API.\u00a0 A task can keep a thread_local reference to its queue."
+        },
+        {
+            "created_at": "2021-05-19T14:24:35.094Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10117?focusedCommentId=17347712) by Weston Pace (westonpace):*\nI'm willing/interested in taking a stab at this but I'm wondering a bit about evaluation and warning up-front that I don't expect to see any benefit anywhere.\u00a0 Pretty much all existing parallelism can be broken down into two categories:\r\n\r\nTask-per-batch - In this case we are creating a new task to handle a new file or block of data.\u00a0 For example, when scanning a dataset with multiple files we create a task for each file.\u00a0 When doing asynchronous readahead we create a task per record batch.\r\n\r\nTask-per-column - In a few places we take this approach to divide expensive work across columns.\r\n\r\n\u00a0\r\n\r\nFor future work (execution engine) the latest discussion seems to be around \"morsel-driven execution model\".\u00a0 If I am stripping away the academia properly a \"morsel-driven execution model\" simply means \"task-per-batch\".\r\n\r\n\u00a0\r\n\r\nTask-per-batch execution will never really benefit from a work-stealing scheduler.\u00a0 Each task is operating on a brand new chunk of data.\u00a0 There isn't any cache coherency to benefit from.\r\n\r\nTask-per-column might benefit in two situations:\r\n\r\n\u00a0 \\* If there is enough other work going on at the same time then multiple queues would be a way to disable task-per-column\r\n\r\n\u00a0 \\* If used within a task-per-batch parallel pipeline this would disable task-per-column dynamically if there were sufficient batches (this is basically a special case of the above bullet).\r\n\r\n\u00a0\r\n\r\nThere is one other special case of parallelism and that is the background readers.\u00a0 One could theorize that multiple queues synchronized across the I/O and CPU thread pools might allow you to match up your I/O core with your processing core.\u00a0 However, in practice I have found that if the pipeline is not I/O bound then it's a moot point and if the pipeline is I/O bound then the context switch overhead is minimal.\r\n\r\n\u00a0\r\n\r\nTL;DR: I will create an artificial benchmark that should see obvious benefits from work stealing.\u00a0 I'll create a work stealing thread pool using the artificial benchmark to verify I did things correctly.\u00a0 I'll then turn it on, run conbench, and cross my fingers but I'm not expecting we will see any change (but I'm more than happy to be pleasantly surprised)."
+        },
+        {
+            "created_at": "2021-05-28T04:01:44.580Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10117?focusedCommentId=17352944) by Weston Pace (westonpace):*\nOne interesting thing to note as my work on this is progressing is that the difference between how tasks are scheduled (ARROW-12903) is having a greater and greater impact on performance.\u00a0 As an example, in my latest benchmarks, a tiny reference workload runs at ~2 million tasks per second.\u00a0 With 8 threads and poor scheduling we end up with 620k tasks per second (this is similar to the baseline performance).\u00a0 With 8 threads and ideal scheduling we end up with 7-8 million tasks per second.\r\n\r\nIt's possible we can find some ways to better handle the worst-case scenario but it's not something I'm going to be tackling as part of this PR."
+        },
+        {
+            "created_at": "2021-05-28T04:05:05.167Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10117?focusedCommentId=17352945) by Weston Pace (westonpace):*\nAnother note is that a lot of academic literature (and techniques like Tokio's thread pool) are willing to introduce a lot of complexity to maximize thread pool performance.\u00a0 However, Arrow does not spawn millions of thread tasks today.\u00a0 Tools like morsel-driven execution and fused operators allow us to run with thousands of thread tasks per second.\u00a0 It's not clear to me how much maintenance headaches we want to introduce to squeeze every last drop out of the thread pool.\u00a0 At the moment I'm aiming to create the complex case first, determine performance, implement a more naive work-stealing implementation, and then re-benchmark so we can be more informed in the decision."
+        },
+        {
+            "created_at": "2021-06-07T19:01:09.745Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10117?focusedCommentId=17358803) by Weston Pace (westonpace):*\nOther than the minor improvement to thread pool overhead described above I saw no real significant improvements with the work stealing thread pool.\u00a0 I'd like to get ARROW-12878 merged as it will make future experiments on thread pool strategies easier to perform.\u00a0 We could perhaps merge ARROW-12902 but I could understand if there was a desire to wait for some actual macro-improvement before doing so.\u00a0 I've attached a summary of my investigation.[Work_Stealing_Thread_Pool_Investigation.pdf](Work_Stealing_Thread_Pool_Investigation.pdf)"
+        },
+        {
+            "created_at": "2022-07-12T14:04:25.328Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10117?focusedCommentId=17565597) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

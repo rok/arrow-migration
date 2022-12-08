@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] Always raise ArrowTypeError instead of TypeError inside pyarrow.array",
+        "body": "***Note**: This issue was originally created as [ARROW-7855](https://issues.apache.org/jira/browse/ARROW-7855). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe following data structure passed to `pa.array` raises a generic `TypeError`:\r\n```java\n\r\nimport pyarrow as pa\r\npa.array([{'TestKey': [123456, 'foo']}])\r\n```\r\n```java\n\r\nTraceback (most recent call last):\r\n File \"pyarrow_list_test.py\", line 30, in <module>\r\n pa_array = pa.array([\\{'TestKey': [123456, 'foo']}])\r\n File \"pyarrow/array.pxi\", line 269, in pyarrow.lib.array\r\n File \"pyarrow/array.pxi\", line 38, in pyarrow.lib._sequence_to_array\r\nTypeError: an integer is required (got type str)\r\n```\r\n\r\nI understand there may be a way to overcome this by setting the `type` value as an argument to `pa.array`, but the use case here is storing results of a SQL query where the structure/type of the column is unknown.\r\n\r\nIf Arrow is ultimately unable to handle this data structure without a predefined `type` passed to `pa.array`, can the exception at least us the PyArrow namespace (e.g. `pa.lib.ArrowTypeError` or `pa.lib.ArrowNotImplementedError).\r\n\r\nAny other workaround suggestions welcome.",
+        "created_at": "2020-02-13T22:49:17.000Z",
+        "updated_at": "2021-02-17T18:11:18.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-02-17T18:11:18.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-02-14T10:06:35.661Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7855?focusedCommentId=17036862) by Joris Van den Bossche (jorisvandenbossche):*\nWhat would you exactly expect in this case? Such a dict will be interpreted as a StructType, and the values of a struct can be lists (as you have here), but Arrow only supports homogeneously typed lists (unless you use a UnionType, but that is not something that can be inferred I think)"
+        },
+        {
+            "created_at": "2020-02-14T14:00:22.376Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7855?focusedCommentId=17036990) by Wes McKinney (wesm):*\n`[~robdiciuccio]` I am curious what you want to do with the data after you create the array. If you're interacting with SQL, at some point you need to homogenize the data to all be of the same type. There are issues about inferring unions (see ARROW-2774) but this will probably be something that has to be opted in to explicitly like `pa.array(data, allow_unions=True)` once it is even implemented"
+        },
+        {
+            "created_at": "2020-02-14T17:05:12.159Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7855?focusedCommentId=17037114) by Rob DiCiuccio (robdiciuccio):*\n`[~wesm]` We're ultimately creating a PyArrow Table from SQL query (DB-API) results. In some cases (with databases such as Presto, Postgres, etc.) there may be nested data structures such as the one above in a column. We're using PyArrow to infer column data types, as DB-API drivers vary greatly in the metadata that's returned, and numpy/pandas lack proper support for nullable data types. We're also using Arrow as a means to serialize data to disk and rehydrate to a new Table instance.\r\n\r\nWe've been working around some of the issues with nested data types by serializing to JSON strings, which is not ideal, but is a functional workaround. Here's some additional context on how we're handling this: https://github.com/apache/incubator-superset/pull/9139\r\n\r\nAny suggestions on how to better handle nested data types of unknown shape is appreciated."
+        },
+        {
+            "created_at": "2020-02-17T11:03:11.538Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7855?focusedCommentId=17038245) by Wes McKinney (wesm):*\nI'm not sure what API would be helpful to you, if there is one other than what is already available we can take a closer look. I agree that raising `ArrowTypeError` (inheriting from TypeError) consistently or `ArrowInvalid` (inheriting from ValueError) (https://github.com/apache/arrow/blob/master/python/pyarrow/error.pxi#L27) would be better. "
+        },
+        {
+            "created_at": "2021-02-17T18:11:18.738Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7855?focusedCommentId=17286043) by Antoine Pitrou (apitrou):*\nWhile ArrowTypeError exists, it doesn't seem useful to me to mandate that PyArrow never raises a plain TypeError. Closing."
+        }
+    ]
+}

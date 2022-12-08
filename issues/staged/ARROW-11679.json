@@ -1,0 +1,34 @@
+{
+    "issue": {
+        "title": "[R] Optimal arrow queries for benchmarking",
+        "body": "***Note**: This issue was originally created as [ARROW-11679](https://issues.apache.org/jira/browse/ARROW-11679). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi\r\nHello,\r\n\r\nWe are running a continuous benchmarking project (https://h2oai.github.io/db-benchmark). In recent days we added Arrow project.\r\n\r\nIt uses R's dplyr and ArrowTable as backend. Queries have been written based on arrow R package documentation.\r\n\r\nThere are 10 grouping queries:\r\n\r\n```\r\n1. q1: sum v1 by id1\n   AT %>% select(id1, v1) %>% group_by(id1) %>% collect() %>% summarise(v1=sum(v1, na.rm=TRUE))\n   \n1. q2: sum v1 by id1:id2\n   AT %>% select(id1, id2, v1) %>% group_by(id1, id2) %>% collect() %>% summarise(v1=sum(v1, na.rm=TRUE))\n   \n1. q3: sum v1 mean v3 by id3\n   AT %>% select(id3, v1, v3) %>% group_by(id3) %>% collect() %>% summarise(v1=sum(v1, na.rm=TRUE), v3=mean(v3, na.rm=TRUE))\n   \n1. q4: mean v1:v3 by id4\n   AT %>% select(id4, v1, v2, v3) %>% group_by(id4) %>% collect() %>% summarise_at(.funs=\\\"mean\\\", .vars=c(\\\"v1\\\",\\\"v2\\\",\\\"v3\\\"), na.rm=TRUE)\n1. q5: sum v1:v3 by id6\n   AT %>% select(id6, v1, v2, v3) %>% group_by(id6) %>% collect () %>% summarise_at(.funs=\\\"sum\\\", .vars=c(\\\"v1\\\",\\\"v2\\\",\\\"v3\\\"), na.rm=TRUE)\n   \n1. q6: median v3 sd v3 by id4 id5\n   AT %>% select(id4, id5, v3) %>% group_by(id4, id5) %>% collect() %>% summarise(median_v3=median(v3, na.rm=TRUE), sd_v3=sd(v3, na.rm=TRUE))\n   \n1. q7: max v1 - min v2 by id3\n   AT %>% select(id3, v1, v2) %>% group_by(id3) %>% collect() %>% summarise(range_v1_v2=max(v1, na.rm=TRUE)-min(v2, na.rm=TRUE))\n   \n1. q8: largest two v3 by id6\n   AT %>% select(id6, largest2_v3=v3) %>% filter(!is.na(largest2_v3)) %>% arrange(desc(largest2_v3)) %>% group_by(id6) %>% filter(row_number() <= 2L) %>% compute()\n   \n1. q9: regression v1 v2 by id2 id4\n   AT %>% select(id2, id4, v1, v2) %>% group_by(id2, id4) %>% collect() %>% summarise(r2=cor(v1, v2, use=\\\"na.or.complete\\\")^2)\n   \n1. q10: sum v3 count by id1:id6\n   AT %>% select(id1, id2, id3, id4, id5, id6, v3) %>% group_by(id1, id2, id3, id4, id5, id6) %>% collect() %>% summarise(v3=sum(v3, na.rm=TRUE), count=n())\n   ```\n   \n   Full benchmark script can be found at https://github.com/h2oai/db-benchmark/blob/master/arrow/groupby-arrow.R\n   \n   ----\n   \n   As per my understanding, all above queries (maybe excluding query 8) will not utilize any arrow computation, as of now. It is because those operations are not yet implemented in arrow, and they are falling back to dplyr implementation.\n   \n   According to Neal's presentation I watched recently, code written now will over time get improved by improvements in arrow implementation. Continuous benchmark I am working on upgrades software automatically, therefore I would like to use the fact to write code now, and have it faster in future, as arrow implementation progresses. I believe the mentioned queries will not satisfy that, because of `collect()` call in the middle. AFAIU it needs a `compute()` call at the end instead (like now in query 8).\n   \n   Is there a way to write this code to be optimal now, and also optimal in future. Similarly as presented by Neal in his presentation?",
+        "created_at": "2021-02-17T19:35:20.000Z",
+        "updated_at": "2022-08-27T14:41:57.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Benchmarking",
+            "Component: R",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2021-02-23T18:02:22.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-02-17T19:55:52.098Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11679?focusedCommentId=17286117) by Wes McKinney (wesm):*\nI would suggest waiting until these queries can be evaluated natively against Arrow data otherwise you're largely looking at dplyr benchmarks. We're working on implementing the algorithms so it could be anywhere from 3-6 months from now, maybe sooner. "
+        },
+        {
+            "created_at": "2021-02-17T20:18:35.342Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11679?focusedCommentId=17286128) by Neal Richardson (npr):*\nThanks `[~jangorecki]` for adding arrow to your benchmarking. Since you're working against an in-memory Arrow Table (and not a Dataset, which may be backed by lots of files not in memory), you actually don't need to `collect()` in the query, `summarize()` will `collect()` the columns it needs. We don't do that automatically for Datasets because we thought it best to make explicit when you were pulling data (potentially too much data) into R. Regarding `compute()`, I don't think that's implemented.\r\n\r\n`[~wesm]` is right, currently these benchmarks would mostly show dplyr's grouped aggregation. If you're interested in showing improvements over time as we implement the Arrow-native query engine, you might want to go forward with them now. If you're only interested in the latest snapshot comparison, it's probably not that informative until we're computing more in Arrow."
+        },
+        {
+            "created_at": "2021-02-23T18:01:51.474Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11679?focusedCommentId=17289226) by Jan Gorecki (jangorecki):*\nThank you both for comments.\r\nYes, we are tracking timings over time, so they can be used to track performance regression or improvements. There are already 90000 timing measurements since Dec 2018, all available in ./time.csv.\r\nMoreover, we have been asked multiple times for adding Arrow to benchmark suite by community members of different programming languages.\r\nNext \"task\" to be added to benchmark is reading csv data, so something where Arrow can already shine.\r\nI amended code according to Neal's suggestions. I also added note in benchmark report explaining that Arrow's \"groupby\" falls back to dplyr at the moment."
+        },
+        {
+            "created_at": "2022-08-27T14:41:57.501Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11679?focusedCommentId=17585951) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

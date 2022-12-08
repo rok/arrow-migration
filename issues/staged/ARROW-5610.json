@@ -1,0 +1,117 @@
+{
+    "issue": {
+        "title": "[Python] Define extension type API in Python to \"receive\" or \"send\" a foreign extension type",
+        "body": "***Note**: This issue was originally created as [ARROW-5610](https://issues.apache.org/jira/browse/ARROW-5610). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn work in ARROW-840, a static `arrow.py_extension_type` name is used. There will be cases where an extension type is coming from another programming language (e.g. Java), so it would be useful to be able to \"plug in\" a Python extension type subclass that will be used to deserialize the extension type coming over the wire. This has some different API requirements since the serialized representation of the type will not have knowledge of Python pickling, etc. ",
+        "created_at": "2019-06-14T13:22:03.000Z",
+        "updated_at": "2019-09-03T11:47:07.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-09-03T11:46:55.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-06-14T14:40:34.705Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16864148) by Antoine Pitrou (apitrou):*\nIs it the extension type that must be customized or just the array subclass?"
+        },
+        {
+            "created_at": "2019-06-14T19:08:15.616Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16864364) by Wes McKinney (wesm):*\nSuppose that Java sends an extension type with name `orgname.special_type`. We want to be able to write:\r\n\r\n```Java\n\r\nclass OrgSpecialType(pa.ExtensionType):\r\n    ...\r\n\r\nclass OrgSpecialArray(pa.ExtensionArray):\r\n    ...\r\n```\r\n\r\nand some API for registering these Python types as the landing zone for the `orgname.special_type` data. "
+        },
+        {
+            "created_at": "2019-06-19T02:27:25.918Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16867170) by Wes McKinney (wesm):*\nGiven everything else needed for the release, I moved this to the 1.0.0 milestone"
+        },
+        {
+            "created_at": "2019-07-01T19:26:31.060Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16876438) by Wes McKinney (wesm):*\ncc `[~jorisvandenbossche]`"
+        },
+        {
+            "created_at": "2019-07-01T19:27:05.893Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16876439) by Wes McKinney (wesm):*\nI updated the issue title to indicate that we should be able to _send_ extension type metadata outside of the current `arrow.py_extension_type`. A more general serialization API will be called for"
+        },
+        {
+            "created_at": "2019-07-09T21:54:34.435Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16881581) by Joris Van den Bossche (jorisvandenbossche):*\nI am trying to wrap my head around what is needed here. For the \"send\" part, we want to create a RecordBatch with an array that has an ExtensionType with a custom name. Currently, in C++ to have an ExtensionType with a custom name, you need to create and register a subclass (eg the `UUIDType` in the tests).  \r\n\r\nSo if we want to create and register such a subclass from python, does that mean we need to make a new C++ subclass from cython (not sure if that is actually possible) ? Or, are there ways to circumvent the need of a new class in C++ per extension type? Eg by having a single C++ class that takes the name as constructor argument (so where the `extension_name` attribute is not a constant), and then register an instance of that?\r\n\r\nCurrently, the Python types can be constructed from the C++ type because the pickled type is stored as the serialized metadata. For such a generic extension type that can be send to or come from other languages, we can't use pickle. Would we then need some **python-specific** registry (different from the C++ registry of extension types) for mapping extension names to a python constructor?"
+        },
+        {
+            "created_at": "2019-07-10T10:35:30.373Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16881941) by Antoine Pitrou (apitrou):*\nI don't understand what Wes means either (\"\"\"_send_ extension type metadata outside of the current `arrow.py_extension_type`. A more general serialization API will be called for\"\"\")."
+        },
+        {
+            "created_at": "2019-07-10T12:17:14.282Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16881990) by David Li (lidavidm):*\nRight now, if you define an extension type in Java whose type name is not \"arrow.py_extension_type\", you have no way of writing the Python equivalent. I think what's needed is a C++ extension type whose implementation dispatches to Python callbacks, which can be instantiated and registered with an arbitrary name. Basically, what Joris suggests with the extension type that can be parameterized with a name.\r\n\r\nI think the implementation would be similar to Flight, where you have a C++ subclass that contains a set of function pointers and a Python object, and invokes those functions by passing them the Python object and the C++ arguments. The functions would be defined in Cython and take care of bridging between the two.\r\n\r\nI don't think there needs to be a Python-specific registry, just a way to hook arbitrary Python into the extension type metadata (de)serialization. Right now, the C++ subclass calls a specific classmethod that tries to unpickle the metadata, but there's no reason why it has to be pickle."
+        },
+        {
+            "created_at": "2019-07-10T12:50:59.457Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16882018) by Antoine Pitrou (apitrou):*\nI don't understand what it means to \"write the Python equivalent\". Your extension type is implemented in Java: why would you reimplement it in Python?\r\n\r\nYou can already implement extension types in Python, and you can already use in Python extension types defined in other languages (though the latter is currently not tested, because we first need to expose libarrow_testing in a Cython module). What's missing exactly?\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-07-10T12:58:35.507Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16882027) by David Li (lidavidm):*\nSay in Java, you have an extension type representing an IP address. Its type name is \"ip\" and its metadata indicates whether it's IPv4 or IPv6. You want to transfer a table containing a column of that type to and from Python. Right now, you can read that data from Python, but you can't create a table with that type. You could implement an extension type that behaves the same, but Java wouldn't recognize it, because the type name has to be \"arrow.py_extension_type\". You also can't deserialize the metadata written by Java or write metadata that Java can read, as it's not in pickle format."
+        },
+        {
+            "created_at": "2019-07-10T13:06:29.431Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16882035) by Joris Van den Bossche (jorisvandenbossche):*\n> You can already implement extension types in Python, and you can already use in Python extension types defined in other languages\r\n\r\nSo assume a UUIDType extension type is implemented in Java or Spark, and it is send to a Python process with arrow's communication layer. How would it look like with the current functionality in Python? \r\nAs I understand, you can only have a Python extension type with the name `arrow.py_extension_type` (although it can have a different serialisation), so how can you preserve the name of the UUIDType?\r\n\r\n(sorry, posted without seeing the previous response. It's duplicative of `[~lidavidm]`'s comment)"
+        },
+        {
+            "created_at": "2019-07-10T13:09:26.126Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16882036) by Antoine Pitrou (apitrou):*\n> You want to transfer a table containing a column of that type to and from Python. Right now, you can read that data from Python, but you can't create a table with that type\r\n\r\nI'm curious, which error do you get when trying to do so?\r\n\r\n> You also can't deserialize the metadata written by Java or write metadata that Java can read, as it's not in pickle format.\r\n\r\nI think you're mixing up extension types defined **in Python** and extension types defined in other languages. I don't remember if the Python BaseExtensionType class lets you access the raw unserialized metadata. But if it doesn't, it's just a single property to add to that class ;)\r\n\r\nAs for _writing_ arbitrary metadata in the name of an existing ExtensionType, C++ doesn't allow you to do that IIRC, and Python just wraps the C++ class. So when you're complaining about a missing facility in Python, it seems you're actually complaining about a missing facility in C++."
+        },
+        {
+            "created_at": "2019-07-10T13:14:32.537Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16882039) by David Li (lidavidm):*\nHmm, to be frank, I haven't gotten a chance to evaluate the API yet, I'm just going off of reading the implementation. I'll follow up once I do get a chance to try it out. But I'm still not sure why the language that the type is defined in should matter - I thought the idea is there is an abstract type, and you implement it for each language, and right now the main limitation is that you can't implement a Python type with an arbitrary name. (i.e. I want a java UuidType, which uses java's UUID class, to map seamlessly to a Python UuidType using the uuid module).\r\n\r\nBut I suppose I should put up some code before I keep talking!"
+        },
+        {
+            "created_at": "2019-07-10T13:21:14.228Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16882049) by Antoine Pitrou (apitrou):*\nI see. My assumption was that any non-Python extension type used in Python would have to be implemented in C++, and that a \"Python extension type\" would simply be an extension type whose single implementation would be in Python.\r\n\r\nApparently there was a misunderstanding on the overall design of this... I'll let you guys figure this out and unsubscribe from this issue."
+        },
+        {
+            "created_at": "2019-07-10T13:30:24.567Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16882059) by Joris Van den Bossche (jorisvandenbossche):*\n> I see. My assumption was that any non-Python extension type used in Python would have to be implemented in C++\r\n\r\nI think this was indeed the misunderstanding between us in this thread, why we were talking past each other. I (and I think David as well) was assuming this issue is about figuring out how to do that _without_ needing to write custom C++ for each extension type defined in another language."
+        },
+        {
+            "created_at": "2019-07-10T13:56:37.836Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16882082) by Wes McKinney (wesm):*\nRight, one purpose of extension types is to communicate proprietary type metadata across language boundaries. I think we need to allow people to create an implementation of a type entirely in Python that can communicate with other languages (either receive something defined elsewhere, or be understood by another language).\r\n\r\nIf someone isn't up to the task of doing this, I can make some time in my schedule for it in the next 6-8 weeks. Let me know"
+        },
+        {
+            "created_at": "2019-07-15T14:30:03.671Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16885281) by David Li (lidavidm):*\n`[~wesmckinn]` I'll try to take a pass this week, if time permits; we would like this functionality. (By the way, is there a Jira explicitly for being able to hook into to_pandas, or a suggested way to efficiently do a custom Pandas conversion?)"
+        },
+        {
+            "created_at": "2019-08-02T14:47:52.552Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16898927) by Joris Van den Bossche (jorisvandenbossche):*\n> I'll try to take a pass this week, if time permits; we would like this functionality\r\n\r\n`[~lidavidm]` Did you further look at this?\r\n\r\n> By the way, is there a Jira explicitly for being able to hook into to_pandas, or a suggested way to efficiently do a custom Pandas conversion?)\r\n\r\nThere is ARROW-2428 for this about a hook into `to_pandas` to specify a custom conversion (there is also ARROW-5271 for the other way around: be able to specify the final arrow array in pandas -> arrow conversion)."
+        },
+        {
+            "created_at": "2019-08-02T14:52:32.397Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16898956) by David Li (lidavidm):*\nMy apologies, I ended up being too busy to look at this.\r\n\r\nThanks for the issue pointers."
+        },
+        {
+            "created_at": "2019-08-07T14:53:37.429Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16902129) by Joris Van den Bossche (jorisvandenbossche):*\n`[~lidavidm]` no apologies needed, it was just a question to check the status :)\r\n\r\n> > You want to transfer a table containing a column of that type to and from Python. Right now, you can read that data from Python, but you can't create a table with that type\r\n>\r\n> I'm curious, which error do you get when trying to do so?\r\n\r\nI tried this out, and so if you have an IPC message that contains an extension type unknown to Python / C++, and you read that into a (pyarrow) Table, you don't get an error at the moment, but it falls back to the storage type. But which also means that you loose all information about the extension type defined elsewhere (as discussed above).\r\n\r\nTo me, it seems that we would need some way to have an \"unknown extension type\" in C++ that can have arbitrary name and metadata to be able to receive such data."
+        },
+        {
+            "created_at": "2019-08-07T15:39:38.430Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16902176) by Joris Van den Bossche (jorisvandenbossche):*\n> But which also means that you loose all information about the extension type defined elsewhere (as discussed above).\r\n\r\nCorrecting myself: this is not fully True. The _type_ is no longer an extension type (but the storage type), but the _field_ in the schema still has the metadata. \r\n\r\nFor example, reading an IPC file with python for an not-registered type (created from C++ where the 'ext' column was a Uuid type as defined in the tests):\r\n\r\n```Java\n\r\nIn [31]: f_ext = pa.ipc.open_stream(\"repos/arrow/cpp/build/examples/arrow/arrow-example-ipc-extension.arrow\")\r\n\r\nIn [32]: table = f_ext.read_all() \r\n\r\nIn [33]: table\r\nOut[33]: \r\npyarrow.Table\r\nint: int64\r\next: int64\r\n\r\nIn [35]: table.schema.field_by_name('ext')                                                                                                                                                                         \r\nOut[35]: pyarrow.Field<ext: int64>\r\n\r\nIn [36]: table.schema.field_by_name('ext').metadata                                                                                                                                                                \r\nOut[36]: \r\n{b'ARROW:extension:metadata': b'uuid-type-unique-code',\r\n b'ARROW:extension:name': b'uuid'}\r\n```\r\n\r\n"
+        },
+        {
+            "created_at": "2019-08-12T14:31:54.999Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16905256) by Joris Van den Bossche (jorisvandenbossche):*\nAfter looking at this some more, my idea to tackle this would be as follows:\r\n\r\nImplement a \"generic\" ExtensionType subclass in C++ (ARROW-6179) that allows a variable \"extension_name\" (and optionally metadata) as argument, and thus doesn't need to be subclassed to create a custom instance.   \r\nFrom Python, we can provide a class to interact with this (a class the user can further subclass, or by directly creating an instance of it) to have an extension type which name and metadata is used in IPC.\r\n\r\nThis is mainly for the sending part, and it wouldn't be registered as extension type in C++ . So for the receiving end, it would come back as an \"UnknownExtensionType\" (something already exists in the Python interface). In this design, if we want to have it come back as a specific ExtensionType subclass (without having it registered in C++), we might need a separate Python-specific registry.\r\n\r\nThe above approach seems doable to me. And also seems simpler as some C++ -> Python callbacks to have code in C++ interact with a custom Python class. \r\n\r\nThoughts on this?"
+        },
+        {
+            "created_at": "2019-08-12T17:44:18.888Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16905428) by David Li (lidavidm):*\n`[~jorisvandenbossche]` the approach makes sense to me. I assume the generic ExtensionType would have a Python \"vtable\" for Python subclasses to implement the C++ methods, and that each Python subclass would somehow register a new instance of the C++ type (with corresponding Python method references) with the extension type registry? The registration method would need to support parameterized types as well (i.e. registering multiple instances of the same type with different parameters).\r\n\r\nThere's still the reference loop between C++ and Python. In this case, since you have no way of re-instantiating the Python instance if the weak reference is dropped, you'd need some other way - so you might have to make the Python-side registry, as a way to get around the reference loop. (Then, during interpreter shutdown, you would drop all the C++ extension type instance references, then drop the Python references.)\r\n\r\nI think then, on the C++ side, the generic extension type instance would get instantiated, but there would be no way to instantiate the corresponding Python class without a separate registry, as you mention. So the unknown extension type then comes into play. Alternatively, Python subclasses could be required to register a factory method that takes the extension type name and metadata."
+        },
+        {
+            "created_at": "2019-08-15T14:16:40.434Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16908131) by Joris Van den Bossche (jorisvandenbossche):*\nOK, I am making some progress on this (I initially was disregarding the parametrized type case, so we indeed need C++ <-> Python interaction). I have basic roundtripping with a parametrized type working. Eg in Python an implementor can do:\r\n```java\n\r\nclass PeriodType(pa.GenericExtensionType):\r\n\r\n    def __init__(self, freq):\r\n# attributes need to be set first before calling super init (as that calls serialize)\r\n        self.freq = freq\r\n        pa.lib.GenericExtensionType.__init__(self, pa.int64(), 'pandas.period')\r\n        \r\n    def __arrow_ext_serialize__(self):\r\n        return \"freq={}\".format(self.freq).encode()\r\n    \r\n    @classmethod\r\n    def __arrow_ext_deserialize__(cls, storage_type, serialized):\r\n        serialized = serialized.decode()\r\n        assert serialized.startswith(\"freq=\")\r\n        freq = serialized.split('=')[1]\r\n        return PeriodType(freq)\r\n\r\nperiod_type = PeriodType('D')\r\npa.lib.register(period_type)\r\n```\r\nand that can roundtrip IPC with the \"pandas.period\" extension name (so not a generic \"arrow.py_extension\").\r\n\r\nI based the above interface (the `__arrow_ext_serialize_` _and ``_`_arrow_ext_deserialize__` methods to implement) on the existing `PyExtensionType` that Antoine implemented.\r\n> > I assume the generic ExtensionType would have a Python \"vtable\" for Python subclasses to implement the C++ methods\r\nSo currently I based myself on the existing `PyExtensionType` and copied the approach there to store a weakref to an instance and the class of the Python subclass the user defines. \r\n That seems to work, but I am not familiar enough with this to judge if the vtable approach (as used in PyFlightServer) would be better.\r\n> > The registration method would need to support parameterized types as well (i.e. registering multiple instances of the same type with different parameters).\r\nIs that needed? My current idea is that you would register a certain type once (with _some_ parametrization, so you don't have to register each possible parametrization). Because we register in C++ based on the name, so otherwise the name would need to include the parameter. Actually, writing this down now, that could also be an option (currently I use the serialized metadata for storing the parametrization).\r\n\r\nOther questions I still need to answer:\r\n - What to do with registration and unregistration? It would be nice if a user didn't need to register a type manually (in python that could be done with a metaclass to register the subclass on definition, but not sure that is possible in cython)\r\n Also for unregistering, since that is needed to avoid segfaults on shutdown, we probably need to keep a python side registry of the C++-registered types to ensure we unregister them on shutdown.\r\n - Do we want to keep the current `PyExtensionType` based on pickle? I think the main advantage compared to the new implementation is that when reading an IPC message, the type does not need to be registered to be recognized (for the unpickling, it is enough that the module is importable, but does not need to be imported manually by the user). But on the other hand it gives two largely overlapping alternatives.\r\n\r\nI will try to clean up and push to a draft PR, which will be easier to get an idea. \r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-09-03T11:46:55.294Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5610?focusedCommentId=16921362) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 5094\n<https://github.com/apache/arrow/pull/5094>"
+        }
+    ]
+}

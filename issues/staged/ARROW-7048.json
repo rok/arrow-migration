@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Java] Support for combining multiple vectors under VectorSchemaRoot",
+        "body": "***Note**: This issue was originally created as [ARROW-7048](https://issues.apache.org/jira/browse/ARROW-7048). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi,\r\n\r\n\u00a0\r\n\r\npyarrow.Table.combine_chunks provides a nice functionality of combining multiple batch records under a single\u00a0pyarrow.Table.\r\n\r\n\u00a0\r\n\r\nI am currently working on a downstream application which reads data from BigQuery. BigQuery storage api supports data output in Arrow format but streams data in many batches of size 1024 or less number of rows.\r\n\r\nIt would be really nice to have Arrow Java api provide this functionality under an abstraction like VectorSchemaRoot.\r\n\r\nAfter getting guidance from [~emkornfield@gmail.com], I tried to write my own implementation by copying data vector by vector using\u00a0TransferPair's copyValueSafe\r\n\r\nBut, unless I am missing some thing obvious, turns out it only copies one value at a time. That means a lot of looping trying\u00a0copyValueSafe millions of rows from source vector index to target vector index. Ideally I would want to concatenate/link the underlying buffers rather than copying one cell at a time.\r\n\r\n\u00a0\r\n\r\nEg, if I have :\r\n```java\n\r\nList<VectorSchemaRoot> batchList = new ArrayList<>();\r\ntry (ArrowStreamReader reader = new ArrowStreamReader(new ByteArrayInputStream(out.toByteArray()), allocator)) {\r\n    Schema schema = reader.getVectorSchemaRoot().getSchema();\r\n    for (int i = 0; i < 5; i++) {\r\n        // This will be loaded with new values on every call to loadNextBatch\r\n        VectorSchemaRoot readBatch = reader.getVectorSchemaRoot();\r\n        reader.loadNextBatch();\r\n        batchList.add(readBatch);\r\n    }\r\n}\r\n\r\n//VectorSchemaRoot.combineChunks(batchList, newVectorSchemaRoot);\n```\r\n\u00a0\r\n\r\nA method like VectorSchemaRoot.combineChunks(List<VectorSchemaRoot>)?\r\n\r\nI did read the VectorSchemaRoot discussion on\u00a0https://issues.apache.org/jira/browse/ARROW-6896\u00a0and am not sure if its the right thing to use here.\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\nPS. Feel free to update the title of this feature request with more appropriate wordings.\r\n\r\n\u00a0\r\n\r\nCheers,\r\n\r\nYogesh\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2019-11-02T02:48:48.000Z",
+        "updated_at": "2020-03-06T04:54:53.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-03-06T04:54:53.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-11-04T01:49:06.641Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7048?focusedCommentId=16966345) by Liya Fan (fan_li_ya):*\n`[~yogeshtewari]` Thanks a lot for opening this issue. \r\nI think your scenario represents some general requirements. IMO, to support your requirement, some fundamental primitives needs to be supported. \r\n\r\nI can think of two possible ways of solving the problem:\r\n\r\n1. support memory address linking at the ArrowBuf level. This may be impractical, as ArrowBuf is extremely performance critical.\r\n2. support bulk copying/appending API, with high performance. In the ideal case, a single copying should accomplish the task for each underlying ArrowBuf. The difficulty for this is that the solution must be provided case by case. For example, for FixedWidthVectors, we can extend the buffer, and perform the copying directly. For VariableWidthVectors, we need to transform the offset buffer to a delta buffer, do the copy, and then transform the delta buffer back to a partial sum buffer. This may involve another feature discussed in ARROW-6394.\r\n\r\nAnyway, I think the feature is useful, but it would be difficult to support it in a single step. "
+        },
+        {
+            "created_at": "2019-11-06T02:10:04.023Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7048?focusedCommentId=16968023) by Liya Fan (fan_li_ya):*\n`[~yogeshtewari]` I notice that the assignee of this issue is left empty. \r\nIf you don't mind, may I try to provide a solution to it?"
+        },
+        {
+            "created_at": "2019-11-06T05:55:26.026Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7048?focusedCommentId=16968099) by Yogesh Tewari (yogeshtewari):*\nSure [~fan_li_ya] . Go for it.\r\n\r\nSorry I couldn't respond earlier, but thanks for the comments. It makes sense."
+        },
+        {
+            "created_at": "2019-11-07T07:32:37.698Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7048?focusedCommentId=16968998) by Micah Kornfield (emkornfield@gmail.com):*\n\"For VariableWidthVectors, we need to transform the offset buffer to a delta buffer, do the copy, and then transform the delta buffer back to a partial sum buffer. This may involve another feature discussed in\u00a0ARROW-6394.\"\r\n\r\nI don't think a transformation between the two is necessary.\u00a0 Would you simply need to add a constant to each set of offset (i.e. translation back and forth is more costly then necessary)."
+        },
+        {
+            "created_at": "2019-11-07T07:55:12.874Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7048?focusedCommentId=16969016) by Liya Fan (fan_li_ya):*\n[~emkornfield@gmail.com] Agreed. Adding a constant to each offset is more efficient. "
+        },
+        {
+            "created_at": "2020-02-27T13:30:34.228Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7048?focusedCommentId=17046623) by Liya Fan (fan_li_ya):*\n`[~yogeshtewari]` Sorry for the long wait. We have provided a PR for this issue. Would you please take a look, and check if it is what you want?"
+        },
+        {
+            "created_at": "2020-03-06T04:54:53.482Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7048?focusedCommentId=17053024) by Micah Kornfield (emkornfield@gmail.com):*\nIssue resolved by pull request 6496\n<https://github.com/apache/arrow/pull/6496>"
+        }
+    ]
+}

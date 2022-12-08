@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Rust] [DataFusion] Add SQL support for table/relation aliases and compound identifiers",
+        "body": "***Note**: This issue was originally created as [ARROW-10732](https://issues.apache.org/jira/browse/ARROW-10732). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe need to support referencing columns in queries using table name and/or alias prefixes so that we can support use cases such as joins between tables that have duplicate column names.\r\n\r\nFor example:\r\n```java\n\r\nSELECT t1.id, t1.name, t2.name FROM t1 JOIN t2 ON t1.id = t2.id \n```",
+        "created_at": "2020-11-25T18:26:29.000Z",
+        "updated_at": "2020-12-08T11:20:51.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust - DataFusion",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-12-08T11:20:45.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-11-28T16:27:40.039Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10732?focusedCommentId=17240001) by Andy Grove (andygrove):*\n`[~alamb]` `[~jorgecarleitao]` `[~nevime]` In order to implement this I need to make a design decision that impacts the core Arrow crate and potentially IPC so thought it would be good to discuss here first . I'm not sure if it warrants its own Google design doc or not but I am happy to create one if you think that would be helpful.\r\n\r\nThe issue is that when translating a SQL AST into a query plan, we need to be able to reference columns using compound keys such as \"customer.id\" and when we support structs in SQL we will need it for representing projections into structs as well e.g. \"customer.address.street\". I can easily update the Expr::Column to support compound names or even add a new Expr::CompoundColumnReferece but the issue I face is that we represent the schema of each LogicalPlan using the Arrow Schema and Field structs and Field does not currently support compound names:\r\n```java\n\r\npub struct Field {\r\n    name: String,\r\n    data_type: DataType,\r\n    nullable: bool,\r\n    dict_id: i64,\r\n    dict_is_ordered: bool,\r\n} \n```\r\nI can work (hack) around this by just using the fully qualified name in the string in the form \"table.column\" and then have logic in the SQL planner to look up a field either by its simple name (while also checking that this is not an ambiguous reference) as well as looking up fully-qualified names. The other option would be to make changes to Field to support compound names and/or adding meta-data that we can use.\r\n\r\nWhat do you think?"
+        },
+        {
+            "created_at": "2020-11-28T18:22:32.414Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10732?focusedCommentId=17240026) by Neville Dipale (nevi_me):*\nWe should be able to implement projection logic without needing to change the Field type, or even the IPC representation. For Arrow it should be easy, but for Parquet, it's a lot more work.\r\n\r\nWe can reference nested Arrow arrays by walking the schem tree, and getting the arrays that we want from that, e.g. if we have `a.b.c` and `a.b.d` but want `a.b`, we can grab `b` which will give us `b.c` and `b.d`.\r\n\r\nWith Parquet, getting `b` means returning `c` and `d1 as 2 separate arrays. There was a PR that implemented this logic in Java/parquet-mr, but I can't seem to find it in my browser history anymore.\r\n\r\nI don't know if we need a design doc, I think a draft PR that's clear enough could also work. We can implement the projection logic on the `Schema` or `RecordBatch` in Arrow, then use that logic in DataFusion.\r\n\r\nWhat do you think?"
+        },
+        {
+            "created_at": "2020-11-28T23:06:38.902Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10732?focusedCommentId=17240159) by Andrew Lamb (alamb):*\n`[~andygrove]` \u2013 I don't think we should add the notion of relations to the Arrow schema \u2013 instead I think that should entirely be a DataFusion concept and by the time Arrow sees it is just has some column name string that it doesn't try to parse or apply semantics to. If absolutely necessary, we could encode DataFusion stuff into the metadata. \r\n\r\n> fully qualified name in the string in the form \"table.column\" and then have logic in the SQL planner to look up a field either by its simple name (while also checking that this is not an ambiguous reference) as well as looking up fully-qualified names.\r\n\r\nI think this is a good idea. I also like doing a \"is ambiguous test\"\r\n\r\nSo like SQL (at least the postgres planner) will allow a query like\r\n\r\n```Java\n\r\nSELECT my_column from A JOIN B on A.id = B.id;\r\n```\r\n\r\nAs long as `my_column` appears in either A or B; If it appears in both you have to distinguish it explicitly like this:\r\n\r\n```Java\n\r\nSELECT A.my_column from A JOIN B on A.id = B.id;\r\n```\r\n\r\nWe could do something similar with Field and structs. \r\n\r\n"
+        },
+        {
+            "created_at": "2020-11-29T16:07:34.806Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10732?focusedCommentId=17240287) by Andy Grove (andygrove):*\nThanks [~nevi_me]\u00a0 and `[~alamb]` for the feedback so far. I am working on a PR now and I think I have a workable approach.\r\n\r\nIn the SQL Planner, instead of dealing directly with LogicalPlan, I have introduced SQLRelation which is a wrapper for LogicalPlan that also contains name/alias information, and SQLSchema, which is a wrapper for Schema along with name/alias information.\r\n\r\nThis isolates the SQL aliasing to the SQL planner, which seems to make sense.\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-11-29T22:37:10.985Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10732?focusedCommentId=17240380) by Andy Grove (andygrove):*\nI got quite far with PR but then hit a dead end so here is a design doc with my new proposal: https://docs.google.com/document/d/1BFo7ruJayCulAHLa9-noaHXbgcaAH_4LuOJFGJnDHkc/edit?usp=sharing"
+        },
+        {
+            "created_at": "2020-12-01T15:07:30.011Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10732?focusedCommentId=17241606) by Andy Grove (andygrove):*\nI have now fixed the permissions in the shared Google doc so everyone should be able to access it now"
+        },
+        {
+            "created_at": "2020-12-08T11:20:45.704Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10732?focusedCommentId=17245823) by Andrew Lamb (alamb):*\nIssue resolved by pull request 8839\n<https://github.com/apache/arrow/pull/8839>"
+        }
+    ]
+}

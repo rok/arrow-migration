@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[C++] Consider adding a scalar type object model",
+        "body": "***Note**: This issue was originally created as [ARROW-47](https://issues.apache.org/jira/browse/ARROW-47). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nJust did this on the Python side. In later analytics routines, passing in scalar values (example: Array + Scalar) requires some kind of container. Some systems, like the R language, solve this problem with length-1 arrays, but we should do some analysis of use cases and figure out what will work best for Arrow.",
+        "created_at": "2016-03-08T05:17:00.000Z",
+        "updated_at": "2019-02-13T15:26:30.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-02-13T15:26:17.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-12-12T14:32:27.452Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-47?focusedCommentId=16719027) by Antoine Pitrou (apitrou):*\nI think there are several dimensions in the design space that should be explored.\r\n\r\n- Should scalars be backed by an ArrayData, or be standalone (or possibly one or the other)? Backing by an ArrayData allows cheap passing of binary values for example (like a std::string_view), while standalone values would be more expensive (some types will come with their owned piece of memory like a std::string). But standalone values are also more flexible in usage (you don't need a separate ArrayData that you must remember to keep alive...).\n  \n- Can scalars have disjoint types, or is a common base class desired? Or perhaps even a single union type, possible a `variant`? Those different solutions have different costs, and also different usage models.\n"
+        },
+        {
+            "created_at": "2018-12-12T15:14:18.446Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-47?focusedCommentId=16719077) by Wes McKinney (wesm):*\nI had been thinking about having standalone in-struct storage for primitive types and using Array/ArrayData for list scalars at least. For binary I'm not sure. I just sketched the following\r\n\r\n```c++\n\r\n\r\nclass Scalar {\r\n  std::shared_ptr<DataType> type() const { return type_; }\r\n\r\n  bool is_valid() const { return is_valid_; }\r\n\r\n protected:\r\n  std::shared_ptr<DataType> type_;\r\n  bool is_valid_;\r\n};\r\n\r\ntemplate <typename Type>\r\nclass PrimitiveScalar : public Scalar {\r\n public:\r\n  using T = typename Type::c_type;\r\n\r\n  T value() const { return value_; }\r\n\r\n private:\r\n  T value_;\r\n};\r\n\r\nclass BinaryScalar : public Scalar {\r\n protected:\r\n  std::shared_ptr<Buffer> value_;\r\n};\r\n\r\nclass ListScalar : public Scalar {\r\n protected:\r\n  std::shared_ptr<Array> value_;\r\n};\r\n```\r\n\r\nI think using `Buffer` for binary scalars is probably the lightest weight thing that also ensures memory lifetime. In practice (e.g. in analytics code paths), we will do dynamic dispatch on the type, so as long as we have a reasonable base class that exposes that, we should try to make the object as lightweight / simple as possible.\r\n\r\nI don't anticipate we'll be dealing with large collections of these scalar objects. But we want to be able to have a suitable way to algebraically represent the data when executing a computation graph (and writing kernel implementations that may accept either array or scalar \u2013 with \"broadcasting\" \u2013 arguments)"
+        },
+        {
+            "created_at": "2018-12-12T15:15:38.080Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-47?focusedCommentId=16719079) by Wes McKinney (wesm):*\nI'm not sure about what `StructScalar` should look like. as we are perhaps not overly concerned about efficiency with these objects, a struct could have an internal vector of `shared_ptr<Scalar>`\r\n\r\ncc `[~fsaintjacques]` `[~bkietz]` `[~xhochy]` for any thoughts"
+        },
+        {
+            "created_at": "2018-12-12T16:11:04.925Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-47?focusedCommentId=16719134) by Francois Saint-Jacques (fsaintjacques):*\nAt first sight, I'd say that StructScalar (and Scalar) memory layout will be critical to the implementation of\u00a0ARROW-3978 (and joins of multiple columns/expressions), hashing/probing\u00a0on the columnar representation SoA is a performance killer (due k pointer indirections and cacheline reads where k is the number of field).\r\n\r\nThe second thing, is that when we'll work with intermediary results of `Scalar`s, the types will almost always be homogeneous.\u00a0For example, when computing the hash table of a join/group-by, you'll have something like `hash<Scalar, Result>` where the type for each scalar instances is the same (minus Null, but we can and should specialize for nullability). Thus adding the type shared_ptr _and_ an `is_valid` boolean is somewhat costly (16 + 1 + sizeof(primitive_type).\r\n\r\nThis optimization can be hidden in the implementation, but I wonder if we'll have to expose the collections at the API boundaries."
+        },
+        {
+            "created_at": "2018-12-12T16:15:03.984Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-47?focusedCommentId=16719136) by Wes McKinney (wesm):*\nI do not think these objects should be used on computation hot paths at all (like joins or hash aggregations); since such code is vector-oriented in general it will require more specialization"
+        },
+        {
+            "created_at": "2018-12-12T17:03:44.191Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-47?focusedCommentId=16719205) by Ben Kietzman (bkietz):*\nOne alternative to using `vector<shared_ptr<Scalar>>` would be a flatbuffer, which would make hashing pretty straightforward and keep small allocations low:\r\n```java\n\r\nstruct StructScalar {\r\n  template <typename T>\r\n  T GetFieldAs(int field_index);\r\n\r\n  flatbuffers::Table *root_;\r\n  std::vector<flatbuffers::reflection::Field*> fields_;\r\n  std::shared_ptr<Buffer> storage_;\r\n};\r\n```\r\nIn any case, the main challenge I see is the amount of fragile unboxing boilerplate that StructScalar would require to be user friendly. That can be mitigated with good metaprogramming, but it's still a bit verbose:\r\n```java\n\r\nStructScalar* obj = get();\r\nStatus s = Unbox1<int, string, ignore, bool>(obj, [](bitset<4> is_valid, int id, string_view name, ignore, bool admin) {\r\n  // ...\r\n});\r\n\r\nbitset<4> is_valid;\r\ntuple<int, string_view, ignore, bool> employee;\r\nRETURN_NOT_OK(Unbox2(obj, &employee, &is_valid));\r\n\r\npair<bool, int> id;\r\npair<bool, string_view> name;\r\npair<bool, bool> admin;\r\nRETURN_NOT_OK(Unbox3(obj, 0, &id));\r\nRETURN_NOT_OK(Unbox3(obj, 1, &name));\r\nRETURN_NOT_OK(Unbox3(obj, 3, &admin));\r\n\r\n// more options available beyond c++11\r\n```"
+        },
+        {
+            "created_at": "2018-12-12T17:53:59.466Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-47?focusedCommentId=16719262) by Wes McKinney (wesm):*\nThat's an interesting approach. \r\n\r\nIn any case, I don't think there's a need to do anything very complicated right now. The basic requirements are:\r\n\r\n- A base type `Scalar` that exposes its type information, and nullness\n- A public API for accessing values in concrete subclasses, including nested types\n  \n  So, a scalar analogue to the `Array` classes. Let's start with making sure we can do things like `Add(Array, Scalar)`. The implementation details of the data structure would best be encapsulated behind a public API for the time being. "
+        },
+        {
+            "created_at": "2019-01-22T07:33:36.573Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-47?focusedCommentId=16748454) by Micah Kornfield (emkornfield@gmail.com):*\nIs this covered by Datum and the implementation at <https://github.com/apache/arrow/pull/3407/files>\u00a0?"
+        },
+        {
+            "created_at": "2019-01-22T08:46:07.173Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-47?focusedCommentId=16748499) by Uwe Korn (uwe):*\nThe implementation in https://github.com/apache/arrow/pull/3407/files looks like a good start. I think we can resolve this issue when the PR is merged. We probably need to add more scalar types in future, e.g. for strings but the implementation in the PR looks sufficient at the moment."
+        },
+        {
+            "created_at": "2019-02-13T15:26:17.602Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-47?focusedCommentId=16767307) by Wes McKinney (wesm):*\nIssue resolved by pull request 3604\n<https://github.com/apache/arrow/pull/3604>"
+        }
+    ]
+}

@@ -1,0 +1,136 @@
+{
+    "issue": {
+        "title": "[C++] 32 bit MSVC doesn't build",
+        "body": "***Note**: This issue was originally created as [ARROW-16778](https://issues.apache.org/jira/browse/ARROW-16778). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen specifying Win32 as a platform, and building with MSVC, the build fails with the following compile errors :\r\n\r\n```\n\r\nC:\\Users\\avertleyb\\git\\arrow\\cpp\\src\\arrow/util/bit_util.h(70,59): error C3861: '__popcnt64': identifier not found [C:\\Users\\avertleyb\\git\\arrow\\cpp\\build32\\src\\arrow\\arrow_shared.vcxproj]\r\nC:\\Users\\avertleyb\\git\\arrow\\cpp\\src\\arrow/util/bit_util.h(204,7): error C3861: '_BitScanReverse64': identifier not found [C:\\Users\\avertleyb\\git\\arrow\\cpp\\build32\\src\\arrow\\arrow_shared.vcxproj]\r\nC:\\Users\\avertleyb\\git\\arrow\\cpp\\src\\arrow/util/bit_util.h(250,7): error C3861: '_BitScanForward64': identifier not found [C:\\Users\\avertleyb\\git\\arrow\\cpp\\build32\\src\\arrow\\arrow_shared.vcxproj]\u00a0\r\n```",
+        "created_at": "2022-06-07T15:44:26.000Z",
+        "updated_at": "2022-11-06T17:51:39.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-09T09:44:46.018Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552080) by Antoine Pitrou (apitrou):*\n`[~avertleyb]` Would you like to submit a Github PR to fix those issues?"
+        },
+        {
+            "created_at": "2022-06-09T16:44:22.764Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552314) by Arkadiy Vertleyb (avertleyb):*\nI was going to, but after I got the build fixed the arrow-utility-test hangs.  Not sure if it is related to my fix, haven't figured out yet how debug it properly.\r\n\r\nThis was my patch:\r\n\r\nindex 8583e10b2..5122cb3d5 100644\r\n\u2014 a/cpp/src/arrow/util/bit_util.h\r\n+++ b/cpp/src/arrow/util/bit_util.h\r\n@@ -67,7 +67,14 @@ static constexpr uint8_t kBytePopcount[] = {\r\n     5, 4, 5, 5, 6, 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7, 3, 4, 4, 5, 4, 5, 5, 6,\r\n     4, 5, 5, 6, 5, 6, 6, 7, 4, 5, 5, 6, 5, 6, 6, 7, 5, 6, 6, 7, 6, 7, 7, 8};\r\n\r\n-static inline uint64_t PopCount(uint64_t bitmap) { return ARROW_POPCOUNT64(bitmap); }\r\n+static inline uint64_t PopCount(uint64_t bitmap) {\r\n+#if defined(_MSC_VER) && ![defined(_M_AMD64) && ](defined(_M_AMD64) && )defined(_M_X64)\r\n+  const uint32_t\\* p = reinterpret_cast<const uint32_t\\*>(&bitmap);\r\n+  return ARROW_POPCOUNT32(**p) + ARROW_POPCOUNT32(**(p + 1));\r\n+#else\r\n+  return ARROW_POPCOUNT64(bitmap);\r\n+#endif\r\n+}\r\n static inline uint32_t PopCount(uint32_t bitmap) { return ARROW_POPCOUNT32(bitmap); }\r\n\r\n //\r\n@@ -199,7 +206,7 @@ static inline int CountLeadingZeros(uint64_t value) {\r\n #if defined(__clang__) || defined(__GNUC__)\r\n   if (value == 0) return 64;\r\n   return static_cast<int>(__builtin_clzll(value));\r\n-#elif defined(_MSC_VER)\r\n+#elif defined(_MSC_VER) && (defined(_M_AMD64) || defined(_M_X64))\r\n   unsigned long index;                     // NOLINT\r\n   if (_BitScanReverse64(&index, value)) {  // NOLINT\r\n     return 63 - static_cast<int>(index);\r\n@@ -245,7 +252,7 @@ static inline int CountTrailingZeros(uint64_t value) {\r\n #if defined(__clang__) || defined(__GNUC__)\r\n   if (value == 0) return 64;\r\n   return static_cast<int>(__builtin_ctzll(value));\r\n-#elif defined(_MSC_VER)\r\n+#elif defined(_MSC_VER) && (defined(_M_AMD64) || defined(_M_X64))\r\n   unsigned long index;  // NOLINT\r\n   if (_BitScanForward64(&index, value)) {\r\n     return static_cast<int>(index);\r\n  "
+        },
+        {
+            "created_at": "2022-06-09T16:47:21.227Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552315) by Antoine Pitrou (apitrou):*\nUnder Linux you would debug using `gdb <binary-dir>/arrow-utility-test`. Under Windows I have no idea."
+        },
+        {
+            "created_at": "2022-06-09T17:38:43.353Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552345) by Arkadiy Vertleyb (avertleyb):*\nCan't build Debug version.  Is:\r\n\r\ncmake --build . --config Debug\r\n\r\nThe right way to do it?\r\n\r\nGetting the following:\r\n\r\n  Performing copy step for 'googletest_ep'\r\n  Error copying file \"C:/.../arrow/cpp/build32_debug/googletest_ep-prefix/bin/gtest.dll\" to \"C:/.../arrow/cpp/build32_debug/release//RELEASE\".\r\nC:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Professional\\MSBuild\\Microsoft\\VC\\v160\\Microsoft.CppCommon.targets(241,5): error MSB8066: Custom build for 'C:\\...\\arrow\\cpp\\build32_debug\\CMakeFiles\\d9834a26c074484d22\r\nc6b56466b8c71e\\googletest_ep-copy.rule;C:\\...\\arrow\\cpp\\build32_debug\\CMakeFiles\\0e7b907092777ef17a2918749093be30\\googletest_ep-complete.rule;C:\\...\\arrow\\cpp\\build32_debug\\CMakeFiles\\4d50031ad3e0595d6aa1\r\naebb9c9d11b8\\googletest_ep.rule' exited with code 1. [C:\\...\\arrow\\cpp\\build32_debug\\googletest_ep.vcxproj]\r\n\r\n"
+        },
+        {
+            "created_at": "2022-06-09T18:34:10.161Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552374) by Antoine Pitrou (apitrou):*\nYou must first configure the CMake build type.\r\nFor this you can pass the `-DCMAKE_BUILD_TYPE=Debug` flag in the CMake configuration command.\r\n\r\n"
+        },
+        {
+            "created_at": "2022-06-09T18:42:26.108Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552378) by Will Jones (willjones127):*\nAlso there are some other useful debug settings. See the `base-debug` preset in [CMakePresets.json](https://github.com/apache/arrow/blob/master/cpp/CMakePresets.json#L17-L27)."
+        },
+        {
+            "created_at": "2022-06-09T19:29:25.364Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552398) by Will Jones (willjones127):*\nFYI I'm working on creating a win32 build right now to see if I can reproduce what you are seeing."
+        },
+        {
+            "created_at": "2022-06-09T19:46:08.017Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552403) by Arkadiy Vertleyb (avertleyb):*\nThanks Will.\r\nSaw you latest comment at Bloomberg. \r\nPlease also keep in mind that using -DCMAKE_BUILD_TYPE=Debug somehow ends up with treating warnings as errors, which doesn't work well in a 32 bit system because of conflicts between int64_t and size_t.  As I understand this comes from Google guidelines conflicting with C++ standard.  Not sure how to avoid this.\r\nAs you probably guessed by now, I am no cmake expert :-( "
+        },
+        {
+            "created_at": "2022-06-09T19:48:06.703Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552406) by Will Jones (willjones127):*\nYes I got that error as warning too. For now I was able to bypass with `-DARROW_CXXFLAGS='/wd4244 /wd4554'.`"
+        },
+        {
+            "created_at": "2022-06-09T20:02:21.714Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552411) by Will Jones (willjones127):*\nAlso note, it seems that our bundled version of Boost Build doesn't compile on VS2022. We may wish to upgrade that.\r\n\r\nI'll go forward in VS2019 for now."
+        },
+        {
+            "created_at": "2022-06-09T20:05:23.329Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552413) by Arkadiy Vertleyb (avertleyb):*\n2019 is good for now."
+        },
+        {
+            "created_at": "2022-06-10T16:40:45.745Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552853) by Will Jones (willjones127):*\n`[~avertleyb]` I've been able to get both of the following configurations to compile. Do you want to try them out and lmk if they work for you?\r\n```none\n\r\n@REM Build using Ninja\r\ncmake.EXE ^\r\n\u00a0-DARROW_DEPENDENCY_SOURCE=BUNDLED ^\r\n\u00a0-DCMAKE_BUILD_TYPE=Debug ^\r\n\u00a0-DARROW_BUILD_TESTS=ON ^\r\n\u00a0\"-DARROW_CXXFLAGS=/wd4244 /wd4554 /wd4018\" ^\r\n\u00a0-DARROW_BUILD_INTEGRATION=OFF ^\r\n\u00a0-DARROW_EXTRA_ERROR_CONTEXT=ON ^\r\n\u00a0-DARROW_BUILD_STATIC=OFF ^\r\n\u00a0-DARROW_WITH_RE2=OFF ^\r\n\u00a0-DARROW_WITH_UTF8PROC=OFF ^\r\n\u00a0-DCMAKE_INSTALL_PREFIX=c:/Users/voltron/arrow/cpp/build/user-cpp-debug-win32-alt/dist ^\r\n\u00a0-S%USERPROFILE%/arrow/cpp ^\r\n\u00a0-B%USERPROFILE%/arrow/cpp/build/user-cpp-debug-win32 ^\r\n\u00a0-G Ninja\r\n\r\n@REM Or build using Visual Studio\r\ncmake.EXE ^\r\n\u00a0-DARROW_DEPENDENCY_SOURCE=BUNDLED ^\r\n\u00a0-DCMAKE_BUILD_TYPE=Debug ^\r\n\u00a0-DARROW_BUILD_TESTS=ON ^\r\n\u00a0\"-DARROW_CXXFLAGS=/wd4244 /wd4554 /wd4018\" ^\r\n\u00a0-DARROW_BUILD_INTEGRATION=OFF ^\r\n\u00a0-DARROW_EXTRA_ERROR_CONTEXT=ON ^\r\n\u00a0-DARROW_BUILD_STATIC=OFF ^\r\n\u00a0-DARROW_WITH_RE2=OFF ^\r\n\u00a0-DARROW_WITH_UTF8PROC=OFF ^\r\n\u00a0-DCMAKE_INSTALL_PREFIX=c:/Users/voltron/arrow/cpp/build/user-cpp-debug-win32-alt/dist ^\r\n\u00a0-S%USERPROFILE%/arrow/cpp ^\r\n\u00a0-B%USERPROFILE%/arrow/cpp/build/user-cpp-debug-win32-alt ^\r\n\u00a0-G \"Visual Studio 16 2019\" ^\r\n\u00a0-A Win32\r\n \n```"
+        },
+        {
+            "created_at": "2022-06-10T16:46:24.691Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552859) by Antoine Pitrou (apitrou):*\nInstead of disabling warnings one-by-one, you can change the `BUILD_WARNING_LEVEL` CMake variable. I don't know why we are not documenting it ( `[~kou]` do you know?), but it is described thusly in `cmake_modules/SetupCxxFlags.cmake`:\r\n\r\n```Java\n\r\n# BUILD_WARNING_LEVEL add warning/error compiler flags. The possible values are\r\n# - PRODUCTION: Build with `-Wall` but do not add `-Werror`, so warnings do not\r\n#   halt the build.\r\n# - CHECKIN: Build with `-Wall` and `-Wextra`.  Also, add `-Werror` in debug mode\r\n#   so that any important warnings fail the build.\r\n# - EVERYTHING: Like `CHECKIN`, but possible extra flags depending on the\r\n#               compiler, including `-Wextra`, `-Weverything`, `-pedantic`.\r\n#               This is the most aggressive warning level.\r\n\r\n# Defaults BUILD_WARNING_LEVEL to `CHECKIN`, unless CMAKE_BUILD_TYPE is\r\n# `RELEASE`, then it will default to `PRODUCTION`. The goal of defaulting to\r\n# `CHECKIN` is to avoid friction with long response time from CI.\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-06-10T16:52:33.456Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552863) by Will Jones (willjones127):*\nWow that will save me a lot of time! :)"
+        },
+        {
+            "created_at": "2022-06-10T17:56:42.194Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552895) by Arkadiy Vertleyb (avertleyb):*\n`[~willjones127]` This builds with three path parameters removed to use defaults and with my patch applied.\r\n\r\nBut then ctest crashes running arrow-io-file-test. "
+        },
+        {
+            "created_at": "2022-06-10T18:06:36.568Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552899) by Will Jones (willjones127):*\n> This builds with three path parameters removed to use defaults and with my patch applied.\r\nGood!\r\n> But then ctest crashes running arrow-io-file-test.\r\nYup, same here. Would you like to continue debugging yourself? Or else I can look into it soon.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-06-10T18:36:44.117Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552918) by Arkadiy Vertleyb (avertleyb):*\n`[~willjones127]` Depends.\r\nBesides crash, multiple tests fail.\r\nLet me ask you - in your best estimate, when was the last time someone ran 32 bit tests?  It could be badly broken by now...\r\nI am afraid fixing that might be a major task, even for someone closely familiar with the system, let alone a new library user like myself.\r\nFor your reference:\r\n      Start  1: arrow-array-test\r\n 1/26 Test  #1: arrow-array-test .................\\*\\*\\*Failed    0.24 sec\r\n      Start  2: arrow-buffer-test\r\n 2/26 Test  #2: arrow-buffer-test ................   Passed    0.03 sec\r\n      Start  3: arrow-extension-type-test\r\n 3/26 Test  #3: arrow-extension-type-test ........\\*\\*\\*Failed    0.02 sec\r\n      Start  4: arrow-misc-test\r\n 4/26 Test  #4: arrow-misc-test ..................   Passed    0.05 sec\r\n      Start  5: arrow-public-api-test\r\n 5/26 Test  #5: arrow-public-api-test ............   Passed    0.02 sec\r\n      Start  6: arrow-scalar-test\r\n 6/26 Test  #6: arrow-scalar-test ................\\*\\*\\*Failed    0.06 sec\r\n      Start  7: arrow-type-test\r\n 7/26 Test  #7: arrow-type-test ..................   Passed    0.15 sec\r\n      Start  8: arrow-table-test\r\n 8/26 Test  #8: arrow-table-test .................\\*\\*\\*Failed    0.05 sec\r\n      Start  9: arrow-tensor-test\r\n 9/26 Test  #9: arrow-tensor-test ................   Passed    0.02 sec\r\n      Start 10: arrow-sparse-tensor-test\r\n10/26 Test #10: arrow-sparse-tensor-test .........   Passed    0.07 sec\r\n      Start 11: arrow-stl-test\r\n11/26 Test #11: arrow-stl-test ...................   Passed    0.03 sec\r\n      Start 12: arrow-random-test\r\n12/26 Test #12: arrow-random-test ................   Passed    0.20 sec\r\n      Start 13: arrow-json-integration-test\r\n13/26 Test #13: arrow-json-integration-test ......\\*\\*\\*Failed    0.15 sec\r\n      Start 14: arrow-concatenate-test\r\n14/26 Test #14: arrow-concatenate-test ...........\\*\\*\\*Failed    0.02 sec\r\n      Start 15: arrow-c-bridge-test\r\n15/26 Test #15: arrow-c-bridge-test ..............\\*\\*\\*Failed    0.06 sec\r\n      Start 16: arrow-io-buffered-test\r\n16/26 Test #16: arrow-io-buffered-test ...........   Passed    0.08 sec\r\n      Start 17: arrow-io-compressed-test\r\n17/26 Test #17: arrow-io-compressed-test .........   Passed    0.02 sec\r\n      Start 18: arrow-io-file-test\r\n18/26 Test #18: arrow-io-file-test ...............\\*\\*\\*Failed   10.61 sec\r\n      Start 19: arrow-io-memory-test\r\n19/26 Test #19: arrow-io-memory-test .............\\*\\*\\*Failed    1.62 sec\r\n      Start 20: arrow-utility-test\r\n20/26 Test #20: arrow-utility-test ...............\\*\\*\\*Failed    3.00 sec\r\n      Start 21: arrow-threading-utility-test\r\n21/26 Test #21: arrow-threading-utility-test .....   Passed   39.77 sec\r\n      Start 22: arrow-feather-test\r\n22/26 Test #22: arrow-feather-test ...............\\*\\*\\*Failed    0.04 sec\r\n      Start 23: arrow-ipc-json-simple-test\r\n23/26 Test #23: arrow-ipc-json-simple-test .......\\*\\*\\*Failed    0.06 sec\r\n      Start 24: arrow-ipc-read-write-test\r\n24/26 Test #24: arrow-ipc-read-write-test ........\\*\\*\\*Failed    8.17 sec\r\n      Start 25: arrow-ipc-tensor-test\r\n25/26 Test #25: arrow-ipc-tensor-test ............\\*\\*\\*Failed    1.16 sec\r\n      Start 26: arrow-json-test\r\n26/26 Test #26: arrow-json-test ..................\\*\\*\\*Failed    0.03 sec\r\n\r\n42% tests passed, 15 tests failed out of 26 "
+        },
+        {
+            "created_at": "2022-06-10T18:49:08.277Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552923) by Will Jones (willjones127):*\n`[~avertleyb]` We actually do test 32-bit on MinGW in CI on every PR, just not on MSVC.\r\n\r\nIt's likely there's just something wrong with the bit utility still; validity bitmaps are a fundamental part of Arrow Arrays, so it wouldn't be surprising at all that a single small issue in bitmap handling would break most tests."
+        },
+        {
+            "created_at": "2022-06-10T19:09:53.854Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552931) by Arkadiy Vertleyb (avertleyb):*\nOkay, I will see what could be wrong with it."
+        },
+        {
+            "created_at": "2022-06-10T21:15:41.038Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17552978) by Arkadiy Vertleyb (avertleyb):*\n`[~willjones127]` Can you try the following under your 32 bit architecture (where tests pass)?\r\n\r\n1) break in the TEST_F(TestSetBitRunReader, OneByte)\r\n\r\n2) put breakpoints on:\r\n  - SkipNextZeroes\r\n  - CountNextOnes\r\n\r\n3) see what is going on.\r\n\r\nIn my system:\r\n  current_word_ = 182 (1011 0110)\r\n  num_zeros = 0;\r\n  current_word remain 182 \u2013 no zeroes removed \r\n\r\nThen the following asserts because 182 & 1 == 0:\r\n\r\n  int64_t CountNextOnes() {\r\n    assert(current_word_ & kFirstBit);\r\n\r\nI have a feeling something may be wrong with the byte ordering, but I am not sure.\r\n"
+        },
+        {
+            "created_at": "2022-06-12T12:00:58.858Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17553262) by Kouhei Sutou (kou):*\n> I don't know why we are not documenting it (Kouhei Sutou do you know?)\r\n\r\nI also don't know. (I think that we just didn't do it.) We can document it."
+        },
+        {
+            "created_at": "2022-06-13T17:57:29.684Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17553743) by Arkadiy Vertleyb (avertleyb):*\n`[~willjones127]` `[~kou]` The following patch fixes the issue (this is in the code I was advised to use as a fallback:\r\n\r\n```\n\r\n@@ -255,7 +262,7 @@ static inline int CountTrailingZeros(uint64_t value) {\r\n #else\r\n   int bitpos = 0;\r\n   if (value) {\r\n-    while (value & 1 == 0) {\r\n+    while ((value & 1) == 0) {\r\n       value >>= 1;\r\n       ++bitpos;\r\n     }\r\n```"
+        },
+        {
+            "created_at": "2022-06-13T18:09:47.393Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17553746) by Arkadiy Vertleyb (avertleyb):*\n`[~willjones127]` `[~kou]`\r\nThe next problem I am having is:\r\n\r\n```\n\r\nRun-Time Check Failure #0 - The value of ESP was not properly saved across a function call.  This is usually a result of calling a function declared with one calling convention with a function pointer declared with a different calling convention.\r\n```\r\n\r\nOn this line in io_util.cc:\r\n\r\n```\n\r\n    if (!entries.empty() &&\r\n        !prefetch_virtual_memory(GetCurrentProcess(),\r\n \n```"
+        },
+        {
+            "created_at": "2022-06-13T19:01:58.900Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17553764) by Arkadiy Vertleyb (avertleyb):*\nAnd this is fixed by the following:\r\n\r\n```\n\r\n@@ -1280,7 +1280,7 @@ Status MemoryAdviseWillNeed(const std::vector<MemoryRegion>& regions) {\r\n     PrefetchEntry(const MemoryRegion& region)  // NOLINT runtime/explicit\r\n         : VirtualAddress(region.addr), NumberOfBytes(region.size) {}\r\n   };\r\n-  using PrefetchVirtualMemoryFunc = BOOL (*)(HANDLE, ULONG_PTR, PrefetchEntry*, ULONG);\r\n+  using PrefetchVirtualMemoryFunc = BOOL (__stdcall *)(HANDLE, ULONG_PTR, PrefetchEntry*, ULONG);\r\n \n```"
+        },
+        {
+            "created_at": "2022-06-13T20:20:59.895Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17553781) by Arkadiy Vertleyb (avertleyb):*\nSubmitted"
+        },
+        {
+            "created_at": "2022-06-13T20:31:13.222Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17553785) by Arkadiy Vertleyb (avertleyb):*\nCan someone assign this Jjira to me?  Or how do I assign it to myself?  \r\n\r\nI need to move it so that my PR can proceed.\r\n"
+        },
+        {
+            "created_at": "2022-06-13T21:01:56.785Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17553792) by Kouhei Sutou (kou):*\nAssigned."
+        },
+        {
+            "created_at": "2022-06-30T15:52:09.021Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17561100) by James Duong (jduong):*\n`[~avertleyb]` , I saw that your PR is closed and that you were going to resubmit it. Do you need help finishing this off? I'm highly interested in this patch."
+        },
+        {
+            "created_at": "2022-07-07T13:07:40.829Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17563787) by Arkadiy Vertleyb (avertleyb):*\n`[~jduong]` sorry, I am still waiting on my employer to approve my open source contribution.  If you can still see my patch you can apply it manually - it's a few lines of code here and there.  Fixed compile and unit tests, but not warnings."
+        },
+        {
+            "created_at": "2022-11-06T17:51:38.666Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16778?focusedCommentId=17629525) by Apache Arrow JIRA Bot (arrowjira):*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned per [project policy](https://arrow.apache.org/docs/dev/developers/bug_reports.html#issue-assignment). Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

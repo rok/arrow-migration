@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[C++] Zero padding bytes in PoolBuffer::Resize",
+        "body": "***Note**: This issue was originally created as [ARROW-2822](https://issues.apache.org/jira/browse/ARROW-2822). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis is a possible proposed fix which would supersede some of the changes made in ARROW-2790 as elsewhere.",
+        "created_at": "2018-07-09T22:25:56.000Z",
+        "updated_at": "2018-07-19T22:41:34.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2018-07-19T18:38:17.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-07-09T22:26:24.117Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2822?focusedCommentId=16537707) by Wes McKinney (wesm):*\ncc `[~alendit]`"
+        },
+        {
+            "created_at": "2018-07-10T07:42:58.397Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2822?focusedCommentId=16538195) by Dimitri Vorona (alendit):*\nHi Wes,\r\n\r\n\u00a0\r\n\r\nyeah, this should work. We'd still have to make sure that Finish is called, since else the overprovisioned portion of the buffer will still be uninitialized, but a memset of avg 32 byte to the last cache line shouldn't be too bad, especially since the time is dominated by a realloc anyway.\r\n\r\nIt just came up to me: we (almost)\u00a0didn't have a padding problem with the buffer builders after all, since they always resize the data_ to a power of 2, so its a multiple of 64 for every case except rare ones like Type == UInt8 and capacity == kMinBuilderCapacity (which is 32 right now). Which explains why we weren't swamped in valgrind warnings.\r\n\r\nI would still say, that it's more of a happy coincidence, and we should just zero everything between size_ and capacity_. The AppendNull problem would still be there, too.\u00a0\r\n\r\n\u00a0\r\n\r\nCheers"
+        },
+        {
+            "created_at": "2018-07-10T08:44:41.573Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2822?focusedCommentId=16538265) by Dimitri Vorona (alendit):*\nOk, thinking further about it: we need to zero the padding in both Resize and Reserve. In case of Reserve it can be way more than the last cache line which needs to be zeroed, so we shouldn't do it by default. If we don't zero in Reserve, but in Resize it's even worse, since we will zero the \"tail\" over and over again.\r\n\r\nBottom line, my proposed solution: we add bool zero_padding flag to Resize which is false by default. Then we can search for the Buffer::Resize usages in the code, and decide where that flag makes sense. Off course, bool flag creep in C++ isn't nice, since you don't have kwargs, but 2 flags are still tolerable, IMHO."
+        },
+        {
+            "created_at": "2018-07-10T09:06:14.003Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2822?focusedCommentId=16538294) by Dimitri Vorona (alendit):*\nBut we can then zero padding in AllocateBuffer by default, no need for a separate method for it."
+        },
+        {
+            "created_at": "2018-07-10T12:48:42.682Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2822?focusedCommentId=16538516) by Dimitri Vorona (alendit):*\nI ended up leaving Buffer::Resize unchanged and explicitly calling ZeroPadding where appropriate. We maybe need a note about preferring AllocateBuffer to make_shared+Resize.\r\n\r\nI also added the finish check we've talked about.\r\n\r\nThere is a place in glib where IMHO we should explicitly zero the padding, too, but since I'm not comfortable with that part of arrow, I'd like for someone to look at the change first:\r\n\r\n`diff --git a/c_glib/arrow-glib/input-stream.cpp b/c_glib/arrow-glib/input-stream.cpp`\r\n`index 353d00a8..fa899fbe 100644`\r\n`--- a/c_glib/arrow-glib/input-stream.cpp`\r\n`+++ b/c_glib/arrow-glib/input-stream.cpp`\r\n`@@ -551,6 +551,7 @@ namespace garrow {`\r\n` if (n_read_bytes < n_bytes) {`\r\n` RETURN_NOT_OK(buffer->Resize(n_read_bytes));`\r\n` `}\r\n`+ buffer->ZeroPadding();`\r\n` *out = buffer;`\r\n` return arrow::Status::OK();`\r\n` `}\r\n\r\nThe rest of the changes are in the PR.\r\n\r\nI just noticed that python raises some warnings about unfinished buffers, too. I can fix those, though no today."
+        },
+        {
+            "created_at": "2018-07-10T15:32:13.979Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2822?focusedCommentId=16538782) by Dimitri Vorona (alendit):*\nExcept for a couple of cases, most of the builder unfinished warnings are caused by destructor call on planned failures. Since we don't use exceptions, I don't see any way to distinguish this case. Since these warnings are only shown in debug build, it may be tolerable, though I find it annoying.\r\n\r\nDo you have any idea how we can solve it better?"
+        },
+        {
+            "created_at": "2018-07-19T18:38:17.752Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2822?focusedCommentId=16549670) by Wes McKinney (wesm):*\nIssue resolved by pull request 2239\n<https://github.com/apache/arrow/pull/2239>"
+        }
+    ]
+}

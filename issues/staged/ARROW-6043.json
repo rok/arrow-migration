@@ -1,0 +1,68 @@
+{
+    "issue": {
+        "title": "[Python] Array equals returns incorrectly if NaNs are in arrays",
+        "body": "***Note**: This issue was originally created as [ARROW-6043](https://issues.apache.org/jira/browse/ARROW-6043). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n```python\n\r\nimport numpy as np\r\nimport pyarrow as pa\r\n\r\ndata = [0, 1, np.nan, None, 4]\r\n\r\narr1 = pa.array(data)\r\narr2 = pa.array(data)\r\n\r\npa.Array.equals(arr1, arr2)\r\n```\r\n\r\nUnsure if this is expected behavior, but in Arrow 0.12.1 this returned `True` as compared to `False` in 0.14.1.\r\n",
+        "created_at": "2019-07-25T22:10:03.000Z",
+        "updated_at": "2022-07-04T17:41:27.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2019-07-25T23:20:05.348Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6043?focusedCommentId=16893207) by Wes McKinney (wesm):*\nSomewhat surprised by this. Can you submit a PR?"
+        },
+        {
+            "created_at": "2019-07-26T02:26:27.637Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6043?focusedCommentId=16893270) by Keith Kraus (keith.j.kraus):*\nWill try to find some time to throw in a PR once our build issues are resolved :)"
+        },
+        {
+            "created_at": "2019-07-29T16:04:45.811Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6043?focusedCommentId=16895396) by Antoine Pitrou (apitrou):*\nHow is this surprising? It's well-known (well, perhaps not :-)) that NaNs compare unequal to themselves. Numpy behaves similarly:\r\n```python\n\r\n>>> a = np.array([1.0, np.nan])                                                                                                                                      \r\n>>> a == a                                                                                                                                                           \r\narray([ True, False])\r\n>>> (a == a).all()                                                                                                                                                   \r\nFalse\r\n```\r\n\r\nIn other words, Arrow was previously incorrect and it was fixed.\r\n\r\nI think this is even less of a problem in Arrow than Numpy, because a missing value in Arrow is represented as a None (which compares equal to itself), so the only reason to have a NaN in Arrow data should be when you really need to represent floating-point NaN."
+        },
+        {
+            "created_at": "2019-07-29T16:29:12.090Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6043?focusedCommentId=16895416) by Wes McKinney (wesm):*\nThis is true \u2013 I think we might need to think about semantic array equality (according to type-specific comparison rules) versus memory equality (i.e. what does `memcmp` on each non-null value yield). Both have their use cases I suppose"
+        },
+        {
+            "created_at": "2019-07-29T18:33:10.114Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6043?focusedCommentId=16895514) by Keith Kraus (keith.j.kraus):*\nFor context, the source of us finding this bug was we were using this function within cuDF unit tests to check for correct null vs NaN handling behavior. I agree this makes sense to return false, but a function that does memory comparison as opposed to value comparison would be useful.\r\n\r\nWe worked around this today by unsafe typecasting from float to int for now which effectively turns it into a memory comparison."
+        },
+        {
+            "created_at": "2019-07-29T18:36:58.489Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6043?focusedCommentId=16895517) by Antoine Pitrou (apitrou):*\nActually, if you look on the C++ side (see `cpp/src/arrow/compare.h`), the equality comparisons now take an optional `EqualOptions` where you can choose to set `nans_equal` to true.\r\n\r\nSo I would suggest to also expose those parameters in Python. Perhaps like it is done in CSV (see _csv.pyx)."
+        },
+        {
+            "created_at": "2019-07-29T20:18:55.788Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6043?focusedCommentId=16895565) by Neal Richardson (npr):*\nFor reference, here's how R handles this:\r\n```java\n\r\n$ R \r\n> a <- c(1, NA, 3, 4) \r\n> b <- c(1, NA, 3, 4) \r\n> a == b \r\n[1] TRUE \u00a0 NA TRUE TRUE \r\n> all(a == b) \r\n[1] NA \r\n> all(a == b, na.rm = TRUE) \r\n[1] TRUE\r\n> identical(a, b) \r\n[1] TRUE\r\n```\r\n\"array equals\" is a vectorized operation, so you get an array back. NA == NA is itself NA (because since the data is missing, we don't know what it is, so logically we also don't know if they're equal). If you want the scalar version, you can do the equivalent to what Antoine showed in Numpy with all(), but note that all() returns **NA** here, not FALSE, for the same reason as the scalar comparison. all() (along with many other base R aggregation functions) does take a na.rm argument though, so you can do the test only on the non-missing values.\r\n\r\nidentical() does the object\u00a0comparison and shows the arrays to be\u00a0the same, despite the missing data semantics.\u00a0\r\n\r\nAt the risk of sparking controversy, I'd suggest that if we're going to model our missing data semantics on some language's implementation, R is a\u00a0great choice, particularly if you care about statistical theory (which we should). That said, there are reasonable cases where you might want to do various kinds of comparisons, and the question is really about what we choose to make the default/natural way and then making the other ways possible somehow.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-07-29T23:07:24.091Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6043?focusedCommentId=16895642) by Wes McKinney (wesm):*\n`[~npr]` I think you're talking about something different. In Arrow NaN is actually not-a-number, not null (which is the most similar concept to R's NA). NumPy has no missing values at all"
+        },
+        {
+            "created_at": "2019-07-29T23:21:25.074Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6043?focusedCommentId=16895648) by Neal Richardson (npr):*\nRight; I was under the impression that `NaN` was (also) commonly used to indicate missing values in numpy because it doesn't have a separate missing value. Maybe that was mistaken.\r\n\r\nFTR, here's the R example with NaN. Same behavior as with NA:\r\n```java\n\r\n> NaN == NaN \r\n[1] NA \r\n> a <- c(1, NaN, 3, 4) \r\n> a == a \r\n[1] TRUE \u00a0 NA TRUE TRUE \r\n> identical(a, a) \r\n[1] TRUE\r\n```"
+        },
+        {
+            "created_at": "2020-06-02T16:14:05.406Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6043?focusedCommentId=17123991) by Wes McKinney (wesm):*\nI still think we need to clearly distinguish \"data structure equality\" from \"semantic equality\". For example, \"semantic equality\" is probably better addressed by kernels (`(a == b).all()`)"
+        },
+        {
+            "created_at": "2021-07-16T21:00:20.269Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6043?focusedCommentId=17382348) by Jonathan Keane (jonkeane):*\nThis has also come up in a slightly different context (comparing `NaN`s to non-missing values) and I made ARROW-13364, though depending on how this ticket is resolved they might go together."
+        },
+        {
+            "created_at": "2021-07-17T08:30:24.004Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6043?focusedCommentId=17382513) by Joris Van den Bossche (jorisvandenbossche):*\nAs mentioned in that other ticket, I think we should keep discussing them separately. Using the terminology of Wes' last comment, this issue is (originally) about \"data structure equality\" (do these objects contain equivalent data? i.e. `arr1.equals(arr2) = True or False`), while the other is about \"semantic/analytical equality\" (or comparisons in general, i.e. the comparison compute kernels)."
+        },
+        {
+            "created_at": "2021-07-28T13:53:17.930Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6043?focusedCommentId=17388793) by Antoine Pitrou (apitrou):*\nWe should first expose the `EqualOptions` members as keyword-only arguments in the various `equals` methods.\r\n\r\n"
+        }
+    ]
+}

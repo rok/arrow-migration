@@ -1,0 +1,38 @@
+{
+    "issue": {
+        "title": "[C++] Reading empty json lists results in invalid non-nullable null type",
+        "body": "***Note**: This issue was originally created as [ARROW-10955](https://issues.apache.org/jira/browse/ARROW-10955). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe're using Arrow to convert from JSON to Parquet and occasionally have empty lists in our json. Reading such JSON into an Arrow table and writing it to Parquet currently fails. We noticed this issue in our C++ Arrow code, but it also happens from Python.\r\n\r\nMinimal repro:\r\n\r\ninput.json:\r\n\r\n{\"foo\": []}\r\n\r\n\u00a0\r\n\r\nconvert.py:\r\n import pyarrow.json\r\n import pyarrow.parquet\r\n\r\nt = pyarrow.json.read_json(\"input.json\")\r\n pyarrow.parquet.write_table(t, \"out.parquet\")\r\n \u00a0\r\n\r\nProduces:\r\n\r\nTraceback (most recent call last):\r\n File \"repro.py\", line 5, in <module>\r\n pyarrow.parquet.write_table(t, \"out.parquet\")\r\nenv/lib/python3.8/site-packages/pyarrow/parquet.py\", line 1717, in write_table\r\n with ParquetWriter(\r\n File \"env/lib/python3.8/site-packages/pyarrow/parquet.py\", line 554, in __init__\r\n self.writer = _parquet.ParquetWriter(\r\n File \"pyarrow/_parquet.pyx\", line 1409, in pyarrow._parquet.ParquetWriter.__cinit__\r\n File \"pyarrow/error.pxi\", line 84, in pyarrow.lib.check_status\r\n pyarrow.lib.ArrowInvalid: NullType Arrow field must be nullable\r\n\r\n\u00a0",
+        "created_at": "2020-12-18T03:41:26.000Z",
+        "updated_at": "2021-01-05T15:11:20.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-01-05T14:40:43.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-12-21T09:09:14.458Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10955?focusedCommentId=17252710) by Joris Van den Bossche (jorisvandenbossche):*\n`[~pgoldsborough]` Thanks for the report!\r\n\r\nThis seems a problem in the JSON reader in the type it creates for empty list arrays. With the json reader, we get:\r\n\r\n```Java\n\r\nIn [10]: pyarrow.json.read_json(\"input.json\")[\"foo\"].type\r\nOut[10]: ListType(list<item: null not null>)\r\n```\r\n\r\nwhile when creating the same empty list array manually, we get:\r\n\r\n```Java\n\r\nIn [6]: pa.array([[]]).type\r\nOut[6]: ListType(list<item: null>)\r\n```\r\n\r\nSo in the case of the JSON array, the value item is \"null not null\", which is a bit contradictory, and the Parquet writer complains about this. \r\n\r\nManually trying to create such a contradictory field actually raises an error:\r\n\r\n```Java\n\r\nIn [13]: pa.field(\"test\", pa.null(), nullable=False)\r\n---------------------------------------------------------------------------\r\nValueError                                Traceback (most recent call last)\r\n<ipython-input-13-e28fa0cf2870> in <module>\r\n----> 1 pa.field(\"test\", pa.null(), nullable=False)\r\n\r\n~/scipy/repos/arrow/python/pyarrow/types.pxi in pyarrow.lib.field()\r\n\r\nValueError: A null type field may not be non-nullable\r\n```\r\n"
+        },
+        {
+            "created_at": "2020-12-21T20:55:47.658Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10955?focusedCommentId=17253106) by Peter Goldsborough (pgoldsborough):*\nThanks for the response Joris. Two questions:\r\n1. Is there a manual workaround we can use to make this conversion process still work? Like change the schema of the json table after it's been loaded?\n1. When can we expect 3.0.0?"
+        },
+        {
+            "created_at": "2021-01-05T13:02:21.274Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10955?focusedCommentId=17258906) by Joris Van den Bossche (jorisvandenbossche):*\n> Is there a manual workaround we can use to make this conversion process still work? Like change the schema of the json table after it's been loaded?\r\n\r\nYes, you should be able to cast the resulting table to a new schema (without the non-nullable null field) after reading in the json.\r\n\r\n> When can we expect 3.0.0?\r\n\r\nThe final release can be expected somewhere second half of January"
+        },
+        {
+            "created_at": "2021-01-05T14:40:43.438Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10955?focusedCommentId=17258965) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 9102\n<https://github.com/apache/arrow/pull/9102>"
+        },
+        {
+            "created_at": "2021-01-05T15:11:20.729Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10955?focusedCommentId=17258989) by Antoine Pitrou (apitrou):*\nThank you `[~pgoldsborough]` for the report!"
+        }
+    ]
+}

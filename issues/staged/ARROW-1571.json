@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[C++] Implement argsort kernels (sort indices) for integers using O(n) counting sort",
+        "body": "***Note**: This issue was originally created as [ARROW-1571](https://issues.apache.org/jira/browse/ARROW-1571). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis function requires knowledge of the minimum and maximum of an array. If it is small enough, then an array of size `maximum - minimum` can be constructed and used to tabulate value frequencies and then compute the sort indices (this is called \"grade up\" or \"grade down\" in APL languages). There is generally a cross-over point where this function performs worse than mergesort or quicksort due to data locality issues",
+        "created_at": "2017-09-19T23:01:11.000Z",
+        "updated_at": "2021-08-02T18:33:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-03-02T21:59:04.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-01-16T02:43:15.338Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1571?focusedCommentId=17016474) by Yibo Cai (yibocai):*\nFinding cross-over point suitable for various hardware may be not easy. I will do some tests to see if we can reach a reasonable approach."
+        },
+        {
+            "created_at": "2020-01-23T07:26:39.257Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1571?focusedCommentId=17021827) by Yibo Cai (yibocai):*\nTwo variables need be figured out:\r\n- Array Size: Array size to begin benefiting from such an optimization. The smaller, the better.\n- Value Range: Gaps between max and min value for an array to benefit from such an optimization. The larger, the better.\n  \n  It's non trivial to find the optimial parameters, as there two variables are correlated, and they depend on actual hardware.\n  \n  I did some benchmark, and plotted how \"array size\" and \"value range\" affect performance (speed ratio of counting sort vs std::stable_sort).\n  Test code at: https://github.com/cyb70289/mytests/blob/master/cpp/sort-range.cc\n  Bench and plot code at: https://github.com/cyb70289/bench-graph/tree/master/sort-range\n  \n  Per my investigation, leveraging counting sort in large integers with limited value range can improve performance significantly, if did right.\n  \n  Below plot is tested on Tntel E5-2650 cpu.\n- Y axis is \"speed-of-counting-sort / speed-of-stl-stable-sort\", its value above 1 means counting sort is better than stl stablesort.\n- X axis is array size, plotted in log scale\n- Different lines map to different value range\n  \n  From the plot, we can see if we leverage counting sort for arrays with at least 1000 elements and value range less than 4096, we can always get above 7x performance uplift.\n  \n   ![e5-2650.png](https://issues.apache.org/jira/secure/attachment/12991610/e5-2650.png) "
+        },
+        {
+            "created_at": "2020-02-24T03:30:41.542Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1571?focusedCommentId=17043145) by Yibo Cai (yibocai):*\nAnother metric is what's the penalty of finding min/max. If (max - min) is too large and we have to fallback to original stl sort code.\r\nPer my investigation, the penalty is trivial, almost not observable for all array size. I see less than 0.3% for long arrays with 10,000,000 elements.\r\nBenchmark code at https://github.com/cyb70289/mytests/blob/master/cpp/minmax-penalty.cc."
+        },
+        {
+            "created_at": "2020-02-24T16:43:54.089Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1571?focusedCommentId=17043666) by Wes McKinney (wesm):*\nExactly the kind of analysis that I wanted to see, thanks `[~yibocai]`! So it seems like for int32/int64 arrays that for small sizes (< 1000 certainly) that we should stick with the O(n log n) sort but for larger arrays the benefit of checking can be large"
+        },
+        {
+            "created_at": "2020-03-02T21:59:04.468Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1571?focusedCommentId=17049689) by Wes McKinney (wesm):*\nIssue resolved by pull request 6495\n<https://github.com/apache/arrow/pull/6495>"
+        }
+    ]
+}

@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] DictionaryArray.to_numpy does not correctly convert null indexes to null values",
+        "body": "***Note**: This issue was originally created as [ARROW-9594](https://issues.apache.org/jira/browse/ARROW-9594). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nExample\r\n```java\n\r\n>>> a = pa.DictionaryArray.from_arrays(pa.array([0, 1, None, 0], type=pa.int32()), pa.array(['foo', 'bar']))\r\n>>> a\r\n<pyarrow.lib.DictionaryArray object at 0x7f12fc94ccf0>-- dictionary:\r\n  [\r\n    \"foo\",\r\n    \"bar\"\r\n  ]\r\n-- indices:\r\n  [\r\n    0,\r\n    1,\r\n    null,\r\n    0\r\n  ]\r\n>>> a.to_pandas()  # this works\r\n0    foo\r\n1    bar\r\n2    NaN\r\n3    foo\r\ndtype: category\r\nCategories (2, object): [foo, bar]\r\n>>> a.to_numpy(zero_copy_only=False)  # this is broken\r\narray(['foo', 'bar', 'bar', 'foo'], dtype=object)\r\n\r\n```\r\n\u00a0",
+        "created_at": "2020-07-29T13:14:54.000Z",
+        "updated_at": "2021-04-28T09:05:53.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-04-28T09:05:48.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-01-09T03:31:54.793Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9594?focusedCommentId=17261743) by Steve M. Kim (chairmank):*\ni checked and confirmed that this is broken in pyarrow 2.0.0"
+        },
+        {
+            "created_at": "2021-04-15T11:03:07.965Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9594?focusedCommentId=17322089) by Joris Van den Bossche (jorisvandenbossche):*\n`[~chairmank]` sorry for the very slow reply, but thanks a lot for the report. I can confirm it still happens on master as well. Tagging with 5.0.0 so we get reminded to look into it for the next release."
+        },
+        {
+            "created_at": "2021-04-19T15:10:36.463Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9594?focusedCommentId=17325111) by Alessandro Molina (amol-):*\nThe issue seems to be caused by `ConvertArrayToPandas` returning `-1` for missing entries. \r\nWhen we map the values to the indices using `np.take` the result is that those negative indices wrap around and end up picking the last value\r\n\r\n```python\n\r\n>>> d = np.array(['foo', 'bar'])\r\n>>> i = np.array([ 0,  1, -1,  0])\r\n>>> np.take(d, i)\r\narray(['foo', 'bar', 'bar', 'foo'], dtype='<U3')\r\n```\r\n\r\nWhen converting to pandas this doesn't happen because `pandas.Categorical` already does return `NaN`\u00a0 for indices that point to a non existing value ( https://pandas.pydata.org/docs/reference/api/pandas.Categorical.html#pandas-categorical )\r\n\r\n\r\n"
+        },
+        {
+            "created_at": "2021-04-19T15:17:20.416Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9594?focusedCommentId=17325114) by Joris Van den Bossche (jorisvandenbossche):*\nSo for pandas that's indeed correct, because `pd.Categorical` storage model is to use -1 to represent missing values in the integer codes (since pandas uses numpy integer array to store the indices/codes of the categorical, and numpy doesn't support missing values in integer arrays). "
+        },
+        {
+            "created_at": "2021-04-28T09:05:48.207Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9594?focusedCommentId=17334596) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 10101\n<https://github.com/apache/arrow/pull/10101>"
+        }
+    ]
+}

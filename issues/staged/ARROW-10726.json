@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[Python] Reading multiple parquet files with different index column dtype (originating pandas) reads wrong data",
+        "body": "***Note**: This issue was originally created as [ARROW-10726](https://issues.apache.org/jira/browse/ARROW-10726). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSee https://github.com/pandas-dev/pandas/issues/38058",
+        "created_at": "2020-11-25T14:14:28.000Z",
+        "updated_at": "2022-02-10T16:10:12.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-02-10T16:10:12.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-01-14T13:50:47.757Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10726?focusedCommentId=17476153) by Alenka Frim (alenka):*\nOne thing I noticed was that _pq.read_table_ and\u00a0_pq.ParquetDataset + read()_ behave differently: first fills index with Nulls, later errors as the schemas do not match.\r\n\r\nExample:\r\n```python\n\r\nimport pandas as pd\r\ndf1 = pd.DataFrame({'a':[1, 2, 3]}, index=['a','b','c'])\r\ndf1.to_parquet('abc/one.parquet')\r\ndf2 = pd.DataFrame({'a':[4, 5, 6]})\r\ndf2.to_parquet('abc/two.parquet')\r\ndf3 = pd.DataFrame({'a':[7, 8, 9]})\r\ndf3.to_parquet('abc/three.parquet')\r\npd.read_parquet('abc/')\r\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\ntable = pq.read_table('abc/')\r\ntable\r\n```\r\noutput:\r\n```python\n\r\npyarrow.Table\r\na: int64\r\n__index_level_0__: string\r\n----\r\na: [[1,2,3],[7,8,9],[4,5,6]]\r\n__index_level_0__: [[\"a\",\"b\",\"c\"],[null,null,null],[null,null,null]]\r\n```\r\nbut\r\n```python\n\r\ndataset = pq.ParquetDataset('abc/')\r\n```\r\nErrors:\r\n```python\n\r\nValueError: Schema in abc//three.parquet was different. \r\na: int64\r\n-- schema metadata --\r\npandas: '{\"index_columns\": [{\"kind\": \"range\", \"name\": null, \"start\": 0, \"' + 375\r\n\r\nvs\r\n\r\na: int64\r\n__index_level_0__: string\r\n-- schema metadata --\r\npandas: '{\"index_columns\": [\"__index_level_0__\"], \"column_indexes\": [{\"na' + 448\r\n```\r\nI would think they would behave the same. If I understand correctly in both cases _ParquetDatasetV2_ is being called but the schema is being checked only in the second _(ParquetDataset)._\r\n\r\nThe idea of the issue was to concat the datasets as it is done in Pandas:\r\n```python\n\r\npd.concat([df1, df2, df3])\r\n\r\na\r\na\t1\r\nb\t2\r\nc\t3\r\n0\t4\r\n1\t5\r\n2\t6\r\n0\t7\r\n1\t8\r\n2\t9\r\n```\r\nin this case both options _pq.read_table_ and\u00a0_pq.ParquetDataset_ should be changed.\r\n\r\nThe other option is to add a check of the schemas in the _pq.read_table_ and get an error in both cases."
+        },
+        {
+            "created_at": "2022-01-17T16:22:20.861Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10726?focusedCommentId=17477308) by Alenka Frim (alenka):*\nI tried similar in R package to compare the results and _open_dataset()_ is producing same index as PyArrow currently (as an additional column).\r\n```r\n\r\n> library(arrow)\r\n> library(dplyr)\r\n> ds <- open_dataset(\"abc/\")\r\n> ds %>% collect()\r\n# A tibble: 9 \u00d7 2\r\n      a `__index_level_0__`\r\n  <int> <chr>              \r\n1     1 a                  \r\n2     2 b                  \r\n3     3 c                  \r\n4     4 NA                 \r\n5     5 NA                 \r\n6     6 NA                 \r\n7     7 NA                 \r\n8     8 NA                 \r\n9     9 NA   \r\n```\r\nAny opinion on how we should handle concating of indexes in PyArrow?\r\n1. Leave as it is - similar as R package\n1. Fix _read_table_ so it gives an error for mismatch in schemas like _ParquetDataset_ does\n1. Fix _read_table_ and _ParquetDataset_ to match Pandas _concat_\u00a0with no nulls and no errors"
+        },
+        {
+            "created_at": "2022-01-18T07:53:50.103Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10726?focusedCommentId=17477629) by Joris Van den Bossche (jorisvandenbossche):*\n> One thing I noticed was that pq.read_table and pq.ParquetDataset + read() behave differently: ... I would think they would behave the same. If I understand correctly in both cases ParquetDatasetV2 is being called but the schema is being checked only in the second (ParquetDataset).\r\n\r\nI think `ParquetDataset(..).read()` actually still uses the legacy dataset reader by default, while `pq.read_table` will use the new datasets API under the hood by default.  Can you pass `use_legacy_dataset=False` to ParquetDataset to see if then it produces the same result?\r\n\r\n> Any opinion on how we should handle concating of indexes in PyArrow?\r\n\r\nWhile in the pandas issue I commented about the current behaviour (with the nulls filled in) being \"wrong\", I am actually not sure about that. The main issue is that you have a \"mixed\" column (some strings, some ints). In pandas you can have that with an \"object\" dtype column, but this is not something that is supported in Arrow. \r\n\r\nWhat happens in the new dataset reader (filling with nulls) is actually the expected behaviour, I think, from a point of view of reading the Parquet file into an Arrow table (when the reader doesn't find a column in a certain sub-file of the dataset, it will automatically fill with nulls, that's intended behaviour).   \r\n\r\n"
+        },
+        {
+            "created_at": "2022-01-18T08:18:56.823Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10726?focusedCommentId=17477648) by Alenka Frim (alenka):*\n> I think\u00a0`ParquetDataset(..).read()`\u00a0actually still uses the legacy dataset reader by default, while\u00a0`pq.read_table`\u00a0will use the new datasets API under the hood by default. Can you pass\u00a0`use_legacy_dataset=False` to ParquetDataset to see if then it produces the same result?\r\nYes you are right! Passing `use_legacy_dataset=False` to ParquetDataset produces the same result:\r\n```python\n\r\ndataset = pq.ParquetDataset('/Users/alenkafrim/repos/abc/', use_legacy_dataset=False)\r\ndataset.read()\r\n\r\npyarrow.Table\r\na: int64\r\n__index_level_0__: string\r\n----\r\na: [[1,2,3],[7,8,9],[4,5,6]]\r\n__index_level_0__: [[\"a\",\"b\",\"c\"],[null,null,null],[null,null,null]]\r\n```\r\n> What happens in the new dataset reader (filling with nulls) is actually the expected behaviour, I think, from a point of view of reading the Parquet file into an Arrow table (when the reader doesn't find a column in a certain sub-file of the dataset, it will automatically fill with nulls, that's intended behaviour).\r\nI would agree with you on this. I think the current behaviour is what I would expect.\r\n\r\nShould I look into `to_pandas()` to see if the info from the schema could be used to correct the index there?"
+        },
+        {
+            "created_at": "2022-01-18T08:33:11.540Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10726?focusedCommentId=17477659) by Joris Van den Bossche (jorisvandenbossche):*\n> Should I look into to_pandas() to see if the info from the schema could be used to correct the index there?\r\n\r\nI was actually going to suggest this (if we see different pandas metadata's that are inconsistent, we could error about it) .. but, on second thought I don't think this is possible. At the moment that the Table->DataFrame conversion happens here, we already have only a single pyarrow.Table.\r\n\r\nSo when reading the multiple files in the dataset, we read each file separately and then we first concatenate them into a single pyarrow.Table, and only then convert to a pandas.DataFrame. So at the concatenation step, the information that we had inconsistent pandas metadata is lost (I think we typically just preserve the metadata of the first table). \r\n\r\nSo if we want to \"solve\" this, it would be to check the pandas metadata during the concatenation step. But we probably don't want to get into doing that."
+        },
+        {
+            "created_at": "2022-01-18T08:54:14.485Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10726?focusedCommentId=17477676) by Alenka Frim (alenka):*\nYes, agree (y)"
+        },
+        {
+            "created_at": "2022-01-18T09:05:49.932Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10726?focusedCommentId=17477685) by Joris Van den Bossche (jorisvandenbossche):*\nSo I think we can close this issue then as a \"can't fix\"?"
+        },
+        {
+            "created_at": "2022-01-18T09:09:15.737Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10726?focusedCommentId=17477687) by Alenka Frim (alenka):*\nThere's \"Won't fix\" only, for me :D"
+        }
+    ]
+}

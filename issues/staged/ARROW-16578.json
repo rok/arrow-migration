@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[R] unique() and is.na() on a column of a tibble is much slower after writing to and reading from a parquet file",
+        "body": "***Note**: This issue was originally created as [ARROW-16578](https://issues.apache.org/jira/browse/ARROW-16578). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nunique() on a column of a tibble is much slower after writing to and reading from a parquet file.\r\n\r\nHere is a reprex.\r\n\r\n`df1 <- tibble::tibble(x=as.character(floor(runif(1000000) * 20)))`\r\n`write_parquet(df1,\"/tmp/test.parquet\")`\r\n`df2 <- read_parquet(\"/tmp/test.parquet\")`\r\n`system.time(unique(df1$x))`\r\n`# Result on my late 2020 macbook pro with M1 processor:`\r\n`# \u00a0 user \u00a0system elapsed\u00a0`\r\n`# \u00a00.020 \u00a0 0.000 \u00a0 0.021\u00a0`\r\n`system.time(unique(df2$x))`\r\n`# \u00a0 user \u00a0system elapsed\u00a0`\r\n`# \u00a05.230 \u00a0 0.419 \u00a0 5.649\u00a0`\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2022-05-14T00:46:01.000Z",
+        "updated_at": "2022-07-23T23:01:24.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-07-22T17:04:52.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-05-14T01:30:55.498Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16578?focusedCommentId=17536955) by Hideaki Hayashi (hideaki):*\nis.na() also has the same kind of performance issue.\r\n\r\n\u00a0\r\n\r\n`df1 <- tibble::tibble(x=as.character(floor(runif(1000000) * 20)))`\r\n`write_parquet(df1,\"/tmp/test.parquet\")`\r\n`df2 <- read_parquet(\"/tmp/test.parquet\")`\r\n`system.time(is.na(df1$x))`\r\n`# \u00a0user \u00a0system elapsed\u00a0`\r\n`# 0.003 \u00a0 0.000 \u00a0 0.003`\r\n`system.time(is.na(df2$x))`\r\n`# \u00a0user \u00a0system elapsed\u00a0`\r\n`# 0.878 \u00a0 0.079 \u00a0 0.957\u00a0`"
+        },
+        {
+            "created_at": "2022-05-14T16:01:52.007Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16578?focusedCommentId=17537052) by Jonathan Keane (jonkeane):*\nThanks for the report + very clear reprex. \r\n\r\nI see what's going on here, which isn't totally what I was expecting. What's happening is that the arrow uses altrep when reading from arrow tables (which happens when one reads from parquet like this). Because of that, when you call `unique()` on the column here, that includes the time that it takes to translate from arrow's representation to R's (which is moderately expensive for strings as you can see here!). \r\n\r\nBut something still isn't quite right here, because I would expect subsequent calls to the same column to be much shorter (basically the same time as the call against `df1$x` there.\r\n\r\n```r\n\r\nlibrary(arrow)\r\n\r\ndf1 <- tibble::tibble(x=as.character(floor(runif(1000000) * 20)))\r\nwrite_parquet(df1,\"/tmp/test.parquet\")\r\ndf2 <- read_parquet(\"/tmp/test.parquet\")\r\n\r\nsystem.time(unique(df2$x))\r\n#>    user  system elapsed \r\n#>  13.285   3.854  17.284\r\n```\r\n\r\nAnd we can check that this column is indeed still altrep when I would have expected that it would be materialized at this point (since `unique()` above caused it to be), but it still isn't:\r\n```r\n\r\narrow:::is_arrow_altrep(df2$x)\r\n#> [1] TRUE\r\n\r\ncol_altrep <- df2$x\r\n\r\narrow:::is_arrow_altrep(col_altrep)\r\n#> [1] TRUE\r\n\r\nsystem.time(unique(col_altrep))\r\n#>    user  system elapsed \r\n#>  12.150   2.760  15.003\r\n```\r\n\r\nBut if we do fully materialize it, we see a much much faster `unique()`:\r\n\r\n```r\n\r\ncol_not_altrep <- df2$x[1:nrow(df2)]\r\n\r\narrow:::is_arrow_altrep(col_not_altrep)\r\n#> [1] FALSE\r\n\r\nsystem.time(unique(col_not_altrep))\r\n#>    user  system elapsed \r\n#>   0.011   0.002   0.013\r\n```\r\n\r\nTL;DR, we do expect the first call to `unique()` in this circumstance to be longer (because we shift the time cost of materializing the data from the parquet file from the reading part to the first call that requires materialization). But we've got something else going wrong because we aren't maintaining the materialization like we should be."
+        },
+        {
+            "created_at": "2022-06-22T03:26:36.824Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16578?focusedCommentId=17557215) by Hideaki Hayashi (hideaki):*\nCreated a PR for a possible fix.\r\n\r\n<https://github.com/apache/arrow/pull/13415>\r\n\r\nIt seems that the Elt call keeps working with un-materialized array, and when it is repeated for all the elements of the array, like R's unique() do, it ends up being expensive.\r\n\r\nHere I'm materializing the array at the first call to Elt, and at least in this case, the result seems much better.\r\n\r\nI also thought about something like 3-strike rule, but took the simple approach here.\r\n\r\nCan this be a valid solution?"
+        },
+        {
+            "created_at": "2022-07-22T17:04:52.374Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16578?focusedCommentId=17570133) by Dewey Dunnington (paleolimbot):*\nIssue resolved by pull request 13415\n<https://github.com/apache/arrow/pull/13415>"
+        }
+    ]
+}

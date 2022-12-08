@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[Python] \"CSV parser got out of sync with chunker\" on subsequent batches regardless of block size",
+        "body": "***Note**: This issue was originally created as [ARROW-18084](https://issues.apache.org/jira/browse/ARROW-18084). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI'm trying to read a specific large CSV file (`the-reddit-climate-change-dataset-comments.csv` from [this dataset](https://www.kaggle.com/datasets/pavellexyr/the-reddit-climate-change-dataset)) by batches. This is my code:\r\n\r\n```python\n\r\nimport os\r\n\r\nimport pyarrow as pa\r\nfrom pyarrow.csv import open_csv, ReadOptions\r\nimport pyarrow.parquet as pq\r\n\r\nfilename = \"/data/reddit-climate/the-reddit-climate-change-dataset-comments.csv\"\r\n\r\nprint(f\"Reading {filename}...\")\r\nmmap = pa.memory_map(filename)\r\n\r\nreader = open_csv(mmap)\r\nwhile True:\r\n    try:\r\n        batch = reader.read_next_batch()\r\n        print(len(batch))\r\n    except StopIteration:\r\n        break\r\n```\r\n\r\nBut, after a few batches, I get an exception:\r\n\r\n\r\n```\n\r\nReading /data/reddit-climate/the-reddit-climate-change-dataset-comments.csv...\r\n1233\r\n1279\r\n1293\r\n\r\n---------------------------------------------------------------------------\r\nArrowInvalid                              Traceback (most recent call last)\r\nInput In [1], in <cell line: 14>()\r\n     13 while True:\r\n     14     try:\r\n---> 15         batch = reader.read_next_batch()\r\n     16         print(len(batch))\r\n     17     except StopIteration:\r\n\r\nFile /opt/conda/lib/python3.9/site-packages/pyarrow/ipc.pxi:683, in pyarrow.lib.RecordBatchReader.read_next_batch()\r\n\r\nFile /opt/conda/lib/python3.9/site-packages/pyarrow/error.pxi:100, in pyarrow.lib.check_status()\r\n\r\nArrowInvalid: CSV parser got out of sync with chunker\r\n```\r\n\r\nI have tried changing the block size, but I always end up with that error sooner or later:\r\n\r\n- With `read_options=ReadOptions(block_size=10_000)`, it reads 1 batch of 11 rows and then crashes\n- With 100_000, 103 rows and then crashes\n- 1_000_000: 1164 rows and then crashes\n- 10_000_000: 12370 rows and then crashes\n  \n  I am not sure what else to try here. According to [the C++ source code](https://github.com/apache/arrow/blob/cd33544533ee7d70cd8ff7556e59ef8f1d33a176/cpp/src/arrow/csv/reader.cc#L266-L267), this \"should not happen\".\n  \n  I have tried with pyarrow 7.0 and 9.0, identical result and traceback.",
+        "created_at": "2022-10-18T08:13:08.000Z",
+        "updated_at": "2022-10-18T08:40:50.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-18T08:30:58.333Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18084?focusedCommentId=17619345) by Antoine Pitrou (apitrou):*\nCan you try passing `newlines_in_values=True`? Chances are this dataset contains embedded newlines in CSV values.\r\nSee https://arrow.apache.org/docs/python/generated/pyarrow.csv.ParseOptions.html#pyarrow.csv.ParseOptions"
+        },
+        {
+            "created_at": "2022-10-18T08:40:32.876Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18084?focusedCommentId=17619351) by Juan Luis Cano Rodr\u00edguez (astrojuanlu):*\nThanks for the blazing fast response `[~apitrou]`. Indeed, adding `parse_options=ParseOptions(newlines_in_values=True)` fixed the problem (no need to specify the block size anymore)."
+        }
+    ]
+}

@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[R] Expose number of threads in read_csv_arrow() and write_csv_arrow()",
+        "body": "***Note**: This issue was originally created as [ARROW-14663](https://issues.apache.org/jira/browse/ARROW-14663). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAs of `readr` 2.0.0 (and the switch to `vroom`) both `read_csv()` and `write_csv()` allow the user to pass the number of threads to be used when processing (the `num_threads` argument). Currently this functionality is not exposed in Arrow. Some functionality (not yet the CSV read or write) allows the user to use the global CPU thread pool, but `num_threads` would offer more granular control. ",
+        "created_at": "2021-11-10T15:42:09.000Z",
+        "updated_at": "2021-11-16T09:53:26.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-11-16T09:53:26.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-10T15:52:42.652Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14663?focusedCommentId=17441802) by Jonathan Keane (jonkeane):*\nCould you go into more detail about this:\r\n\r\n> Some functionality (not yet the CSV read or write) allows the user to use the global CPU thread pool, but num_threads would offer more granular control.\r\n\r\nAre you seeing that cvs reading is not multi-threading? OR not responding to setting the option(s) that arrow uses to control those? Something else?"
+        },
+        {
+            "created_at": "2021-11-10T16:07:51.231Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14663?focusedCommentId=17441811) by Neal Richardson (npr):*\nIMO I think it would be odd to only add this for csv read/write since we have lots of things that use multithreading. And I'm not sure that adding arguments to every function is a good idea. We already provide the global thread pool controls: aside from just keeping up with arguments added to readr functions, is there value in doing this?"
+        },
+        {
+            "created_at": "2021-11-11T09:49:00.201Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14663?focusedCommentId=17442192) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nProbably not a huge amount of value (besides keeping up with the readr signature). I think using the global thread pool in `CsvWriteOptions$create()` would go a long way even if not directly exposed to the user. Maybe we can allow the use to specify `write_options` or `readr_options` and that will allow them some level of control over the use of the global thread pool."
+        },
+        {
+            "created_at": "2021-11-11T09:50:55.945Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14663?focusedCommentId=17442193) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\n`[~jonkeane]` sorry, I forgot we exposed `use_threads = option_use_threads()` in `CsvReadOptions$create()`"
+        },
+        {
+            "created_at": "2021-11-11T14:14:26.568Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14663?focusedCommentId=17442290) by Jonathan Keane (jonkeane):*\nIn my experience, CSV reading already does use the global thread pool:\r\n\r\n```r\n\r\nlibrary(arrow, warn.conflict = FALSE)\r\n#> See arrow_info() for available features\r\n\r\nset_cpu_count(12)\r\nsystem.time({read_csv_arrow(\"nyctaxi_2010-01.csv\", as_data_frame = FALSE)})\r\n#>    user  system elapsed \r\n#>  20.328   6.747   3.292\r\n\r\nset_cpu_count(1)\r\nsystem.time({read_csv_arrow(\"nyctaxi_2010-01.csv\", as_data_frame = FALSE)})\r\n#>    user  system elapsed \r\n#>  11.490   1.236  12.788\r\n```\r\n\r\nSo that's good. I agree with `[~npr]` that exposing `num_threads` just for csv is a bit odd, and since arrow does many things and likely people want to set how many threads to use globally, having the helper and advertising that is probably the right answer.\r\n\r\nSomething that **is** confusing here is that we have `cpu_count()`/`set_cpu_count`, `io_thread_count()`/`set_io_thread_count`, and options(\"arrow.use_threads\") and there isn't a good explanation of what the difference is between them (I thought we had made a jira about explaining this difference \u2014 even if it is only/mostly developer focused). \r\n\r\nWe should probably add details to the read_csv_arrow documentation linking to `cpu_count()`/`set_cpu_count` as the way to control multi-threading. And possibly refine the documentation about the others (or set them to keywords-internal if we don't expect users to need to or want to set them)"
+        },
+        {
+            "created_at": "2021-11-12T17:43:39.846Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14663?focusedCommentId=17442880) by Weston Pace (westonpace):*\nI'll point out that the description for \"num_threads\" is:\r\n> The number of processing threads to use for initial parsing and lazy reading of data. If your data contains newlines within fields the parser should automatically detect this and fall back to using one thread only. However if you know your file has newlines within quoted fields it is safest to set `num_threads = 1` explicitly\r\nThis comment does not apply to Arrow's CSV reader (fields aren't allowed to contain newlines at all if I recall).\r\n\r\nAlso, an argument in this spot would seem to suggest that Arrow is going to spin up \"num_threads\" _new_ threads specific to the task.\u00a0 That is not how Arrow works.\u00a0 Arrow has a single thread pool of threads that all tasks share.\u00a0 So if you called read_csv multiple times in parallel then you don't create additional threads, all tasks will share the same threads.\r\n\r\nSo I'm also in favor of not supporting a \"num_threads\" argument.\r\n> Maybe we can allow the use to specify `write_options` or `readr_options` and that will allow them some level of control over the use of the global thread pool.\r\nThis is doable but not trivial.\u00a0 Without a concrete use case I would be very reluctant to investigate further."
+        },
+        {
+            "created_at": "2021-11-12T17:48:17.939Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14663?focusedCommentId=17442881) by Weston Pace (westonpace):*\n> (I thought we had made a jira about explaining this difference \u2014 even if it is only/mostly developer focused).\r\n\u00a0\r\n\r\nThere was not a Jira already.\u00a0 There is very little about the thread pools in the documentation.\u00a0 I have created ARROW-14702"
+        },
+        {
+            "created_at": "2021-11-16T09:36:07.404Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14663?focusedCommentId=17444401) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nThanks you all for your input. I largely agree with you all. So, in conclusion we won't be implementing `{}num_threads{`}. The CSV reading function is already set up to use the global\u00a0thread pool and for the CSV writing functionality we won't be implementing\u00a0access to said global pool for now. We will revisit `write_csv_arrow` & multithreading if there is a strong need since the\u00a0implementation is not trivial.\u00a0"
+        },
+        {
+            "created_at": "2021-11-16T09:47:50.768Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14663?focusedCommentId=17444406) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nI have created [ARROW-14720](https://issues.apache.org/jira/browse/ARROW-14720) as the complement R documentation issue on threading."
+        }
+    ]
+}

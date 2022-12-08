@@ -1,0 +1,21 @@
+{
+    "issue": {
+        "title": "Memory leak when read_table().to_pandas().to_json()",
+        "body": "***Note**: This issue was originally created as [ARROW-5302](https://issues.apache.org/jira/browse/ARROW-5302). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe following piece of code (running on a Linux, Python 3.6 from anaconda) demonstrates a memory leak when reading data from disk.\r\n```java\n\r\nimport resource\r\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\n\r\n# some random data, some of them as array columns\r\npath = 'data.parquet'\r\nbatches = 5000\r\ndf = pd.DataFrame({\r\n    't': [list(range(0, 180 * 60, 5))] * batches,\r\n})\r\n\r\npq.write_table(pa.Table.from_pandas(df), path)\r\n\r\ntable = pq.read_table(path)\r\n\r\n\r\n# read the data above and convert it to json (e.g. the backend of a restful API)\r\nfor i in range(100):\r\n# comment any of the 2 lines for the leak to vanish.\r\n    df = pq.read_table(path).to_pandas()\r\n    df['t'].to_json()\r\n    print(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)\r\n\r\n```\r\nResult :\r\n```java\n\r\n481676\r\n618584\r\n755396\r\n892156\r\n1028892\r\n1165660\r\n1302428\r\n1439184\r\n1620376\r\n1801340\r\n...\n```\r\nRelevant pip freeze:\r\n\r\npyarrow (0.13.0)\r\n\r\npandas (0.24.2)\r\n\r\n\u00a0\r\n\r\nNote: it is not entirely obvious that this is\u00a0caused\u00a0by pyarrow instead of pandas or numpy. I was only able to reproduce it through write/read from pyarrow.\r\n\r\n\u00a0",
+        "created_at": "2019-05-11T18:00:08.000Z",
+        "updated_at": "2019-05-11T18:32:12.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-05-11T18:32:12.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-05-11T18:31:39.312Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5302?focusedCommentId=16837905) by Jorge Leit\u00e3o (jorgecarleitao):*\nIt seems that this is not related to arrow. The following arrow-independent code leaks:\r\n```java\n\r\nimport resource\r\n\r\nimport pandas as pd\r\n\r\n# some random data, some of them as array columns\r\npath = 'data.parquet'\r\nbatches = 5000\r\ndf = pd.DataFrame({\r\n    't': [pd.np.array(range(0, 180 * 60, 5))] * batches,\r\n})\r\n\r\n\r\n# read the data above and convert it to json (e.g. the backend of a restful API)\r\nfor i in range(100):\r\n# comment any of the 2 lines for the leak to vanish.\r\n    print(df['t'].iloc[0].shape, df['t'].iloc[0].dtype)\r\n    df['t'] = df['t'].apply(lambda x: pd.np.array(list(x)))\r\n    df['t'].to_json()\r\n    print(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)\r\n\r\n```"
+        }
+    ]
+}

@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[C++] Add utf8_upper and utf8_lower",
+        "body": "***Note**: This issue was originally created as [ARROW-9133](https://issues.apache.org/jira/browse/ARROW-9133). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis is the equivalent of\u00a0https://issues.apache.org/jira/browse/ARROW-9100\u00a0for utf8. This will be a good test for unilib vs utf8proc, performance, and API wise.\r\n\r\nAlso, since Unicode strings can grow and shrink, this is also a good start to think about a strategy for memory allocation.\r\n\r\nHow much can a 'string' (or byte sequence) length actually grow?\u00a0\r\n\r\nItem 5.18 mentioned that a string can expand by a factor of 3, by which they seem to mean 3 codepoints. This can be validated by checking with Python:\r\n```python\n\r\nfor i in range(0x100, 0x110000):\r\n    codepoint = chr(i)\r\n    try:\r\n        bytes_before = codepoint.encode()\r\n    except UnicodeEncodeError:\r\n        continue\r\n    bytes_after = codepoint.upper().encode()\r\n    if len(bytes_before) != len(bytes_after):\r\n        print(i, hex(i), codepoint, codepoint.lower(), len(bytes_before), len(bytes_after))\r\n....\r\n912 0x390 \u0390 \u0399\u0308\u0301 2 6\r\n...\n```\r\nshowing that a two-byte codepoint can expand to 3 (2 byte) codepoints (2 bytes => 6 bytes). The character \u0399\u0308\u0301 has no single precomposed capital character, so it is composed of a single base character and two combining characters. However there are different situations explain in\u00a0<https://www.unicode.org/Public/UCD/latest/ucd/SpecialCasing.txt>)\r\n\r\nThis increase by a factor of 3 is used in CPython\u00a0<https://github.com/python/cpython/blob/25f38d7044a3a47465edd851c4e04f337b2c4b9b/Objects/unicodeobject.c#L10058>\u00a0which is an easy solution not to have to grow the buffer dynamically.\r\n\r\nHowever, growing 3x in size seems at odds with the API of both utf8proc:\r\n\r\n<https://github.com/JuliaStrings/utf8proc/blob/08f9999a0698639f15d07b12c0065a4494f2d504/utf8proc.c#L375>\r\n\r\n<https://github.com/ufal/unilib/blob/d8276e70b7c11c677897f71030de7258cbb1f99e/unilib/unicode.h#L79>\r\n\r\nand unilib:\r\n\r\n<https://github.com/ufal/unilib/blob/d8276e70b7c11c677897f71030de7258cbb1f99e/unilib/unicode.h#L79>\r\n\r\nWhich can only return a single 32bit value (thus 1 codepoint, encoding 1 character). Both libraries seem to ignore the special cases of case mapping (no library uses/downloads SpecialCasing.txt).\r\n\r\nThis means that if Arrow wants to support the same features as Python regarding upper casing and lower casing (which means really implementing the Unicode), neither libraries are sufficient.\r\n\r\nThere are more edges cases/irregularities. But I propose I start with a version of utf8_lower and utf8_upper that ignore the special cases.\u00a0\r\n\r\n\u00a0\r\n\r\nPS:\r\n\r\nAnother interesting finding is that although upper casing can increase a buffer length by a factor of 3, lowercasing a utf8 string will only increase the byte length by a factor of 3/2 at maximum.\r\n```python\n\r\nfor i in range(0x100, 0x110000):\r\n    codepoint = chr(i)\r\n    try:\r\n        bytes_before = codepoint.encode()\r\n    except UnicodeEncodeError:\r\n        continue\r\n    bytes_after = codepoint.lower().encode()\r\n    if len(bytes_before) != len(bytes_after):\r\n        print(i, hex(i), codepoint, codepoint.lower(), len(bytes_before), len(bytes_after))\r\n304 0x130 \u0130 i\u0307 2 3\r\n570 0x23a \u023a \u2c65 2 3\r\n574 0x23e \u023e \u2c66 2 3\r\n7838 0x1e9e \u1e9e \u00df 3 2\r\n8486 0x2126 \u2126 \u03c9 3 2\r\n8490 0x212a \u212a k 3 1\r\n8491 0x212b \u212b \u00e5 3 2\r\n11362 0x2c62 \u2c62 \u026b 3 2\r\n11364 0x2c64 \u2c64 \u027d 3 2\r\n11373 0x2c6d \u2c6d \u0251 3 2\r\n11374 0x2c6e \u2c6e \u0271 3 2\r\n11375 0x2c6f \u2c6f \u0250 3 2\r\n11376 0x2c70 \u2c70 \u0252 3 2\r\n11390 0x2c7e \u2c7e \u023f 3 2\r\n11391 0x2c7f \u2c7f \u0240 3 2\r\n42893 0xa78d \ua78d \u0265 3 2\r\n42922 0xa7aa \ua7aa \u0266 3 2\r\n42923 0xa7ab \ua7ab \u025c 3 2\r\n42924 0xa7ac \ua7ac \u0261 3 2\r\n42925 0xa7ad \ua7ad \u026c 3 2\r\n42926 0xa7ae \ua7ae \u026a 3 2\r\n42928 0xa7b0 \ua7b0 \u029e 3 2\r\n42929 0xa7b1 \ua7b1 \u0287 3 2\r\n42930 0xa7b2 \ua7b2 \u029d 3 2\r\n```",
+        "created_at": "2020-06-15T12:18:45.000Z",
+        "updated_at": "2020-07-15T16:08:47.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-06-30T10:50:21.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-06-15T12:21:08.071Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9133?focusedCommentId=17135809) by Antoine Pitrou (apitrou):*\nI think we shouldn't overthink this. Preallocating the output with the same size as the input should be good enough as a heuristic. At worse there'll be one or two upsizes, and a final shrink.\r\n\r\nAlso agreed that we shouldn't bother with special cases for now."
+        },
+        {
+            "created_at": "2020-06-15T12:23:21.124Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9133?focusedCommentId=17135813) by Antoine Pitrou (apitrou):*\nAs for utf8proc vs. unilib, I think we've determined in ARROW-8961 that utf8proc would be ok."
+        },
+        {
+            "created_at": "2020-06-15T13:50:19.324Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9133?focusedCommentId=17135875) by Wes McKinney (wesm):*\n> As for utf8proc vs. unilib, I think we've determined in ARROW-8961 that utf8proc would be ok.\r\n\r\nYes, also unilib is basically a no-go altogether because of its difficult license (for example, we would not be permitted to vendor its source code). "
+        },
+        {
+            "created_at": "2020-06-30T10:50:21.881Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9133?focusedCommentId=17148528) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 7449\n<https://github.com/apache/arrow/pull/7449>"
+        }
+    ]
+}

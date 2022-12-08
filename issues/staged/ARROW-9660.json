@@ -1,0 +1,21 @@
+{
+    "issue": {
+        "title": "[C++] IPC - dictionaries in maps",
+        "body": "***Note**: This issue was originally created as [ARROW-9660](https://issues.apache.org/jira/browse/ARROW-9660). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI created the following record batch which has a single column with a type of map<dict, string> where dict is defined as: dict<int8,string>:\r\n\r\n\u00a0\r\n```java\n\r\narrow::MapBuilder map_builder(arrow::default_memory_pool(),\r\n    std::make_shared<arrow::StringDictionaryBuilder>(),\r\n    std::make_shared<arrow::StringBuilder>());\r\nauto key_builder = \r\n    dynamic_cast<arrow::StringDictionaryBuilder *>(map_builder.key_builder());\r\nauto item_builder = \r\n    dynamic_cast<arrow::StringBuilder *>(map_builder.item_builder());\r\n\r\n// Add a first row with k<i>=v<i> for i 0..14;\r\nASSERT_OK(map_builder.Append());\r\nfor (int i = 0; i < 15; ++i) {\r\n  ASSERT_OK(key_builder->Append(\"k\" + std::to_string(i)));\r\n  ASSERT_OK(item_builder->Append(\"v\" + std::to_string(i)));\r\n}\r\n// Add a second row with k<i>=w<i> for i 0..14;\r\nASSERT_OK(map_builder.Append());\r\nfor (int i = 0; i < 15; ++i) {\r\n  ASSERT_OK(key_builder->Append(\"k\" + std::to_string(i)));\r\n  ASSERT_OK(item_builder->Append(\"w\" + std::to_string(i)));\r\n}\r\nstd::shared_ptr<arrow::Array> array;\r\nASSERT_OK(map_builder.Finish(&array));\r\nstd::shared_ptr<arrow::Schema> schema = \r\n    arrow::schema({arrow::field(\"s\", array->type())});\r\nstd::shared_ptr<arrow::RecordBatch> batch = \r\n    arrow::RecordBatch::Make(schema, array->length(), {array});\r\n```\r\nWhen one attempts to send this in a round trip IPC:\r\n1. On IpcFormatWriter::Start(): The memo records one entry for field_to_id and id_to_type_ where the dict id = 0.\n1. On IpcFormatWriter::CollectDictionaries: The memo records a new entry for field_to_id and id_to_type with id=1 and also records in id_to_dictionary_. At this point we have 2 entries with the entry id=0 having no associated dict.\n1. On IpcFormatWriter;:WriteDictionaries: It writes the dict with entry = 1\n   \n   When reading:\n1. GetSchema eventually gets to the nested dictionary in FieldFromFlatBuffer\n1. The recovered dict id is 0.\n1. This adds to the memo the field_to_id and id_to_type with id = 0\n1. My round trip code calls \"ReadAll\".\n1. RecordBatchStreamReaderImpl::ReadNext attempts to load the initial dicts\n1. It recovers id = 1\n1. The process aborts because id = 1 is not in the memo: dictionary_memo->GetDictionaryType(id, &value_type)\n   \n   A similar example with a dict inside a \"struct\" worked fine and only used dict id = 0. So it looks like something wrong when gathering the schema for the map. Unless I did not construct the map correctly?\n   \n   \u00a0",
+        "created_at": "2020-08-05T23:53:13.000Z",
+        "updated_at": "2020-08-29T19:36:38.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-08-27T16:10:50.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-08-27T16:10:50.440Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9660?focusedCommentId=17185941) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 7992\n<https://github.com/apache/arrow/pull/7992>"
+        }
+    ]
+}

@@ -1,0 +1,66 @@
+{
+    "issue": {
+        "title": "Prebuilt distributions (aka. pyarrow and libarrow-dev) should use the same ABI (with or without the DUAL abi)",
+        "body": "***Note**: This issue was originally created as [ARROW-10599](https://issues.apache.org/jira/browse/ARROW-10599). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI have observed that the python release (pyarrow) and c++ release (libarrow-dev for ubuntu) are built using the different GCC ABI.\r\n\r\nThe former, pyarrow, builtin within the manylinux1 environment, using gcc-4.8, however the later's ABI has a `[cxx11]` tag. That blocks users to develop python C extensions that depends on libarrow-dev. For example, we have developed `lib` A in C++, which use arrow's `Arrow::Buffer` from libarrow-dev, and wrap it using things like `pybind11` to a python module `liba`. After building the `liba` on commodity Ubuntu (which could install libarrow-dev with apt-get), the user import both `liba` and `pyarrow` to the python's script, it won't work correctly due to the ABI confliction (especially when it comes to the string cases).\r\n\r\nI can see two options to make it works:\r\n\r\n1. build arrow's python package using static link, that the pyarrow won't contains so many shared libraries (libarrow.so, libarrow_python.so, etc.)\r\n2. distribute `libarrow-dev` with `-D_GLIBCXX_USE_CXX11_ABI=0`\r\n\r\nI'm also wondering if there's any technical issues that not distributing packages in different languages with the same ABI.",
+        "created_at": "2020-11-15T16:18:51.000Z",
+        "updated_at": "2020-11-19T07:31:43.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-11-16T03:04:21.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-11-16T01:09:13.069Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10599?focusedCommentId=17232439) by Kouhei Sutou (kou):*\nYou should use `python3 -m pip3 install --no-binary pyarrow pyarrow` when you use libarrow-dev and system Python on Ubuntu. Note that you can't use libarrow-dev with non-system Python. It's built for system Python.\r\n\r\nThe manylinux1 wheel for pyarrow isn't only for Ubuntu. It can be used for other Linux distributions such as CentOS.\r\n"
+        },
+        {
+            "created_at": "2020-11-16T01:55:39.705Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10599?focusedCommentId=17232460) by Wes McKinney (wesm):*\nCorrect \u2013 it is not intended for the distribution-specific Linux packages to be used together with the manylinux Python wheels, and we have no plans to change that.\u00a0"
+        },
+        {
+            "created_at": "2020-11-16T02:26:30.328Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10599?focusedCommentId=17232466) by Tao He (sighingnow):*\nThanks `[~kou]` and `[~wesm]`, I agree to build pyarrow wheels using manylinux1 for generic linux distributions, but how about distribute libarrow-dev with `-D_GLIBCXX_USE_CXX11_ABI=0`?\r\n\r\nCurrent manylinux1 wheels works well if our python pip also built using manylinux1, i.e., gcc-4.8 and without the DUAL abi. But it users install pyarrow wheels and build our package from scratch, things would be broken. "
+        },
+        {
+            "created_at": "2020-11-16T02:39:55.681Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10599?focusedCommentId=17232470) by Kouhei Sutou (kou):*\nI can't understand why you want to use manylinux1 wheels with libarrow-dev.\r\n\r\nIf your package provides manylinux1 wheels, users don't need to build your package from scratch, right?"
+        },
+        {
+            "created_at": "2020-11-16T03:01:54.421Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10599?focusedCommentId=17232479) by Tao He (sighingnow):*\nIt usually happens on develop environment where our package is build from scratch. I think building pyarrow from source does make sense for developers.\r\n\r\nI'm going to close this ticket, thanks `[~kou]`."
+        },
+        {
+            "created_at": "2020-11-16T03:17:50.426Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10599?focusedCommentId=17232481) by Kouhei Sutou (kou):*\nThanks. I understand."
+        },
+        {
+            "created_at": "2020-11-16T12:44:34.075Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10599?focusedCommentId=17232731) by Tao He (sighingnow):*\nHi `[~kou]`, I'm also wondering if pyarrow could use `RTLD_GLOBAL` flags to import the C++ extension modules. Neither the manylinux1 wheels nor building from source using system-wide libarrow-dev doesn't work without `RTLD_GLOBAL`, and it users import pyarrow before our module we cannot reload shared libraries in pyarrow. That means, pyarrow cannot work with python module that depends on libarrow-dev when pyarrow is imported first. "
+        },
+        {
+            "created_at": "2020-11-16T20:12:07.290Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10599?focusedCommentId=17233048) by Kouhei Sutou (kou):*\nYou can use `sys.setdlopenflags` https://docs.python.org/3/library/sys.html#sys.setdlopenflags for it but I'm not sure it works as you expect.\r\n"
+        },
+        {
+            "created_at": "2020-11-17T04:00:31.361Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10599?focusedCommentId=17233248) by Tao He (sighingnow):*\n`setdlopenflags` works, but could I submit to pyarrow to make it as the default behaviour of loading pyarrow's C extension?"
+        },
+        {
+            "created_at": "2020-11-17T19:54:50.327Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10599?focusedCommentId=17233899) by Kouhei Sutou (kou):*\nDo you mean that you want to add `sys.setdlopenflags` call to pyarrow?\r\nIt's not acceptable. Once again, we don't recommend that users mix manylinux1 wheels and `libarrow-dev`."
+        },
+        {
+            "created_at": "2020-11-18T12:30:24.221Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10599?focusedCommentId=17234566) by Tao He (sighingnow):*\nWithout `setdlopenflags(RTLD_GLOBAL)` pyarrow won't work even with other manylinux1-built wheels of other packages, and won't work even when pyarrow and the other package are both built from source, using system-wide installed libarrow-dev (I have tested with arrow-1.0.1-1)."
+        },
+        {
+            "created_at": "2020-11-19T07:31:43.266Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10599?focusedCommentId=17235223) by Kouhei Sutou (kou):*\nCould you provide a Python script and wheels for your package that reproduce your problem?\r\n"
+        }
+    ]
+}

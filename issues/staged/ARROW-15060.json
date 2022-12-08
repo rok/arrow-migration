@@ -1,0 +1,52 @@
+{
+    "issue": {
+        "title": "[R] open_dataset() on csv files lacks support for compressed files",
+        "body": "***Note**: This issue was originally created as [ARROW-15060](https://issues.apache.org/jira/browse/ARROW-15060). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nUsing open_dataset() on S3 buckets of csv files is a game-changing magic, particularly with all the additional support for database / dplyr operations over the remote connection, and the widespread adoption of S3 buckets even by old-school big data providers like NOAA.\r\n\r\n\u00a0\r\n\r\nIt's not uncommon to encounter buckets with \\*.csv.gz formats.\u00a0 I know technically this should be unnecessary, as compression can be done \"in flight\" by the server, but usually this is not an issue for R users since R's `connection` class automatically detects and gunzips compressed files (over either POSIX or HTTP connections).\u00a0 It would be really great if arrow could handle this case too.\u00a0",
+        "created_at": "2021-12-10T16:58:00.000Z",
+        "updated_at": "2021-12-17T19:47:51.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-12-10T17:09:49.387Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15060?focusedCommentId=17457278) by David Li (lidavidm):*\nHmm, ARROW-10372 was supposed to implement this. Do you get an error when you try to open a dataset of compressed CSV?"
+        },
+        {
+            "created_at": "2021-12-10T17:13:05.521Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15060?focusedCommentId=17457280) by Jonathan Keane (jonkeane):*\nThanks for that David, I was just going to point to the same ticket. I also tried locally:\r\n\r\n```Java\n\r\n> library(arrow, warn.conflicts = FALSE)\r\n> \r\n> dir.create(\"./dataset\")\r\n> readr::write_csv(mtcars, \"dataset/data-0.csv.gz\")\r\n> readr::write_csv(mtcars, \"dataset/data-1.csv.gz\")                           \r\n>                                                                             \r\n> ds <- open_dataset(\"dataset\", format = \"csv\")\r\n> dplyr::collect(ds)\r\n# A tibble: 64 \u00d7 11\r\n     mpg   cyl  disp    hp  drat    wt  qsec    vs    am  gear  carb\r\n   <dbl> <int> <dbl> <int> <dbl> <dbl> <dbl> <int> <int> <int> <int>\r\n 1  21       6  160    110  3.9   2.62  16.5     0     1     4     4\r\n 2  21       6  160    110  3.9   2.88  17.0     0     1     4     4\r\n 3  22.8     4  108     93  3.85  2.32  18.6     1     1     4     1\r\n 4  21.4     6  258    110  3.08  3.22  19.4     1     0     3     1\r\n 5  18.7     8  360    175  3.15  3.44  17.0     0     0     3     2\r\n 6  18.1     6  225    105  2.76  3.46  20.2     1     0     3     1\r\n 7  14.3     8  360    245  3.21  3.57  15.8     0     0     3     4\r\n 8  24.4     4  147.    62  3.69  3.19  20       1     0     4     2\r\n 9  22.8     4  141.    95  3.92  3.15  22.9     1     0     4     2\r\n10  19.2     6  168.   123  3.92  3.44  18.3     1     0     4     4\r\n# \u2026 with 54 more rows\r\n```\r\n\r\nThough it's possible the S3 bit is the issue here?"
+        },
+        {
+            "created_at": "2021-12-10T17:13:54.010Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15060?focusedCommentId=17457282) by Jonathan Keane (jonkeane):*\nOr maybe our docs / what the arguments are accepted for `format` should include csv.gz (or tell folks that csv.gz is the same as csv?)"
+        },
+        {
+            "created_at": "2021-12-10T17:24:25.756Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15060?focusedCommentId=17457285) by David Li (lidavidm):*\nI also just tried it with Minio (which goes through S3FileSystem still) and that seemed to work fine:\r\n```java\n\r\n> minio$ls(\"taxi-csv-gz\", recursive = TRUE)\r\n[1] \"taxi-csv-gz/2009\" \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0\"taxi-csv-gz/2009/01\" \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0\r\n[3] \"taxi-csv-gz/2009/01/data.csv.gz\" \"taxi-csv-gz/2009/02\" \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0\r\n[5] \"taxi-csv-gz/2009/02/data.csv.gz\"\r\n> open_dataset(\"taxi-csv-gz\", partitioning=c(\"year\", \"month\"), format=\"csv\", filesystem=minio)\r\nFileSystemDataset with 2 csv files\r\nvendor_id: string\r\npassenger_count: int64\r\ntrip_distance: double\r\npickup_longitude: double\r\npickup_latitude: double\r\nrate_code_id: null\r\nstore_and_fwd_flag: null\r\ndropoff_longitude: double\r\ndropoff_latitude: double\r\npayment_type: string\r\nfare_amount: double\r\nextra: double\r\nmta_tax: null\r\ntip_amount: double\r\ntolls_amount: double\r\ntotal_amount: double\r\nyear: int32\r\nmonth: int32 \n```\r\nIt may be worth documenting this explicitly, though, just to make sure it'll show up in searches."
+        },
+        {
+            "created_at": "2021-12-16T18:21:58.122Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15060?focusedCommentId=17460947) by Carl Boettiger (cboettig):*\nMy apologies, but it looks like it is read_csv_arrow over S3 which fails: \r\n\r\n\r\n```java\n\r\n## arrow network csv.gz\r\nbench::bench_time({ # ERROR\r\n\u00a0 analysis <- arrow::s3_bucket(bucket = \"analysis\", endpoint_override = \"data.ecoforecast.org\", anonymous = TRUE)\r\n\u00a0 ds <- arrow::read_csv_arrow(analysis$OpenInputFile(\"combined_forecasts_scores.csv.gz\"))\r\n})\r\n \n```\r\nThe above example is on a public bucket, should be reproducible.\u00a0 \r\n\r\nNo problems if I use `read_csv_arrow()` locally.\u00a0 \r\n\r\nRelatedly, does `write_csv_arrow()` gzip a csv if we add the \".gz\" to the name?\u00a0 Or is there a way to toggle compression when using `write_dataset` with `format=\"csv\"` ?"
+        },
+        {
+            "created_at": "2021-12-17T14:12:12.709Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15060?focusedCommentId=17461464) by David Li (lidavidm):*\nAh. Locally, we're just passing a path to `{}read_csv_arrow{`}, right? But for S3, we're passing a file.\r\n\r\n`read_csv_arrow` will defer to `make_readable_file` if given a path, which auto-detects compression. This doesn't happen for `{}OpenInputFile{`}. Maybe we can do that? (I'll defer to Jon on this.)\r\n\r\nIt doesn't seem that `write_csv_arrow` does any compression based on output suffix. You would have to manually wrap it in a CompressedOutputStream, I think. I also don't see options for compression for CSV datasets, either in R or C++."
+        },
+        {
+            "created_at": "2021-12-17T14:12:38.041Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15060?focusedCommentId=17461465) by David Li (lidavidm):*\nThis should work: `ds <- arrow::read_csv_arrow(CompressedInputStream$create(analysis$OpenInputFile(\"combined_forecasts_scores.csv.gz\")))`"
+        },
+        {
+            "created_at": "2021-12-17T19:46:22.704Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15060?focusedCommentId=17461634) by Weston Pace (westonpace):*\n> I also don't see options for compression for CSV datasets, either in R or C++.\r\n\r\nI assume you are talking about writing datasets?\r\n\r\nWith regard to reading datasets, while there is no option today to override compression the default behavior will decompress automatically if there is a .gz extension.  (see arrow::dataset::FileSource::OpenCompressed)\r\n"
+        },
+        {
+            "created_at": "2021-12-17T19:47:51.995Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15060?focusedCommentId=17461636) by David Li (lidavidm):*\nYes, sorry, for writing datasets. Reading datasets works automatically, of course. I already filed ARROW-15148 for the write side."
+        }
+    ]
+}

@@ -1,0 +1,69 @@
+{
+    "issue": {
+        "title": "[C++] ScanNode is not using the filter expression",
+        "body": "***Note**: This issue was originally created as [ARROW-14642](https://issues.apache.org/jira/browse/ARROW-14642). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe ScanNode can not apply predicate push-down, it seems the are some fragments that are not able to use or setting up properly the filter expression.\u00a0\r\n```c++\n\r\nauto options = std::make_shared<ScanOptions>();\r\noptions->filter = filter_expression;\r\ncompute::MakeExecNode(\"scan\", plan.get(), {}, ScanNodeOptions{dataset, options}));\u00a0\r\n```\r\nAlso, if the ScanOptions doesn't have a projection expression the code just crash and I think I should create a default expression to include all the fields from the dataset schema.",
+        "created_at": "2021-11-09T15:52:42.000Z",
+        "updated_at": "2021-12-01T04:07:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-12-01T04:07:03.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-09T15:54:20.612Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14642?focusedCommentId=17441243) by David Li (lidavidm):*\nIs this the same as ARROW-13498, at least for the filter part?\r\n\r\nThe scan can't guarantee that it applies the filter or even fully applies the filter, so in general you need to filter again afterwards. (e.g. CSV - you can't push down any filter there, the only filtering would be based on partitioning info.)\r\n\r\nThe crash should be fixed, though."
+        },
+        {
+            "created_at": "2021-11-09T16:07:05.441Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14642?focusedCommentId=17441256) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nThanks for the quick reply David!\r\n\r\nIt make sense, but I think that the scan should be able to evaluate the filter when the file format supports predicate push (for instance my tests were using parquet files)\r\n\r\nOtherwise, we would not able to support predicate push optimization and we will create always a Filter node for situations when the datasets is dealing with formats like parquet.\r\n\r\nLet me know your ideas about this!"
+        },
+        {
+            "created_at": "2021-11-09T16:18:38.057Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14642?focusedCommentId=17441263) by David Li (lidavidm):*\nEven with Parquet, you can't always evaluate the predicate just via metadata - so you'd have to differentiate between them to know when you need a separate filter step. (Or the predicate may only be partially evaluable via metadata.)\r\n\r\nFor Parquet specifically, though, I don't think we implement all the possible predicates - so improvements there would certainly be welcome. Can you share exactly what isn't working?"
+        },
+        {
+            "created_at": "2021-11-09T17:10:26.656Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14642?focusedCommentId=17441288) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nGood points! Thanks David!\r\n\r\nI was loading the TPC-H nation table and I saw that the MakeScanNode is using the fragment implementation based on the FileSystemDataset::GetFragmentsImpl.\r\n\r\nAnd from there I think the predicate is being accumulated but not used or passed to the proper Parquet reader.\r\n\r\nbtw I'm ok to close this ticket, thanks David!"
+        },
+        {
+            "created_at": "2021-11-09T18:43:55.426Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14642?focusedCommentId=17441322) by David Li (lidavidm):*\n> And from there I think the predicate is being accumulated but not used or passed to the proper Parquet reader.\r\n\r\nSorry, so you mean that we're not doing pushdown for the particular predicate tested? I think if it's one that could be pushed down to the metadata, then we can implement it (though you probably can't get rid of the FilterNode still)."
+        },
+        {
+            "created_at": "2021-11-09T19:19:18.114Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14642?focusedCommentId=17441331) by Weston Pace (westonpace):*\nOne last note, just because it hasn't been mentioned yet, is that this is tightly related to the concept of an ExecBatch's guarantee.\u00a0 So a filter node will always be created with the full filter.\u00a0 If the scanner happens to be able to apply the filter completely or partially it will attach a guarantee of some kind to the ExecBatch objects it creates.\u00a0 The filter node will them simplify the filter it needs to apply given the guarantee.\u00a0 This may simplify down to \"literal(true)\" (e.g. the filter was entirely pushed down), it may not simplify at all (nothing was pushed down) or it could even partially simplify (e.g. if the filter is x > 3 && y < 4 then maybe the guarantee is x > 0 and it simplifies to y < 4."
+        },
+        {
+            "created_at": "2021-11-09T22:19:54.768Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14642?focusedCommentId=17441391) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nThanks Weston, based on that explanation, it looks like this simple use case should be supported in datasets: Is a simple table (TPC-H nation), it was on an Int field and the predicated was simple (greater_than)\r\n\r\nI understand that defining a Filter node is kind of mandatory here, but those simple predicates should be evaluated by the dataset scanner right?"
+        },
+        {
+            "created_at": "2021-11-09T22:46:44.749Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14642?focusedCommentId=17441418) by Weston Pace (westonpace):*\nYes.\u00a0 Assuming the file format was parquet and the file was created with statistics.\u00a0 That pushdown happens in arrow::dataset::ParquetFileFragment::TestRowGroups in file_parquet.cc\r\n\r\n\r\nIf the file format is IPC or CSV or the parquet file was saved without statistics then no filtering will happen in the scanner."
+        },
+        {
+            "created_at": "2021-11-09T22:56:03.163Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14642?focusedCommentId=17441421) by Weston Pace (westonpace):*\nAlso, the data would have to be saved in such a way that row groups exist which are easily excluded.\u00a0 For example, if your files had 10 row groups each and every row group had n_regionkey between 0 and 100 and your filter was n_regionkey > 50 then no filtering would happen in the scanner.\r\n\r\n\u00a0\r\n\r\nOn the other hand, if your files had 10 row groups each and the underlying data was sorted so that the first row group had n_regionkey 0-10 and the next had n_regionkey 11 - 20 and so on then half the data would be filtered by the scanner."
+        },
+        {
+            "created_at": "2021-11-10T00:14:57.883Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14642?focusedCommentId=17441440) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nThe file has only 1 row group and it has statistics for that column:\r\n```python\n\r\n>>> parquet_file = pq.ParquetFile('nation_0_0.parquet') \u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\r\n>>> parquet_file.metadata \r\n<pyarrow._parquet.FileMetaData object at 0x7fe390909dd0> \r\n\u00a0created_by: parquet-mr version 1.8.1-drill-r0 (build 6b605a4ea05b66e1a6bf843353abcb4834a4ced8) \r\n\u00a0num_columns: 4 \r\n\u00a0num_rows: 25 \r\n\u00a0num_row_groups: 1 \r\n\u00a0format_version: 1.0 \r\n\u00a0serialized_size: 605 \r\n>>> parquet_file.metadata.row_group(0) \r\n<pyarrow._parquet.RowGroupMetaData object at 0x7fe39099ab30> \r\n\u00a0num_columns: 4 \r\n\u00a0num_rows: 25 \r\n\u00a0total_byte_size: 2757 \r\n>>> parquet_file.metadata.row_group(0).column(0) \r\n<pyarrow._parquet.ColumnChunkMetaData object at 0x7fe39099abf0> \r\n\u00a0file_offset: 4 \r\n\u00a0file_path: \u00a0\r\n\u00a0physical_type: INT32 \r\n\u00a0num_values: 25 \r\n\u00a0path_in_schema: n_nationkey \r\n\u00a0is_stats_set: True \r\n\u00a0statistics: \r\n\u00a0\u00a0\u00a0<pyarrow._parquet.Statistics object at 0x7fe39099ab30> \r\n\u00a0\u00a0\u00a0\u00a0\u00a0has_min_max: True \r\n\u00a0\u00a0\u00a0\u00a0\u00a0min: 0 \r\n\u00a0\u00a0\u00a0\u00a0\u00a0max: 24 \r\n\u00a0\u00a0\u00a0\u00a0\u00a0null_count: 0 \r\n\u00a0\u00a0\u00a0\u00a0\u00a0distinct_count: 0 \r\n\u00a0\u00a0\u00a0\u00a0\u00a0num_values: 25 \r\n\u00a0\u00a0\u00a0\u00a0\u00a0physical_type: INT32 \r\n\u00a0\u00a0\u00a0\u00a0\u00a0logical_type: None \r\n\u00a0\u00a0\u00a0\u00a0\u00a0converted_type (legacy): NONE \r\n\u00a0compression: UNCOMPRESSED \r\n\u00a0encodings: ('RLE', 'BIT_PACKED', 'PLAIN') \r\n\u00a0has_dictionary_page: False \r\n\u00a0dictionary_page_offset: None \r\n\u00a0data_page_offset: 4 \r\n\u00a0total_compressed_size: 141 \r\n\u00a0total_uncompressed_size: 141 \r\n>>> \n```\r\nI'm going to debug TestRowGroups and see why the expression is not being evaluated."
+        },
+        {
+            "created_at": "2021-11-10T00:49:00.994Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14642?focusedCommentId=17441446) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nThe file is too small to test, the row group statistics is intersecting with the condition, so that is why all the row group is being processed.\r\n\r\nThat make sense, so perhaps we should close this ticket since the behavior I'm getting is correct (according to the parquet reader implementation): the filtering will happen by row groups based on its statistics."
+        },
+        {
+            "created_at": "2021-12-01T01:53:15.023Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14642?focusedCommentId=17451467) by Weston Pace (westonpace):*\n`[~aucahuasi]` Can we close this?"
+        },
+        {
+            "created_at": "2021-12-01T04:07:03.489Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14642?focusedCommentId=17451494) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nDuplicated\r\n\r\nhttps://issues.apache.org/jira/browse/ARROW-13498"
+        }
+    ]
+}

@@ -1,0 +1,38 @@
+{
+    "issue": {
+        "title": "[Python] Don't check Schema metadata in __eq__ and __ne__",
+        "body": "***Note**: This issue was originally created as [ARROW-8057](https://issues.apache.org/jira/browse/ARROW-8057). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen performing schema roundtrips, the equality check for fields break. This is a regression from PyArrow 0.16.0\r\n\r\nThe equality check for entire schemas has never worked (but should from my POV)\r\n```python\n\r\nimport pyarrow.parquet as pq\r\nimport pyarrow as pa\r\nprint(pa.__version__)\r\nfields = [\r\n    pa.field(\"bool\", pa.bool_()),\r\n    pa.field(\"byte\", pa.binary()),\r\n    pa.field(\"date\", pa.date32()),\r\n    pa.field(\"datetime64\", pa.timestamp(\"us\")),\r\n    pa.field(\"float32\", pa.float64()),\r\n    pa.field(\"float64\", pa.float64()),\r\n    pa.field(\"int16\", pa.int64()),\r\n    pa.field(\"int32\", pa.int64()),\r\n    pa.field(\"int64\", pa.int64()),\r\n    pa.field(\"int8\", pa.int64()),\r\n    pa.field(\"null\", pa.null()),\r\n    pa.field(\"uint16\", pa.uint64()),\r\n    pa.field(\"uint32\", pa.uint64()),\r\n    pa.field(\"uint64\", pa.uint64()),\r\n    pa.field(\"uint8\", pa.uint64()),\r\n    pa.field(\"unicode\", pa.string()),\r\n    pa.field(\"array_float32\", pa.list_(pa.float64())),\r\n    pa.field(\"array_float64\", pa.list_(pa.float64())),\r\n    pa.field(\"array_int16\", pa.list_(pa.int64())),\r\n    pa.field(\"array_int32\", pa.list_(pa.int64())),\r\n    pa.field(\"array_int64\", pa.list_(pa.int64())),\r\n    pa.field(\"array_int8\", pa.list_(pa.int64())),\r\n    pa.field(\"array_uint16\", pa.list_(pa.uint64())),\r\n    pa.field(\"array_uint32\", pa.list_(pa.uint64())),\r\n    pa.field(\"array_uint64\", pa.list_(pa.uint64())),\r\n    pa.field(\"array_uint8\", pa.list_(pa.uint64())),\r\n    pa.field(\"array_unicode\", pa.list_(pa.string())),\r\n]\r\n\r\nschema = pa.schema(fields)\r\n\r\nbuf = pa.BufferOutputStream()\r\npq.write_metadata(schema, buf)\r\nreader = pa.BufferReader(buf.getvalue().to_pybytes())\r\nreconstructed_schema = pq.read_schema(reader)\r\n\r\nassert reconstructed_schema == reconstructed_schema\r\nassert reconstructed_schema[0] == reconstructed_schema[0]\r\n# This breaks on master / regression from 0.16.0 \r\nassert schema[0] == reconstructed_schema[0]\r\n\r\n# This never worked but should\r\nassert reconstructed_schema == schema\r\nassert schema == reconstructed_schema\r\n```",
+        "created_at": "2020-03-10T10:35:17.000Z",
+        "updated_at": "2020-03-11T00:14:01.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-03-11T00:13:59.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-03-10T10:40:22.875Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8057?focusedCommentId=17055804) by Florian Jetter (fjetter):*\nInvestigating the fields explicitly shows that the reconstructed schemas now hold metadata which was not there before\r\n```java\n\r\nschema[0].metadata\r\n\r\nreconstructed_schema[0].metadata\r\nOrderedDict([(b'PARQUET:field_id', b'1')]) \n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-03-10T10:57:16.858Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8057?focusedCommentId=17055816) by Antoine Pitrou (apitrou):*\ncc `[~wesm]`"
+        },
+        {
+            "created_at": "2020-03-10T14:00:41.762Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8057?focusedCommentId=17055979) by Wes McKinney (wesm):*\nYes, this was added in https://github.com/apache/arrow/commit/f609298f8f00783a6704608ca8493227a552abab. \r\n\r\nI don't think this is a bug. You can compare schemas without comparing metadata `a.equals(b, check_metadata=False)`. Perhaps we could change `__eq__` to use `check_metadata=False` when comparing.\r\n\r\nAnother option is that we could change the default for `check_metadata` to `False`"
+        },
+        {
+            "created_at": "2020-03-10T14:30:57.145Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8057?focusedCommentId=17056005) by Wes McKinney (wesm):*\nI went with changing the default to `False`, it feels like the right thing to me https://github.com/apache/arrow/pull/6569"
+        },
+        {
+            "created_at": "2020-03-11T00:13:59.891Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8057?focusedCommentId=17056540) by Wes McKinney (wesm):*\nIssue resolved by pull request 6569\n<https://github.com/apache/arrow/pull/6569>"
+        }
+    ]
+}

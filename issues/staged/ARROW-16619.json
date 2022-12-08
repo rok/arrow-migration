@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[R] Support compression + R connection (URL with .gz file)",
+        "body": "***Note**: This issue was originally created as [ARROW-16619](https://issues.apache.org/jira/browse/ARROW-16619). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently, remote access to data (particularly lazy read, an immensely powerful arrow ability) only works for data in an S3-compliant object store (though I know Azure support is in the works).\u00a0 It would be really fantastic if we could have remote access over HTTPS (I think this already works on the python side thanks to fsspec).\u00a0 \r\n\r\nFor example, this fails in arrow but works in readr:\r\n\r\n\r\narrow::read_csv_arrow(\"https://data.ecoforecast.org/targets/aquatics/aquatics-targets.csv.gz\")\r\n\u00a0\r\nreadr::read_csv(\"https://data.ecoforecast.org/targets/aquatics/aquatics-targets.csv.gz\")\r\n\r\nI think this ability would be even more compelling in `open_dataset()`, since it opens up for us all the power of lazy read access.\u00a0 Most servers support curl range requests so it seems this should be possible.\u00a0 (We can already do something similar from duckdb+R, but only after manually opting in the http extension and only for parquet).",
+        "created_at": "2022-05-19T19:25:22.000Z",
+        "updated_at": "2022-08-03T12:13:36.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-08-03T12:13:36.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-05-19T19:28:02.689Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16619?focusedCommentId=17539758) by David Li (lidavidm):*\nIt seems this is an exact copy of ARROW-14998 and ARROW-7594?"
+        },
+        {
+            "created_at": "2022-05-19T20:20:01.206Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16619?focusedCommentId=17539779) by Carl Boettiger (cboettig):*\n@David Li I agree these are closely related issues, though I'm not sure about an exact copy, I think that depends how your team chooses to implement this.\u00a0 \r\n\r\nIt would certainly be possible to make `arrow::read_csv_arrow(\"https://data.ecoforecast.org/targets/aquatics/aquatics-targets.csv.gz\")` succeed without implementing the abstract FileSystem operations (many of which involve operations that would not apply to https interface anyway).\u00a0 I'd love\u00a0 a generic implementation of filesystem operations over https, (could potentially include write operations as well?) but I think supporting read over https might be a smaller subset of that problem?\u00a0 (i.e. even though 7594 is open at the C++ level, I'm not sure python users are impacted by this thanks to arrow compatibility with fsspec?)\u00a0"
+        },
+        {
+            "created_at": "2022-05-19T20:28:35.033Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16619?focusedCommentId=17539783) by David Li (lidavidm):*\nFair enough, but I'll defer to the R developers on that front.\r\n\r\nNote that while fsspec helps Python users, it's helpful to have the C++ filesystem implemented (not least to avoid constant calls back into Python, which also prevents the filesystem from truly implementing parallelism).\r\n\r\nInside `open_dataset` however you must have a filesystem. So from that angle I'm not sure how much this differs from the other issues."
+        },
+        {
+            "created_at": "2022-05-19T20:37:29.123Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16619?focusedCommentId=17539789) by Carl Boettiger (cboettig):*\nthanks, yeah totally.\u00a0 I'd love to see this at the C++ level and thus available to all the client tools, that would be ideal.\u00a0 Sounds like a bigger lift potentially, but it would be super and would solve these derivative issues for sure.\u00a0 Anyway, thanks for all the awesome work, I enjoy blowing someone's mind with arrow just about every day :)"
+        },
+        {
+            "created_at": "2022-05-23T14:46:45.512Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16619?focusedCommentId=17540987) by Neal Richardson (npr):*\nIt is possible to read a csv over https (ARROW-9235, in the 8.0.0 release), but currently we aren't auto-detecting compression from the file name in this case like we do for local files. \r\n\r\n```Java\n\r\n> read_csv_arrow(\"https://raw.githubusercontent.com/ursa-labs/arrow-r-nightly/master/linux/distro-map.csv\")\r\n# A tibble: 21 \u00d7 2\r\n   actual    use_this    \r\n   <chr>     <chr>       \r\n 1 fedora-28 ubuntu-18.04\r\n 2 fedora-29 ubuntu-18.04\r\n 3 fedora-30 ubuntu-18.04\r\n 4 fedora-31 ubuntu-18.04\r\n 5 fedora-32 ubuntu-18.04\r\n 6 fedora-33 ubuntu-18.04\r\n 7 fedora-34 ubuntu-18.04\r\n 8 centos-8  ubuntu-18.04\r\n 9 rhel-8    ubuntu-18.04\r\n10 fedora-19 centos-7    \r\n# \u2026 with 11 more rows\r\n```"
+        },
+        {
+            "created_at": "2022-05-24T14:37:51.726Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16619?focusedCommentId=17541497) by Dewey Dunnington (paleolimbot):*\nI believe it will also work out-of-the-box for an IPC stream (or anything else that doesn't require a RandomAccessFile)!\r\n\r\nI think it's within scope for the R package to support a URL...I run into this primarily when writing about Arrow, where I want to write something like `read_parquet(\"https://my.website/some_tiny.parquet\")` and instead have to download to a temporary file myself which takes some vertical writing space that I'd like to avoid for clarity.\r\n\r\nPre-vroom readr supported this via a \"download to temporary file + read + delete temporary file on exit\" strategy, which seems reasonable here as well. I'd be happy to implement that unless there are objections."
+        },
+        {
+            "created_at": "2022-05-25T20:26:36.193Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16619?focusedCommentId=17542229) by Carl Boettiger (cboettig):*\nsounds good!\u00a0 Eventually it would still be nice for this to work as a stream from https source, e.g. with open_dataset(), allowing us to filter-before-downloading or 'read once' into RAM rather than than serializing to disk first.... But going the temp file route for now would still be a very nice improvement"
+        }
+    ]
+}

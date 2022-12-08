@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[C++] Parquet statistics incorrect for decimal128",
+        "body": "***Note**: This issue was originally created as [ARROW-12054](https://issues.apache.org/jira/browse/ARROW-12054). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n```java\n\r\nimport decimal\r\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\ndtype = pa.decimal128(12, 4)\r\nctx = decimal.Context(prec=12)\r\narr = pa.array([0, ctx.create_decimal(3.99)], dtype)\r\ntable = pa.Table.from_arrays([arr], [\"foo\"])\r\npq.write_table(table, '/tmp/foo.pq')\r\nmeta = pq.read_metadata('/tmp/foo.pq')\r\nprint(meta.row_group(0).column(0).statistics)\r\n\r\n```\r\nExpected 0 to be the min and 3.99 to be the max but got the reverse.",
+        "created_at": "2021-03-23T12:14:02.000Z",
+        "updated_at": "2021-03-23T20:16:44.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-03-23T20:16:44.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-03-23T12:15:39.440Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12054?focusedCommentId=17306998) by Antoine Pitrou (apitrou):*\ncc `[~emkornfield]`"
+        },
+        {
+            "created_at": "2021-03-23T13:04:06.458Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12054?focusedCommentId=17307041) by Taras Kuzyo (ktaras):*\nActually, it is even weirder\r\n\r\n\u00a0\r\n```java\n\r\nimport decimal\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\ndef pad(b):\r\n# Left pad 0 or 1 based on leading digit (2's complement rules)\r\n if b[-1] & 128 == 0:\r\n return b.ljust(16, b'\\x00')\r\n else:\r\n return b.ljust(16, b'\\xff')\r\n\r\ndef to_pyarrow_bytes(b):\r\n# converts from big-endian (parquet's repr) to little endian (arrow's repr)\r\n# and then pads to 16 bytes\r\n return pad(b[::-1])\r\n\r\ndef decode_stats_decimal(b):\r\n pyarrow_bytes = to_pyarrow_bytes(b)\r\n arr = pa.Array.from_buffers(pa.decimal128(12, 4), 1, [None, pa.py_buffer(pyarrow_bytes)], 0)\r\n return arr[0].as_py()\r\n\r\ncontext = decimal.Context(prec=12)\r\nnumbers = [context.create_decimal(x/10) for x in range(10, 30)]\r\na = pa.array(numbers, pa.decimal128(12, 4))\r\nnumbers = [context.create_decimal(x - 10) for x in range(10, 30)]\r\nb = pa.array(numbers, pa.decimal128(12, 4))\r\nnumbers = [context.create_decimal(x % 20) for x in range(10, 30)]\r\nc = pa.array(numbers, pa.decimal128(12, 4))\r\nnumbers = [context.create_decimal(x % 10) for x in range(10, 30)]\r\nd = pa.array(numbers, pa.decimal128(12, 4))\r\n\r\ntable = pa.Table.from_arrays([a, b, c, d], ['A', 'B', 'C', 'D'])\r\nwith pq.ParquetWriter('test.parquet', table.schema) as writer:\r\n writer.write_table(table)\r\nreader = pq.ParquetFile('test.parquet')\r\nfor rowgroup in range(reader.num_row_groups):\r\n    meta = reader.metadata.row_group(rowgroup)\r\n    for i in range(meta.num_columns):\r\n       print(f'Column {i}')\r\n       min_price = meta.column(i).statistics.min\r\n       max_price = meta.column(i).statistics.max\r\n       df = reader.read_row_group(0).column(i).to_pandas()\r\n       actual_min, actual_max = df.min(), df.max()\r\n       print(f'Min decoded: {decode_stats_decimal(min_price)} Min actual: {actual_min}') \r\n       print(f'Max decoded: {decode_stats_decimal(max_price)} Max actual: {actual_max}')\u00a0\r\n```\r\n\u00a0\r\n\r\nThe output:\r\n```\n\r\nColumn 0\r\nMin decoded: 1.0000 Min actual: 1.0000\r\nMax decoded: 2.9000 Max actual: 2.9000\r\nColumn 1\r\nMin decoded: 4.0000 Min actual: 0.0000\r\nMax decoded: 16.0000 Max actual: 19.0000\r\nColumn 2\r\nMin decoded: 4.0000 Min actual: 0.0000\r\nMax decoded: 16.0000 Max actual: 19.0000\r\nColumn 3\r\nMin decoded: 4.0000 Min actual: 0.0000\r\nMax decoded: 9.0000 Max actual: 9.0000\n```"
+        },
+        {
+            "created_at": "2021-03-23T20:16:14.870Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12054?focusedCommentId=17307393) by Weston Pace (westonpace):*\nWell, testing on latest (probably should have clarified I was using 3.0.0 earlier) shows that this is already fixed (presumably by PARQUET-1655)"
+        }
+    ]
+}

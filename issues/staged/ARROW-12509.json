@@ -1,0 +1,72 @@
+{
+    "issue": {
+        "title": "[C++] More fine-grained control of file creation in filesystem layer",
+        "body": "***Note**: This issue was originally created as [ARROW-12509](https://issues.apache.org/jira/browse/ARROW-12509). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n`FileSystem::OpenOutputStream` silently truncates an existing file.\r\n\r\nIt would be better to give more control to the user. Ideally, one could choose between several options: \"always overwrite and fail if doesn't exist\", \"overwrite if exists, otherwise create\", \"creates if doesn't exist, otherwise fails\".\r\n\r\nOne should research whether e.g. S3 supports such control.",
+        "created_at": "2021-04-22T15:56:17.000Z",
+        "updated_at": "2022-07-12T14:04:28.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-04-22T16:21:09.932Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12509?focusedCommentId=17329249) by Antoine Pitrou (apitrou):*\nS3 doesn't by itself support such options. That could be worked around non-atomically, by first looking up whether the object exists before trying to write to it."
+        },
+        {
+            "created_at": "2021-12-14T16:11:03.159Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12509?focusedCommentId=17459277) by Antoine Pitrou (apitrou):*\n`[~coryan]` Is this the kind of control that GCS exposes?"
+        },
+        {
+            "created_at": "2021-12-30T15:13:27.482Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12509?focusedCommentId=17466915) by Antoine Pitrou (apitrou):*\nHmm, I'm trying to implement this using `ifGenerationMatch` and `ifGenerationNotMatch`, but apparently the POST request always succeeds with the GCS testbench, it's the subsequent PUT request that fails:\r\n\r\nWith `IfGenerationMatch=0` and an existing file:\r\n```Java\n\r\nINFO:werkzeug:127.0.0.1 - - [30/Dec/2021 15:10:25] \"POST /upload/storage/v1/b/l95tbwi5ar9y4ehsikntmu00gokcjrd7/o?ifGenerationMatch=0&uploadType=resumable&name=if-exists.txt HTTP/1.1\" 200 -\r\nINFO:werkzeug:127.0.0.1 - - [30/Dec/2021 15:10:25] \"PUT /upload/storage/v1/b/l95tbwi5ar9y4ehsikntmu00gokcjrd7/o?uploadType=resumable&upload_id=25d866cf8542df6abaec31f6367c50d26ee4765ef66244a0e6c2a7d9c2009dc3 HTTP/1.1\" 412 -\r\n```\r\n\r\nWith `IfGenerationNotMatch=0` and a non-existing file:\r\n```Java\n\r\nINFO:werkzeug:127.0.0.1 - - [30/Dec/2021 15:10:25] \"POST /upload/storage/v1/b/fb90qwvinqshydbu5qbv2q6vibaegkbd/o?ifGenerationNotMatch=0&uploadType=resumable&name=if-not-exists.txt HTTP/1.1\" 200 -\r\nINFO:werkzeug:127.0.0.1 - - [30/Dec/2021 15:10:25] \"PUT /upload/storage/v1/b/fb90qwvinqshydbu5qbv2q6vibaegkbd/o?uploadType=resumable&upload_id=a98b676e239654fa2050f7fb24dfdd192e062711bb69c53ba0d358d168766bbb HTTP/1.1\" 304 -\r\n```\r\n\r\nDoes the actual Google Cloud implementation have the same behaviour, or is it a quirk/bug in the testbench?\r\n"
+        },
+        {
+            "created_at": "2021-12-30T15:29:45.262Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12509?focusedCommentId=17466919) by Antoine Pitrou (apitrou):*\nYou can find the in-progress implementation here btw:\r\nhttps://github.com/apache/arrow/compare/master...pitrou:ARROW-12509-fs-file-creation#diff-04dcab9ef46b1170cab130885a433e4de8b459944a8f2765f9ca5fb44d25e53a\r\n"
+        },
+        {
+            "created_at": "2022-01-18T13:50:24.474Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12509?focusedCommentId=17477871) by Antoine Pitrou (apitrou):*\nPing `[~coryan]` , I would welcome your insight here."
+        },
+        {
+            "created_at": "2022-02-08T10:53:07.270Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12509?focusedCommentId=17488767) by Antoine Pitrou (apitrou):*\ncc `[~emkornfield]` , I don't know if you have some knowledge about GCS protocol details."
+        },
+        {
+            "created_at": "2022-02-08T13:01:18.145Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12509?focusedCommentId=17488828) by Carlos O'Ryan (coryan):*\nSorry I missed this.\u00a0 I think the behavior you observed in the testbench is accurate.\u00a0 Consider the case where two uploads started more or less at the same time with `ifGenerationMatch(0)`.\u00a0 You want both to be able to start (1), so the POST must succeed, and only one to be able to finish, so the PUT must fail.\r\n\r\n\u00a0\r\n\r\n(1): Why?\u00a0 Because if the first uploads is abandoned there is no reason to prevent the first one from starting, in fact, it would be bad if you did.\u00a0"
+        },
+        {
+            "created_at": "2022-02-08T13:07:57.082Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12509?focusedCommentId=17488830) by Antoine Pitrou (apitrou):*\nHmm, I see, thank you for the answer. This makes the feature less useful to us, then... (except perhaps if we can write and flush a 0-byte area just after opening the file)"
+        },
+        {
+            "created_at": "2022-02-08T13:16:24.649Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12509?focusedCommentId=17488834) by Carlos O'Ryan (coryan):*\nA 0-byte flush won't work.\u00a0 GCS only accepts PUTs that are multiples of 256KiB.\u00a0 Anything less than 256KiB finalizes the upload.\u00a0 The client library refuses to flush data if it is smaller than the 256KiB quantum.\u00a0 Even if you had a quantum: the testbench only checks the preconditions on the final PUT.\u00a0 I am not sure how the service does it, but I would expect it to do the same: fetching the metadata is expensive, and you will need to fetch the metadata in the final PUT anyway (the object state may have changed).\r\n\r\n\u00a0\r\n\r\nI think you are running into another difference between POSIX filesystems and object storage.\u00a0 There is no equivalent to `O_CREAT | O_EXCL` because the object is not created when you start the upload, is created at the end.\u00a0 The object is not readable, or even visible, while being uploaded."
+        },
+        {
+            "created_at": "2022-02-08T13:19:20.232Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12509?focusedCommentId=17488835) by Antoine Pitrou (apitrou):*\nOk. Note that in the test I'm running, the file already exists _before_ starting the upload, so GCS could very well detect that and fail the POST. I understand the argument for consistency, though."
+        },
+        {
+            "created_at": "2022-02-08T13:20:24.020Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12509?focusedCommentId=17488836) by Antoine Pitrou (apitrou):*\nThis probably means we'll have to resort to manual checking of file existence to implement this feature."
+        },
+        {
+            "created_at": "2022-02-09T06:50:53.604Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12509?focusedCommentId=17489286) by Micah Kornfield (emkornfield):*\nNote about the use-case on the blocking issue.\u00a0 In the hadoop ecosystem GCS tries to emulate renames by doing a copy and delete.\u00a0 The [copy](https://github.com/GoogleCloudDataproc/hadoop-connectors/pull/622/files#diff-122b4a11389e8967ef7004ddf049fd1e7d688cf1c52fc16e61b0af2e60ed120dL1164) use the if match feature) but I think this type of operation might be expensive.\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-02-09T12:49:01.725Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12509?focusedCommentId=17489522) by Carlos O'Ryan (coryan):*\n> The copy use the if match feature) but I think this type of operation might be expensive.\r\n\r\nDepends on what you mean by expensive and which operation are you referring to.  Copy operations (aka rewrites) in GCS are relatively cheap.  In most cases they are just metadata updates, even in the cases where they are not (changing the storage class, storage location and/or encryption keys) the copy happens server-side which is much cheaper than a download + upload.  AFAIK, the pre-condition checks are also cheap compared to an upload, download, or checking the metadata on the client side.\r\n"
+        },
+        {
+            "created_at": "2022-07-12T14:04:28.877Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12509?focusedCommentId=17565643) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

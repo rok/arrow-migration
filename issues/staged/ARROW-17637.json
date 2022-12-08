@@ -1,0 +1,20 @@
+{
+    "issue": {
+        "title": "[R] as.Date fails going from timestamp[us] to timestamp[s]",
+        "body": "***Note**: This issue was originally created as [ARROW-17637](https://issues.apache.org/jira/browse/ARROW-17637). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nUsing as.Date to convert from timestamp to date fails in Arrow even though this is fine in R.\r\n\r\n\r\n```r\n\r\nlibrary(arrow)\r\nlibrary(dplyr)\r\nlibrary(lubridate)\r\n\r\ntf <- tempfile()\r\ndir.create(tf)\r\ntbl <- tibble::tibble(x = as_datetime('2022-05-05T00:00:01.676632'))\r\nwrite_dataset(tbl, tf)\r\nopen_dataset(tf) %>%\r\n  mutate(date = as.Date(x)) %>%\r\n  collect()\r\n#> Error in `collect()`:\r\n#> ! Invalid: Casting from timestamp[us, tz=UTC] to timestamp[s, tz=UTC] would lose data: 1651708801676632\r\n#> /home/nic2/arrow/cpp/src/arrow/compute/exec.cc:799  kernel_->exec(kernel_ctx_, input, out)\r\n#> /home/nic2/arrow/cpp/src/arrow/compute/exec.cc:767  ExecuteSingleSpan(input, &output)\r\n#> /home/nic2/arrow/cpp/src/arrow/compute/exec/expression.cc:597  executor->Execute( ExecBatch(std::move(arguments), all_scalar ? 1 : input.length), &listener)\r\n#> /home/nic2/arrow/cpp/src/arrow/compute/exec/expression.cc:579  ExecuteScalarExpression(call->arguments[i], input, exec_context)\r\n#> /home/nic2/arrow/cpp/src/arrow/compute/exec/project_node.cc:91  ExecuteScalarExpression(simplified_expr, target, plan()->exec_context())\r\n#> /home/nic2/arrow/cpp/src/arrow/compute/exec/exec_plan.cc:573  iterator_.Next()\r\n#> /home/nic2/arrow/cpp/src/arrow/record_batch.cc:337  ReadNext(&batch)\r\n#> /home/nic2/arrow/cpp/src/arrow/record_batch.cc:351  ToRecordBatches()\r\n\r\ntbl %>%\r\n  mutate(date = as.Date(x))\r\n#> # A tibble: 1 \u00d7 2\r\n#>   x                   date      \r\n#>   <dttm>              <date>    \r\n#> 1 2022-05-05 00:00:01 2022-05-05\r\n\r\n```\r\n",
+        "created_at": "2022-09-06T19:31:25.000Z",
+        "updated_at": "2022-10-18T13:59:48.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-06T19:48:06.119Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17637?focusedCommentId=17600960) by Neal Richardson (npr):*\nThe naive cast to date32() works: \r\n\r\n```Java\n\r\n> Array$create(lubridate::as_datetime('2022-05-05T00:00:01.676632'))\r\nArray\r\n<timestamp[us, tz=UTC]>\r\n[\r\n  2022-05-05 00:00:01.676632\r\n]\r\n> Array$create(lubridate::as_datetime('2022-05-05T00:00:01.676632'))$cast(date32())\r\nArray\r\n<date32[day]>\r\n[\r\n  2022-05-05\r\n]\r\n```\r\n\r\nThe issue looks to be in this extra cast, something about handling timezones: https://github.com/apache/arrow/blob/master/r/R/dplyr-funcs-datetime.R#L329\r\n\r\nBasically, if x is timestamp type, we either need to keep the same unit from x (it's a parameter to the type, default is \"s\", hence the error), or pass the right cast option to allow truncation. (And probably not cast at all if it's already the same timezone.)"
+        }
+    ]
+}

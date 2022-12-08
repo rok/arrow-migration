@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[R] Simple arrange %>% head does not respect ordering",
+        "body": "***Note**: This issue was originally created as [ARROW-14162](https://issues.apache.org/jira/browse/ARROW-14162). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis was originally reported by `[~jonkeane]` in ARROW-13893 but that issue was covering a different topic so I am opening a new issue for this specific behavior.\r\n\r\n```r\n\r\n> library(arrow)\r\n> library(dplyr)\r\n> \r\n> tab <- Table$create(mtcars)\r\n> \r\n> tab %>% \r\n+   arrange(mpg) %>% \r\n+   head(4) %>% \r\n+   collect()\r\n   mpg cyl disp  hp drat    wt  qsec vs am gear carb\r\n1 21.0   6  160 110 3.90 2.620 16.46  0  1    4    4\r\n2 21.0   6  160 110 3.90 2.875 17.02  0  1    4    4\r\n3 22.8   4  108  93 3.85 2.320 18.61  1  1    4    1\r\n4 21.4   6  258 110 3.08 3.215 19.44  1  0    3    1\r\n> \r\n> mtcars %>% \r\n+   arrange(mpg) %>% \r\n+   head(4) %>% \r\n+   collect()\r\n                     mpg cyl disp  hp drat    wt  qsec vs am gear carb\r\nCadillac Fleetwood  10.4   8  472 205 2.93 5.250 17.98  0  0    3    4\r\nLincoln Continental 10.4   8  460 215 3.00 5.424 17.82  0  0    3    4\r\nCamaro Z28          13.3   8  350 245 3.73 3.840 15.41  0  0    3    4\r\nDuster 360          14.3   8  360 245 3.21 3.570 15.84  0  0    3    4\r\n```\r\n",
+        "created_at": "2021-09-29T03:09:13.000Z",
+        "updated_at": "2021-10-12T20:13:06.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-10-12T20:13:06.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-09-29T03:36:34.112Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14162?focusedCommentId=17421912) by Weston Pace (westonpace):*\nThe call to `head` is triggering an (immediate?) call to the legacy scanner head method.  The resulting dataset is then returned.  Then the remaining dplyr execution is resolved against the in-memory data.  ExecPlan is not used at all.  So it is first fetching the first 4 rows and then sorting instead of sorting and then fetching.\r\n\r\nIf this is truly a blocker for 6.0.0 then it might be an problem.  The head can't be applied in R because it would read in all of the data (presumably you could abort the read partway through but I think this would be overly complex).\r\n\r\nIf we want to do a proper ordered head in C++ then my recommendation would be the batch index scheme proposed in the sequencing doc [here](https://docs.google.com/document/d/1MfVE9td9D4n5y-PTn66kk4-9xG7feXs1zSFf-qxQgPs/edit?usp=sharing) but I'm not sure we want to tackle that as part of 6.0.0.\r\n\r\nAs a short term solution we can modify the sorting sink node to accept a limit argument.  That should be a reasonably quick solution and could maybe fit in 6.0.0 but I'm not sure how much time we want to invest in stop-gap measures."
+        },
+        {
+            "created_at": "2021-09-29T13:10:35.357Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14162?focusedCommentId=17422109) by Neal Richardson (npr):*\nAll sink nodes should probably take a limit argument, right? (Not saying for 6.0, just in general)"
+        }
+    ]
+}

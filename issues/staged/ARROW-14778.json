@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[C++] mean on a decimal truncates and does not round",
+        "body": "***Note**: This issue was originally created as [ARROW-14778](https://issues.apache.org/jira/browse/ARROW-14778). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n```Java\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\n\r\ndf <- data.frame(\r\n  x = c(0.1, 0.2, 0.2, 0.2, 0.2)\r\n)\r\n\r\ntab <- Table$create(df)\r\n\r\ntab %>%\r\n  summarise(mean(x)) %>% \r\n  collect()\r\n#> # A tibble: 1 \u00d7 1\r\n#>   `mean(x)`\r\n#>       <dbl>\r\n#> 1      0.18\r\n\r\ntab %>%\r\n  summarise(x = mean(x)) %>% \r\n  mutate(x = cast(x, decimal(5, 1))) %>% \r\n  collect()\r\n#> # A tibble: 1 \u00d7 1\r\n#>       x\r\n#>   <dbl>\r\n#> 1   0.2\r\n\r\ntab %>%\r\n  mutate(x = cast(x, decimal(5, 1))) %>% \r\n  summarise(x = mean(x)) %>% \r\n  collect()\r\n#> # A tibble: 1 \u00d7 1\r\n#>       x\r\n#>   <dbl>\r\n#> 1   0.1\r\n```",
+        "created_at": "2021-11-19T16:31:37.000Z",
+        "updated_at": "2021-11-25T13:20:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-11-24T14:24:27.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-19T16:34:44.445Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14778?focusedCommentId=17446568) by David Li (lidavidm):*\nAh, it's because we perform all the computations at the input decimal precision/scale (so only 1 decimal digit here). We could perhaps promote it to the max precision/scale, then round it back down? (e.g. for decimal128(5, 1), do computations at decimal128(38, 2) or something then round back down to (5, 1), I haven't thought this though too much, also this would apply to many of the other decimal kernels)."
+        },
+        {
+            "created_at": "2021-11-19T16:38:07.918Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14778?focusedCommentId=17446569) by Jonathan Keane (jonkeane):*\nYeah, I thought it might be more wide-spread than just mean, but hadn't tested it yet. Feel free to expand this issue to cover the more general case.\r\n\r\nFor what it's worth, DuckDB returns the rounded answer, though I haven't dug in to see what they do under the hood. Or looked at what other DBs like postgres do"
+        },
+        {
+            "created_at": "2021-11-19T16:40:09.582Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14778?focusedCommentId=17446570) by David Li (lidavidm):*\nThat's a good point, we should steal what they do. (It might just be \"convert to float and back\" though.)"
+        },
+        {
+            "created_at": "2021-11-19T16:47:56.108Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14778?focusedCommentId=17446573) by Jonathan Keane (jonkeane):*\nI'm not sure how bad it is from a performance perspective but to float and back might be fine for most cases"
+        },
+        {
+            "created_at": "2021-11-19T17:04:13.161Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14778?focusedCommentId=17446583) by David Li (lidavidm):*\nI think I avoided it initially because I didn't want to inadvertently round, that said, maybe that's not a concern for something like `mean` anyways. (And for something like `tdigest` we do just convert to double.)"
+        },
+        {
+            "created_at": "2021-11-19T17:07:42.801Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14778?focusedCommentId=17446586) by Jonathan Keane (jonkeane):*\nYeah, this is a bit coincidental, but the query that I bumped into this on has a bunch of things like the example where the mean result is actually quite close to the next integer so the answers seem _very wrong_ when compared"
+        },
+        {
+            "created_at": "2021-11-19T17:27:45.102Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14778?focusedCommentId=17446595) by David Li (lidavidm):*\nFrom a quick glance, DuckDB does it as an average on the underlying integers, then rescales them to double ([source](https://github.com/duckdb/duckdb/blob/573c3e8dc1a65090fbafe656ed8305f45ce188d1/src/function/aggregate/algebraic/avg.cpp#L171-L180)). I think we can do this quite easily if we're ok with returning double. (We could still return decimal and round the double first as well, but that'd probably be easier as an avg %>% round %>% cast.)"
+        },
+        {
+            "created_at": "2021-11-24T14:24:27.232Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14778?focusedCommentId=17448641) by David Li (lidavidm):*\nIssue resolved by pull request 11754\n<https://github.com/apache/arrow/pull/11754>"
+        }
+    ]
+}

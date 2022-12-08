@@ -1,0 +1,44 @@
+{
+    "issue": {
+        "title": "[C++] Clarify lifecycle of a StopSource/StopToken",
+        "body": "***Note**: This issue was originally created as [ARROW-17173](https://issues.apache.org/jira/browse/ARROW-17173). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn ARROW-11841 we ran into an issue where a single cancellable operation (i.e., `SetSignalStopSource()`/`ResetSignalStopSource()` was a poor fit: the `StopToken` must be assigned to an `IOContext` when a filesystem is created; however, the filesystem may be reused for more than one cancellable operation (e.g., reading a CSV). Following the instructions in the current API (in util/cancel.h) results in a situation the lifecycle of the filesystem must match the lifecycle of the `StopSource`, which can be difficult to program around.\r\n\r\nA related problem is that where we load Python and R Arrow libraries that link to the same .so. After ARROW-11841, R will have the ability to register signal handlers to interrupt Arrow operations, and users that load pyarrow via reticulate must be careful to disable it or they will get an error along the lines of \"StopSource already set up\".\r\n\r\nFrom a purely R-centric point of view, we could provide our own `StopToken` implementation if we were allowed to since R already implements the proper signal handler and the arrow R package implements the proper event loop to make this thread safe. Currently the `StopToken` is passed by value and thus a subclass is not an option. For R, anyway, this would eliminate any need to consider the lifecycle of another object.",
+        "created_at": "2022-07-21T19:03:19.000Z",
+        "updated_at": "2022-09-22T09:19:34.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-21T11:53:07.069Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17173?focusedCommentId=17607708) by Antoine Pitrou (apitrou):*\n> From a purely R-centric point of view, we could provide our own StopToken implementation if we were allowed to since R already implements the proper signal handler and the arrow R package implements the proper event loop to make this thread safe\r\n\r\nAFAIU this would be a `StopSource` implementation, not a `StopToken` implementation."
+        },
+        {
+            "created_at": "2022-09-21T11:54:34.379Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17173?focusedCommentId=17607709) by Antoine Pitrou (apitrou):*\nBut I agree that the design of having `StopToken` tied to `IOContext` and therefore to a filesystem instance is not ideal. Not sure how to solve this without adding lots of explicit `StopToken` arguments everywhere.\r\n\r\ncc `[~lidavidm]`"
+        },
+        {
+            "created_at": "2022-09-21T12:02:25.937Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17173?focusedCommentId=17607714) by David Li (lidavidm):*\nI don't think you can avoid plumbing around it, either explicitly as we have, or implicitly by maintaining some sort of thread or task-local state (which we have to be careful to propagate/save/restore). I like this series of posts which discusses the same issue in Python: https://vorpus.org/blog/timeouts-and-cancellation-for-humans/ but there's no easy answer there (Trio does a lot of work to maintain the task-local state to make cancellation work).\r\n\r\nI also agree that at least for the immediate issue, filesystems shouldn't be getting StopToken from the IOContext, but rather individual operations should have a StopToken."
+        },
+        {
+            "created_at": "2022-09-21T18:26:29.273Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17173?focusedCommentId=17607930) by Dewey Dunnington (paleolimbot):*\nThanks to you both for explaining...it's an exciting feature and I hope we can get it to work!\r\n\r\nI also wonder if it wouldn't be safer to warn (instead of error) when Python tries but fails to set up a `StopSource`. It sounds like Python is careful not to nest cancellable operations within the Python library; however, a GDAL or an R package linking to the same .so might do this by accident (or with a good reason that we haven't considered). It sounds like this would be possible (the operation just wouldn't be cancellable in Python)?"
+        },
+        {
+            "created_at": "2022-09-22T09:02:28.935Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17173?focusedCommentId=17608157) by Antoine Pitrou (apitrou):*\nYes, we should just warn in that case."
+        },
+        {
+            "created_at": "2022-09-22T09:17:53.685Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17173?focusedCommentId=17608164) by Antoine Pitrou (apitrou):*\nI think we could also rethink the StopSource lifecycle:\r\n\r\n- have StopToken hold a _weak_ pointer to the StopSource\n- StopSource must be held by the stopping side for as long as stopping might be desired\n- then `SetSignalStopSource` can return some kind of `shared_ptr` to the same instance, so that it can be called several times\n  \n"
+        },
+        {
+            "created_at": "2022-09-22T09:19:34.648Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17173?focusedCommentId=17608167) by Antoine Pitrou (apitrou):*\nBy the way, we must keep in mind that signals interrupting a task is not the only use case for which StopSource / StopToken was designed.\r\n\r\nAnother important use case is: when a server starts some long-winded work on behalf of the client, it must be able to cancel the work if the client drops the connection. In this model, each client connection will instantiate a distinct StopSource."
+        }
+    ]
+}

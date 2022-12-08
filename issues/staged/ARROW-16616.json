@@ -1,0 +1,52 @@
+{
+    "issue": {
+        "title": "[Python] Allow lazy evaluation of filters in Dataset and add Datset.filter method",
+        "body": "***Note**: This issue was originally created as [ARROW-16616](https://issues.apache.org/jira/browse/ARROW-16616). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nTo keep the `Dataset` api compatible with the `Table` one in terms of analytics capabilities, we should add a `Dataset.filter` method. The initial POC was based on `_table_filter` but that required materialising all the `Dataset` content after filtering as it returned an `{}InMemoryDataset{`}.\u00a0\r\n\r\nGiven that `Scanner` can filter a dataset without actually materialising the data until a final step happens, it would be good to have `Dataset.filter` return some form of lazy dataset when the filter is only stored aside and the Scanner is created when data is actually retrieved.\r\n\r\nPS: Also update `test_dataset_filter` test to use the `Dataset.filter` method",
+        "created_at": "2022-05-19T12:59:30.000Z",
+        "updated_at": "2022-10-26T10:13:15.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: task"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-21T21:54:48.733Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16616?focusedCommentId=17557141) by Will Jones (willjones127):*\nI'm a little cautious about the idea of `Dataset.filter()` returning a `Dataset`, since it mixes up the purpose of `Dataset` and `Scanner`. If it did, what would this return then?\r\n\r\n```python\n\r\nds.filter(ds.field(\"x\") > 2).scan(filter=ds.field(\"y\") < 3)\r\n```\r\n\r\nI think it might be better if `Dataset.filter()` returned a scanner with that filter. And then `Scanner` could also have `filter()` and `project()` methods to allow chaining. So you could do:\r\n\r\n```python\n\r\n(\r\n  ds.filter(ds.field(\"x\") > 2)\r\n    .filter(ds.field(\"y\") < 4)\r\n    .project(\"x\", \"y\", \"z\")\r\n    .to_table()\r\n)\r\n```\r\n\r\nWhat do you think of that?"
+        },
+        {
+            "created_at": "2022-06-22T16:14:41.014Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16616?focusedCommentId=17557545) by Alessandro Molina (amol-):*\nI'm not fond of relying on `Scanner` because it looks like violating the single responsibility principle as it would have to grow nearly the same capabilities of `Dataset` (for example if I want to do a join over filtered data, we would have to implement `Scanner.join` which doesn't seem to make much sense).\r\n\r\nAnother direction I thought about was going toward having a `FilteredDataset` class, that would still inherit from `Dataset`\u00a0but more clearly provide a separation of concerns.  "
+        },
+        {
+            "created_at": "2022-06-22T16:23:15.792Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16616?focusedCommentId=17557549) by Neal Richardson (npr):*\nIn the R package we handle this by building a separate query object that contains the Dataset (or RecordBatchReader, or Table, or whatever), and the query object contains the filtering etc. methods. So here, Dataset.filter would first create the query object from the Dataset and then calls the filter method on it. \r\n\r\nThat said, going that route (or the FilteredDataset path, for that matter) feels like a path to essentially creating ibis in pyarrow. I'd caution you to think twice before adding APIs like this since they become sticky and hard to remove later (look at how long ParquetDataset has lived past the creation of the general Dataset class)."
+        },
+        {
+            "created_at": "2022-06-22T16:55:08.684Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16616?focusedCommentId=17557566) by Will Jones (willjones127):*\n> In the R package we handle this by building a separate query object that contains the Dataset (or RecordBatchReader, or Table, or whatever), and the query object contains the filtering etc. methods.\r\nYeah, I think it seems like the PR as-is would be trying to make `Dataset` into this kind of query object, which I don't think is it's purpose. `Scanner` seems closer to that to me, but it's also a bit of a mismatch.\r\n> That said, going that route (or the FilteredDataset path, for that matter) feels like a path to essentially creating ibis in pyarrow.\r\nIMO we need to have a larger conversation about how much of Acero we want to expose in PyArrow. We might want a low-level API for creating exec plans, and maybe even some high-level functions like this. But seems like we should have a design doc to think about what our vision in here and how that does relate to developments in Ibis."
+        },
+        {
+            "created_at": "2022-06-22T16:58:26.379Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16616?focusedCommentId=17557568) by Neal Richardson (npr):*\nScanner is one-shot though, you can't filter to create a Scanner and then filter it again, you can only Scan."
+        },
+        {
+            "created_at": "2022-06-22T17:25:09.834Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16616?focusedCommentId=17557578) by Will Jones (willjones127):*\n> Scanner is one-shot though, you can't filter to create a Scanner and then filter it again, you can only Scan.\r\nYeah, then I think we would need some other query class for representing deferred computations with Acero. Which again goes into the question of PyArrow vs Ibis purpose."
+        },
+        {
+            "created_at": "2022-06-22T17:52:02.805Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16616?focusedCommentId=17557599) by Alessandro Molina (amol-):*\nI don't see much of a conflict with Ibis on long term. Ibis is an interface to multiple query engines and the queries you build there can be run against different targets. It serves the purpose of having a single interface to an infrastructure agnostic environment. Write your Ibis code locally and deploy it against a production system that might run something very different from a Acero in-memory.\r\n\r\nPyArrow instead only exposes the features that are already available in Arrow itself, and it's something all the other bindings are doing too (R and Java do expose access to the compute engine). What you write in pyarrow won't be able to really grow too much in the direction of scaling on multiple nodes, so it's better positioned for quick data discovery without having to involve external dependencies than for the actual final product which will probably want to be based on IBIS."
+        },
+        {
+            "created_at": "2022-06-27T15:00:37.176Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16616?focusedCommentId=17559209) by Weston Pace (westonpace):*\nI agree that scanner should not be used.  The term \"scanner\", in general, should probably go away from the public API.  The scanner in python is more of a record batch reader.\r\n\r\nI'm not sure I have much to add to the \"dataset\" vs \"query\" terminology."
+        },
+        {
+            "created_at": "2022-07-25T08:14:33.526Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16616?focusedCommentId=17570764) by Krisztian Szucs (kszucs):*\nPostponing to 10.0, feel free to include it when the PR is ready."
+        }
+    ]
+}

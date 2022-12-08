@@ -1,0 +1,48 @@
+{
+    "issue": {
+        "title": "[Python] saving a dataframe to the same partitioned location silently doubles the data",
+        "body": "***Note**: This issue was originally created as [ARROW-7706](https://issues.apache.org/jira/browse/ARROW-7706). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen a user saves a dataframe:\r\n```python\n\r\ndf1.to_parquet('/tmp/table', partition_cols=['col_a'], engine='pyarrow')\r\n```\r\nit will create sub-directories named \"`a=val1`\", \"`a=val2`\" in `/tmp/table`. Each of them will contain one (or more?) parquet files with random filenames.\r\n\r\nIf a user runs the same command again, the code will use the existing sub-directories, but with different (random) filenames. As a result, any data loaded from this folder will be wrong - each row will be present twice.\r\n\r\nFor example, when using\r\n```python\n\r\ndf1.to_parquet('/tmp/table', partition_cols=['col_a'], engine='pyarrow')  # second time\r\n\r\ndf2 = pd.read_parquet('/tmp/table', engine='pyarrow')\r\nassert len(df1) == len(df2)  # raise an error\n```\r\nThis is a subtle change in the data that can pass unnoticed.\r\n\r\n\u00a0\r\n\r\nI would expect that the code will prevent the user from using an non-empty destination as partitioned target. an overwrite flag can also be useful.",
+        "created_at": "2020-01-28T17:09:09.000Z",
+        "updated_at": "2021-08-24T02:26:59.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-02-04T08:49:48.076Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7706?focusedCommentId=17029654) by Joris Van den Bossche (jorisvandenbossche):*\n`[~tsvikas]` Thanks for the report! I agree that silently adding data doesn't seem the best default behaviour, at least it can give surprising results. \r\n\r\nIn addition to an overwrite flag (which would delete the contents of the directory?), we could maybe have an \"append mode\" to still have the possibility to write to an non-empty directory.\r\n\r\ncc `[~fsaintjacques]` `[~bkietz]` this question will also be relevant once we start with the write part of Datasets"
+        },
+        {
+            "created_at": "2020-02-06T15:17:42.930Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7706?focusedCommentId=17031666) by Francois Saint-Jacques (fsaintjacques):*\nAgreed."
+        },
+        {
+            "created_at": "2020-04-24T16:00:08.364Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7706?focusedCommentId=17091686) by Gregory Hayes (hayesgb):*\nI've encountered this as well, when using pyarrow v0.17.  In my instance, I've attempted to both write and to append to a partitioned dataset.  Both a write and append operation silently double the data."
+        },
+        {
+            "created_at": "2020-04-25T03:21:27.625Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7706?focusedCommentId=17092028) by Will Jones (willjones127):*\nTo add to the idea of write modes, Spark's Dataframe.saveAsTable() method has a mode attribute similar to what you're discussing here. Might be a good part of their API to imitate.\r\n\r\nIt includes the modes:\r\n> - <q>append</q>: Append contents of this\u00a0[`DataFrame`](https://spark.apache.org/docs/latest/api/python/pyspark.sql.html#pyspark.sql.DataFrame)\u00a0to existing data.\n> \n> - <q>overwrite</q>: Overwrite existing data.\n> \n> - <q>error</q>\u00a0or\u00a0<q>errorifexists</q>: Throw an exception if data already exists.\n> \n> - <q>ignore</q>: Silently ignore this operation if data already exists.\r\nThe default is \"error\": error if destination is not empty.\r\n\r\nReference:\u00a0<https://spark.apache.org/docs/latest/api/python/pyspark.sql.html#pyspark.sql.DataFrameWriter.saveAsTable>"
+        },
+        {
+            "created_at": "2020-04-27T00:32:00.059Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7706?focusedCommentId=17092899) by Gregory Hayes (hayesgb):*\nIt would be great to see this added.\n\n"
+        },
+        {
+            "created_at": "2020-04-27T15:06:16.916Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7706?focusedCommentId=17093604) by Gregory Hayes (hayesgb):*\nOne additional thought \u2013 Spark 2.3 also implements the ability to dynamically overwrite only partitions that have changed, as described [here](https://jaceklaskowski.gitbooks.io/mastering-spark-sql/spark-sql-dynamic-partition-inserts.html ), by using:  spark.conf.set(\"spark.sql.sources.partitionOverwriteMode\",\"dynamic\"), allowing for incrementally updating data in a pipeline.\r\n\r\nIt would be awesome to see this in the roadmap eventually.  "
+        },
+        {
+            "created_at": "2021-04-13T14:03:34.974Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7706?focusedCommentId=17320194) by Joris Van den Bossche (jorisvandenbossche):*\nFor reference here, I opened a new issue ARROW-12358 on this topic for the new Datasets API, which currently has different behaviour as pandas' `to_parquet` or `pyarrow.parquet.write_to_dataset`:  \r\n`pyarrow.dataset.write_dataset` by default uses a fixed filename template, which will in practice often overwrite existing data instead of silently doubling data (which is probably also not the desired default behaviour)"
+        },
+        {
+            "created_at": "2021-08-24T02:25:55.656Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7706?focusedCommentId=17403459) by Weston Pace (westonpace):*\nI've added some customization here in https://github.com/apache/arrow/pull/10955 via \"existing_data_behavior\".    This will provide the options...\r\n\r\n- kError - Raise an error if there are any files or directories in `base_dir` (the new default)\n- kOverwriteOrIgnore - Existing files will be ignored unless the filename is one of those chosen by the dataset writer in which case they will be overwritten (the old default)\n- kDeleteMatchingPartitions - This is similar to the dynamic partition overwrite mode in spark.  The first time a directory is written to it will delete any existing data.\n  \n  Compared to the previous disucssion:\n  \n   \\* Append - I think opening up append is a can of worms I'd rather avoid\n   \\* Error if partition exists - There is no good way to only error if a file would be written to.  By the time we figured that out we'd be halfway into the write operation and you'd end up with a partially written dataset.  I'm hoping \"error if there is any data there at all\" will be sufficient.\n  \n  Feedback on this approach is welcomed!"
+        }
+    ]
+}

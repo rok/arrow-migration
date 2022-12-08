@@ -1,0 +1,69 @@
+{
+    "issue": {
+        "title": "Some logical types not supported when loading Parquet",
+        "body": "***Note**: This issue was originally created as [ARROW-601](https://issues.apache.org/jira/browse/ARROW-601). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen I try to read a parquet file with some logical types in it, pyarrow says they are not supported:\n\n```Java\ntable = pq.read_table('t.parquet')\n---------------------------------------------------------------------------\nArrowException                            Traceback (most recent call last)\n<ipython-input-14-b7190e66bcb5> in <module>()\n----> 1 table = pq.read_table('parquet/t')\n\n/opt/conda/lib/python3.5/site-packages/pyarrow/parquet.py in read_table(source, columns, nthreads, metadata)\n    113 \n    114     pf = ParquetFile(source, metadata=metadata)\n--> 115     return pf.read(columns=columns, nthreads=nthreads)\n    116 \n    117 \n\n/opt/conda/lib/python3.5/site-packages/pyarrow/parquet.py in read(self, nrows, columns, nthreads)\n     78 \n     79         return self.reader.read(column_indices=column_indices,\n---> 80                                 nthreads=nthreads)\n     81 \n     82 \n\n/opt/conda/lib/python3.5/site-packages/pyarrow/_parquet.pyx in pyarrow._parquet.ParquetReader.read (/feedstock_root/build_artefacts/pyarrow_1488133203047/work/arrow-f6924ad83bc95741f003830892ad4815ca3b70fd/python/build/temp.linux-x86_64-3.5/_parquet.cxx:7706)()\n\n/opt/conda/lib/python3.5/site-packages/pyarrow/error.pyx in pyarrow.error.check_status (/feedstock_root/build_artefacts/pyarrow_1488133203047/work/arrow-f6924ad83bc95741f003830892ad4815ca3b70fd/python/build/temp.linux-x86_64-3.5/error.cxx:1197)()\n\nArrowException: NotImplemented: Unhandled logical type for int32\n```\n\nThis is the schema of the parquet file (see attached):\n\n```Java\noptional group root {\n  optional int64 instant (TIMESTAMP_MILLIS);\n  optional int32 time (TIME_MILLIS);\n  optional double a-double;\n  optional int64 another-int;\n  optional binary a-string (UTF8);\n  optional group list (LIST) {\n    repeated group list {\n      optional int64 element;\n    }\n  }\n  optional boolean a-boolean;\n  optional group a-group {\n    optional boolean bool;\n    optional int64 another;\n  }\n  optional int64 an-int;\n  optional int32 a-date (DATE);\n}\n```\n\nI assume this is because not pyarrow doesn't support loading all the parquet logical types yet. Is there someplace I can look (even if it's not documented, just in the codebase), where I can find what types are supported currently and which are not?\n ",
+        "created_at": "2017-03-03T18:41:50.000Z",
+        "updated_at": "2017-07-17T00:00:31.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-07-17T00:00:31.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-03-04T16:47:50.371Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-601?focusedCommentId=15895765) by Wes McKinney (wesm):*\nhi `[~saulshanabrook]` \u2013 all of the schema mappings are contained in https://github.com/apache/parquet-cpp/blob/master/src/parquet/arrow/schema.cc\n\nwhat system did you use to create the file? The two problematic types are the DATE (see PARQUET-890) and the struct \"a-group\" (the support for nested types is not yet complete \u2013 any interest in helping with this?). `[~xhochy]` may have some other comments"
+        },
+        {
+            "created_at": "2017-03-11T15:50:07.668Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-601?focusedCommentId=15906229) by Uwe Korn (uwe):*\nDATE support is now in parquet-cpp/pyarrow master and the error messages are now more informative. Support for TIME and STRUCT are still missing in the path, I'll add tickets for those."
+        },
+        {
+            "created_at": "2017-03-13T17:32:24.604Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-601?focusedCommentId=15907915) by Miki Tebeka (tebeka):*\nSmall patch at [PR #270](https://github.com/apache/parquet-cpp/pull/270).\n\nNote that when running a small test on the file provided with the JIRA issue I get a segfault. Tracking it down got me to see that the number of fields calculated in FromParquetSchema is 9 where the actual number of fields in the node is 8.\nSee parquet/arrow/schema.cc line 283. This IMO stems from ReadTable (parquet/arrow/reader.cc)\n"
+        },
+        {
+            "created_at": "2017-03-13T21:33:20.127Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-601?focusedCommentId=15922985) by Wes McKinney (wesm):*\n`[~tebeka]` if I had to guess, the segfault is because of the struct type \n\n```Java\noptional group a-group {\n    optional boolean bool;\n    optional int64 another;\n  }\n```\n\nI don't think we have any tests yet for structs (PARQUET-911). "
+        },
+        {
+            "created_at": "2017-04-16T23:25:08.459Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-601?focusedCommentId=15970550) by Wes McKinney (wesm):*\nAdded this as a blocker for 0.3 to at least see if the behavior is better now (skipping the unsupported fields) or anything else we should do until we have full struct support"
+        },
+        {
+            "created_at": "2017-04-17T00:12:29.098Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-601?focusedCommentId=15970562) by Wes McKinney (wesm):*\nNow we have\n\n```Java\nIn [5]: table = pq.read_table('/home/wesm/Downloads/t.parquet')\n\nIn [6]: table\nOut[6]: \npyarrow.Table\nan-int: int64\nanother-int: int64\na-double: double\na-boolean: bool\na-group: struct<bool: bool, another: int64>\na-string: string\na-date: date64[ms]\ntime: time32[ms]\n\nIn [7]: table.to_pandas()\n---------------------------------------------------------------------------\nArrowNotImplementedError                  Traceback (most recent call last)\n<ipython-input-7-cad6e023c888> in <module>()\n----> 1 table.to_pandas()\n\n/home/wesm/code/arrow/python/pyarrow/_table.pyx in pyarrow._table.Table.to_pandas (/home/wesm/code/arrow/python/build/temp.linux-x86_64-3.5/_table.cxx:9726)()\n    745             nthreads = pyarrow._config.cpu_count()\n    746 \n--> 747         mgr = table_to_blockmanager(self.sp_table, nthreads)\n    748         return _pandas().DataFrame(mgr)\n    749 \n\n/home/wesm/code/arrow/python/pyarrow/_table.pyx in pyarrow._table.table_to_blockmanager (/home/wesm/code/arrow/python/build/temp.linux-x86_64-3.5/_table.cxx:7763)()\n    539 \n    540     with nogil:\n--> 541         check_status(pyarrow.ConvertTableToPandas(table, nthreads,\n    542                                                   &result_obj))\n    543 \n\n/home/wesm/code/arrow/python/pyarrow/_error.pyx in pyarrow._error.check_status (/home/wesm/code/arrow/python/build/temp.linux-x86_64-3.5/_error.cxx:1542)()\n     64             raise ArrowKeyError(message)\n     65         elif status.IsNotImplemented():\n---> 66             raise ArrowNotImplementedError(message)\n     67         elif status.IsTypeError():\n     68             raise ArrowTypeError(message)\n\nArrowNotImplementedError: NotImplemented: struct<bool: bool, another: int64>\n```\n\nThe attached file has schema\n\n```Java\nmessage root {\n  optional int64 an-int;\n  optional int64 another-int;\n  optional double a-double;\n  optional boolean a-boolean;\n  optional group a-group {\n    optional boolean bool;\n    optional int64 another;\n  }\n  optional binary a-string (UTF8);\n  optional int32 a-date (DATE);\n  optional int32 time (TIME_MILLIS);\n}\n```\n\nSo the Arrow schema looks OK (we should switch to date32 now), but the struct should be skipped on read because it isn't supported. `[~xhochy]` can you take a look? "
+        },
+        {
+            "created_at": "2017-04-18T16:03:20.160Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-601?focusedCommentId=15972970) by Uwe Korn (uwe):*\nSchema is ok but I really don't like that we would skip columns that we don't support. In this case, I would hope that the user explicitly selects the columns he wants to read and exclude the struct columns from that."
+        },
+        {
+            "created_at": "2017-04-18T16:05:24.885Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-601?focusedCommentId=15972974) by Wes McKinney (wesm):*\nThat sounds fine. Instead we should raise an exception that a column is unsupported (the read should not have succeeded here)? "
+        },
+        {
+            "created_at": "2017-04-18T16:07:43.126Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-601?focusedCommentId=15972976) by Uwe Korn (uwe):*\nOh, I only just now realised that we have read the data already into Arrow. Yes, the read should have failed earlier, probably at some point we're not checking a status. "
+        },
+        {
+            "created_at": "2017-04-21T14:19:59.924Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-601?focusedCommentId=15978804) by Wes McKinney (wesm):*\nI opened a patch for PARQUET-963, taking this off the 0.3 release and will leave this issue open until we can read the file completely"
+        },
+        {
+            "created_at": "2017-07-03T22:28:44.392Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-601?focusedCommentId=16072955) by Wes McKinney (wesm):*\nWell, we can read and convert the structs now, but not the time32[ms]:\n\n```Java\nIn [12]: pq.read_table('/home/wesm/Downloads/t.parquet', columns=['a-group.bool', 'a-group.another']).to_pandas()\nOut[12]: \n                          a-group\n0  {'bool': True, 'another': 343}\n\nIn [13]: pq.read_table('/home/wesm/Downloads/t.parquet').to_pandas()\n---------------------------------------------------------------------------\nArrowNotImplementedError                  Traceback (most recent call last)\n<ipython-input-13-7a965403c9d1> in <module>()\n----> 1 pq.read_table('/home/wesm/Downloads/t.parquet').to_pandas()\n\n/home/wesm/code/arrow/python/pyarrow/table.pxi in pyarrow.lib.Table.to_pandas (/home/wesm/code/arrow/python/build/temp.linux-x86_64-3.5/lib.cxx:32758)()\n    768             nthreads = cpu_count()\n    769 \n--> 770         mgr = pdcompat.table_to_blockmanager(self, nthreads)\n    771         return pd.DataFrame(mgr)\n    772 \n\n/home/wesm/code/arrow/python/pyarrow/pandas_compat.py in table_to_blockmanager(table, nthreads)\n    141             )\n    142 \n--> 143     result = lib.table_to_blocks(block_table, nthreads)\n    144 \n    145     blocks = []\n\n/home/wesm/code/arrow/python/pyarrow/table.pxi in pyarrow.lib.table_to_blocks (/home/wesm/code/arrow/python/build/temp.linux-x86_64-3.5/lib.cxx:31292)()\n    570 \n    571     with nogil:\n--> 572         check_status(\n    573             libarrow.ConvertTableToPandas(\n    574                 c_table, nthreads, &result_obj\n\n/home/wesm/code/arrow/python/pyarrow/error.pxi in pyarrow.lib.check_status (/home/wesm/code/arrow/python/build/temp.linux-x86_64-3.5/lib.cxx:7378)()\n     64             raise ArrowKeyError(message)\n     65         elif status.IsNotImplemented():\n---> 66             raise ArrowNotImplementedError(message)\n     67         elif status.IsTypeError():\n     68             raise ArrowTypeError(message)\n\nArrowNotImplementedError: NotImplemented: No known equivalent Pandas block for Arrow data of type time32[ms] is known.\n```\n\nSee ARROW-1183"
+        },
+        {
+            "created_at": "2017-07-15T23:17:21.761Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-601?focusedCommentId=16088754) by Wes McKinney (wesm):*\nThis is finally resolved by ARROW-1183: https://github.com/apache/arrow/pull/849\n\n```Java\nIn [1]: import datetime\n\nIn [2]: import pyarrow.parquet as pq\n\nIn [3]: t = pq.read_table('/home/wesm/Downloads/t.parquet')\n\nIn [4]: t.to_pandas()\nOut[4]: \n   an-int  another-int  a-double a-boolean                         a-group  \\\n0     123         2332  232.2323      True  {'another': 343, 'bool': True}   \n\n  a-string     a-date             time  \n0      hie 2017-03-03  13:37:34.721000  \n```"
+        },
+        {
+            "created_at": "2017-07-17T00:00:31.786Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-601?focusedCommentId=16089195) by Wes McKinney (wesm):*\nResolved by https://github.com/apache/arrow/commit/50b518afcb03172e6133643eb5cbecd03c63368c and prior patches implementing support for list and struct reads"
+        }
+    ]
+}

@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Python] from_numpy_dtype returns wrong types",
+        "body": "***Note**: This issue was originally created as [ARROW-1999](https://issues.apache.org/jira/browse/ARROW-1999). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe following code shows multiple issues when using `from_numpy_dtype`:\r\n```Java\n\r\nimport numpy as np\r\nimport pyarrow as pa\r\n\r\npa.from_numpy_dtype(np.unicode) # returns DataType(bool)\r\npa.from_numpy_dtype(np.int)     # returns DataType(bool)\r\n\r\npa.from_numpy_dtype(np.int64) # Fails with the following message:\r\n#\r\n# ArrowNotImplementedError Traceback (most recent call last)\r\n# <ipython-input-14-ca0855a7dda8> in <module>()\r\n# ----> 1 pa.from_numpy_dtype(np.int64)\r\n# 2\r\n#\r\n# types.pxi in pyarrow.lib.from_numpy_dtype()\r\n#\r\n# error.pxi in pyarrow.lib.check_status()\r\n#\r\n# ArrowNotImplementedError: Unsupported numpy type 32760\r\n```\r\nAdditionally, a potentially related issue is also seen when using `to_pandas_dtype`:\r\n```Java\n\r\npa.DataType.to_pandas_dtype(pa.string()) # Returns numpy.object_ \r\n# (shouldn't it be numpy.unicode?)\r\n```",
+        "created_at": "2018-01-15T22:58:15.000Z",
+        "updated_at": "2018-01-28T15:51:10.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-01-28T15:47:58.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-01-25T22:50:11.313Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1999?focusedCommentId=16340237) by Jim Crist (jim.crist):*\nThis looks to be because the cython code is wrapping `NumPyDtypeToArrow`, which expects a dtype object, but the objects being passed in aren't `dtype` objects.\r\n\r\n\u00a0\r\n```java\n\r\nIn [8]: pa.from_numpy_dtype(np.dtype('U'))  # this is a dtype, works fine\r\nOut[8]: DataType(string)\r\n\r\nIn [9]: pa.from_numpy_dtype(np.unicode)  # not a dtype\r\nOut[9]: DataType(int8)\r\n```\r\nI'd like to take this on. Since the C++ signature is `PyObject`, should the conversion be done there or in the cython code? It's not clear to me the distinction between the cython and c++ python codebases."
+        },
+        {
+            "created_at": "2018-01-25T23:12:05.252Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1999?focusedCommentId=16340264) by Wes McKinney (wesm):*\nI got bitten by this when working on <https://github.com/apache/arrow/pull/1509> \u2013 `NumPyDtypeToArrow`\u00a0does not do type checking on the input value and will fail silently if passed a non-dtype object\u00a0"
+        },
+        {
+            "created_at": "2018-01-25T23:13:36.378Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1999?focusedCommentId=16340266) by Wes McKinney (wesm):*\nIt'd probably easiest to ensure that the input value is a dtype in Cython. For code that only touches the Python C API or Arrow API, there's no hard distinction between where to put code except what is more convenient (and generally keeping the Cython bindings as \"thin\" as possible). the C++ arrow/python code does not expose any of the C++ libraries' dependencies to keep the build system simple"
+        },
+        {
+            "created_at": "2018-01-28T15:47:58.541Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1999?focusedCommentId=16342614) by Uwe Korn (uwe):*\nIssue resolved by pull request 1523\n<https://github.com/apache/arrow/pull/1523>"
+        }
+    ]
+}

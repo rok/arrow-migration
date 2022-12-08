@@ -1,0 +1,21 @@
+{
+    "issue": {
+        "title": "[C++][Parquet] Decoding byte stream split encoded columns fails when it has null values",
+        "body": "***Note**: This issue was originally created as [ARROW-13024](https://issues.apache.org/jira/browse/ARROW-13024). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nReading from a parquet file fails with the following error\r\n\r\n`Data size too small for number of values (corrupted file?)`.\r\n\r\nThis happens for the case when there is a `BYTE_STREAM_SPLIT`-encoded column which has less values stored than number of rows, which is the case when the column has null values (definition levels are present).\r\n\r\nThe problematic part is the condition checked in `ByteStreamSplitDecoder<DType>::SetData`, which raises the error if the number of values does not match the size of the data array.\r\n\r\nI'm unsure whether I have enough experience with the internals of the encoding/decoding part of this implementation to fix this issue, but my suggestion would be to initialize `num_values_in_buffer_` with `len/static_cast<int64_t>(sizeof(T))`.\r\n",
+        "created_at": "2021-06-09T15:43:51.000Z",
+        "updated_at": "2022-06-02T08:22:32.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Parquet",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-02T08:03:23.434Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13024?focusedCommentId=17545332) by Benedikt (wisperwind):*\nI've just encountered the same issue (on arrow 7.0.0), and starting from `[~romankarlstetter]`'s comment I've browsed the `ByteStreamSplitDecoder` code a bit and I think the suggestion above points at the right place, but is not a complete fix.\r\n\r\nThe relevant exception was added in <https://github.com/apache/arrow/pull/6781> in order to fix an out-of-bounds buffer read found by fuzzing (this one apparently: <https://bugs.chromium.org/p/oss-fuzz/issues/detail?id=21453>). However, it seems to me that this fix wasn't quite right in the first place. My understanding is the following:\r\n\r\nIn `{}SetData{`}, the number of `null` values interleaved with the data is not known, but `num_values` includes them. Thus, it is not possible to validate `num_values` against `len` in this function yet. Any validation must happen in the `Decode` and `DecodeArrow` methods (in fact, `Decode` is safe via limiting the number of values returned, and `DecodeArrow` does precisely this verification).\r\n\r\nAs suggested above, `num_values_in_buffer_` is not correctly initialized, since the meaning of `num_values` is different in the presence of \\`null`s, and should be set as argued by `[~romankarlstetter]` such that it has the meaning suggested by its name.\r\n\r\nHowever, when changing `num_values_in_buffer_` in this way, the calculation of `const int num_decoded_previously = num_values_in_buffer_ - num_values_` in `Decode` and `DecodeArrow` becomes incorrect since `num_values_` includes `null`s, but `num_values_in_buffer_` does not. To complete the bug fix, it might be easiest to store `num_decoded_previously` explicitly in `{}ByteStreamSplitDecoder{`}.\r\n\r\nIf this is done, `Decode` should calculate\r\n\r\n`values_to_decode = std::min(num_values_in_buffer_ - num_decoded_previously, max_values)`\r\n\r\ninstead of the current\r\n\r\n`{}values_to_decode = std::min(num_values_, max_values){`}.\r\n\r\nI can't really tell from the bug report whether this already accounts for the issues found by the fuzzer."
+        }
+    ]
+}

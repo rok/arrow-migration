@@ -1,0 +1,44 @@
+{
+    "issue": {
+        "title": "[R] Expose API to create Dataset from Fragments",
+        "body": "***Note**: This issue was originally created as [ARROW-15317](https://issues.apache.org/jira/browse/ARROW-15317). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThird-party packages may define dataset factories for table formats like Delta Lake and Apache Iceberg. These formats store metadata like schema, file lists, and file-level statistics on the side, and can construct a dataset without a discovery process needed. Python exposed enough API to do this successfully for [a Delta Lake dataset reader here](https://github.com/delta-io/delta-rs/blob/6a8195d6e3cbdcb0c58a14a3ffccc472dd094de0/python/deltalake/table.py#L267-L280).\r\n\r\nI propose adding the following to the R API:\r\n\r\n \\* Expose `Fragment` as an R6 object\r\n \\* Add the `MakeFragment` method to various file format objects. It's key that `partition_expression` is included as an argument. ([See Python equivalent here](https://github.com/apache/arrow/blob/ab86daf3f7c8a67bee6a175a749575fd40417d27/python/pyarrow/_dataset_parquet.pyx#L209-L210))\r\n \\* Add a dataset constructor that takes a list of `Fragments`",
+        "created_at": "2022-01-13T04:50:07.000Z",
+        "updated_at": "2022-02-04T14:24:53.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-01-31T14:25:32.236Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15317?focusedCommentId=17484714) by Dewey Dunnington (paleolimbot):*\nIf I'm reading this correctly, this sounds useful for making an abstraction around arbitrary file formats (I'm thinking things like some geospatial formats like shapefiles here) in addition to the ones you listed above!\r\n\r\nWhere this is tested in Python: https://github.com/apache/arrow/blob/ad073b7c0fec80ce88aaf1e7d6a78104711952f2/python/pyarrow/tests/test_dataset.py#L788-L804"
+        },
+        {
+            "created_at": "2022-01-31T23:42:07.166Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15317?focusedCommentId=17485000) by Will Jones (willjones127):*\nWell to be clear I table formats are not the same as file formats; they just are a standard for metadata on a parquet (or other format) table. Basically they hold a cache of all the useful dataset discovery information (in particular, the list of files currently part of the table and their partition values), and to use them with datasets we need a way to just build one from pre-created fragments.\r\n\r\nI think for new file formats, it's not clear those are pluggable. But I could see a world where a third-party package implements some FileFormat object that holds the implementation for reading a single fragment of the data into Arrow."
+        },
+        {
+            "created_at": "2022-02-01T00:27:24.480Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15317?focusedCommentId=17485005) by Weston Pace (westonpace):*\nIf we go this route are we effectively defining yet another table format?  Albeit a rather limited one.  For example, we could say that a dataset can be created from a vector of  (path, filesystem, partition_expression, row_groups).  But then, in what format, as R objects?  So, for example, if we had an \"iceberg R package\" then either:\r\n\r\n  \\* The Iceberg R package imports the Arrow R package to get the R types\r\n  \\* There is a third package the \"Iceberg-R-Arrow-Adapter\" package which converts from Iceberg R objects to Arrow R objects\r\n\r\nAlso wandering along this path you also might brainstorm/encounter \"A stable C ABI for datasets\".\r\n\r\nOn the other hand, Arrow's C++ lib could pick a table format (e.g. Iceberg) that we use to define our \"datasets API\".  So then we could have an export \"Arrow dataset -> Iceberg Table\" and \"Iceberg Table -> Arrow dataset\" in the C++ lib."
+        },
+        {
+            "created_at": "2022-02-01T02:43:05.675Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15317?focusedCommentId=17485028) by Will Jones (willjones127):*\n> If we go this route are we effectively defining yet another table format? Albeit a rather limited one.\r\nI think of datasets as lower-level than a table format, and in my experience the files reader / writer is decoupled from the table format reader / writer. Table formats implement:\r\n \\* A serialization of ACID transaction information, and a protocol for how to handle writes\r\n \\* Metadata (e.g. table name, description) storage, including possible integration with Data Catalogs (e.g. AWS Glue)\r\n \\* Protocols for table maintenance (cleaning up old files, compacting files)\r\n \\* Table versioning / time travel\r\n\r\nThat's all very different than the scope of datasets, right?\r\n\r\nThe path I'm experimenting with right now is implementing a reader and writer for Delta Lake on top of datasets within delta-rs/python. That's been pretty doable with the reader, and seems like it wouldn't require [that many changes for a writer](https://github.com/delta-io/delta-rs/issues/542#issue-1099890585).\r\n\r\n> Also wandering along this path you also might brainstorm/encounter \"A stable C ABI for datasets\".\r\n\r\nI think that would be awesome, particularly for delta-rs or any other Rust project. Though tough part would be expressions, which maybe is solved by substrait?"
+        },
+        {
+            "created_at": "2022-02-03T19:32:21.428Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15317?focusedCommentId=17486673) by Dewey Dunnington (paleolimbot):*\nThe use-case I had in mind is read-only...a user wants to query a dataset that somebody has provided as a few thousand shapefiles. If we're in another R package (which we should be for something like this), we'd need C linkage but there's no need for writing or filter expressions (Will has a good point that Substrait would let you provide one). The existing C ABI would let you do `int get_arrow_array_stream(const char\\* key, struct ArrowArrayStream\\* result, struct ErrorInfo\\* error_info)`...I would be using Arrow for its own awesome filtering instead of trying to provide it myself. Perhaps that's far too simplistic and perhaps this is straying too far from exposing the `Fragment` in the R package...I'm new to all of this!"
+        },
+        {
+            "created_at": "2022-02-04T02:23:00.847Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15317?focusedCommentId=17486786) by Weston Pace (westonpace):*\n`[~willjones127]` makes some good points regarding a table format probably being overkill for this problem.  Also, I do agree the use case is valid.\r\n\r\nMostly I'm just trying to keep the number of specs as low as possible.  Is it possible that Substrait alone an answer for this?  It sounds like the key thing missing is the ability to attach a partition expression (i.e. guarantee) to a piece of input data.  I wonder if we could add that into Substrait's \"in memory table\" spec or something.  Or am I still missing something?"
+        },
+        {
+            "created_at": "2022-02-04T14:24:53.283Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15317?focusedCommentId=17487097) by Dewey Dunnington (paleolimbot):*\nMy use-case should definitely be revisited once I understand a bit more about Substrait and Dataset!"
+        }
+    ]
+}

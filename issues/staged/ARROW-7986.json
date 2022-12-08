@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[Python] pa.Array.from_pandas cannot convert pandas.Series containing pyspark.ml.linalg.SparseVector",
+        "body": "***Note**: This issue was originally created as [ARROW-7986](https://issues.apache.org/jira/browse/ARROW-7986). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe code\u00a0\r\n```java\n\r\nimport pandas as pd\r\nfrom pyspark.ml.linalg import SparseVector\r\nimport pyarrow as pa\r\n\r\nsparse_values = {0: 0.1, 1: 1.1}\r\nsparse_vector = SparseVector(len(sparse_values), sparse_values)\r\npds = pd.Series(sparse_vector)\r\npa.array(pds)\n```\r\nresults in:\u00a0\r\n```\n\r\npyarrow/array.pxi:191: in pyarrow.lib.array\r\n ???\r\npyarrow/array.pxi:78: in pyarrow.lib._ndarray_to_array\r\n ???\r\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\r\n> ???\r\nE pyarrow.lib.ArrowInvalid: Could not convert (2,[0,1],[0.1,1.1]) with type SparseVector: did not recognize Python value type when inferring an Arrow data type\r\npyarrow/error.pxi:85: ArrowInvalid\r\n```\r\n\u00a0\r\n\r\n\u00a0\r\n\r\nMy initial intention was to test if databricks.koala's functionality is implemented, which took me to error coming from pyarrow:\r\n```java\n\r\nimport pandas as pd\r\nimport databricks.koalas as ks\r\nfrom pyspark.ml.linalg import SparseVector\r\n\r\nsparse_values = {0: 0.1, 1: 1.1}\r\nsparse_vector = SparseVector(len(sparse_values), sparse_values)\r\npds = pd.Series(sparse_vector)\r\nkss = ks.Series(sparse_vector)\r\n```\r\nwhile pd.Series on the SparseVector works fine, the last line errors as:\u00a0\r\n```\n\r\ndatabricks/koalas/typedef.py:176: in infer_pd_series_spark_type\r\n return from_arrow_type(pa.Array.from_pandas(s).type)\r\npyarrow/array.pxi:593: in pyarrow.lib.Array.from_pandas\r\n ???\r\npyarrow/array.pxi:191: in pyarrow.lib.array\r\n ???\r\npyarrow/array.pxi:78: in pyarrow.lib._ndarray_to_array\r\n ???\r\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\r\n> ???\r\nE pyarrow.lib.ArrowInvalid: Could not convert (2,[0,1],[0.1,1.1]) with type SparseVector: did not recognize Python value type when inferring an Arrow data type\r\npyarrow/error.pxi:85: ArrowInvalid\r\n```\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2020-03-02T19:30:08.000Z",
+        "updated_at": "2020-03-12T14:47:26.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-03-12T14:47:12.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-03-02T22:49:07.479Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7986?focusedCommentId=17049722) by Wes McKinney (wesm):*\nWhat would you be expecting to happen?"
+        },
+        {
+            "created_at": "2020-03-03T06:31:38.872Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7986?focusedCommentId=17049939) by Nikolay Petrov (nikilp):*\nI'm trying to wrap my mind around it. I apologise if my description is not very clear. I'm new to _arrow_ (and\u00a0koalas which is relying on it).\r\n\r\n_[koalas](http://[https://github.com/databricks/koalas)]_ is implementing the _pandas_ DataFrame API on top of Apache Spark and for example command like\u00a0\r\n```python\n\r\npds = pd.Series(sparse_vector)\n```\r\nwould eventually have equivalence in _koalas_ as\u00a0\r\n```python\n\r\nkss = ks.Series(sparse_vector)\r\n```\r\n_koalas_ in this case relies on\u00a0_pyarrow_ to convert the\u00a0**pyspark.ml.linalg**-specific **SparseVector**, but arrow does not know what to do with it.\u00a0The SparseVector comes from \"libsvm\" format. [Here\\|#linear-regression]\u00a0is an example using that format.\r\n\r\n\u00a0\r\n\r\nComing back to your question - what would I be expecting to happen - for the pd.Series defined above I get:\r\n```python\n\r\n>>> print(pds)\r\n```\r\n```python\n\r\n0 (0.1, 1.1)\r\ndtype: object\r\n```\r\n```python\n\r\n>>> type(pds)\r\n```\r\n```python\n\r\n<class 'pandas.core.series.Series'>\n```\r\n\u00a0\r\n\r\nEventually, I'd expect similar result\u00a0for the ks.Series:\r\n```python\n\r\n>>> print(kds)\r\n```\r\n```python\n\r\n0 (0.1, 1.1)\r\ndtype: object\n```\r\n```python\n\r\n>>> type(kds)\r\n```\r\n```python\n\r\n<class 'databricks.koalas.series.Series'>\n```\r\nbut instead that's where the error comes."
+        },
+        {
+            "created_at": "2020-03-03T14:58:11.765Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7986?focusedCommentId=17050287) by Joris Van den Bossche (jorisvandenbossche):*\nAre you sure that `pd.Series(sparse_vector)` is doing what you are expecting? (note: I never used pyspark.ml.linalg or koalas, so to be clear I don't know the answer)   \r\nIt's putting the SparseVector as a scalar value in a Series of length 1, and not putting the values of the SparseVector in the Series (so that `len(sparse_vector) == len(pds)`, which is not the case right now).\r\n\r\nSo basically, it is creating an object Series with custom python objects (i.e. SparseVector objects), which feels out of scope for pyarrow to support. \r\n\r\nWe could maybe think about supporting objects that have `__array__` so they can be converted like we would convert an object Series consisting of numpy arrays. But not sure that would necessarily give the result you want (it would no longer be sparse). \r\n\r\n"
+        },
+        {
+            "created_at": "2020-03-03T14:59:14.166Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7986?focusedCommentId=17050288) by Joris Van den Bossche (jorisvandenbossche):*\nTo add, SparseVector seems to be a 1D sparse array (https://spark.apache.org/docs/1.1.1/api/python/pyspark.mllib.linalg.SparseVector-class.html). So even if you would expect the SparseVector to become the column of a Table: Arrow currently does not support \"sparse\" columns."
+        },
+        {
+            "created_at": "2020-03-03T16:16:38.324Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7986?focusedCommentId=17050359) by Micah Kornfield (emkornfield@gmail.com):*\n> So even if you would expect the SparseVector to become the column of a Table: Arrow currently does not support \"sparse\" columns.\r\n\r\nIn this case how would sparse columns differ from an Arrow \"List\"?"
+        },
+        {
+            "created_at": "2020-03-03T16:28:09.107Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7986?focusedCommentId=17050369) by Joris Van den Bossche (jorisvandenbossche):*\n> In this case how would sparse columns differ from an Arrow \"List\"?\r\n\r\nAn Arrow List would be a dense representation, increasing memory usage?\u00a0 \r\nWhile the values of a ListArray only include the non-null entries, the offsets of a ListArray still include a value for each entry of the ListArray, I think?"
+        },
+        {
+            "created_at": "2020-03-04T00:27:05.240Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7986?focusedCommentId=17050662) by Wes McKinney (wesm):*\nI think this task should be pushed onto the Koalas developers. I suggest leaving this issue open and opening a corresponding issue in the Koalas issue tracker. "
+        },
+        {
+            "created_at": "2020-03-04T16:14:19.556Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7986?focusedCommentId=17051372) by Wes McKinney (wesm):*\nI opened an issue https://github.com/databricks/koalas/issues/1323"
+        },
+        {
+            "created_at": "2020-03-12T06:54:53.612Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7986?focusedCommentId=17057643) by Hyukjin Kwon (hyukjin.kwon):*\nThanks, `[~wesm]` for chiming in. The issue itself is fixed in Koalas at this moment. See also https://github.com/databricks/koalas/issues/1323#issuecomment-598034080"
+        },
+        {
+            "created_at": "2020-03-12T08:33:46.060Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7986?focusedCommentId=17057704) by Joris Van den Bossche (jorisvandenbossche):*\nOK, closing the issue here then, since the original reported case has been fixed, and more general issues were created (https://github.com/databricks/koalas/issues/1323, ARROW-8004)."
+        },
+        {
+            "created_at": "2020-03-12T14:47:26.615Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7986?focusedCommentId=17057979) by Wes McKinney (wesm):*\nI changed the status to \"Resolved\" since it was fixed"
+        }
+    ]
+}

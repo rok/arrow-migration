@@ -1,0 +1,21 @@
+{
+    "issue": {
+        "title": "[Python] ArrowInvalid error raised when deserialising pandas with pd.NaT values in object column",
+        "body": "***Note**: This issue was originally created as [ARROW-9211](https://issues.apache.org/jira/browse/ARROW-9211). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn pyarrow 0.17.x when deserialising a pandas dataframe which has pd.NaT values in an object column, an ArrowInvalid error is raised:\r\n```java\n\r\npyarrow.lib.ArrowInvalid: Casting from timestamp[us] to timestamp[ns] would result in out of bounds timestamp: -62135596800000000\r\n```\r\nReproducible code (using\u00a0pyarrow==0.17.1 and pandas==1.0.3):\r\n```java\n\r\nimport pandas as pd\r\nimport pyarrow.ipc as ipc\r\nimport pyarrow as pa\r\nv = pd.DataFrame({\r\n    \"bar\": [1592808896000000000, pd.NaT]\r\n})\r\n# works fine as datetime64[ns] but not as object type\r\nv = v.astype({\"bar\": \"datetime64[ns]\"}).astype({\"bar\": \"object\"})\r\nbs = ipc.serialize_pandas(v).to_pybytes()\r\ndf = ipc.deserialize_pandas(bs)  # error\n```\r\n\u00a0In pyarrow 0.16.0 no error occurs and df is returned as:\r\n```java\n\r\n                            bar\r\n0 2020-06-22 06:54:56.000000000\r\n1 1754-08-30 22:43:41.128654848\r\n```\r\nWas the change in 0.17.x to raise an error an intentional behaviour change? Given the previous behaviour in 0.16.0 seemed a bit like undefined behaviour already, where it converted NaT to 1754-08-30 (which seems due to the -62135596800000000 timestamp mentioned in the error above?).\r\n\r\nAlso note that when serialized as datetime64[ns] rather than object, the code works fine in both 0.17.x and 0.16.0, returning:\r\n```java\n\r\n                  bar\r\n0 2020-06-22 06:54:56\r\n1                 NaT\n```\r\n\u00a0",
+        "created_at": "2020-06-23T05:38:16.000Z",
+        "updated_at": "2020-06-24T23:02:18.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-06-24T22:49:53.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-06-24T22:49:45.422Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9211?focusedCommentId=17144465) by Wes McKinney (wesm):*\nWell, raising an exception is strictly better than returning garbage to you. The problem is in the conversion of NaT to null, which is not handled correctly:\r\n\r\n```Java\n\r\nIn [29]: v                                                                                                        \r\nOut[29]: \r\n                   bar\r\n0  2020-06-22 06:54:56\r\n1                  NaT\r\n\r\nIn [30]: pa.table(v)[0].chunk(0)                                                                                  \r\nOut[30]: \r\n<pyarrow.lib.TimestampArray object at 0x7f4b4070e528>\r\n[\r\n  2020-06-22 06:54:56.000000,\r\n  0001-01-01 00:00:00.000000\r\n]\r\n```\r\n\r\npandas's NaT value is a bit weird:\r\n\r\n```Java\n\r\nIn [31]: type(pd.NaT).mro()                                                                                       \r\nOut[31]: \r\n[pandas._libs.tslibs.nattype.NaTType,\r\n pandas._libs.tslibs.nattype._NaT,\r\n datetime.datetime,\r\n datetime.date,\r\n object]\r\n```\r\n\r\nI'm gonna quickly see if I can get pyarrow to recognize pandas.NaT, so I'm closing this as a duplicate of ARROW-842"
+        }
+    ]
+}

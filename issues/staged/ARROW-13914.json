@@ -1,0 +1,88 @@
+{
+    "issue": {
+        "title": "[C++][Python] Optimize type inference when converting from python values",
+        "body": "***Note**: This issue was originally created as [ARROW-13914](https://issues.apache.org/jira/browse/ARROW-13914). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently we use an extensive set of checks to infer arrow type from python sequences. \r\n\r\nLast time I checked using asv, the inference part had a significant overhead. \r\n\r\nWe could try other approaches to speed-up the type inference, see comments: https://github.com/apache/arrow/pull/11076#discussion_r702808196",
+        "created_at": "2021-09-06T11:02:12.000Z",
+        "updated_at": "2021-09-06T16:50:33.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-09-06T14:08:28.324Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13914?focusedCommentId=17410623) by Antoine Pitrou (apitrou):*\nIt seems there is no difference for many types, simply because `make_unions_` is always false and therefore the inference finishes almost immediately.\r\n(note that `make_unions_ = true` is not implemented at all!)\r\n\r\nWhat remains is a couple types such as integers and lists:\r\n```python\n\r\n>>> d = [1] * 10000\r\n>>> %timeit pa.array(d)\r\n257 \u00b5s \u00b1 108 ns per loop (mean \u00b1 std. dev. of 7 runs, 1000 loops each)\r\n>>> %%timeit ty = pa.array(d).type\r\n...: pa.array(d, type=ty)\r\n...: \r\n...: \r\n200 \u00b5s \u00b1 458 ns per loop (mean \u00b1 std. dev. of 7 runs, 1000 loops each)\r\n```\r\n\r\n```python\n\r\n>>> d = [[1, 2]] * 10000\r\n>>> %timeit pa.array(d)\r\n1.41 ms \u00b1 11.2 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 1000 loops each)\r\n>>> %%timeit ty = pa.array(d).type\r\n...: pa.array(d, type=ty)\r\n...: \r\n...: \r\n962 \u00b5s \u00b1 9.49 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 1000 loops each)\r\n```\r\n\r\nTherefore, optimizing this sounds low-priority to me."
+        },
+        {
+            "created_at": "2021-09-06T14:43:15.739Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13914?focusedCommentId=17410642) by Krisztian Szucs (kszucs):*\nDespite that {make_unions_} is always false I have the following results locally:\r\n\r\n```Java\n\r\nIn [29]: %timeit pa.array(data)\r\n1.31 ms \u00b1 9.95 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 1000 loops each)\r\n\r\nIn [30]: %timeit pa.array(data, type=ty)\r\n647 \u00b5s \u00b1 9.93 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 1000 loops each)\r\n\r\nIn [31]: %timeit pa.infer_type(data)\r\n669 \u00b5s \u00b1 3.61 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 1000 loops each)\r\n```\r\n\r\nSo the inference doubles the conversion time. "
+        },
+        {
+            "created_at": "2021-09-06T14:44:07.733Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13914?focusedCommentId=17410648) by Antoine Pitrou (apitrou):*\nWhat is `data`?"
+        },
+        {
+            "created_at": "2021-09-06T14:48:04.772Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13914?focusedCommentId=17410654) by Krisztian Szucs (kszucs):*\nSame time ratio with both `[1, 2, 3] * 10000` and `[[1, 2]] * 10000`"
+        },
+        {
+            "created_at": "2021-09-06T14:50:13.832Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13914?focusedCommentId=17410655) by Antoine Pitrou (apitrou):*\nWell, as I said above, integers don't short-circuit. The exact ratio will depend on the compiler, on the machine, and perhaps on whether you built in release mode :-)"
+        },
+        {
+            "created_at": "2021-09-06T14:55:06.624Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13914?focusedCommentId=17410661) by Krisztian Szucs (kszucs):*\nRight, the integers is the only branch not setting the `keep_going` flag. Wouldn't it be desirable to improve that logic with different inference strategies perhaps? \r\n"
+        },
+        {
+            "created_at": "2021-09-06T15:06:01.440Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13914?focusedCommentId=17410669) by Antoine Pitrou (apitrou):*\nWhich strategies? This is a bit vague. If this is for performance, I don't think it's very important."
+        },
+        {
+            "created_at": "2021-09-06T15:20:51.298Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13914?focusedCommentId=17410677) by Krisztian Szucs (kszucs):*\nI'm not saying that it is important or urgent, though I think we should enable the user to convert pure integer sequences without presuming that there can be floating point numbers, thus doubling the conversion time. "
+        },
+        {
+            "created_at": "2021-09-06T15:23:45.252Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13914?focusedCommentId=17410679) by Antoine Pitrou (apitrou):*\nThe easy way to do that is to pass the type explicitly..."
+        },
+        {
+            "created_at": "2021-09-06T15:26:54.416Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13914?focusedCommentId=17410681) by Krisztian Szucs (kszucs):*\nWe could do the same for `pa.array([1, 2.])` if it were raising a `pyarrow.lib.ArrowTypeError: Expected integer, got float`\r\n\r\nWe could have different inference strategies with different performance/convenience tradeoffs. "
+        },
+        {
+            "created_at": "2021-09-06T15:32:48.156Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13914?focusedCommentId=17410683) by Antoine Pitrou (apitrou):*\nWe could, but in the end I'm not sure it would be very useful. Presumably, if you really care about performance you avoid generating your data in pure Python.\r\n\r\nConverting from a Numpy array of integers is 100x faster than converting from a Python list of integers:\r\n```python\n\r\n>>> d = list(range(10000))\r\n>>> nd = np.array(d)\r\n>>> %timeit pa.array(d)\r\n288 \u00b5s \u00b1 454 ns per loop (mean \u00b1 std. dev. of 7 runs, 1000 loops each)\r\n>>> %timeit pa.array(d, type=pa.int64())\r\n234 \u00b5s \u00b1 3.9 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 1000 loops each)\r\n>>> %timeit pa.array(nd)\r\n1.96 \u00b5s \u00b1 6.64 ns per loop (mean \u00b1 std. dev. of 7 runs, 1000000 loops each)\r\n>>> %timeit pa.array(nd, type=pa.int64())\r\n1.81 \u00b5s \u00b1 6.24 ns per loop (mean \u00b1 std. dev. of 7 runs, 1000000 loops each)\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-09-06T16:21:51.785Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13914?focusedCommentId=17410720) by Krisztian Szucs (kszucs):*\nData can come from a variety of noisy sources like pickle/json/csv files and eventually arrow will serve as the first efficient format to convert into (rather than hopping through numpy arrays or pandas series), so a convenient while performant inference layer would be nice to have. \r\n\r\n"
+        },
+        {
+            "created_at": "2021-09-06T16:23:25.819Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13914?focusedCommentId=17410721) by Antoine Pitrou (apitrou):*\nWe already have JSON and CSV readers that don't go through pure Python objects.\r\n\r\nReally, I'd like to see an actual case, not something theoretical."
+        },
+        {
+            "created_at": "2021-09-06T16:43:25.973Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13914?focusedCommentId=17410731) by Krisztian Szucs (kszucs):*\nFor example I'd like to be able to (not with the exact API):\r\n\r\n```Java\n\r\nty = pa.infer_type(data, how=\"strict|promote|union|...\", sample=\"all|100|0.1|...\")\r\npa.array(data, type=ty)\r\n```\r\n\r\nSo I can choose to prefer unsafe but quick inference over safe but slower.\r\n"
+        },
+        {
+            "created_at": "2021-09-06T16:44:47.967Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13914?focusedCommentId=17410732) by Antoine Pitrou (apitrou):*\nYou're not saying _why_ you want to do it, though."
+        },
+        {
+            "created_at": "2021-09-06T16:45:16.797Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13914?focusedCommentId=17410733) by Antoine Pitrou (apitrou):*\nI can agree with the `how` parameter, however."
+        },
+        {
+            "created_at": "2021-09-06T16:47:12.232Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13914?focusedCommentId=17410735) by Krisztian Szucs (kszucs):*\nSince we have type loosening in the CSV module, type promotion in the JSON module and some level of promotion in the python->arrow conversion paths perhaps we could even consolidate the inference logic between different modules (configured for the specific module). "
+        },
+        {
+            "created_at": "2021-09-06T16:50:33.539Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13914?focusedCommentId=17410737) by Antoine Pitrou (apitrou):*\nI don't think the inference rules would necessarily be the same when different formats are involved (Python has a much richer type system than CSV or JSON). Also this sounds like a different issue that what this issue is talking about :)"
+        }
+    ]
+}

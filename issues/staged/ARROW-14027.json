@@ -1,0 +1,38 @@
+{
+    "issue": {
+        "title": "[C++][R] Ensure groupers accept scalar inputs (was: Allow me to group_by + summarise() with partitioning fields)",
+        "body": "***Note**: This issue was originally created as [ARROW-14027](https://issues.apache.org/jira/browse/ARROW-14027). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIf one puts a field that is one of the partitioning variables in `group_by()` and then summarises, we get a segfault:\r\n\r\n```r\n\r\nlibrary(arrow)\r\nlibrary(dplyr)\r\n\r\ntemp <- tempfile()\r\n\r\nwrite_dataset(mtcars, path = temp, partitioning = \"cyl\")\r\n\r\nds <- open_dataset(temp)\r\n\r\n# this works just fine\r\nds %>% \r\n  group_by(gear) %>% \r\n  summarise(\r\n    sum(mpg)\r\n  ) %>% \r\n  collect()\r\n\r\n# however this segfaults (regardless of the aggregation, even simply n()) \r\n#  *** caught segfault ***\r\n# address 0x0, cause 'memory not mapped'\r\nds %>% \r\n  group_by(cyl) %>% \r\n  summarise(\r\n    sum(mpg)\r\n  ) %>% \r\n  collect()\r\n```",
+        "created_at": "2021-09-17T16:44:14.000Z",
+        "updated_at": "2021-09-30T00:39:46.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-09-29T17:59:40.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-09-17T18:49:24.725Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14027?focusedCommentId=17416863) by David Li (lidavidm):*\nHere's the back of the traceback, which confirms it is an issue with a hash aggregate kernel not accounting for scalar inputs:\r\n```\n\r\n/home/lidavidm/Code/upstream/arrow-14027/cpp/src/arrow/util/variant.h:383:10: runtime error: reference binding to null pointer of type 'const struct shared_ptr'\r\n    #0 0x7f37f2a3a792 in std::shared_ptr<arrow::ArrayData> const& arrow::util::get<std::shared_ptr<arrow::ArrayData>, arrow::Datum::Empty, std::shared_ptr<arrow::Scalar>, std::shared_ptr<arrow::ArrayData>, std::shared_ptr<arrow::ChunkedArray>, std::shared_ptr<arrow::RecordBatch>, std::shared_ptr<arrow::Table>, std::vector<arrow::Datum, std::allocator<arrow::Datum> > >(arrow::util::Variant<arrow::Datum::Empty, std::shared_ptr<arrow::Scalar>, std::shared_ptr<arrow::ArrayData>, std::shared_ptr<arrow::ChunkedArray>, std::shared_ptr<arrow::RecordBatch>, std::shared_ptr<arrow::Table>, std::vector<arrow::Datum, std::allocator<arrow::Datum> > > const&) (/home/lidavidm/Code/upstream/arrow-14027/install/lib/libarrow.so.600+0x45b0792)\r\n    #1 0x7f37f2eea8cd in arrow::Datum::array() const /home/lidavidm/Code/upstream/arrow-14027/cpp/src/arrow/datum.h:191\r\n    #2 0x7f37f369d2d3 in Consume /home/lidavidm/Code/upstream/arrow-14027/cpp/src/arrow/compute/kernels/hash_aggregate.cc:570\r\n    #3 0x7f37f3381c35 in Consume /home/lidavidm/Code/upstream/arrow-14027/cpp/src/arrow/compute/exec/aggregate_node.cc:406\r\n    #4 0x7f37f338517a in InputReceived /home/lidavidm/Code/upstream/arrow-14027/cpp/src/arrow/compute/exec/aggregate_node.cc:518\r\n \n```"
+        },
+        {
+            "created_at": "2021-09-17T18:50:27.886Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14027?focusedCommentId=17416865) by David Li (lidavidm):*\nI think we've had issues like this before\u2026we should improve test coverage."
+        },
+        {
+            "created_at": "2021-09-17T18:51:16.011Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14027?focusedCommentId=17416867) by David Li (lidavidm):*\nI spoke too fast, this is in the grouper."
+        },
+        {
+            "created_at": "2021-09-17T21:13:08.163Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14027?focusedCommentId=17416919) by David Li (lidavidm):*\n`[~bkietz]` and/or `[~michalno]` do either of you have ideas on how best to handle scalars in GrouperFastImpl? (GrouperImpl is simple enough to extend.) From what I understand of the implementation, GrouperFastImpl works with pointers to array buffers, which would be difficult to do given scalars. We could:\r\n1. Update the group by node to give accurate shape information to Grouper::Make, and have Grouper::Make fall back to the non-fast impl if there are scalar arguments (for now)\n1. Expand scalars to arrays and continue processing\n1. \u2026Slice the input batch into 1-row batches and trying to fake the array buffer layout from the scalar data? (Not sure if this is even worth it performance-wise)\n   \n   Since to me, it looks like directly supporting scalars here will be difficult/require some invasive refactoring."
+        },
+        {
+            "created_at": "2021-09-29T17:59:40.979Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14027?focusedCommentId=17422297) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 11191\n<https://github.com/apache/arrow/pull/11191>"
+        }
+    ]
+}

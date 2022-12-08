@@ -1,0 +1,46 @@
+{
+    "issue": {
+        "title": "[C++][Parquet][Python] LZ4- compressed parquet files are unreadable by (py)spark",
+        "body": "***Note**: This issue was originally created as [ARROW-15073](https://issues.apache.org/jira/browse/ARROW-15073). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe following snipped shows the issue\r\n\r\n```java\n\r\nimport pyarrow as pa  # pyarrow==6.0.1\r\nimport pyarrow.parquet\r\nimport pyspark.sql  # pyspark==3.1.2\r\n\r\n\r\npath = \"bla.parquet\"\r\n\r\nt = pa.table(\r\n    [pa.array([0, 1, None, 3, None, 5, 6, 7, None, 9])],\r\n    schema=pa.schema([pa.field(\"int64\", pa.int64(), nullable=True)]),\r\n)\r\n\r\npyarrow.parquet.write_table(\r\n    t,\r\n    path,\r\n    use_dictionary=False,\r\n    compression=\"LZ4\",\r\n)\r\n\r\nspark = pyspark.sql.SparkSession.builder.getOrCreate()\r\n\r\nresult = spark.read.parquet(path).select(\"int64\").collect()\r\n```\r\n\r\nThis fails with:\r\n\r\n```java\n\r\nCaused by: shaded.parquet.org.apache.thrift.protocol.TProtocolException: Required field 'codec' was not present! Struct: ColumnMetaData(type:INT64, encodings:[PLAIN, RLE], path_in_schema:[int64], codec:null, num_values:10, total_uncompressed_size:142, total_compressed_size:104, data_page_offset:4, statistics:Statistics(max:09 00 00 00 00 00 00 00, min:00 00 00 00 00 00 00 00, null_count:0, max_value:09 00 00 00 00 00 00 00, min_value:00 00 00 00 00 00 00 00), encoding_stats:[PageEncodingStats(page_type:DATA_PAGE, encoding:PLAIN, count:1)])\r\n```\r\n\r\nFound while debugging the root cause of https://github.com/pola-rs/polars/issues/2018\r\n\r\npyarrow reads the file correctly.",
+        "created_at": "2021-12-11T17:26:13.000Z",
+        "updated_at": "2021-12-13T16:52:50.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Parquet",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-12-13T16:52:15.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-12-11T17:34:22.939Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15073?focusedCommentId=17457693) by Jorge Leit\u00e3o (jorgecarleitao):*\ncc `[~emkornfield]` `[~apitrou]`"
+        },
+        {
+            "created_at": "2021-12-11T18:05:18.019Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15073?focusedCommentId=17457700) by Micah Kornfield (emkornfield):*\nThis is expected LZ4 has always had compatibility issues which is why lz4_raw was introduced in https://issues.apache.org/jira/browse/PARQUET-1998\u00a0 I'm trying to find the Jira for it but failing for the Java implementation of LZ4_RAW in java but to my knowledge it hasn't been done yet. \u00a0<https://github.com/apache/parquet-format/pull/168/files> has a description.\r\n\r\n\u00a0\r\n\r\nZSTD is news to me, but haven't been tracking it carefully, I thought it was tested at some point but we might need to have a conversation on that one as well.\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-12-13T09:58:43.029Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15073?focusedCommentId=17458247) by Antoine Pitrou (apitrou):*\nThe Spark error message is weird. We do write the codec field, otherwise we wouldn't be able to read the file again. Can you file a bug for Spark and attach the ZSTD-compressed file there?"
+        },
+        {
+            "created_at": "2021-12-13T10:55:12.586Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15073?focusedCommentId=17458302) by Micah Kornfield (emkornfield):*\nIf LZ4 gets translated to LZ4_RAW depending on the version of parquet-mr, I wonder if null could indicate an unknown value for that field. \u00a0 `[~jorgecarleitao]` is it actually the same error message with ZSTD in Spark the code above only shows LZ4?\u00a0 From the original polars ticket it seems ZSTD parquet was not an issue."
+        },
+        {
+            "created_at": "2021-12-13T16:32:10.315Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15073?focusedCommentId=17458523) by Jorge Leit\u00e3o (jorgecarleitao):*\nthe ZSTD I tested it myself as I wanted to understand if it was only LZ4 or others too. But I was sloppy and did not read the error properly. So ZSTD is just an pyspark-specific thing:\r\n\r\n> Caused by: java.lang.RuntimeException: native zStandard library not available: this version of libhadoop was built without zstd support.\r\n\r\nand we can ignore in this issue (sorry for the noise :/)\r\n\r\nWrt to the LZ4, I think that you are both right: it is probable that the compiled thrift no longer contains the LZ4 and it is thus being ignored when reading. For example, rust's parquet2 crate (which does not read the file too) uses https://github.com/jorgecarleitao/parquet-format-rs/blob/master/parquet.thrift#L479 which contains LZ4 but it says it was added in 2.4, so this probably corresponds to newer LZ4_RAW format(?)"
+        },
+        {
+            "created_at": "2021-12-13T16:49:13.537Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15073?focusedCommentId=17458531) by Antoine Pitrou (apitrou):*\nHmm, so is there anything to do on the Arrow side here?"
+        },
+        {
+            "created_at": "2021-12-13T16:52:50.825Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15073?focusedCommentId=17458534) by Jorge Leit\u00e3o (jorgecarleitao):*\nNo, closed. Thank you for your input!\r\n"
+        }
+    ]
+}

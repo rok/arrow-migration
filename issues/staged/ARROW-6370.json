@@ -1,0 +1,69 @@
+{
+    "issue": {
+        "title": "[JS] Table.from adds 0 on int columns",
+        "body": "***Note**: This issue was originally created as [ARROW-6370](https://issues.apache.org/jira/browse/ARROW-6370). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI am generating an arrow table in pyarrow and send it via gRPC like this:\r\n```java\n\r\nsink = pa.BufferOutputStream()        \r\nwriter = pa.RecordBatchStreamWriter(sink, batch.schema)        writer.write_batch(batch)        \r\nwriter.close()        \r\nyield ds.Response(\r\n    status=200,\r\n    loading=False,\r\n    response=[sink.getvalue().to_pybytes()]   \r\n)\r\n```\r\nOn the javascript end, I parse it like that:\r\n```java\n\r\n Table.from(response.getResponseList()[0])\r\n```\r\nThat works but when I look at the actual table, int columns have a 0 for every other row. String columns seem to be parsed just fine.\u00a0\r\n\r\nThe Python byte array created from to_pybytes() has the same length as received in javascript. I am also able to recreate the original table for the byte array in Python.\u00a0",
+        "created_at": "2019-08-27T17:22:01.000Z",
+        "updated_at": "2019-09-21T04:48:48.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: JavaScript",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-09-21T04:48:48.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-08-28T15:08:45.866Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6370?focusedCommentId=16917848) by Brian Hulette (bhulette):*\nWhat is the type of the int column, int64? int64s behave a little weird in JS. If running in a platform with BigInt, calls to Int64Array.get _should_ return an instance of it, otherwise they will return a two element slice of Int32Array with the high, low bytes.\r\n\r\nCould you provide a little more detail on how you're generating the record batches? and maybe how you're observing the ints?"
+        },
+        {
+            "created_at": "2019-08-28T15:24:03.113Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6370?focusedCommentId=16917852) by Sascha Hofmann (saschahofmann):*\nYes, the column is int64.\r\n\r\nFor creating the RecordBatch in python: I am reading a pyarrow table from a parquet file, which itself was created from a csv. I tested this on different CSVs with the same behaviour.\u00a0\r\n\r\nI assume above issue is creating our problem. We are using arrow in an Electron app (so Node.js) with a python backend server. The bytes are sent via gRPC.\r\n\r\n\u00a0\r\n\r\nI will try to convert the int columns to int32 in python and see what's happening.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-08-28T15:35:42.434Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6370?focusedCommentId=16917857) by Brian Hulette (bhulette):*\nYeah I suspect converting to int32 will solve your problem. But this is still a bug so I'll see if I can reproduce it :)\r\nWhat version of node are you using?"
+        },
+        {
+            "created_at": "2019-08-28T15:49:42.847Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6370?focusedCommentId=16917864) by Sascha Hofmann (saschahofmann):*\nCool thank you! Using latest so\u00a0v10.16.3"
+        },
+        {
+            "created_at": "2019-08-28T16:26:18.487Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6370?focusedCommentId=16917896) by Sascha Hofmann (saschahofmann):*\nIndeed! Converting it to int32() in python solved the issue of added 0s."
+        },
+        {
+            "created_at": "2019-09-04T21:43:58.437Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6370?focusedCommentId=16922883) by Sascha Hofmann (saschahofmann):*\nI still believe that this is a bug and that converting a colum that is originally a int64 is only a temporary solution?"
+        },
+        {
+            "created_at": "2019-09-09T14:43:14.306Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6370?focusedCommentId=16925745) by Sascha Hofmann (saschahofmann):*\nI still think that is a bug and the JS implementation of Arrow should support int64 platform independently.\r\n\r\n\u00a0\r\n\r\nMy workaround of casting int64 to int32 in python is not a great solution long term"
+        },
+        {
+            "created_at": "2019-09-09T17:13:18.281Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6370?focusedCommentId=16925928) by Paul Taylor (paul.e.taylor):*\n`[~saschahofmann]` I closed this because this is working as intended.\r\n\r\n64-bit little-endian numbers are represented as pairs of lo, hi twos-complement 32-bit integers. If your values are less than 32-bits, the high bits will be zero. We're not inserting zeros, the zeros are part of the data Python is sending to JavaScript.\r\n\r\nThe Int64Vector and Uint64Vector support implicitly casting either to a normal JS 64-bit float as (with 53-bits of precision) if you can afford to lose precision, or to JS's new [BigInt](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/BigInt) type if you need the full 64-bits of precision and are on a platform that supports BigInt (v8 and the newest versions of FF).\r\n\r\n```javascript\n\r\nconst { Int64, Vector } = require('apache-arrow');\r\nlet i64s = Vector.from({ type: new Int64(), values: [123n, 456n, 789n] });\r\nfor (let x of i64s) {\r\n  console.log(x); // will be an Int32Array of two numbers: lo, hi\r\n  console.log(0 + x); // casts to a 53-bit integer, i.e. regular JS float64\r\n  console.log(0n + x); // casts to a BigInt, i.e. JS's new 64-bit integer\r\n}\r\n```\r\n"
+        },
+        {
+            "created_at": "2019-09-10T08:34:53.500Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6370?focusedCommentId=16926425) by Sascha Hofmann (saschahofmann):*\nOk gotcha. Our problem is that we are sending a whole table buffer, is there a way to pass the table schema to the Table.from(buffer) ? Or do we need to check for int32 columns and cast them to int64?\u00a0"
+        },
+        {
+            "created_at": "2019-09-11T17:28:05.429Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6370?focusedCommentId=16927830) by Sascha Hofmann (saschahofmann):*\nFrom my understanding of Arrow it should be a platform-independent format, meaning that if I am sending an arrow table from Python to JS it should turn out the same, right?\r\n\r\nAnyhow, I am trying to write a parser function that translates Int columns to Int64. I couldn't find much about casting a Vector to a different type in the docs. Could you maybe point me in the right direction, [~paul.e.taylor] ?\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-09-12T10:06:20.928Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6370?focusedCommentId=16928421) by Sascha Hofmann (saschahofmann):*\nOk I discovered that I can retrieve the right values via\r\n```java\n\r\ncol.chunks[0].values64\n```\r\nStill confusing to me why \r\nArrayType:\u00a0Int32Array but chunks:[Int64Vector]\u00a0but at least I am getting the right values now."
+        },
+        {
+            "created_at": "2019-09-12T19:51:45.537Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6370?focusedCommentId=16928851) by Paul Taylor (paul.e.taylor):*\n`[~saschahofmann]`\r\n\r\n> From my understanding of Arrow it should be a platform-independent format, meaning that if I am sending an arrow table from Python to JS it should turn out the same, right?\r\n\r\nYes, and that's what's happening here. But you're sending 8-byte integers to a platform which has historically only supported 4-byte integers, which is why you see each 8-byte integer as a pair of 4-byte integers.\r\n\r\nI recommend reading [this post](https://v8.dev/features/bigint) on BigInts in the v8 blog.\r\n\r\nBigInts (and their related typed arrays) are relatively new additions to JS, and aren't supported in all engines yet.\r\n\r\nWe have done our best to support getting and setting BigInt values when running in VM that does support them, but for now we still have to support platforms without BigInt. That's why the values Array for Int64Vector is a stride-2 Int32Array instead of a BigInt64Array."
+        },
+        {
+            "created_at": "2019-09-12T20:37:22.215Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6370?focusedCommentId=16928878) by Sascha Hofmann (saschahofmann):*\nAlright! Thank you so much explaining that and for your patience :D.\u00a0"
+        }
+    ]
+}

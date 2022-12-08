@@ -1,0 +1,30 @@
+{
+    "issue": {
+        "title": "[C++][Python] Variable dictionaries do not survive roundtrip to IPC stream",
+        "body": "***Note**: This issue was originally created as [ARROW-10121](https://issues.apache.org/jira/browse/ARROW-10121). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFailing test case (from dev@ https://lists.apache.org/thread.html/r338942b4e9f9316b48e87aab41ac49c7ffedd45733d4a6349523b7eb%40%3Cdev.arrow.apache.org%3E)\r\n\r\n```Java\n\r\nimport pyarrow as pa\r\nfrom io import BytesIO\r\n\r\npa.__version__\r\n\r\nschema = pa.schema([pa.field('foo', pa.int32()), pa.field('bar', pa.dictionary(pa.int32(), pa.string()))] )\r\nr1 = pa.record_batch(\r\n    [\r\n        [1, 2, 3, 4, 5],\r\n        pa.array([\"a\", \"b\", \"c\", \"d\", \"e\"]).dictionary_encode()\r\n    ],\r\n    schema\r\n)\r\n\r\nr1.validate()\r\nr2 = pa.record_batch(\r\n    [\r\n        [1, 2, 3, 4, 5],\r\n        pa.array([\"c\", \"c\", \"e\", \"f\", \"g\"]).dictionary_encode()\r\n    ],\r\n    schema\r\n)\r\n\r\nr2.validate()\r\n\r\nassert r1.column(1).dictionary != r2.column(1).dictionary\r\n\r\n\r\nsink =  pa.BufferOutputStream()\r\nwriter = pa.RecordBatchStreamWriter(sink, schema)\r\n\r\nwriter.write(r1)\r\nwriter.write(r2)\r\n\r\nserialized = BytesIO(sink.getvalue().to_pybytes())\r\nstream = pa.ipc.open_stream(serialized)\r\n\r\ndeserialized = []\r\n\r\nwhile True:\r\n    try:\r\n        deserialized.append(stream.read_next_batch())\r\n    except StopIteration:\r\n        break\r\n\r\nassert deserialized[1][1].to_pylist() == r2[1].to_pylist()\r\n```",
+        "created_at": "2020-09-28T17:26:29.000Z",
+        "updated_at": "2020-10-05T20:40:49.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-10-05T20:40:48.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-29T16:33:06.793Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10121?focusedCommentId=17204119) by Antoine Pitrou (apitrou):*\nAFAICT, this bug was already present in 0.15.1, and perhaps before.\r\nThe problem is basically this snippet in `IpcFormatWriter::RecordBatch`:\r\n```c++\n\r\n    if (!wrote_dictionaries_) {\r\n      RETURN_NOT_OK(WriteDictionaries(batch));\r\n      wrote_dictionaries_ = true;\r\n    }\r\n```\r\n\r\nThe solution isn't entirely trivial: presumably we don't want to write dictionaries again when they are identical. We also don't want to compare them every time. Perhaps compare them by pointer?"
+        },
+        {
+            "created_at": "2020-09-29T16:57:22.978Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10121?focusedCommentId=17204133) by Wes McKinney (wesm):*\nI would have thought this would have been addressed by delta dictionary work but it seems that it only treated the read side, not the write side.\r\n\r\nWhen encountering an unequal dictionary (based at minimum on the memory address of the dictionary):\r\n\r\n- At minimum we need to determine whether it's a permutation, delta, or dictionary prefix.\n- If it's a permutation (neither delta not subdictionary) and we are writing a stream (non-file), then we can either permute the indices (and if necessary write a delta dictionary if there are new values) or write a dictionary replacement. Dictionary replacement is the most \"preserving\"\n  \n  In any case, we shouldn't allow the status quo to persist \u2013 either we should fix it properly or have it raise an error until we fix it properly. "
+        },
+        {
+            "created_at": "2020-10-05T20:40:49.053Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10121?focusedCommentId=17208301) by Wes McKinney (wesm):*\nIssue resolved by pull request 8302\n<https://github.com/apache/arrow/pull/8302>"
+        }
+    ]
+}

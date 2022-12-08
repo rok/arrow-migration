@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Python] Handling unicode pandas columns on parquet.read_table",
+        "body": "***Note**: This issue was originally created as [ARROW-1976](https://issues.apache.org/jira/browse/ARROW-1976). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nUnicode columns in pandas DataFrames aren't being handled correctly for some datasets when reading a parquet file into a pandas DataFrame, leading to the common Python ASCII encoding error.\r\n \r\nThe dataset used to get the error is here: https://catalog.data.gov/dataset/college-scorecard\r\n\r\n```Java\n\r\nimport numpy as np\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\ndf = pd.read_csv('college_data.csv')\r\n```\r\n\r\nFor verification, the DataFrame's columns are indeed unicode\r\n```Java\n\r\ndf.columns\r\n> Index([u'\ufeffUNITID', u'OPEID', u'OPEID6', u'INSTNM', u'CITY', u'STABBR',\r\n       u'INSTURL', u'NPCURL', u'HCM2', u'PREDDEG',\r\n       ...\r\n       u'RET_PTL4', u'PCTFLOAN', u'UG25ABV', u'MD_EARN_WNE_P10', u'GT_25K_P6',\r\n       u'GRAD_DEBT_MDN_SUPP', u'GRAD_DEBT_MDN10YR_SUPP', u'RPY_3YR_RT_SUPP',\r\n       u'C150_L4_POOLED_SUPP', u'C150_4_POOLED_SUPP'],\r\n      dtype='object', length=123)\r\n```\r\n\r\nThe DataFrame can be saved into a parquet file\r\n```Java\n\r\narrow_table = pa.Table.from_pandas(df)\r\npq.write_table(arrow_table, 'college_data.parquet')\r\n```\r\n\r\nBut trying to read the parquet file immediately afterwards results in the following\r\n```Java\n\r\ndf = pq.read_table('college_data.parquet').to_pandas()\r\n\r\n> ---------------------------------------------------------------------------\r\nUnicodeEncodeError                        Traceback (most recent call last)\r\n<ipython-input-29-23906ea1efe3> in <module>()\r\n----> 2 df = pq.read_table('college_data.parquet').to_pandas()\r\n\r\n/Users/anaconda/envs/env/lib/python2.7/site-packages/pyarrow/table.pxi in pyarrow.lib.Table.to_pandas (/Users/travis/build/BryanCutler/arrow-dist/arrow/python/build/temp.macosx-10.6-intel-2.7/lib.cxx:46331)()\r\n   1041         if nthreads is None:\r\n   1042             nthreads = cpu_count()\r\n-> 1043         mgr = pdcompat.table_to_blockmanager(options, self, memory_pool,\r\n   1044                                              nthreads)\r\n   1045         return pd.DataFrame(mgr)\r\n\r\n/Users/anaconda/envs/env/lib/python2.7/site-packages/pyarrow/pandas_compat.pyc in table_to_blockmanager(options, table, memory_pool, nthreads, categoricals)\r\n    539     if columns:\r\n    540         columns_name_dict = {\r\n--> 541             c.get('field_name', str(c['name'])): c['name'] for c in columns\r\n    542         }\r\n    543         columns_values = [\r\n\r\n/Users/anaconda/envs/env/lib/python2.7/site-packages/pyarrow/pandas_compat.pyc in <dictcomp>((c,))\r\n    539     if columns:\r\n    540         columns_name_dict = {\r\n--> 541             c.get('field_name', str(c['name'])): c['name'] for c in columns\r\n    542         }\r\n    543         columns_values = [\r\n\r\nUnicodeEncodeError: 'ascii' codec can't encode character u'\\ufeff' in position 0: ordinal not in range(128)\r\n```\r\n\r\nLooking at the stacktrace , it looks like this line, which is using str which by default will try to do ascii encoding: https://github.com/apache/arrow/blob/master/python/pyarrow/pandas_compat.py#L541",
+        "created_at": "2018-01-07T22:06:37.000Z",
+        "updated_at": "2018-02-06T19:02:48.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-02-06T00:27:48.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-01-09T16:44:46.252Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1976?focusedCommentId=16318720) by Phillip Cloud (cpcloud):*\nNote this is python 2 specific. You won't run into issues like this if you don't use python 2.\r\n\r\nIf there's no restriction on the version of Python you need to use please use python 3.\r\n\r\nThat said, since we have to support python 2, this is a bug.\r\n\r\nHow is it possible to read in Unicode from a CSV file without specifying an encoding to `read_csv`? Pandas must make an assumption about the encoding or choose a default.\r\n\r\nI've also submitted a data issue to data.gov to request that they include the encoding in the metadata.\r\n\r\nhttps://www.data.gov/issue/request-id/635154"
+        },
+        {
+            "created_at": "2018-01-10T14:51:53.707Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1976?focusedCommentId=16320364) by Simbarashe Nyatsanga (simbanyatsanga):*\nThanks `[~cpcloud]` . As far as I can tell in the Pandas code base, the **read_csv** is using **utf-8** by default. Unfortunately it's not possible to upgrade to python3 at this time. I would be keen to pick up and fix this issue but I have been having trouble building pyarrow for python 2.7."
+        },
+        {
+            "created_at": "2018-01-13T11:23:28.657Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1976?focusedCommentId=16325088) by Uwe Korn (uwe):*\nI think this should be simply solved by using `six.text_type` here. Not sure about the exact Pandas internals but I have the feeling that it is common with Pandas+Python 2.7 that the columns are `unicode`.\r\n\r\n`[~simbanyatsanga]` Do you want to make this change? What are your build issues? (You might also reach out for support on your build issues on the mailing list dev@arrow.apache.org or on Slack (signup at https://apachearrowslackin.herokuapp.com/ ))"
+        },
+        {
+            "created_at": "2018-02-06T00:27:48.597Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1976?focusedCommentId=16353145) by Wes McKinney (wesm):*\nIssue resolved by pull request 1553\n<https://github.com/apache/arrow/pull/1553>"
+        }
+    ]
+}

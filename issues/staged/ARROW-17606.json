@@ -1,0 +1,44 @@
+{
+    "issue": {
+        "title": "[C++] Cast float to decimal truncates",
+        "body": "***Note**: This issue was originally created as [ARROW-17606](https://issues.apache.org/jira/browse/ARROW-17606). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nEven with all of the cast options to allow truncation and overflow set to False, cast from double to decimal truncates. \r\n\r\nShort reproducer in R:\r\n\r\n```Java\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\n\r\na <- Scalar$create(sqrt(2))\r\na\r\n#> Scalar\r\n#> 1.4142135623730951\r\n\r\na$cast(decimal(5, 1))\r\n#> Scalar\r\n#> 1.4\r\n```\r\n\r\nLonger version that shows the cast options:\r\n\r\n```Java\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\n\r\ntab <- arrow_table(a = sqrt(2))\r\ntab\r\n#> Table\r\n#> 1 rows x 1 columns\r\n#> $a <double>\r\n\r\ntab$a\r\n#> ChunkedArray\r\n#> <double>\r\n#> [\r\n#>   [\r\n#>     1.4142135623730951\r\n#>   ]\r\n#> ]\r\n\r\n# See that all of the cast options are false:\r\ntab %>% \r\n  mutate(b = cast(a, decimal(5, 1)))\r\n#> Table (query)\r\n#> a: double\r\n#> b: decimal128(5, 1) (cast(a, {to_type=decimal128(5, 1), allow_int_overflow=false, allow_time_truncate=false, allow_time_overflow=false, allow_decimal_truncate=false, allow_float_truncate=false, allow_invalid_utf8=false}))\r\n#> \r\n#> See $.data for the source Arrow object\r\n\r\nnew_tab <- tab %>% \r\n  mutate(b = cast(a, decimal(5, 1))) %>% \r\n  compute()\r\nnew_tab\r\n#> Table\r\n#> 1 rows x 2 columns\r\n#> $a <double>\r\n#> $b <decimal128(5, 1)>\r\n\r\nnew_tab$b\r\n#> ChunkedArray\r\n#> <decimal128(5, 1)>\r\n#> [\r\n#>   [\r\n#>     1.4\r\n#>   ]\r\n#> ]\r\n```",
+        "created_at": "2022-09-03T13:01:44.000Z",
+        "updated_at": "2022-10-19T03:11:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-03T13:26:06.567Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17606?focusedCommentId=17599927) by Antoine Pitrou (apitrou):*\nHow would you reliably detect that conversion doesn't truncate? For example, 1.4 isn't exactly representable as a float/double."
+        },
+        {
+            "created_at": "2022-09-03T14:55:25.528Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17606?focusedCommentId=17599947) by Neal Richardson (npr):*\nYeah I get that, but we seem to be able to print 1.4 as \"1.4\" and not \"1.400000001\", so we have some way of determining that.\r\n\r\n```Java\n\r\n> Scalar$create(1.4)\r\nScalar\r\n1.4\r\n> Scalar$create(1.4)$type\r\nFloat64\r\ndouble\r\n```"
+        },
+        {
+            "created_at": "2022-09-03T15:02:35.557Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17606?focusedCommentId=17599953) by Antoine Pitrou (apitrou):*\nYes, we are able to determine that... or, rather, the vendored float printing routines are :)\r\n\r\nHowever, converting to a decimal string is a rather expensive check to go through, and I haven't heard there's a much  more efficient way to do it.\r\n\r\nI'll note that Python's decimal module, which was written and maintained by extremely competent people, doesn't try to be smart about it:\r\n```python\n\r\n>>> from decimal import Decimal\r\n>>> Decimal(1.4)\r\nDecimal('1.399999999999999911182158029987476766109466552734375')\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-09-03T15:10:26.920Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17606?focusedCommentId=17599954) by Neal Richardson (npr):*\nI understand. But we have all of these cast options `allow_*_truncate`, and as a user it is surprising that they don't do anything when converting to decimal. How do we reconcile that?"
+        },
+        {
+            "created_at": "2022-09-03T16:01:10.946Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17606?focusedCommentId=17599959) by Antoine Pitrou (apitrou):*\nWe can at least document that issue."
+        },
+        {
+            "created_at": "2022-09-06T12:59:19.476Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17606?focusedCommentId=17600759) by Joris Van den Bossche (jorisvandenbossche):*\nThis might be too naive, but when casting float to int, AFAIK we check for truncation by comparing the int back to float and comparing float equality with the input value. Can we do something similar here? Get the float representation of the decimal, and compare with the original float? "
+        },
+        {
+            "created_at": "2022-09-06T13:07:47.455Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17606?focusedCommentId=17600765) by Antoine Pitrou (apitrou):*\nAh, I suppose we could do that, but it would be quite slower than in the float-to-int case."
+        }
+    ]
+}

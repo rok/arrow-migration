@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[C++] Parquet writes broken file or incorrect data when nullable=False",
+        "body": "***Note**: This issue was originally created as [ARROW-15899](https://issues.apache.org/jira/browse/ARROW-15899). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn such cases, when trying to write a pyarrow table to parquet with provided schema, and the provided schema contains a field with `nullable=false`, but contains an actual null value , the resulting parquet either\r\n \\* cannot be read or\r\n \\* the columns are somewhat get `pushed up`, and the whole table becomes inconsistent. The column changes by seemingly dropping the null value, and pushing together the complete dataset based on the provided row_group_size (and starting over from the start when runs out of values). Different row group sizes will lead to different results as well.\u00a0 This off-by-one problem is persistent in a single row group, the next could be perfectly fine if it contains no null values.\r\n\r\n\u00a0\r\n\r\nI believe, none of these behaviours are intentional, but they easily overseen by the user as one might think that providing a schema with constraints would lead to at least a warning/ (or better) an exception when writing the file. Using provided validation methods also see no problem with this particular problem.\r\n\r\nYou can find a snippet below explaining this weird behaviour.\r\n```java\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\nfield_name = 'a_string'\r\nschema = pa.schema([\r\n    pa.field(name=field_name, type=pa.string(), nullable=False) # not nullable\r\n])\r\n\r\n# Arrow Columnar Format doesn't care if a non-nullable field holds a null\r\nt_out = pa.table([['0', '1', None, '3', '4']], schema=schema) # OK\r\nt_out.validate(full=True) # OK\r\nt_out.cast(schema, safe=True) # OK\r\n\r\n\r\n# Parquet writing does not raise, but silently kills the null string\r\n# because of the REQUIRED-ness of the field in the schema.\r\n\r\n# Then you either cannot read the parquet back, or the returned data\r\n# is invented, depending on the written row_group_size.\r\n\r\npq.write_table(t_out, where='pq_1', row_group_size=1)\r\npq.read_table('pq_1')\r\n# -> OSError: Unexpected end of stream\r\n\r\npq.write_table(t_out, where='pq_2', row_group_size=2)\r\npq.read_table('pq_2')\r\n# -> OSError: Unexpected end of stream\r\n# -> or sometimes: pyarrow.lib.ArrowInvalid: Index not in dictionary bounds\r\n\r\npq.write_table(t_out, where='pq_3', row_group_size=3)\r\nprint(pq.read_table('pq_3')[field_name])\r\n# -> [[\"0\",\"1\",\"0\"],[\"3\",\"4\"]]\r\n\r\npq.write_table(t_out, where='pq_4', row_group_size=4)\r\nprint(pq.read_table('pq_4')[field_name])\r\n# -> [[\"0\",\"1\",\"3\",\"0\"],[\"4\"]]\r\n\r\npq.write_table(t_out, where='pq_5', row_group_size=5)\r\nprint(pq.read_table('pq_5')[field_name])\r\n# -> [[\"0\",\"1\",\"3\",\"4\",\"0\"]]\n```",
+        "created_at": "2022-03-10T11:30:53.000Z",
+        "updated_at": "2022-08-23T11:30:34.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Parquet",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-10T11:36:48.535Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15899?focusedCommentId=17504201) by Antoine Pitrou (apitrou):*\nHmm, we should probably check the `nullable` flag when validating (currently we don't)."
+        },
+        {
+            "created_at": "2022-08-23T11:30:34.876Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15899?focusedCommentId=17583529) by R\u00e1cz D\u00e1niel (dracz):*\nHi, is there any chance that this bug will get fixed anytime soon?"
+        }
+    ]
+}

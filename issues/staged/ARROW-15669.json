@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "\"std::bad_cast\" on mac os when reading from FlightStreamReader",
+        "body": "***Note**: This issue was originally created as [ARROW-15669](https://issues.apache.org/jira/browse/ARROW-15669). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen calling \"FlightStreamReader::ReadAll()\", got \"std::bad_cast exception\" (this is on 6.0.0, on 7.0.0 got \"segmentation violation signal\"). This happens only on mac os, it works fine on linux (tested on ubuntu).\r\n\r\nCode snippet:\r\n\r\nConstruction of\u00a0FlightDataStream inside server's DoGet():\r\n\r\n`auto schema = ::arrow::schema({`\r\n{{\r\n\r\n{field(\"f0\", ::arrow::int32())}\r\n\r\n,}}\r\n{{\r\n\r\n{field(\"f1\", ::arrow::int32())}\r\n\r\n,}}\r\n{{\r\n\r\n{field(\"f2\", ::arrow::int32())}\r\n\r\n,}}\r\n`});`\r\n\r\n`auto array_0_0 = Arrays::make<::arrow::Int32Type>(\\{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}).value();`\r\n`auto array_0_1 = Arrays::make<::arrow::Int32Type>(\\{10, 11, 12, 13, 14, 15, 16, 17, 18, 19}).value();`\r\n`auto array_0_2 = Arrays::make<::arrow::Int32Type>(\\{20, 21, 22, 23, 24, 25, 26, 27, 28, 29}).value();`\r\n\r\n`auto rb_0 = ::arrow::RecordBatch::Make(schema, 10, \\{array_0_0, array_0_1, array_0_2});`\r\n`auto rb_1 = ::arrow::RecordBatch::Make(schema, 10, \\{array_0_0, array_0_1, array_0_2});`\r\n\r\n`auto rb_reader = ::arrow::RecordBatchReader::Make(\\{rb_0, rb_1});`\r\n\r\n`return std::make_unique<::arrow::flight::RecordBatchStream>(*rb_reader);`\r\n\r\n\u00a0\r\n\r\nRetrieve record batches from stream at client:\r\n\r\n`std::unique_ptr<::arrow::flight::FlightStreamReader> reader;`\r\n\r\n`st = client->DoGet(ticket, &reader);\u00a0 \u00a0 // ticked is well constructed`\r\n\r\n`{}std::shared_ptr<::arrow::Table> table;{`}`{}st = reader->ReadAll(&table);{`}\r\n\r\n\u00a0\r\n\r\nThanks!",
+        "created_at": "2022-02-13T03:22:49.000Z",
+        "updated_at": "2022-02-17T08:12:14.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: FlightRPC",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-02-17T08:12:14.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-15T10:21:06.795Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15669?focusedCommentId=17492502) by Yibo Cai (yibocai):*\nThanks for reporting this issue.\r\nWill be great if you can attach a debugger to locate the code triggering the error. Or creating a test case to reproduce it."
+        },
+        {
+            "created_at": "2022-02-16T06:19:11.439Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15669?focusedCommentId=17493020) by Yifei Yang (yyfyyf123123):*\nSure, I uploaded the stack trace and a minimal test case to reproduce it which is based on doctest (using arrow 6.0.0).\u00a0"
+        },
+        {
+            "created_at": "2022-02-17T02:27:00.359Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15669?focusedCommentId=17493604) by Yibo Cai (yibocai):*\nThanks `[~yyfyyf123123]`.\r\n\r\nI tried arrow 6.0.0 and 7.0.0 (build from source), but cannot reproduce this issue.\r\nMy test machine is apple m1, macos 12.1, apple clang 13.\r\n\r\nFrom stracktrace, the error comes from [ipc/reader.cc:169](https://github.com/apache/arrow/blob/apache-arrow-6.0.0/cpp/src/arrow/ipc/reader.cc#L169).\r\n```cpp\n\r\nStatus LoadType(const DataType& type) { return VisitTypeInline(type, this); }\r\n```\r\nVisitTypeInline casts \"type\" to concrete data type based on \"type.id()\". Looks the actual data type class doesn't match the id. This is very strange.\r\n\r\nUpload a test patch to ease debugging. It adds \"arrow-mac-test\" to arrow source tree, based on the test case from `[~yyfyyf123123]`.\r\n [0001-mac-flight-crash-test.patch](0001-mac-flight-crash-test.patch) \r\n\r\ncc `[~lidavidm]`"
+        },
+        {
+            "created_at": "2022-02-17T06:00:26.015Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15669?focusedCommentId=17493667) by Yifei Yang (yyfyyf123123):*\nThanks! Have played on my machine a little more, seems using static lib instead of the shared one can make it work, but unsure why the shared one throws this error..."
+        },
+        {
+            "created_at": "2022-02-17T06:45:14.673Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15669?focusedCommentId=17493699) by Yifei Yang (yyfyyf123123):*\nIt seems that the shared lib of arrow flight works well, the issue is probably from the shared lib I created based on the shared lib of arrow flight. The shared lib I create initially cannot work on mac due to several link issues, so I added some command to fix it (attached as [fix_build_on_mac.cmake](fix_build_on_mac.cmake)). The function \"linkForMacShared()\" is the main one to fix the target shared lib on mac. I'm not sure if this fix potentially causes the strange exception?"
+        },
+        {
+            "created_at": "2022-02-17T07:54:25.122Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15669?focusedCommentId=17493735) by Yibo Cai (yibocai):*\nI didn't see suspicious changes in the cmake file.\r\nLooks it's not an arrow issue. Can we close this jira?"
+        },
+        {
+            "created_at": "2022-02-17T07:56:27.310Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15669?focusedCommentId=17493737) by Yifei Yang (yyfyyf123123):*\nSure, thanks for your help!"
+        },
+        {
+            "created_at": "2022-02-17T08:12:14.347Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15669?focusedCommentId=17493751) by Yibo Cai (yibocai):*\nThanks `[~yyfyyf123123]`. Feel free to add comments if you have new findings."
+        }
+    ]
+}

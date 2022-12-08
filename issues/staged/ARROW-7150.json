@@ -1,0 +1,65 @@
+{
+    "issue": {
+        "title": "[Python] Explain parquet file size growth",
+        "body": "***Note**: This issue was originally created as [ARROW-7150](https://issues.apache.org/jira/browse/ARROW-7150). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHaving columnar storage format in mind, with gzip compression enabled, I can't make sense of how parquet file size is growing in my specific example.\r\n\r\nSo far without sharing a dataset (would need to create a mock one to share).\r\n```java\n\r\n> # 1. read 820 rows from a parquet file\r\n> df.read_parquet('820.parquet')\r\n> # size of 820.parquet is 528K\r\n> len(df)\r\n820\r\n> # 2. write 8200 rows to a parquet file\r\n> df_big = pandas.concat([df] * 10).reset_index(drop=True)\r\n> len(df_big)\r\n8200\r\n> df_big.to_parquet('8200.parquet', compression='gzip')\r\n> # size of 800.parquet is 33M. Why is it 60 times bigger?\r\n \n```\r\n\u00a0\u00a0\r\n\r\nCompression works better on bigger files. How come 10x1 increase with repeated data resulted in 60x growth of file? Insane imo.\r\n\r\n\u00a0\r\n\r\nWorking on a periodic job that concats smaller files into bigger ones and doubting now whether I need this.\r\n\r\n\u00a0\r\n\r\nI attached 820.parquet to try out",
+        "created_at": "2019-11-12T17:25:25.000Z",
+        "updated_at": "2022-08-27T14:41:47.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2019-11-15T05:58:04.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-11-12T19:59:17.588Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7150?focusedCommentId=16972730) by Neal Richardson (npr):*\nHard to say without a working example to reproduce the issue. Can you confirm that this is still an issue in 0.15.1? There was a lot of Parquet work done between 0.14 and 0.15."
+        },
+        {
+            "created_at": "2019-11-13T16:31:11.200Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7150?focusedCommentId=16973501) by Bogdan Klichuk (klichukb):*\nHello. Tried 0.15.1, got the same results. I managed to generate a similar situation with different dataset and I applied it to the ticket (820.parquet file. Try to follow instructions in the ticket using it now)"
+        },
+        {
+            "created_at": "2019-11-14T08:32:56.234Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7150?focusedCommentId=16974021) by Micah Kornfield (emkornfield@gmail.com):*\nUsing parquet-tools to analyze this it appears the actual data being written out is somehow 60 times larger between the two files.\r\n\r\n\u00a0\r\n\r\nstream: \u00a0 \u00a0 \u00a0 BINARY GZIP DO:4 FPO:535142 SZ:535646/4280717/7.99 VC:820 ENC:PLAIN,PLAIN_DICTIONARY,RLE ST:[no stats for this column]\r\n\r\n\u00a0\r\n\r\nstream: \u00a0 \u00a0 \u00a0 BINARY GZIP DO:4 FPO:535142 SZ:34388333/273435618/7.95 VC:8200 ENC:PLAIN,PLAIN_DICTIONARY,RLE ST:[no stats for this column]\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-11-14T09:10:46.646Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7150?focusedCommentId=16974068) by Micah Kornfield (emkornfield@gmail.com):*\nNote total data-size for 8200 appears to be ~300MB\r\n\r\n\u00a0\r\n\r\nIt looks like dictionary encoding might only be getting applied to the first page (see parquet-tools command below).\u00a0 Based on the parquet this might be expected ..\r\n> The dictionary encoding builds a dictionary of values encountered in a given column. The dictionary will be stored in a dictionary page per column chunk. The values are stored as integers using the\u00a0[RLE/Bit-Packing Hybrid](https://github.com/apache/parquet-format/blob/master/Encodings.md#RLE)\u00a0encoding. If the dictionary grows too big, whether in size or number of distinct values, the encoding will fall back to the plain encoding. The dictionary page is written first, before the data pages of the column chunk.\r\n\u00a0\r\n\r\n`\"parquet-tools dump 8200.parquet |head -20\"`\r\n\r\n\u00a0\r\n\r\n stream TV=8200 RL=0 DL=1 DS: 114 DE:PLAIN_DICTIONARY\r\n\r\n\u00a0 \u00a0 ----------------------------------------------------------------------------\r\n\r\n\u00a0 \u00a0 page 0: \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 DLE:RLE RLE:RLE VLE:PLAIN_DICTIONARY [more]... VC:1024\r\n\r\n\u00a0 \u00a0 page 1: \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 DLE:RLE RLE:RLE VLE:PLAIN ST:[no sta [more]... VC:1024\r\n\r\n\u00a0 \u00a0 page 2: \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 DLE:RLE RLE:RLE VLE:PLAIN ST:[no sta [more]... VC:1024\r\n\r\n\u00a0 \u00a0 page 3: \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 DLE:RLE RLE:RLE VLE:PLAIN ST:[no sta [more]... VC:1024\r\n\r\n\u00a0 \u00a0 page 4: \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 DLE:RLE RLE:RLE VLE:PLAIN ST:[no sta [more]... VC:1024\r\n\r\n\u00a0 \u00a0 page 5: \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 DLE:RLE RLE:RLE VLE:PLAIN ST:[no sta [more]... VC:1024\r\n\r\n\u00a0 \u00a0 page 6: \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 DLE:RLE RLE:RLE VLE:PLAIN ST:[no sta [more]... VC:1024\r\n\r\n\u00a0 \u00a0 page 7: \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 DLE:RLE RLE:RLE VLE:PLAIN ST:[no sta [more]... VC:1024\r\n\r\n\u00a0 \u00a0 page 8: \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 DLE:RLE RLE:RLE VLE:PLAIN ST:[no sta [more]... VC:8"
+        },
+        {
+            "created_at": "2019-11-14T09:13:45.973Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7150?focusedCommentId=16974073) by Micah Kornfield (emkornfield@gmail.com):*\n`[~klichukb]` \u00a0does the above explanation make sense.\u00a0 Looking at the generated data, I'm not sure parquet is well suited storing large strings that vary by a lot."
+        },
+        {
+            "created_at": "2019-11-14T09:41:03.520Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7150?focusedCommentId=16974090) by Micah Kornfield (emkornfield@gmail.com):*\nI'm actually not sure I understand why we might stop with plain_dictionary in follow-up pages (it seems like there are 114 unique values in the dataset)."
+        },
+        {
+            "created_at": "2019-11-14T09:55:51.220Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7150?focusedCommentId=16974107) by Micah Kornfield (emkornfield@gmail.com):*\nTo answer my own question it looks like default dictionary size is set to 1MB in CPP (and the 114 values is ~4MB).\u00a0 The knob to tune this does not appear to be currently accessible in python, so after the first page since generally at least one new value is expected the encoding would fallback to plain encoding."
+        },
+        {
+            "created_at": "2019-11-14T09:57:00.851Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7150?focusedCommentId=16974108) by Bogdan Klichuk (klichukb):*\n[~emkornfield@gmail.com]\u00a0yeah, i'm not too familiar with parquet internals but what you explained and cited makes sense.\r\n\r\nThat's the kind of data I save indeed - strings that vary a lot.\r\n\r\nStill There are cases where similar varying big strings do quite well. But that could be explained by:\r\n\r\n>\u00a0If the dictionary grows too big, whether in size or number of distinct values, the encoding will fall back to the plain encoding\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-11-14T09:57:51.798Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7150?focusedCommentId=16974110) by Bogdan Klichuk (klichukb):*\nBeen always thinking of avro as alternative since i pretty much read full rows everytime i consume this table."
+        },
+        {
+            "created_at": "2019-11-15T05:57:52.870Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7150?focusedCommentId=16974827) by Micah Kornfield (emkornfield@gmail.com):*\n`[~klichukb]` \u00a0I don't think either Parquet or Avro is going to give you great performance if you are simply sticking JSON strings in as data.\u00a0 If you want smaller file sizes, two columns for parquet, one with field name and one with field value (boolean) would do a lot better.\u00a0 \u00a0Unfortunately, the Arrow library doesn't support writing nested data yet (otherwise list<struct<field : string, value : bool>) would be preferred.\r\n\r\n\u00a0\r\n\r\nI opened\u00a0https://issues.apache.org/jira/browse/ARROW-7174\u00a0which if implemented and there is a lot of duplication in strings might still get useful compression.\u00a0 For now I think this is working as intended."
+        },
+        {
+            "created_at": "2019-11-18T09:13:05.777Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7150?focusedCommentId=16976379) by Bogdan Klichuk (klichukb):*\nYeah its not that simple on my end. It's just one of json datasets inside of the table.\r\n\r\nI need to save any kinda of json/csv without any type inferences, that means all kinds of csv/json, these are provided by user and should be saved as is without parsing for logging purpose and evidence of exact original data. So i will end up dealing with big strings up to 500mb each."
+        },
+        {
+            "created_at": "2022-08-27T14:41:47.174Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7150?focusedCommentId=17585842) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

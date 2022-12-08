@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[R] Non-UTF-8 data in Arrow <--> R conversion",
+        "body": "***Note**: This issue was originally created as [ARROW-7018](https://issues.apache.org/jira/browse/ARROW-7018). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHello.\r\nI'm new to the arrow package in R and I'm having a trouble regarding special characters (Icelandic). I have a large data set and everything is fine until I write the file to disk and read it in again (i.e. I use write_parquet() and then read_parquet()). When I read the data back in to R special characters turn into question mark. I.e. Veitingasta\u00f0ir becomes Veitingasta\ufffdir.\r\n\r\nThis does not happen when I use .csv.\r\n\r\nIs there anything I can do when I write the .parquet file to disk or when I read it in to prevent this?",
+        "created_at": "2019-10-29T08:08:10.000Z",
+        "updated_at": "2020-06-26T15:20:38.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-06-26T15:19:31.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-29T22:06:11.189Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7018?focusedCommentId=16962497) by Neal Richardson (npr):*\nHi `[~vidaringa]`, to help us address the issue, could you please provide a self-contained minimal code example that reproduces the issue, along with a printout of your R `sessionInfo()`? These encoding issues are notoriously difficult, so I want to be sure that we're seeing exactly what you're seeing. Thanks!"
+        },
+        {
+            "created_at": "2019-10-30T09:04:14.288Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7018?focusedCommentId=16962823) by Vidar Ingason (vidaringa):*\nHi\u00a0Neal\r\n\r\n\u00a0Here is a small code that will reproduces this issue.\r\n```java\n\r\nlibrary(tidyverse)\r\nlibrary(arrow)\r\n\r\ndf <- tibble(a = c(\"Veitingasta\u00f0ir\"),\r\n             b = 10)\r\n\r\nwrite_parquet(df, \"test.parquet\")\r\n\r\ndf_read <- read_parquet(\"test.parquet\")\r\n\\\\\n```\r\n\u00a0\r\n\r\nSessioninfo:\r\n\r\nR version 3.6.1 (2019-07-05)\r\nPlatform: x86_64-w64-mingw32/x64 (64-bit)\r\nRunning under: Windows 10 x64 (build 17134)\r\n\r\nMatrix products: default\r\n\r\nlocale:\r\n[1] LC_COLLATE=Icelandic_Iceland.1252 LC_CTYPE=Icelandic_Iceland.1252 LC_MONETARY=Icelandic_Iceland.1252\r\n[4] LC_NUMERIC=C LC_TIME=Icelandic_Iceland.1252\r\n\r\nattached base packages:\r\n[1] stats graphics grDevices utils datasets methods base\r\n\r\nother attached packages:\r\n [1] arrow_0.15.0 forcats_0.4.0 stringr_1.4.0 dplyr_0.8.3 purrr_0.3.3 readr_1.3.1 tidyr_1.0.0 tibble_2.1.3 \r\n [9] ggplot2_3.2.1 tidyverse_1.2.1\r\n\r\nloaded via a namespace (and not attached):\r\n [1] Rcpp_1.0.2 cellranger_1.1.0 pillar_1.4.2 compiler_3.6.1 tools_3.6.1 bit_1.1-14 zeallot_0.1.0 \r\n [8] jsonlite_1.6 lubridate_1.7.4 lifecycle_0.1.0 nlme_3.1-140 gtable_0.3.0 lattice_0.20-38 pkgconfig_2.0.3 \r\n[15] rlang_0.4.1 cli_1.1.0 rstudioapi_0.10 haven_2.1.1 withr_2.1.2 xml2_1.2.2 httr_1.4.1 \r\n[22] generics_0.0.2 vctrs_0.2.0 hms_0.5.1 bit64_0.9-7 grid_3.6.1 tidyselect_0.2.5 glue_1.3.1 \r\n[29] R6_2.4.0 fansi_0.4.0 readxl_1.3.1 modelr_0.1.5 magrittr_1.5 backports_1.1.5 scales_1.0.0 \r\n[36] rvest_0.3.4 assertthat_0.2.1 colorspace_1.4-1 utf8_1.1.4 stringi_1.4.3 lazyeval_0.2.2 munsell_0.5.0 \r\n[43] broom_0.5.2 crayon_1.3.4\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-06-17T19:15:18.358Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7018?focusedCommentId=17138739) by Neal Richardson (npr):*\nHere's a more minimal reproducer. The relevant mangling seems to happen on converting Arrow to R, without involving parquet, and I haven't set the Icelandic locale, just on default English (latin1):\r\n\r\n```Java\n\r\n> x <- \"Veitingasta\u00f0ir\"\r\n> x\r\n[1] \"Veitingasta\u00f0ir\"\r\n> Encoding(x)\r\n[1] \"latin1\"\r\n> a <- Array$create(x)\r\n> a\r\nArray\r\n<string>\r\n[\r\n  \"Veitingasta\u00f0ir\"\r\n]\r\n> as.vector(a)\r\n[1] \"Veitingasta\\xf0ir\"\r\n> identical(as.vector(a), x)\r\n[1] FALSE\r\n```\r\n\r\nRead/write parquet doesn't seem to do any special mangling:\r\n\r\n```Java\n\r\n> f <- tempfile()\r\n> write_parquet(Table$create(a=a), f)\r\n> tab <- read_parquet(f, as_data_frame = FALSE)\r\n> tab\r\nTable\r\n1 rows x 1 columns\r\n$a <string>\r\n> tab$a\r\nChunkedArray\r\n<string>\r\n[\r\n  \"Veitingasta\u00f0ir\"\r\n]\r\n> as.data.frame(tab)\r\n                  a\r\n1 Veitingasta<f0>ir\r\n> as.data.frame(tab)$a\r\n[1] \"Veitingasta\\xf0ir\"\r\n```\r\n\r\n`enc2native` doesn't repair this but `iconv` does:\r\n\r\n```Java\n\r\n> enc2native(as.vector(a))\r\n[1] \"Veitingasta<f0>ir\"\r\n> iconv(as.vector(a), to=\"latin1\")\r\n[1] \"Veitingasta\u00f0ir\"\r\n```\r\n\r\nGiven that the Arrow string array is technically called `utf8`, maybe we should always convert to UTF-8 when sending strings to Arrow? This does work as expected:\r\n\r\n```Java\n\r\n> a2 <- Array$create(enc2utf8(x))\r\n> as.vector(a2)\r\n[1] \"Veitingasta\u00f0ir\"\r\n> Encoding(as.vector(a2))\r\n[1] \"UTF-8\"\r\n```\r\n\r\nwith the side effect that now the C++ pretty printing clashes with the latin1 locale\r\n\r\n```Java\n\r\n> a2\r\nArray\r\n<string>\r\n[\r\n  \"Veitingasta\u00c3\u00b0ir\"\r\n]\r\n```\r\n\r\nThoughts `[~wesm]` `[~apitrou]`?"
+        },
+        {
+            "created_at": "2020-06-17T19:18:43.763Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7018?focusedCommentId=17138741) by Antoine Pitrou (apitrou):*\nWhy do you have a latin1 locale in the first place? Is this on Windows?"
+        },
+        {
+            "created_at": "2020-06-17T19:19:28.584Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7018?focusedCommentId=17138742) by Antoine Pitrou (apitrou):*\nIn any case, I have no idea whether RArrow should do the something about this or let the user deal with it. I'm not a R user."
+        },
+        {
+            "created_at": "2020-06-17T20:23:27.289Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7018?focusedCommentId=17138787) by Neal Richardson (npr):*\n`[~apitrou]` yes, we're talking about windows.\r\n\r\nI tagged you less for your opinion about what R users should do and more for your knowledge of the Arrow format and what assumptions other parts of the project make. Specifically, how we handle non-UTF string data, and whether it is forbidden to put non-UTF-8 data in a string Array, or whether it is perhaps not explicitly illegal, maybe just discouraged. \r\n\r\nI can't think of how exactly I would indicate that this StringArray has non-UTF encoding. As part of a RecordBatch or Table, I could attach some custom metadata, but nothing in Arrow would know what to do with that, for better or worse.\r\n\r\nI'm ok if the policy is that Arrow strings are always UTF-8, I can work with that, but it's not clear that that is enforced, or actually true, or if all Arrow libraries share that policy. It seems from the C++ pretty print methods at least that there's some reliance on system locale, but maybe that's something to be addressed.\r\n"
+        },
+        {
+            "created_at": "2020-06-17T20:31:33.559Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7018?focusedCommentId=17138800) by Wes McKinney (wesm):*\nType::STRING must have UTF-8 data. Non-UTF-8 string data should be stored as BINARY \u2013 if you want to preserve the encoding for informational purposes or otherwise you can store it in the metadata of the corresponding Field of the Schema.\r\n\r\nI just opened ARROW-9163 about adding a method to make it easier to validate whether a string array has all UTF-8 values"
+        },
+        {
+            "created_at": "2020-06-26T15:19:31.923Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7018?focusedCommentId=17146393) by Neal Richardson (npr):*\nIssue resolved by pull request 7527\n<https://github.com/apache/arrow/pull/7527>"
+        }
+    ]
+}

@@ -1,0 +1,85 @@
+{
+    "issue": {
+        "title": "[C++] Relocate src/parquet/arrow code to src/arrow/dataset/parquet",
+        "body": "***Note**: This issue was originally created as [ARROW-5691](https://issues.apache.org/jira/browse/ARROW-5691). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI think it may make sense to continue developing and maintaining this code in the same place as other file format <-> Arrow serialization code and dataset handling routines (e.g. schema normalization). Under this scheme, libparquet becomes a link time dependency of libarrow_dataset",
+        "created_at": "2019-06-22T20:28:23.000Z",
+        "updated_at": "2020-01-07T23:42:27.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-01-07T23:42:27.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-06-22T20:28:33.324Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5691?focusedCommentId=16870356) by Wes McKinney (wesm):*\ncc `[~xhochy]` if you have thoughts"
+        },
+        {
+            "created_at": "2019-06-23T08:47:40.237Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5691?focusedCommentId=16870498) by Uwe Korn (uwe):*\nI would be 100% fine with moving it into `src/arrow/parquet` but I question a bit of making the Parquet adaptor a full subset of the dataset project. For me these are two different entities, an adaptor providing access to the Parquet file format, either standalone low-level access or high-level reads into Arrow. Whereas, the dataset project builds on top of various adaptors but is not required for simple interactions with the file formats it supports."
+        },
+        {
+            "created_at": "2019-06-23T21:26:26.981Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5691?focusedCommentId=16870675) by Wes McKinney (wesm):*\nWell, the symbols have to go into some shared library, so pick your poison. My proposed solution\r\n\r\n- libparquet depends on libarrow\n- libarrow_dataset depends on both libarrow and libparquet, and contains arrow::csv, arrow::json, and arrow::parquet symbols, usable directly without going through datasets API.\n  \n  What other structure would you prefer? I don't think we should create a standalone \"libarrow_parquet\" library. \n  \n  Personally I would prefer to have a single shared library that contains all symbols related to low level (like the current `parquet::arrow` symbols) and high level (the proposed `arrow::dataset` APIs) interactions with file formats. Both low- and high-level file APIs will continue to be provided "
+        },
+        {
+            "created_at": "2019-08-22T22:56:23.073Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5691?focusedCommentId=16913778) by Wes McKinney (wesm):*\n[~emkornfield@gmail.com] `[~pitrou]` thoughts about organizing our various file format interfaces (CSV, JSON, ORC, Parquet, eventually Avro)? Wherever we organize the code, we have to have it build in a shared library separate from `libarrow.so` since it will need to depend on e.g. `libparquet.so` (which in turn depends on `libarrow.so`)?"
+        },
+        {
+            "created_at": "2019-08-23T02:25:20.985Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5691?focusedCommentId=16913863) by Micah Kornfield (emkornfield@gmail.com):*\nGiven the current organization of the code base and based on `[~xhochy]` \u00a0comment above.\u00a0 I think we should put the core logic of reading files under the adaptor folders (where ORC is currently located), then consume that from datasets.\u00a0 I don't have a good mental model of the current .so dependencies to offer a meaningful opinion on that.\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-08-23T14:35:30.964Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5691?focusedCommentId=16914304) by Wes McKinney (wesm):*\nFWIW I dislike the \"adapters\" name and I don't know that the \"arrow/adapters/tensorflow\" belongs in the same place as file format interfaces"
+        },
+        {
+            "created_at": "2019-08-23T14:52:10.072Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5691?focusedCommentId=16914317) by Antoine Pitrou (apitrou):*\nI also dislike the \"adapters\" name (too generic, it could be anything).\r\n\r\nAs for the Parquet-to-Arrow dependency, isn't it broken precisely if the action outlined in the title is achieved? (\"relocate src/parquet/arrow to src/arrow/dataset/parquet\")\r\n\r\nI guess we could have a \"formats\" directory where we would put JSON, CSV, Parquet, ORC...\r\nThough I'm not fond of deep hierarchies and would also be fine with putting \"json\", \"csv\", \"parquet\", \"orc\"... directories at the Arrow top-level."
+        },
+        {
+            "created_at": "2019-08-23T14:53:13.516Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5691?focusedCommentId=16914320) by Antoine Pitrou (apitrou):*\nInside \"src/arrow/dataset\" directory, intuitively I'd only put the dataset-compliant interfaces, not the actual file format handling routines (especially as they expose other APIs already)."
+        },
+        {
+            "created_at": "2019-08-23T15:01:19.552Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5691?focusedCommentId=16914327) by Francois Saint-Jacques (fsaintjacques):*\nI prefer `src/arrow/format`, where we'd drop csv, json, orc, and parquet-arrow specific stuff..."
+        },
+        {
+            "created_at": "2019-08-23T15:15:44.370Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5691?focusedCommentId=16914337) by Antoine Pitrou (apitrou):*\nThen \"formats\" plural, because \"format\" singular sounds too much like the Arrow format itself."
+        },
+        {
+            "created_at": "2019-08-23T15:49:06.363Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5691?focusedCommentId=16914378) by Wes McKinney (wesm):*\nWe can also flatten these directories and instead use `$FORMAT_` prefixes, for example\r\n\r\n`src/arrow/formats/parquet_reader.h`\r\n\r\netc. Thoughts?"
+        },
+        {
+            "created_at": "2019-08-23T15:49:58.101Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5691?focusedCommentId=16914381) by Wes McKinney (wesm):*\nWe still have the problem of which shared library to put the symbols in. libarrow.so is not an option for the Parquet symbols as discussed above"
+        },
+        {
+            "created_at": "2019-08-23T15:51:59.110Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5691?focusedCommentId=16914384) by Antoine Pitrou (apitrou):*\nIf we have a \"formats\" directory I'd still like to have the per-format subdirectories. \r\n\r\nAs for the Parquet symbols I'm not sure I understand: if we move the Arrow-specific code from Parquet to Arrow, is there still a dependency from libparquet.so to libarrow.so?"
+        },
+        {
+            "created_at": "2019-08-23T16:25:33.199Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5691?focusedCommentId=16914433) by Wes McKinney (wesm):*\nCorrect. This library uses Arrow platform code: array classes (supported directly in the encoders and low-level column readers/writers now \u2013 this is what all my refactoring recently was about, improved efficiency with Arrow), memory management, IO classes, etc. "
+        },
+        {
+            "created_at": "2019-08-23T16:29:43.037Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5691?focusedCommentId=16914438) by Wes McKinney (wesm):*\nI'm OK to leave things as they are now, since it's not really hurting anything. I mostly want to nix the `parquet::arrow` namespace and treat libparquet.so as a dependency of Arrow record batch assembly / disassembly"
+        },
+        {
+            "created_at": "2019-08-23T16:29:45.879Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5691?focusedCommentId=16914439) by Antoine Pitrou (apitrou):*\nAh... Then perhaps the Parquet-Arrow bridge needs to be in a separate `libarrow_parquet.so` library. Not very pretty..."
+        },
+        {
+            "created_at": "2020-01-07T23:42:27.741Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5691?focusedCommentId=17010170) by Wes McKinney (wesm):*\nClosing as Won't Fix for now"
+        }
+    ]
+}

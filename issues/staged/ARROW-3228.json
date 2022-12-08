@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Python] Immutability of bytes is ignored",
+        "body": "***Note**: This issue was originally created as [ARROW-3228](https://issues.apache.org/jira/browse/ARROW-3228). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCreating a pyarrow.Buffer from Python bytes allows in-place changes of immutable Python strings:\r\n```java\n\r\n>>> import pyarrow as pa\r\n>>> import numpy as np\r\n>>> a = b'123456'\r\n>>> a[0] = 77 # bytes are immutable, so TypeError is expected\r\nTypeError: 'bytes' object does not support item assignment\r\n>>> b = pa.py_buffer(a)  # but with pyarrow bytes can be changed in-place\r\n>>> arr = np.frombuffer(b, dtype=np.uint8)\r\n>>> arr[0] = 66 # change 'a' in-place, would expect error\r\n>>> a\r\nb'B23456'\r\n>>> hash(a)\r\n-4581532003987476523\r\n>>> arr[0] = 77\r\n>>> a\r\nb'M23456'\r\n>>> hash(a) # hash value stays constant while changing 'a'\r\n-4581532003987476523\n```\r\n`Notice that numpy.frombuffer respects immutability of bytes:`\r\n``\r\n```java\n\r\n>>> arr2 = np.frombuffer(a, dtype=np.uint8)\r\n>>> arr2\r\narray([77, 50, 51, 52, 53, 54], dtype=uint8)\r\n>>> arr2[0] = 88 # expecting error\r\nValueError: assignment destination is read-only\n```",
+        "created_at": "2018-09-12T20:33:50.000Z",
+        "updated_at": "2018-09-16T00:43:16.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-09-16T00:43:09.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-09-13T00:25:36.160Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3228?focusedCommentId=16612892) by Wes McKinney (wesm):*\nApparently somewhere a mutability flag isn't being respected. Wasn't obvious at a glance where the problem lies, see:\r\n\r\n- https://github.com/apache/arrow/blob/master/cpp/src/arrow/python/common.cc#L61\n- https://github.com/apache/arrow/blob/master/python/pyarrow/io.pxi#L831"
+        },
+        {
+            "created_at": "2018-09-15T20:31:15.676Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3228?focusedCommentId=16616502) by Wes McKinney (wesm):*\nIt looks like the `flags` argument from `PyObject_GetBuffer` is being ignored. NumPy tries to get a mutable buffer, and if that fails (which it must if the buffer is readonly), then it sets WRITEABLE to false: https://github.com/numpy/numpy/blob/e8d177f74adbe5c7630721a4ab3f20f58839ac99/numpy/core/src/multiarray/ctors.c#L3711. Patch incoming"
+        },
+        {
+            "created_at": "2018-09-16T00:43:09.737Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3228?focusedCommentId=16616551) by Wes McKinney (wesm):*\nIssue resolved by pull request 2567\n<https://github.com/apache/arrow/pull/2567>"
+        }
+    ]
+}

@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[C++][Parquet] Support LargeListArray",
+        "body": "***Note**: This issue was originally created as [ARROW-7731](https://issues.apache.org/jira/browse/ARROW-7731). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFor now it's not possible to write a pyarrow.Table containing a LargeListArray in parquet. The lines\r\n```java\n\r\nfrom pyarrow import parquet\r\nimport pyarrow as pa\r\n\r\nindices = [1, 2, 3]\r\nindptr = [0, 1, 2, 3]\r\nq = pa.lib.LargeListArray.from_arrays(indptr, indices) \r\ntable = pa.Table.from_arrays([q], names=['no']) \r\n\r\nparquet.write_table(table, '/test')\n```\r\nyields the error\u00a0\r\n```java\n\r\nArrowNotImplementedError: Unhandled type for Arrow to Parquet schema conversion: large_list<item: int64>\r\n\r\n```\r\n\u00a0",
+        "created_at": "2020-01-31T10:00:41.000Z",
+        "updated_at": "2022-08-27T14:41:52.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-09-01T04:14:40.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-01-31T12:47:26.498Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7731?focusedCommentId=17027457) by Artem KOZHEVNIKOV (ArtemK):*\nI found another edge case that's maybe linked to this (pyarrow=0.15.1)\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nl1 = pa.array([list(range(100))] * 10**7, type=pa.list_(pa.int16()))\r\ntt = pa.Table.from_pydict(\\{'big': pa.chunked_array([l1]*10)})\u00a0 # if concat, offset will overflow int32\r\npq.write_table(tt, '/tmp/test.parquet') # that took a while but worked\r\ntt_reload = pq.read_table('/tmp/test.parquet')   # it consumes a huge amount of memory before failing\r\n\r\nArrowInvalid Traceback (most recent call last) <ipython-input-7-bf871e1a4f57> in <module> ----> 1 tt_reload = pq.read_table('/tmp/test.parquet') /opt/conda/envs/model/lib/python3.6/site-packages/pyarrow/parquet.py in read_table(source, columns, use_threads, metadata, use_pandas_metadata, memory_map, read_dictionary, filesystem, filters, buffer_size)  1279 buffer_size=buffer_size)  1280 return pf.read(columns=columns, use_threads=use_threads, -> 1281 use_pandas_metadata=use_pandas_metadata)  1282  1283 /opt/conda/envs/model/lib/python3.6/site-packages/pyarrow/parquet.py in read(self, columns, use_threads, use_pandas_metadata)  1135 table = piece.read(columns=columns, use_threads=use_threads,  1136 partitions=self.partitions, -> 1137 use_pandas_metadata=use_pandas_metadata)  1138 tables.append(table)  1139 /opt/conda/envs/model/lib/python3.6/site-packages/pyarrow/parquet.py in read(self, columns, use_threads, partitions, file, use_pandas_metadata)  603 table = reader.read_row_group(self.row_group, **options)  604 else: --> 605 table = reader.read(**options)  606  607 if len(self.partition_keys) > 0: /opt/conda/envs/model/lib/python3.6/site-packages/pyarrow/parquet.py in read(self, columns, use_threads, use_pandas_metadata)  251 columns, use_pandas_metadata=use_pandas_metadata)  252 return self.reader.read_all(column_indices=column_indices, --> 253 use_threads=use_threads)  254  255 def scan_contents(self, columns=None, batch_size=65536): /opt/conda/envs/model/lib/python3.6/site-packages/pyarrow/_parquet.pyx in pyarrow._parquet.ParquetReader.read_all() /opt/conda/envs/model/lib/python3.6/site-packages/pyarrow/error.pxi in pyarrow.lib.check_status() ArrowInvalid: Column 0: Offset invariant failure: 21474837 inconsistent offset for non-null slot: -2147483596<2147483600\r\n\r\n```\r\nThrown Error is not explicit. I wonder if created parquet file is correct (I've not tried yet to reload it with spark) or it's just a reading by pyarrow that does not support it."
+        },
+        {
+            "created_at": "2020-02-04T22:58:35.699Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7731?focusedCommentId=17030190) by Wes McKinney (wesm):*\nEither way that looks like the wrong exception to throw"
+        },
+        {
+            "created_at": "2020-06-26T16:37:32.672Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7731?focusedCommentId=17146472) by Micah Kornfield (emkornfield@gmail.com):*\nWriting should be supported now (as of 0.16.0) please update the bug of you are still seeing issues. Reading isn't."
+        },
+        {
+            "created_at": "2020-08-31T13:01:22.699Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7731?focusedCommentId=17187716) by Artem KOZHEVNIKOV (ArtemK):*\nyes, I confirm that writing is ok now, reading is still broken !"
+        },
+        {
+            "created_at": "2020-09-01T04:14:13.053Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7731?focusedCommentId=17188129) by Micah Kornfield (emkornfield@gmail.com):*\nSupporting reading is tacked in ARROW-1644 and its children."
+        },
+        {
+            "created_at": "2020-10-26T09:41:55.981Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7731?focusedCommentId=17220591) by Artem KOZHEVNIKOV (ArtemK):*\nthanks a lot ![ the reading is fixed as well in pyarrow=2 ]( the reading is fixed as well in pyarrow=2 )"
+        },
+        {
+            "created_at": "2020-10-26T10:06:41.694Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7731?focusedCommentId=17220602) by Artem KOZHEVNIKOV (ArtemK):*\nbut the concat still does not work :\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nl1 = pa.array([list(range(100))] * 10**7, type=pa.list_(pa.int16()))\r\ntt = pa.Table.from_pydict({'big': pa.chunked_array([l1] * 10)})  # if concat, offset will overflow int32\r\ntt.combine_chunks()\r\n\r\n---------------------------------------------------------------------------\r\nArrowInvalid                              Traceback (most recent call last)\r\n<ipython-input-3-39fcc668ae13> in <module>\r\n----> 1 tt.combine_chunks()\r\n\r\n/opt/conda/envs/model/lib/python3.7/site-packages/pyarrow/table.pxi in pyarrow.lib.Table.combine_chunks()\r\n\r\n/opt/conda/envs/model/lib/python3.7/site-packages/pyarrow/error.pxi in pyarrow.lib.pyarrow_internal_check_status()\r\n\r\n/opt/conda/envs/model/lib/python3.7/site-packages/pyarrow/error.pxi in pyarrow.lib.check_status()\r\n\r\nArrowInvalid: offset overflow while concatenating arrays\r\n```\r\n"
+        },
+        {
+            "created_at": "2020-10-26T21:45:36.810Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7731?focusedCommentId=17221003) by Wes McKinney (wesm):*\nIs there an issue about that, or if not can you create one and link it to this issue?"
+        },
+        {
+            "created_at": "2022-08-27T14:41:52.334Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7731?focusedCommentId=17585897) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[R] Convert schema to the corresponding ptype (zero-row data frame)?",
+        "body": "***Note**: This issue was originally created as [ARROW-17886](https://issues.apache.org/jira/browse/ARROW-17886). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen fetching data e.g. from a RecordBatchReader, I would like to know, ahead of time, what the data will look like after it's converted to a data frame. I have found a way using utils::head(0), but I'm not sure if it's efficient in all scenarios.\r\n\r\nMy use case is the Arrow extension to DBI, in particular the default implementation for drivers that don't speak Arrow yet. I'd like to know which types the columns should have on the database. I can already infer this from the corresponding R types, but those existing drivers don't know about Arrow types.\r\n\r\nShould we support as.data.frame() for schema objects? The semantics would be to return a zero-row data frame with correct column names and types.\r\n\r\n\r\nlibrary(arrow)\r\n#> Some features are not enabled in this build of Arrow. Run `arrow_info()` for more information.\r\n#> \r\n#> Attaching package: 'arrow'\r\n#> The following object is masked from 'package:utils':\r\n#> \r\n#>     timestamp\r\n\r\ndata <- data.frame(\r\n  a = 1:3,\r\n  b = 2.5,\r\n  c = \"three\",\r\n  stringsAsFactors = FALSE\r\n)\r\ndata$d <- blob::blob(as.raw(1:10))\r\n\r\ntbl <- arrow::as_arrow_table(data)\r\nrbr <- arrow::as_record_batch_reader(tbl)\r\n\r\ntibble::as_tibble(head(rbr, 0))\r\n#> # A tibble: 0 \u00d7 4\r\n#> # \u2026 with 4 variables: a <int>, b <dbl>, c <chr>, d <blob>\r\nrbr$read_table()\r\n#> Table\r\n#> 3 rows x 4 columns\r\n#> $a <int32>\r\n#> $b <double>\r\n#> $c <string>\r\n#> $d <<blob[0]>>\r\n#> \r\n#> See $metadata for additional Schema metadata",
+        "created_at": "2022-09-29T03:42:48.000Z",
+        "updated_at": "2022-10-27T19:35:47.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-27T19:35:47.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-29T14:21:55.529Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17886?focusedCommentId=17611061) by Dewey Dunnington (paleolimbot):*\nIt hasn't been implemented yet, but we're probably going to include this at least internally to support additional tidyselect helpers (see ARROW-12778). In the meantime, you may be able to use this workaround:\r\n\r\n```R\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\n#> Some features are not enabled in this build of Arrow. Run `arrow_info()` for more information.\r\n\r\nsimulate_data_frame <- function(schema) {\r\n  arrays <- lapply(schema$fields, function(field) concat_arrays(type = field$type))\r\n  vectors <- lapply(\r\n    arrays,\r\n    function(array) tryCatch(\r\n      as.vector(array), \r\n      error = function(...) vctrs::unspecified()\r\n    )\r\n  )\r\n  \r\n  names(vectors) <- names(schema)\r\n  tibble::new_tibble(vectors, nrow = 0)\r\n}\r\n\r\nsimulate_data_frame(schema(col1 = int32(), col2 = string()))\r\n#> # A tibble: 0 \u00d7 2\r\n#> # \u2026 with 2 variables: col1 <int>, col2 <chr>\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-09-30T04:12:31.021Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17886?focusedCommentId=17611350) by Kirill M\u00fcller (krlmlr):*\nThanks, I can work with that until an upstream implementation becomes available."
+        },
+        {
+            "created_at": "2022-10-27T19:35:41.898Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17886?focusedCommentId=17625280) by Nicola Crane (thisisnic):*\nClosing this as I believe that this is covered by the changes made in ARROW-12105, but if not, please let me know."
+        }
+    ]
+}

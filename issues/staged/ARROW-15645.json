@@ -1,0 +1,50 @@
+{
+    "issue": {
+        "title": "[Flight][Java][C++] Data read through Flight is having endianness issue on s390x",
+        "body": "***Note**: This issue was originally created as [ARROW-15645](https://issues.apache.org/jira/browse/ARROW-15645). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAm facing an endianness issue on s390x(big endian) when converting the data read through flight to pandas data frame.\r\n\r\n(1) table.validate() fails with error\r\n```Java\n\r\nTraceback (most recent call last):\r\n\u00a0 File \"/tmp/2.py\", line 51, in <module>\r\n\u00a0 \u00a0 table.validate()\r\n\u00a0 File \"pyarrow/table.pxi\", line 1232, in pyarrow.lib.Table.validate\r\n\u00a0 File \"pyarrow/error.pxi\", line 99, in pyarrow.lib.check_status\r\npyarrow.lib.ArrowInvalid: Column 1: In chunk 0: Invalid: Negative offsets in binary array\r\n```\r\n\r\n(2) table.to_pandas() gives a segmentation fault\r\n____________\r\nHere is a sample code that I am using:\r\n```python\n\r\nfrom pyarrow import flight\r\nimport os\r\nimport json\r\n\r\nflight_endpoint = os.environ.get(\"flight_server_url\", \"grpc+tls://...local:443\")\r\nprint(flight_endpoint)\r\n\r\n#\r\nclass TokenClientAuthHandler(flight.ClientAuthHandler):\r\n\u00a0 \u00a0 \"\"\"An example implementation of authentication via handshake.\r\n\u00a0 \u00a0 \u00a0 \u00a0With the default constructor, the user token is read from the environment: TokenClientAuthHandler().\r\n\u00a0 \u00a0 \u00a0 \u00a0You can also pass a user token as parameter to the constructor, TokenClientAuthHandler(yourtoken).\r\n\u00a0 \u00a0 \"\"\"\r\n\u00a0 \u00a0 def \\_\\_init\\_\\_(self, token: str = None):\r\n\u00a0 \u00a0 \u00a0 \u00a0 super().\\_\\_init\\__()\r\n\u00a0 \u00a0 \u00a0 \u00a0 if( token != None):\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 strToken = strToken = 'Bearer {}'.format(token)\r\n\u00a0 \u00a0 \u00a0 \u00a0 else:\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 strToken = 'Bearer {}'.format(os.environ.get(\"some_auth_token\"))\r\n\u00a0 \u00a0 \u00a0 \u00a0 self.token = strToken.encode('utf-8')\r\n\u00a0 \u00a0 \u00a0 \u00a0 #print(self.token)\r\n\r\n\u00a0 \u00a0 def authenticate(self, outgoing, incoming):\r\n\u00a0 \u00a0 \u00a0 \u00a0 outgoing.write(self.token)\r\n\u00a0 \u00a0 \u00a0 \u00a0 self.token = incoming.read()\r\n\r\n\u00a0 \u00a0 def get_token(self):\r\n\u00a0 \u00a0 \u00a0 \u00a0 return self.token\r\n\u00a0 \u00a0\u00a0\r\nreadClient = flight.FlightClient(flight_endpoint)\r\nreadClient.authenticate(TokenClientAuthHandler())\r\n\r\ncmd = json.dumps(\\{...})\r\n\r\ndescriptor = flight.FlightDescriptor.for_command(cmd)\r\nflightInfo = readClient.get_flight_info(descriptor)\r\n\r\nreader = readClient.do_get(flightInfo.endpoints[0].ticket)\r\ntable = reader.read_all()\r\n\r\nprint(table)\r\nprint(table.num_columns)\r\nprint(table.num_rows)\r\ntable.validate()\r\ntable.to_pandas()\r\n```",
+        "created_at": "2022-02-10T11:43:18.000Z",
+        "updated_at": "2022-02-25T09:42:11.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: FlightRPC",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-10T11:52:26.577Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15645?focusedCommentId=17490156) by Ravi Gummadi (ravidotg):*\nThe issue is seen only with pyarrow 5.0.0 and is not seen with pyarrow 3.0.0.\r\n_________________________\r\nSome investigation details from my side while debugging validate():\r\n\r\nThe offsets are having opposite byte-order with pyarrow 5.0.0 (from validate.cc)\r\n\r\n(gdb) p data.buffers[1]->data()\r\n$8 = (const uint8_t \\*) 0x3fff9680040 \"\"\r\n(gdb) p data.buffers[1]->data()[4]\r\n$9 = 26 '\\032'\r\n\r\nThe same flight server is used for reading data. When I run the above sample code with pyarrow 3.0.0, I see the following correct offset values with the right byte-order.\r\nFrom data.h GetValues() called from validate.cc:\r\n\r\n(gdb) p buffers[1]->data()\r\n$11 = (const uint8_t \\*) 0x2aa00a544b2 \"\"\r\n(gdb) p buffers[1]->data()[4]\r\n$12 = 0 '\\000'\r\n(gdb) p buffers[1]->data()[5]\r\n$13 = 0 '\\000'\r\n(gdb) p buffers[1]->data()[6]\r\n$14 = 0 '\\000'\r\n(gdb) p buffers[1]->data()[7]\r\n$15 = 26 '\\032'\r\n\r\n____________________________\r\nAll offsets are seen as little endian order when using pyarrow5.0.0 on big endian machine. With pyarrow3.0.0, the offsets are in the expected byte-order on big endian machine."
+        },
+        {
+            "created_at": "2022-02-11T06:01:35.180Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15645?focusedCommentId=17490682) by Ravi Gummadi (ravidotg):*\nFlight server side arrow version is 6.x\r\n\r\nAny clues on why only pyarrow 5.0.0 has the issue and the issue is not seen with pyarrow 3.0.0 ? Where in the arrow source code the fix may have to go in ? Thanks"
+        },
+        {
+            "created_at": "2022-02-15T06:15:46.564Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15645?focusedCommentId=17492382) by Ravi Gummadi (ravidotg):*\n`[~kiszk]` ,\r\n\r\nI tried using pyarrow 6.0 on the client side and still the issue is seen.\r\nSo\r\n(1) the issue is NOT there in pyarrow 3.0.0 on the client side and with flight server side arrow version 6.0.x\r\n(2) the issue is seen with pyarrow 5.0.0 on the client side and flight server side arrow version 6.0.x\r\n(3) the issue is seen with pyarrow 6.0.0 on the client side and flight server side arrow version 6.0.x"
+        },
+        {
+            "created_at": "2022-02-24T10:43:12.378Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15645?focusedCommentId=17497337) by Ravi Gummadi (ravidotg):*\nFlight server side is using java based arrow 6.0.1 version.\r\nClient side pyarrow 5.0.0 or 6.0.0 or 7.0.0 ---- all 3 versions are facing the above reported issue."
+        },
+        {
+            "created_at": "2022-02-24T14:44:01.201Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15645?focusedCommentId=17497439) by Antoine Pitrou (apitrou):*\nIs the client or the server on s390x?"
+        },
+        {
+            "created_at": "2022-02-24T15:02:37.764Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15645?focusedCommentId=17497452) by Antoine Pitrou (apitrou):*\nOk, so my guess is that both server (Java) and client (Python/C++) are on s390x, right?\r\n\r\nOn Arrow C++ 3.0.0, no conversion happens in either Java or C++, and it works since client and server have the same endianness (both big endian).\r\n\r\nOn Arrow C++ 4.0.0+, the Flight client reads the endianness information from the IPC stream. If the machine endianness doesn't match the stream endianness, endianness conversion is attempted by default.\r\n\r\nHere is the problem: Arrow Java (and the Java Flight server) seems to always set the endianness information to \"little\" (even on a big endian machine). Arrow C++ interprets that information as meaning a conversion is needed, while the data is already in the right format."
+        },
+        {
+            "created_at": "2022-02-24T15:11:01.086Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15645?focusedCommentId=17497458) by Antoine Pitrou (apitrou):*\nIf my diagnosis above is correct, then this is really caused by ARROW-15778.\r\n\r\nYou could work it around by disabling endianness conversion on the Flight client side, but unfortunately that option is not exposed in Python (see ARROW-15777)."
+        },
+        {
+            "created_at": "2022-02-25T09:17:09.032Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15645?focusedCommentId=17498004) by Ravi Gummadi (ravidotg):*\nYes. Both server and client are on s390x.\r\n\r\nThanks for the details `[~apitrou]` . I will watch <https://issues.apache.org/jira/projects/ARROW/issues/ARROW-15778> and test on my environment once a fix for 15778 is available."
+        }
+    ]
+}

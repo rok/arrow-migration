@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[Format] In-memory format for 128-bit Decimals, handling of sign bit",
+        "body": "***Note**: This issue was originally created as [ARROW-786](https://issues.apache.org/jira/browse/ARROW-786). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\ncc `[~cpcloud]`\n\nWe found in ARROW-655 that we needed to add an extra bit for signedness for decimals stored as 128-bit values to be able to use the Boost multiprecision libraries. This makes Decimal128 not fit completely neatly as a 16-byte fixed size binary value, and more of a `struct<sign_bitmap: boolean, data: fixed_size_binary(16)>`. What is the current formata in the Java implementation? We will need to document the memory layout for decimals that maximizes compatibility across languages and eventually implement integration tests for IPC. ",
+        "created_at": "2017-04-07T15:51:38.000Z",
+        "updated_at": "2017-08-24T17:57:50.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Format",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2017-08-24T17:57:50.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-07-26T15:48:35.543Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-786?focusedCommentId=16101836) by Jacques Nadeau (jnadeau):*\nThe current format of the java implementation is an embedded sign bit. GCC/Clang/Intel support __int128 which I believe on x86-64 machines is represented with the sign bit embedded ( ? ). I remember talking to `[~nongli]` about this years ago and (if I recall correctly), we chose the Parquet representation based on his experiments with GCC or Clang/LLVM. (Unfortunately, I'm unable to find the thread.)\n\nThe current Java implementation supports a 16-bit wide, sign-bit embedded twos-complement big-endian representation that is the same as the Parquet description here: \n\nhttps://github.com/apache/parquet-format/blob/master/src/main/thrift/parquet.thrift#L81"
+        },
+        {
+            "created_at": "2017-07-26T15:54:53.775Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-786?focusedCommentId=16101842) by Jacques Nadeau (jnadeau):*\nWould also be good to confirm the memory representation of <16 x i128> vector using llvm on x86-64."
+        },
+        {
+            "created_at": "2017-07-26T16:32:51.727Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-786?focusedCommentId=16101887) by Phillip Cloud (cpcloud):*\n`[~jnadeau]` `__int128_t` doesn't work on Windows (with visual cpp) and when I originally wrote the decimal code for arrow-cpp, it was buggy with clang. The symbols required to link in libc++ code necessary to use that type were not exported by clang. See here: https://bugs.llvm.org//show_bug.cgi?id=26156.\n\nWe ultimately went with the boost multiprecision representation (which is sign magnitude) because of desire to reuse existing libraries and cross platform capabilities out of the box.\n\nOne possible alternative (depending on whether clang issues have been resolved) is to write our own pared down of version of something like boost multiprecision that uses `__int128_t` on UNIXes and two `int64_t` s on Windows. It wouldn't need to have any operations at the moment, just the ability to print itself like a decimal number and convert decimal strings to the underlying type. Even those may be able to be functions and not methods on the class."
+        },
+        {
+            "created_at": "2017-07-26T16:37:24.296Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-786?focusedCommentId=16101901) by Wes McKinney (wesm):*\n`[~cpcloud]` is it possible to do bit twiddling to convert between the 16-byte Java/Parquet-compatible representation and the Boost::Multiprecision representation? "
+        },
+        {
+            "created_at": "2017-07-26T17:35:44.420Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-786?focusedCommentId=16101976) by Phillip Cloud (cpcloud):*\nThat should be possible.\n\nThough because boost is using 128 bits + a sign bit, going from arrow-cpp to Java won't be possible in every case since the boost representation's values range from `+/-0..2 ** 128 - 1`, whereas the Java implementation's values range from `-2 ** 127..2 ** 127 - 1`.\n\nThe more I think about this and reread the boost multiprecision docs, I think we should just implement our own very small wrapper around native types.\n\nBoost multiprecision has some optimizations that arrow doesn't care about like this that increase implementation complexity at best and hurt performance at worst:\n\n```Java\nWhen used at fixed precision, the size of this type is always one machine word larger than you would expect for an N-bit integer: the extra word stores both the sign, and how many machine words in the integer are actually in use.\n```\n\nplus the complexities of have two signed integer representations are enough to make me want to try jettisoning boost multiprecision."
+        },
+        {
+            "created_at": "2017-07-26T18:04:53.580Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-786?focusedCommentId=16102037) by Wes McKinney (wesm):*\nIt seems like we might end up having to build a from-scratch implementation of Java's BigDecimal in C++. It might be worth it, but it's also a lot of work. The JDK source code is not ASF-friendly so we would have to start from scratch from a mathematical resource"
+        },
+        {
+            "created_at": "2017-08-02T03:16:46.988Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-786?focusedCommentId=16110206) by Wes McKinney (wesm):*\nIt doesn't look like this will be resolved in 0.6.0; moving to the next release"
+        },
+        {
+            "created_at": "2017-08-02T14:19:41.988Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-786?focusedCommentId=16110990) by Phillip Cloud (cpcloud):*\nI'm going to try to start working on this this weekend. This should be up for the next release."
+        },
+        {
+            "created_at": "2017-08-02T14:51:35.147Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-786?focusedCommentId=16111057) by Wes McKinney (wesm):*\nOK, sweet, that would be awesome. "
+        },
+        {
+            "created_at": "2017-08-24T17:57:50.071Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-786?focusedCommentId=16140411) by Wes McKinney (wesm):*\nIssue resolved by pull request 981\n<https://github.com/apache/arrow/pull/981>"
+        }
+    ]
+}

@@ -1,0 +1,78 @@
+{
+    "issue": {
+        "title": "[R][C++] Allow cancelling long-running commands",
+        "body": "***Note**: This issue was originally created as [ARROW-11841](https://issues.apache.org/jira/browse/ARROW-11841). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen calling a long-running task (for example reading a CSV file) from the R prompt, users may want to interrupt with Ctrl-C.\r\n\r\nAllowing this will require integrating R's user interruption facility with the cancellation API that's going to be exposed in C++ (see  ARROW-8732).\r\n\r\nBelow some information I've gathered on the topic:\r\n\r\nThere is some hairy discussion of how to interrupt C++ code from R at https://stackoverflow.com/questions/40563522/r-how-to-write-interruptible-c-function-and-recover-partial-results and https://stat.ethz.ch/pipermail/r-devel/2011-April/060714.html .\r\n\r\nIt seems it may involve polling cpp11::check_user_interrupt() and catching any cpp11::unwind_exception that may signal an interruption. A complication is that apparently R APIs should only be called from the main thread. There's also a small library which claims to make writing all this easier: https://github.com/tnagler/RcppThread/blob/master/inst/include/RcppThread/RMonitor.hpp\r\n\r\nBut since user interruptions will only be noticed by the R main thread, the solution may be to launch heavy computations (e.g. CSV reading) in a separate thread and have the main R thread periodically poll for interrupts while waiting for the separate thread. This is what this dedicated thread class does in its join method: https://github.com/tnagler/RcppThread/blob/master/inst/include/RcppThread/Thread.hpp#L79\r\n",
+        "created_at": "2021-03-02T20:03:20.000Z",
+        "updated_at": "2022-10-05T20:08:24.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-03T14:44:28.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-05-12T11:16:12.159Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11841?focusedCommentId=17343186) by Antoine Pitrou (apitrou):*\ncc `[~romainfrancois]`"
+        },
+        {
+            "created_at": "2022-07-11T18:09:57.118Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11841?focusedCommentId=17565132) by Dewey Dunnington (paleolimbot):*\nFrom the R perspective, you can call\r\n```Java\n\r\nSafeCallIntoRVoid([]() { cpp11::check_user_interrupt(); })\r\n```\r\nanywhere in C++ and it will return a non-OK status if there's a pending interrupt. That will only work for tasks run with `RunWithCapturedR()`, although that includes most of the operations one would want to cancel (e.g., reading CSV, Feather, and query engine execution after ARROW-16444). It also only works for places where the R package can insert some kind of cancel callback.\r\n\r\nIf we have a Future that we can cancel, we could rig something similar, maybe using our own event loop (currently we use Arrow's RunInSerialExecutor and I don't know how customizable that is).\r\n\r\nIn addition to RMonitor, there's also the 'later' package ( https://github.com/r-lib/later ) which can also run event loops although I don't know how customizable they are.\r\n\r\nIn the R package we have the `RMainThread` singleton which could be an appropriate place to register a C++ cancel callback (e.g., a `std::function` that calls some Future's cancel callback). In most cases, though, we don't have a future we can cancel.\r\n"
+        },
+        {
+            "created_at": "2022-07-11T19:00:50.497Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11841?focusedCommentId=17565148) by Weston Pace (westonpace):*\n> If we have a Future that we can cancel, we could rig something similar, maybe using our own event loop (currently we use Arrow's RunInSerialExecutor and I don't know how customizable that is).\r\n\r\nCancellation is supported in C++ but not via cancellable futures (and probably won't be).  Instead, operations which support cancellation take in a stop token.  A stop token is something that the C++ code can poll on a regular basis to see if cancellation has been requested (very similar to `cpp11::check_user_interrupt()` but not global).\r\n\r\nThe stop token is connected to a stop source which the user holds onto.  If the user marks the stop source as cancelled then the stop token will see the cancellation the next time it is polled and exit.\r\n\r\nIt sounds like, for R, this stop source approach won't work (is there no way to register a callback that gets called on cancellation instead of requiring polling?)  In that case maybe we want a custom stop token implementation for R.  This stop token's poll method could check `cpp11::check_user_interrupt()`.  However, we'd probably want to debounce the call as a stop token might be polled very frequently and should be pretty fast."
+        },
+        {
+            "created_at": "2022-07-11T19:05:33.602Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11841?focusedCommentId=17565150) by Dewey Dunnington (paleolimbot):*\nOne way we can do this in just the R package is to wrap `InputStream`/`RandomAccessFile` objects with ones whose read methods call `SafeCallIntoR()` (with care to make sure we're not checking so frequently that is slows things down)? That would limit the checking to filesystem operations but I think it's rare for a single `Read` or `ReadAt` call to be large enough to matter in this context?"
+        },
+        {
+            "created_at": "2022-07-11T19:12:00.405Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11841?focusedCommentId=17565153) by Dewey Dunnington (paleolimbot):*\nCan the `RunInSerialExecutor` do something like `setTimeout` (i.e., schedule something for execution later)? If so, that could just do `cpp11::check_user_interrupt()`, set the C++ stop token if an interrupt has been requested, and schedule itself to run in a few seconds otherwise?"
+        },
+        {
+            "created_at": "2022-07-11T19:36:42.346Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11841?focusedCommentId=17565165) by Weston Pace (westonpace):*\n> Can the RunInSerialExecutor do something like setTimeout (i.e., schedule something for execution later)? If so, that could just do cpp11::check_user_interrupt(), set the C++ stop token if an interrupt has been requested, and schedule itself to run in a few seconds otherwise?\r\n\r\nThat's not supported today but, it should be possible, and it seems like a pretty good way to solve this problem.  One challenge is that we want to make sure to let cleanup happen (e.g. tasks that close file handles).  However, there might be some middle ground here.  `RunInSerialExecutor`, when it decides a timeout has occurred, could mark a StopSource as cancelled.  We would not need to override stop token in that case."
+        },
+        {
+            "created_at": "2022-07-12T09:50:33.504Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11841?focusedCommentId=17565406) by Antoine Pitrou (apitrou):*\n`[~paleolimbot]` When you try to interrupt e.g. CSV reading using Ctrl-C in R currently, what happens? It might be that it already works, given the changes mentioned."
+        },
+        {
+            "created_at": "2022-07-12T09:55:36.970Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11841?focusedCommentId=17565408) by Antoine Pitrou (apitrou):*\nAlso it would be worth taking a look how it's done in Python currently:\r\nhttps://github.com/apache/arrow/blob/2519230121b9be3ecac01ac3ed2b610382dbca48/python/pyarrow/error.pxi\r\n\r\nand the C++ APIs that it relies on:\r\nhttps://github.com/apache/arrow/blob/2519230121b9be3ecac01ac3ed2b610382dbca48/cpp/src/arrow/util/cancel.h\r\n\r\nThey allow to automatically cancel a StopToken from a set of received signals. It should in turn interrupt whatever primitive is checking for StopToken cancellations (such as CSV reading)."
+        },
+        {
+            "created_at": "2022-07-15T18:29:35.879Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11841?focusedCommentId=17567349) by Dewey Dunnington (paleolimbot):*\nIt's a little hard to test because it involves seeing how fast you can press Control-C, but I'm pretty sure that the sending an interrupt signal to CSV reading and an exec plan doesn't do anything:\r\n\r\n```R\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\n#> Some features are not enabled in this build of Arrow. Run `arrow_info()` for more information.\r\n\r\ntf <- tempfile()\r\nreadr::write_csv(vctrs::vec_rep(mtcars, 5e5), tf)\r\n\r\n# try to slow down CSV reading\r\nset_cpu_count(1)\r\nset_io_thread_count(2)\r\n\r\n# compare timing of cancelled vs not cancelled (hard to tell the difference)\r\nsystem.time(read_csv_arrow(tf))\r\n#>    user  system elapsed \r\n#>   2.852   0.637   5.365\r\nsystem.time(open_dataset(tf, format = \"csv\") |> dplyr::collect())\r\n#>    user  system elapsed \r\n#>   2.920   0.219   3.049\r\n\r\n# compare responsiveness of cancelling the read using other APIs\r\n# (usually quite a difference)\r\nsystem.time(readr::read_csv(tf))\r\n#> Rows: 16000000 Columns: 11\r\n#> \u2500\u2500 Column specification \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\r\n#> Delimiter: \",\"\r\n#> dbl (11): mpg, cyl, disp, hp, drat, wt, qsec, vs, am, gear, carb\r\n#> \r\n#> \u2139 Use `spec()` to retrieve the full column specification for this data.\r\n#> \u2139 Specify the column types or set `show_col_types = FALSE` to quiet this message.\r\n#>    user  system elapsed \r\n#>  19.424   1.267   3.496\r\nsystem.time(read.csv(tf))\r\n#>    user  system elapsed \r\n#>  20.858   0.718  21.864\r\n```\r\n\r\nIt seems like we would need some sort of \"run this bit of code in XX seconds\" to implement this in the R bindings (or if there's an easier way that would be great!). It doesn't matter what thread it's on because `SafeCallIntoR` handles that...I **think** I know how to do that (start a thread, make it sleep for some number of seconds, then call SafeCallIntoR). The setup/cleanup could live in `RunWithCapturedR`?\r\n"
+        },
+        {
+            "created_at": "2022-07-15T19:29:28.216Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11841?focusedCommentId=17567367) by Antoine Pitrou (apitrou):*\nIn your example, `read_csv_arrow` is actually interrupted or does it run to completion?"
+        },
+        {
+            "created_at": "2022-07-16T01:27:52.285Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11841?focusedCommentId=17567430) by Dewey Dunnington (paleolimbot):*\nI believe that it runs to completion even if you Control-C when it's running (going on evidence that it takes the same amount of time whether you do or do not cancel it). I also checked `open_dataset() |> write_dataset()`, which both takes the same amount of time AND writes the same thing regardless of whether or not you Control-C in the middle of it."
+        },
+        {
+            "created_at": "2022-07-16T02:03:34.118Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11841?focusedCommentId=17567433) by Dewey Dunnington (paleolimbot):*\nAnother piece of evidence is that if you use an R connection instead of a filename then you get immediate cancellation (because with an R connection as input it's calling `SafeCallIntoR()` every few ms and the error propagation will also propagate the interrupt condition).\r\n\r\n```R\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\n#> Some features are not enabled in this build of Arrow. Run `arrow_info()` for more information.\r\n\r\ntf <- tempfile()\r\nreadr::write_csv(vctrs::vec_rep(mtcars, 5e5), tf)\r\n\r\n# try to slow down CSV reading\r\nset_cpu_count(1)\r\nset_io_thread_count(2)\r\n\r\n# you can cancel if you use an R connection because the error propagation\r\n# will also propagate the interrupt condition\r\nsystem.time(read_csv_arrow(file(tf)))\r\n#>    user  system elapsed \r\n#>   2.909   0.598   3.410\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-07-16T15:15:14.541Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11841?focusedCommentId=17567497) by Antoine Pitrou (apitrou):*\n`RunInSerialExecutor` internally gets a future (using the private `SerialExecutor::Run`) and then waits for the future to complete.\r\n\r\nInstead there should be a public way to get that future without waiting for it. Then you can wait for the future yourself, but with a timeout to implement whatever polling you want.\r\n\r\nOf course, polling is suboptimal. Ideally there would be a way to temporarily override R's signal handlers, and reuse the same strategy as in Python. Perhaps that can be done using plain `signal` calls in C++?"
+        },
+        {
+            "created_at": "2022-07-16T15:40:40.155Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11841?focusedCommentId=17567502) by Antoine Pitrou (apitrou):*\nTo elaborate on the latter strategy (temporarily override signal handlers in C++), you could mimick what is done on the Python/Cython side:\r\nhttps://github.com/apache/arrow/blob/2519230121b9be3ecac01ac3ed2b610382dbca48/python/pyarrow/error.pxi#L223-L242\r\n... except that `PyErr_SetInterrupt` would become either either `Rf_onintr` or `Rf_onintrNoResume` (not sure which one). And I don't think `PyErr_CheckSignals` needs a R equivalent at all.\r\n\r\nAs for setting and restoring signal handlers, you would do that in C++ become R doesn't seem to have any equivalent APIs (so you would use our own `SetSignalHandler` helper function)."
+        },
+        {
+            "created_at": "2022-10-03T14:44:28.010Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11841?focusedCommentId=17612325) by Dewey Dunnington (paleolimbot):*\nIssue resolved by pull request 13635\n<https://github.com/apache/arrow/pull/13635>"
+        }
+    ]
+}

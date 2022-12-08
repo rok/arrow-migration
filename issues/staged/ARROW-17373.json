@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[R] copying dataset and immediatly writing the copy to a different location fails",
+        "body": "***Note**: This issue was originally created as [ARROW-17373](https://issues.apache.org/jira/browse/ARROW-17373). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen I copy large feather files, open a dataset from that file and immediately write that dataset to a new location I get the following error:\r\n\r\n\u00a0\r\n\r\n```Error: Invalid: Expected to read 144 metadata bytes but got 0```\r\n\r\n\u00a0\r\n\r\nI have made a reproducible example below:\r\n\r\n\u00a0\r\n\r\n``` r\r\ndf <- data.frame(replicate(1,sample(0:1,100e6,rep=TRUE)))\r\nsavePath <- file.path(tempdir(), 'arrowTest')\r\nif (!dir.exists(savePath)) {\r\n\u00a0 dir.create(savePath)\r\n}\r\n\r\narrow::write_feather(df, file.path(savePath, 'part-0.feather'))\r\n\r\ncopyPath <- file.path(tempdir(),'arrowTest')\r\nif (!dir.exists(copyPath)) {\r\n\u00a0 dir.create(copyPath)\r\n}\r\n\r\nwritePath <- file.path(tempdir(), 'arrowTest')\r\nif (!dir.exists(writePath)) {\r\n\u00a0 dir.create(writePath)\r\n}\r\narrow::copy_files(savePath, copyPath)\r\n\r\ndataset <- arrow::open_dataset(copyPath, format='feather')\r\narrow::write_dataset(dataset = dataset, path = writePath, format = 'feather')\r\n```",
+        "created_at": "2022-08-10T11:05:16.000Z",
+        "updated_at": "2022-08-24T08:15:06.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-08-11T09:46:04.514Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17373?focusedCommentId=17578358) by Egill Axfjord Fridgeirsson (egillax):*\nAfter some further testing it seems the copying is unnecessary.\r\n\r\nOpening a large dataset and writing to a different location seems to produce the error in most cases.\r\n\r\n\u00a0\r\n\r\nHere is a slightly simpler reprex:\r\n```java\n\r\ndf <- data.frame(replicate(1,sample(0:1,100e6,rep=TRUE)))\r\nsavePath <- file.path(tempdir(), 'arrowTest')\r\nif (!dir.exists(savePath)) {\r\n\u00a0 dir.create(savePath)\r\n}\r\narrow::write_feather(df, file.path(savePath, 'part-0.feather'))\r\nwritePath <- file.path(tempdir(), 'arrowTest')\r\nif (!dir.exists(writePath)) {\r\n\u00a0 dir.create(writePath)\r\n}\r\ndataset <- arrow::open_dataset(savePath, format='feather')\r\narrow::write_dataset(dataset = dataset, path = writePath, format = 'feather')\r\n```"
+        },
+        {
+            "created_at": "2022-08-22T20:23:44.691Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17373?focusedCommentId=17583184) by Adam Black (adam.black):*\nI think this only happens when the write location is the same as the current location of the open dataset. In the example above `writePath` and `savePath` are equal.\r\n\r\n\u00a0\r\n\r\n`df <- data.frame(x = replicate(1,sample(0:1, 100e6, rep=TRUE)))`\r\n`savePath <- file.path(tempdir(), 'arrowTest')`\r\n\r\n`if (!dir.exists(savePath))`\r\n\r\n{ dir.create(savePath) }\r\n\r\n`arrow::write_feather(df, file.path(savePath, 'part-0.feather'))`\r\n\r\n`# writing a dataset to a new directory ('arrowTest2') works fine`\r\n\r\n`writePath <- file.path(tempdir(), 'arrowTest2')`\r\n\r\nif (!dir.exists(writePath)) \\{ dir.create(writePath) }\r\n\r\n`dataset <- arrow::open_dataset(savePath, format='feather')`\r\n`nrow(dataset)`\r\n`#> [1] 100000000`\r\n\r\n`arrow::write_dataset(dataset = dataset, path = writePath, format = 'feather')`\r\n`dataset2 <- arrow::open_dataset(writePath, format='feather')`\r\n`nrow(dataset2)`\r\n`#> [1] 100000000`\r\n\r\n`trying to write an open dataset to it's own path gives an error`\r\n`arrow::write_dataset(dataset = dataset2, path = writePath, format = 'feather')`\r\n`#> Error: Invalid: Expected to read 144 metadata bytes but got 0`\r\n\r\n\u00a0\r\n\r\n`# and it modifies the dataset`\r\n`nrow(dataset2)`\r\n`#> [1] 1966080`\r\n\r\n`# But with a smaller dataset there seems to be no issue\u00a0`\r\n`arrow::write_dataset(dataset = head(dataset, 1000), path = savePath, format = 'feather')`\r\n`dataset3 <- arrow::open_dataset(savePath, format='feather')`\r\n`nrow(dataset3)`\r\n`#> [1] 1000`"
+        },
+        {
+            "created_at": "2022-08-23T22:58:13.439Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17373?focusedCommentId=17583893) by Weston Pace (westonpace):*\nI think you are trying to overwrite a file that you are currently reading.  What would be the preferred result here?  Should it be an error before the write begins?  Should it detect that the filename already exists and use a different filename?  Is there some other preferred outcome?\r\n\r\nI think you get away with it when the dataset is smaller because all the data fits onto a single batch so by the time you start writing you have already finished reading."
+        },
+        {
+            "created_at": "2022-08-24T08:15:06.169Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17373?focusedCommentId=17584108) by Egill Axfjord Fridgeirsson (egillax):*\nMy bad I didn't realize I was trying to overwrite the same dataset. IMO stopping me and giving an error with a useful error message would have helped me here."
+        }
+    ]
+}

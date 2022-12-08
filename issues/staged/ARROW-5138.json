@@ -1,0 +1,38 @@
+{
+    "issue": {
+        "title": "[Python/C++] Row group retrieval doesn't restore index properly",
+        "body": "***Note**: This issue was originally created as [ARROW-5138](https://issues.apache.org/jira/browse/ARROW-5138). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen retrieving row groups the index is no longer properly restored to its initial value and is set to an range index starting at zero no matter what. version 0.12.1 restored and int64 index with the correct index values.\r\n\r\n\r\n```python\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nprint(pa.__version__)\r\ndf = pd.DataFrame(\r\n    {\"a\": [1, 2, 3, 4]}\r\n)\r\nprint(\"total DF\")\r\nprint(df.index)\r\ntable = pa.Table.from_pandas(df)\r\nbuf = pa.BufferOutputStream()\r\npq.write_table(table, buf, chunk_size=2)\r\nreader = pa.BufferReader(buf.getvalue().to_pybytes())\r\nparquet_file = pq.ParquetFile(reader)\r\nrg = parquet_file.read_row_group(1)\r\n\r\ndf_restored = rg.to_pandas()\r\nprint(\"Row group\")\r\nprint(df_restored.index)\r\n```\r\n\r\nPrevious behavior\r\n```python\n\r\n0.12.1\r\ntotal DF\r\nRangeIndex(start=0, stop=4, step=1)\r\nRow group\r\nInt64Index([2, 3], dtype='int64')\r\n```\r\n\r\nBehavior now\r\n```python\n\r\n0.13.0\r\ntotal DF\r\nRangeIndex(start=0, stop=4, step=1)\r\nRow group\r\nRangeIndex(start=0, stop=2, step=1)\r\n```",
+        "created_at": "2019-04-08T13:25:11.000Z",
+        "updated_at": "2019-06-27T20:55:26.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-06-27T20:55:18.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-04-22T05:14:58.268Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5138?focusedCommentId=16822879) by Wes McKinney (wesm):*\nThere seems to be a broken encapsulation here of pandas DataFrame serialization. Are you storing different DataFrame objects in different row groups? "
+        },
+        {
+            "created_at": "2019-05-06T11:28:46.296Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5138?focusedCommentId=16833719) by Joris Van den Bossche (jorisvandenbossche):*\nThe issue here is that there is a mismatch between the pandas metadata (of the original full dataframe) and the row group:\r\n\r\n- full pandas DataFrame is converted to arrow Table, which includes this part in the metadata about the index: ```Java\n  \"index_columns\": [{\"kind\": \"range\", \"name\": null, \"start\": 0, \"stop\": 4, \"step\": 1}] \n  ```\n- the arrow Table is written to parquet as two RowGroups, but the pandas metadata is kept intact\n- when reading a single row group, the pandas metadata still suggest a RangeIndex of length 4, while the row group is only of length 2. As a result, a default index is used (always starting at zero, for both row groups).\n  \n  I am not sure this can be solved (you would need to start modifying the range start/stop values in the pandas metadata when splitting arrow tables that have such metadata. Similar issues will be encountered when eg slicing a Table). It seems the consequence of the choice to no longer serialize a RangeIndex.\n  \n  `[~fjetter]` I think the best workaround for now would be to ensure your original data has a Int64Index instead of RangeIndex, if you want to keep this working (`df.index = pd.Int64Index(df.index)`).\n  \n  Given those issues, should we add an option to still include a RangeIndex in the actual schema? "
+        },
+        {
+            "created_at": "2019-05-31T20:54:07.792Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5138?focusedCommentId=16853418) by Wes McKinney (wesm):*\nI think we should change the RangeIndex optimization to only do so for trivial RangeIndex starting at 0 and with step 1. Then this issue is resolved"
+        },
+        {
+            "created_at": "2019-06-05T08:47:42.746Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5138?focusedCommentId=16856508) by Joris Van den Bossche (jorisvandenbossche):*\n`[~wesmckinn]` I don't think that will solve this problem. The _original_ dataframe (when converted to an arrow Table) had a trivial RangeIndex (starting at 0, step of 1), so the optimization would have been correctly applied according to that logic. \r\n\r\nIt is only when a Table is sliced or splitted (in row groups, and then reading a single row group instead of the full table) that the RangeIndex metadata get \"out of date\" and no longer match the new (subsetted) arrow Table.\r\n\r\nSee also ARROW-5427 for a summary issue I made on this topic."
+        },
+        {
+            "created_at": "2019-06-27T20:55:18.252Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5138?focusedCommentId=16874504) by Wes McKinney (wesm):*\nIssue resolved by pull request 4728\n<https://github.com/apache/arrow/pull/4728>"
+        }
+    ]
+}

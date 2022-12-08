@@ -1,0 +1,64 @@
+{
+    "issue": {
+        "title": "[Python] Infer index and/or filtering from parquet column statistics",
+        "body": "***Note**: This issue was originally created as [ARROW-3245](https://issues.apache.org/jira/browse/ARROW-3245). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe metadata included in parquet generally gives the min/max of data for each chunk of each column. This allows early filtering out of whole chunks if they do not meet some criterion, and can greatly reduce reading burden in some circumstances. In Dask, we care about this for setting an index and its \"divisions\" (start/stop values for each data partition) and for directly avoiding including some chunks in the graph of tasks to be processed. Similarly, filtering may be applied on the values of fields defined by the directory partitioning.\r\n\r\nCurrently, dask using the fastparquet backend is able to infer possible columns to use as an index, perform filtering on that index and do general filtering on any column which has statistical or partitioning information. It would be very helpful to have such facilities via pyarrow also.\r\n\r\n\u00a0This is probably the most important of the requests from Dask.\r\n\r\n(please forgive that some of this has already been mentioned elsewhere; this is one of the entries in the list at\u00a0<https://github.com/dask/fastparquet/issues/374>\u00a0as a feature that is useful in fastparquet)",
+        "created_at": "2018-09-16T23:55:28.000Z",
+        "updated_at": "2022-07-12T14:04:47.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2018-09-17T01:56:56.414Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3245?focusedCommentId=16616986) by Wes McKinney (wesm):*\nThis metadata is available from the API already. I am not sure what we need to do in this project since the use of the column statistics is an application-level concern. Seems like the implementation of this would need to be in Dask"
+        },
+        {
+            "created_at": "2018-09-19T18:28:13.386Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3245?focusedCommentId=16621009) by Martin Durant (mdurant):*\nCould you please point me to documentation on how to fetch and interpret that metadata? I can try to implement it in dask."
+        },
+        {
+            "created_at": "2018-09-19T21:32:50.258Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3245?focusedCommentId=16621234) by Wes McKinney (wesm):*\nIt isn't documented in Sphinx yet (see ARROW-3275) but you can have a look at the API in the Cython interface https://github.com/apache/arrow/blob/master/python/pyarrow/_parquet.pyx#L131"
+        },
+        {
+            "created_at": "2018-09-20T01:45:57.988Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3245?focusedCommentId=16621400) by Martin Durant (mdurant):*\nSorry to be thick, but how do I actually get at that information\u00a0from a ParquetDataset?"
+        },
+        {
+            "created_at": "2018-09-20T02:19:39.372Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3245?focusedCommentId=16621417) by Wes McKinney (wesm):*\nYou can get at the metadata for each file in the dataset using the `pieces` attribute. See usages of `ParquetDatasetPiece.get_metadata`"
+        },
+        {
+            "created_at": "2018-09-20T13:05:15.473Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3245?focusedCommentId=16621990) by Martin Durant (mdurant):*\n(pyarrow 0.10.0)\r\n\r\n```\r\n\r\nIn [7]: df = pd.DataFrame(\\{'a': [1, 0]})\r\n\r\nIn [8]: df.to_parquet('out.parq', engine='pyarrow')\r\n\r\nIn [9]: pf = pq.ParquetDataset('out.parq')\r\n\r\nIn [10]: pf.pieces[0].get_metadata()\r\n---------------------------------------------------------------------------\r\nTypeError Traceback (most recent call last)\r\n<ipython-input-10-5f47bb2e5193> in <module>()\r\n----> 1 pf.pieces[0].get_metadata()\r\n\r\n~/anaconda/envs/tester/lib/python3.6/site-packages/pyarrow/parquet.py in get_metadata(self, open_file_func)\r\n 412 file's metadata\r\n 413 \"\"\"\r\n--> 414 return self._open(open_file_func).metadata\r\n 415\r\n 416 def _open(self, open_file_func=None):\r\n\r\n~/anaconda/envs/tester/lib/python3.6/site-packages/pyarrow/parquet.py in _open(self, open_file_func)\r\n 418 Returns instance of ParquetFile\r\n 419 \"\"\"\r\n--> 420 reader = open_file_func(self.path)\r\n 421 if not isinstance(reader, ParquetFile):\r\n 422 reader = ParquetFile(reader)\r\n\r\nTypeError: 'NoneType' object is not callable\r\n\r\n```"
+        },
+        {
+            "created_at": "2018-09-20T22:13:03.662Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3245?focusedCommentId=16622789) by Wes McKinney (wesm):*\nYou have to pass a function to that method"
+        },
+        {
+            "created_at": "2018-09-21T00:43:57.661Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3245?focusedCommentId=16622921) by Matthew Rocklin (mrocklin):*\nAfter some fooling around this worked for me\r\n\r\n`import pyarrow.parquet as pq`\r\n`import pandas as pd`\r\n`df = pd.DataFrame(\\{'a': [1, 0]})`\r\n`df.to_parquet('out.parq', engine='pyarrow')`\r\n`pf = pq.ParquetDataset('out.parq')`\r\n`piece = pf.pieces[0]`\r\n`import functools`\r\n`piece.get_metadata(functools.partial(open, mode='rb'))`\r\n\r\nI had to dive into the source a bit to figure out how to interpret the docstring."
+        },
+        {
+            "created_at": "2018-09-21T00:47:27.103Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3245?focusedCommentId=16622923) by Wes McKinney (wesm):*\nObviously this function _should_ try to use local filesystem methods if no argument is provided. Even better would be to instantiate `ParquetDatasetPiece` with a reference to the filesystem in use. Neither change is particularly difficult"
+        },
+        {
+            "created_at": "2020-11-12T17:00:34.536Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3245?focusedCommentId=17230784) by Ben Kietzman (bkietz):*\n`[~jorisvandenbossche]` Is this issue still relevant in light of https://github.com/dask/dask/pull/6346 ?"
+        },
+        {
+            "created_at": "2020-11-13T15:04:27.890Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3245?focusedCommentId=17231548) by Joris Van den Bossche (jorisvandenbossche):*\nI think it is actually not relevant anymore for a longer time, since dask already uses the pyarrow.parquet interface to read the statistics in their \"pyarrow\" engine as well, similarly as was done before in the \"fastparquet\" engine. \r\n\r\nReading the discussion above, I think we could see this issue as \"better document how to get the parquet metadata and statistics\". Will take a look at our docs to ensure it is now properly documented."
+        },
+        {
+            "created_at": "2022-07-12T14:04:47.696Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3245?focusedCommentId=17565751) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

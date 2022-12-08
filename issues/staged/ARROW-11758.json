@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[C++][Compute] Summation kernel round-off error",
+        "body": "***Note**: This issue was originally created as [ARROW-11758](https://issues.apache.org/jira/browse/ARROW-11758). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFrom below test, summation kernel is of lower precision than numpy.sum.\r\nNumpy implements pairwise summation [1] with O(logn) round-off error, better than O(n\\) error from naive summation.\r\n\r\n**sum.py**\r\n```python\n\r\nimport numpy as np\r\nimport pyarrow.compute as pc\r\n\r\nt = np.arange(321000, dtype='float64')\r\nt2 = t - np.mean(t)\r\nt2 *= t2\r\n\r\nprint('numpy sum:', np.sum(t2))\r\nprint('arrow sum:', pc.sum(t2))\r\n```\r\n\r\n**test result**\r\n```\n\r\n# Verified with wolfram alpha (arbitrary precision), Numpy's result is correct. \r\n$ ARROW_USER_SIMD_LEVEL=SSE4_2 python sum.py\r\nnumpy sum: 2756346749973250.0\r\narrow sum: 2756346749973248.0\r\n\r\n$ ARROW_USER_SIMD_LEVEL=AVX2 python sum.py \r\nnumpy sum: 2756346749973250.0\r\narrow sum: 2756346749973249.0\r\n```\r\n\r\n[1] https://en.wikipedia.org/wiki/Pairwise_summation",
+        "created_at": "2021-02-24T06:30:47.000Z",
+        "updated_at": "2021-08-02T18:36:53.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-03-12T01:33:24.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-02-24T08:10:42.074Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11758?focusedCommentId=17289761) by Joris Van den Bossche (jorisvandenbossche):*\n+1 on using pairwise summation. Also Julia uses that as the default sum. \r\n(only not fully sure it would be easy to use if we integrate with hash/grouped aggregations)"
+        },
+        {
+            "created_at": "2021-02-27T09:34:13.673Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11758?focusedCommentId=17292078) by Yibo Cai (yibocai):*\nImplemented recursive and non-recursive pairwise summation, also naive summation.\r\nNaive summation suffers from severe round-off errors, and worse performance.\r\n**Non-recursive pairwise summation** is of best performance, it above 1x faster than recursive one. We should adopt it.\r\nDetails at https://github.com/cyb70289/sum/"
+        },
+        {
+            "created_at": "2021-03-02T08:34:49.116Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11758?focusedCommentId=17293497) by Yibo Cai (yibocai):*\nCurrent sum kernel code is after several optimizations (manual unroll, simd, bitblockcounter, etc).\r\nThere will be radical changes to adopt pairwise summation, most existing code may be dropped or refactored.\r\ncc `[~apitrou]` [~frank.du]"
+        },
+        {
+            "created_at": "2021-03-02T09:08:03.201Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11758?focusedCommentId=17293532) by Antoine Pitrou (apitrou):*\n+1 for improving precision. Thank you `[~yibocai]` ."
+        },
+        {
+            "created_at": "2021-03-12T01:33:24.893Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11758?focusedCommentId=17299972) by yibocai#1 (yibocai#1):*\nIssue resolved by pull request 9635\n<https://github.com/apache/arrow/pull/9635>"
+        },
+        {
+            "created_at": "2021-03-16T07:15:13.650Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11758?focusedCommentId=17302281) by yibocai#1 (yibocai#1):*\nFor record.\r\n Arrow's pairwise sum implementation is a bit different from numpy. Numpy adopts recursion with manually unrolled loops for last 16 summations. Arrow code is non-recursive, and no unroll. Though equivalent in theory, they are different for floating point arithmetic in reality. There may be gaps for large array summations.\r\n\r\nActually, neither numpy nor pyarrow can give accurate results. The point is they both guarantees O(logn) round-off error bound.\r\n\r\nIn below test, pyarrow gives the accurate result. Of course, there must be some tests in favor of numpy. The truth value is from mpmath arbitrary precision lib.\r\n\r\n**Test code**\r\n```python\n\r\nimport numpy as np\r\nimport pyarrow.compute as pc\r\nimport mpmath\r\n\r\nmpmath.dps = 30\r\nt = np.arange(123456, 654321, dtype='float64') * 987654321\r\n\r\nprint(' numpy: %.0f' % np.sum(t))\r\nprint(' arrow: %.0f' % pc.sum(t).as_py())\r\nprint('mpmath: %.0f' % mpmath.fsum(t))\r\n```\r\n**Result**\r\n```\n\r\n numpy: 203898299380326662144\r\n arrow: 203898299380326498304\r\nmpmath: 203898299380326498304\r\n```"
+        }
+    ]
+}

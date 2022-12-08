@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[R] Add additional DESCRIPTION fields for dev dependencies and update docs accordingly",
+        "body": "***Note**: This issue was originally created as [ARROW-12743](https://issues.apache.org/jira/browse/ARROW-12743). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nEdit: Blocked by [a bug in \\{remotes}](https://github.com/r-lib/remotes/issues/642) which results in second order dependencies of packages listed in `Config/Needs?...` not being installed.\r\n====================\r\nRecent updates to the remotes package mean that additional fields can be added to a package's DESCRIPTION and remotes functions can take the field as a parameter and install these additional dependencies: https://github.com/r-lib/remotes/blob/master/NEWS.md#new-functions-and-features\r\n\r\nWe could update DESCRIPTION to use these fields and update the docs to use this functionality of remotes instead of having separate references to packages to install.\r\n\r\n\u00a0",
+        "created_at": "2021-05-11T20:50:17.000Z",
+        "updated_at": "2022-03-03T04:02:24.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-03-02T15:01:20.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-05-27T13:45:13.878Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12743?focusedCommentId=17352484) by Ian Cook (icook):*\nAlso see the related discussion here:\u00a0<https://github.com/apache/arrow/pull/10373#issuecomment-849631610>\r\n\r\nFor some dev dependencies such as roxygen2, a version of the package _does_\u00a0exist on CRAN, but we want the newer dev version of it from GitHub. In such cases,\u00a0wouldn\u2019t it be fine to just use\u00a0`Suggests`\u00a0and\u00a0`Remotes`\u00a0like this:\u00a0\r\n```java\n\r\nSuggests: \r\n    roxygen2\r\nRemotes:  \r\n    r-lib/roxygen2\n```\r\n`Config/Needs`\u00a0seems more appropriate for dependencies that don\u2019t exist on CRAN at all. The [devtools vignette](http://example.com/) says:\r\n> When you submit your package to CRAN, all of its dependencies must also be available on CRAN. For this reason,\u00a0`release()`\u00a0will warn you if you try to release a package with a\u00a0`Remotes`\u00a0field.\r\nBut that is vague on the question of what happens if all dependencies are on CRAN _and_ there\u2019s a Remotes field."
+        },
+        {
+            "created_at": "2021-05-27T14:06:24.055Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12743?focusedCommentId=17352503) by Jonathan Keane (jonkeane):*\nIf I'm reading the devtools/remotes documentation correctly, if we use something like `Config/Needs/docs: ...` then someone would have to install the dependencies with `install_deps(\".\", dependencies = \"Config/Needs/docs\")` in order to have those dependencies installed. Which isn't that hard, but is an extra step beyond what is currently needed. The pro is that we don't have to trim this when sending it to CRAN.\r\n\r\nOn the other hand using `Remotes: r-lib/roxygen2` all the dependencies are installed when people do the standard `install_deps(\".\", dependencies = TRUE)` which is nice for developer (especially new developer) experience, but we'll need to trim it before we send to CRAN (though we already do that with badges, so it's not that much extra work).\r\n\r\nI think leaving it with a version number requirement is not great \u2014 we would need to confirm that the new version is released to cran before we can send it (since it would fail the version check there and complain, right?) _and_ it's possible for someone to have installed roxygen2 from github before this feature was added, but after the number was bumped so it would appear at install time that the dependency is satisfied, but then the errors when redocumenting would be weird."
+        },
+        {
+            "created_at": "2021-12-10T09:38:35.542Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12743?focusedCommentId=17457009) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nI think the roxygen2 version is recorded in a single place in DESCRIPTION (i.e. the `RoxygenNote:` field). I don't think CRAN checks parse that field and check what version of roxygen2 is available. If there is a mismatch in versions between the developer's local environment and DESCRIPTION `devtools::check()` with not re-document. Running `devtools::document()` in the same scenario will overwrite the `RoxygenNote` field.\r\n\r\nWe could use multiple \"Config/Needs/...\" fields and then install all dependencies with a single call to `{}remotes::install_deps(){`}.\r\n```r\n\r\ninstall_deps(\".\", dependencies = c(\"soft\", \"Config/Needs/website\", \"Config/Needs/dev\"))\r\n```\r\n, where `\"soft\"` is the equivalent of `{}TRUE{`}.\r\n\r\nI think if someone has the development version of roxygen2 installed and they attempt to install dependencies, `remotes` will compare shas and will suggest and upgrade even if the version number is the same."
+        },
+        {
+            "created_at": "2022-01-11T09:51:27.424Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12743?focusedCommentId=17472612) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nThere seems to be a [bug in \\{remotes}](https://github.com/r-lib/remotes/issues/642) when trying to install dependencies from the `\"Config/Needs/...\"` fields. The package or packages listed there are installed, but not their dependencies.\r\n\r\nReprex (needs to be run inside a package that has `Config/Needs/website: pkgdown` in DESCRIPTION:\r\n```r\n\r\n# fs and memoise are pkgdown dependencies\r\nremove.packages(c(\"pkgdown\", \"fs\", \"memoise\")) \r\nremotes::install_deps(\".\", dependencies = \"Config/Needs/website\")\r\npackageVersion(\"pkgdown\")\r\n# [1] \u20182.0.1\u2019\r\npackageVersion(\"fs\")\r\n# Error in packageVersion(\"fs\") : there is no package called \u2018fs\u2019\r\npackageVersion(\"memoise\")\r\n# Error in packageVersion(\"memoise\") : there is no package called \u2018memoise\u2019\r\n```\r\nadding `\"soft\"` or `\"hard\"` to `dependencies` works, but that seems a non-canonical use of either of those options and, thus, could change without warning.\r\n```r\n\r\nremotes::install_deps(\".\", dependencies = c(\"hard\", \"Config/Needs/website\"))\r\n# or\r\nremotes::install_deps(\".\", dependencies = c(\"soft\", \"Config/Needs/website\"))\r\n```\r\nIn conclusion, I propose we delay using the `Config/Needs/...` field in DESCRIPTION until either the \\{remotes} issue is solved or we switch to \\{pak} for package installation."
+        },
+        {
+            "created_at": "2022-01-11T13:52:21.475Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12743?focusedCommentId=17472734) by Jonathan Keane (jonkeane):*\nAnd, additionally, didn't you find that `remotes::install_deps(\".\", dependencies = \"soft\")` installs not just imports+depends+suggests, but does that recursively for all packages it touches, so ends up installing many more packages than {{remotes::install_deps(\".\", dependencies = TRUE)} right?"
+        },
+        {
+            "created_at": "2022-01-11T14:05:29.671Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12743?focusedCommentId=17472754) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nYes, that is right, I raised that as ARROW-15299.\u00a0I'm not 100% convinced I am correct with that one, hence raised it as an investigation ticket (and not yet a \\{remotes} GitHub issue).\u00a0"
+        },
+        {
+            "created_at": "2022-02-09T11:22:46.365Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12743?focusedCommentId=17489480) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nI am copying (from ARROW-15299) the results of my little investigation.\u00a0\r\n=======================\r\n\r\nWhat we would need is a combination between `dependencies = TRUE` and `{}dependencies = \"Config/Needs/website\"{`}.\r\nI ran the experiment and the results are below:\r\n\n|test|description|total_pkgs_installed|\r|\n|-|-|-|-|\n|1|dependencies = TRUE|64|\r|\n|2|dependencies = 'hard'|12|\r|\n|3|dependencies = c('hard', 'Config/Needs/website')|61|\r|\n|4|dependencies = 'soft'|1819|\r|\n|5|dependencies = c('soft', 'Config/Needs/website')|1819|\r|\n|6|dependencies = c('Config/Needs/website')|1|\r<br>\r<br>I excluded `dependencies = 'soft'` & combinations of `'soft'` since that is too recursive and ends up installing an excessive number of packages. \r<br>`dependencies = 'hard'` & `dependencies = 'Config/Needs/website'` are too narrow.\r<br>\r<br>I compared `dependencies = TRUE` to `{}dependencies = c('hard', 'Config/Needs/website'){`}. While the overall number of installed packages looks promising (64 vs 61), there isn't complete overlap.\u00a0|\n"
+        },
+        {
+            "created_at": "2022-03-02T15:01:20.709Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12743?focusedCommentId=17500218) by Nicola Crane (thisisnic):*\nIssue resolved by pull request 11921\n<https://github.com/apache/arrow/pull/11921>"
+        }
+    ]
+}

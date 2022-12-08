@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[C++] Empty IPC streams containing a dictionary are corrupt",
+        "body": "***Note**: This issue was originally created as [ARROW-6006](https://issues.apache.org/jira/browse/ARROW-6006). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n\u00a0\r\n```java\n\r\n#include <arrow/api.h>\r\n#include <arrow/ipc/api.h>\r\n#include <arrow/io/api.h>\r\n\r\nvoid check(arrow::Status status) {\r\n    if (!status.ok()) {\r\n        status.Abort();\r\n    }\r\n}\r\n\r\nint main() {\r\n    auto type = arrow::dictionary(arrow::int8(), arrow::utf8());\r\n    auto f0 = arrow::field(\"f0\", type);\r\n    auto schema = arrow::schema({f0});\r\n\r\n    std::shared_ptr<arrow::io::BufferOutputStream> os;\r\n    check(arrow::io::BufferOutputStream::Create(0, arrow::default_memory_pool(), &os));\r\n\r\n    std::shared_ptr<arrow::ipc::RecordBatchWriter> writer;\r\n    check(arrow::ipc::RecordBatchStreamWriter::Open(&*os, schema, &writer));\r\n    check(writer->Close());\r\n\r\n    std::shared_ptr<arrow::Buffer> buffer;\r\n    check(os->Finish(&buffer));\r\n    arrow::io::BufferReader is(buffer);\r\n\r\n    std::shared_ptr<arrow::ipc::RecordBatchReader> reader;\r\n    check(arrow::ipc::RecordBatchStreamReader::Open(&is, &reader));\r\n\r\n    std::shared_ptr<arrow::RecordBatch> batch;\r\n    check(reader->ReadNext(&batch));\r\n}\r\n```\r\n\u00a0\r\n```\n\r\n-- Arrow Fatal Error --\r\nInvalid: Expected message in stream, was null or length 0\n```\r\nIt seems like this was caused by\u00a0<https://github.com/apache/arrow/commit/e68ca7f9aed876a1afcad81a417afb87c94ee951>, which moved the dictionary\u00a0values from the DataType to the array itself.\r\n\r\nI initially thought I could work around this by writing a zero-length table but that doesn't seem to actually work.\r\n\r\n\u00a0",
+        "created_at": "2019-07-22T21:15:41.000Z",
+        "updated_at": "2019-08-01T22:39:28.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-07-29T14:44:59.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-07-22T23:10:37.151Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6006?focusedCommentId=16890533) by Steven Fackler (sfackler):*\nLooking through the implementations, it seems like the issue here is actually that the C++ RecordBatchWriter can't properly write initial dictionaries for empty streams. The Java reader expects to have all dictionaries available, for example."
+        },
+        {
+            "created_at": "2019-07-25T17:22:21.171Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6006?focusedCommentId=16892974) by Wes McKinney (wesm):*\nThat sounds like a bug in the Java implementation. "
+        },
+        {
+            "created_at": "2019-07-25T17:36:09.083Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6006?focusedCommentId=16892994) by Steven Fackler (sfackler):*\nThe C++ RecordBatchReader also assumes that dictionaries are sent."
+        },
+        {
+            "created_at": "2019-07-25T17:40:55.878Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6006?focusedCommentId=16892998) by Wes McKinney (wesm):*\nRight. I'll have a patch up to fix the C++ implementation here in a few minutes, can you create a JIRA about fixing Java?"
+        },
+        {
+            "created_at": "2019-07-25T18:03:19.033Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6006?focusedCommentId=16893022) by Steven Fackler (sfackler):*\nDone! ARROW-6040"
+        },
+        {
+            "created_at": "2019-07-29T14:44:59.342Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6006?focusedCommentId=16895312) by Wes McKinney (wesm):*\nIssue resolved by pull request 4947\n<https://github.com/apache/arrow/pull/4947>"
+        }
+    ]
+}

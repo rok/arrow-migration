@@ -1,0 +1,22 @@
+{
+    "issue": {
+        "title": "[Python] Incorrect conversion of Arrow dictionary to Parquet dictionary when duplicate values are present",
+        "body": "***Note**: This issue was originally created as [ARROW-10246](https://issues.apache.org/jira/browse/ARROW-10246). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCopying this from [the mailing list](https://lists.apache.org/thread.html/r8afb5aed3855e35fe03bd3a27f2c7e2177ed2825c5ad5f455b2c9078%40%3Cdev.arrow.apache.org%3E)\r\n\r\nWe can observe the following odd behaviour when round-tripping data via parquet using pyarrow, when the data contains dictionary arrays with duplicate values.\r\n\r\n\u00a0\r\n```java\n\r\nimport pyarrow as pa\r\n import pyarrow.parquet as pq\r\nmy_table = pa.Table.from_batches(\r\n [\r\n pa.RecordBatch.from_arrays(\r\n [\r\n pa.array([0, 1, 2, 3, 4]),\r\n pa.DictionaryArray.from_arrays(\r\n pa.array([0, 1, 2, 3, 4]),\r\n pa.array(['a', 'd', 'c', 'd', 'e'])\r\n )\r\n ],\r\n names=['foo', 'bar']\r\n )\r\n ]\r\n )\r\n my_table.validate(full=True)\r\npq.write_table(my_table, \"foo.parquet\")\r\nread_table = pq.ParquetFile(\"foo.parquet\").read()\r\n read_table.validate(full=True)\r\nprint(my_table.column(1).to_pylist())\r\n print(read_table.column(1).to_pylist())\r\nassert my_table.column(1).to_pylist() == read_table.column(1).to_pylist()\r\n```\r\nBoth tables pass full validation, yet the last three lines print:\r\n\r\n\r\n```java\n\r\n['a', 'd', 'c', 'd', 'e']\r\n['a', 'd', 'c', 'e', 'a']\r\nTraceback (most recent call last):\r\n File \"/home/ataylor/projects/dsg-python-dtcc-equity-kinetics/dsg/example.py\", line 29, in <module>\r\n assert my_table.column(1).to_pylist() == read_table.column(1).to_pylist()\r\nAssertionError\n```\r\nWhich clearly doesn't look right!\r\n\r\n\u00a0\r\n\r\nIt seems to me that the reason this is happening is that when re-encoding an Arrow dictionary as a Parquet one, the function at\r\n\r\n<https://github.com/apache/arrow/blob/4bbb74713c6883e8523eeeb5ac80a1e1f8521674/cpp/src/parquet/encoding.cc#L773>\r\n\r\nis called to create a Parquet DictEncoder out of the Arrow dictionary data. This internally uses a map from value to index, and this map is constructed by continually calling GetOrInsert on a memo table. When called with duplicate values as in Al's example, the duplicates do not cause a new dictionary index to be allocated, but instead return the existing one (which is just ignored). However, the caller assumes that the resulting Parquet dictionary uses the exact same indices as the Arrow one, and proceeds to just copy the index data directly. In Al's example, this results in an invalid dictionary index being written (that it is somehow wrapped around when reading again, rather than crashing, is potentially a second bug).",
+        "created_at": "2020-10-09T11:01:48.000Z",
+        "updated_at": "2020-10-09T13:25:33.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-10-09T13:25:33.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-10-09T13:25:24.861Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10246?focusedCommentId=17210933) by Joris Van den Bossche (jorisvandenbossche):*\nThis was already reported as ARROW-10237 and fixed in the meantime.  \r\nBut we should have notified the mailing about that, sorry about that! Thanks for looking into it anyway"
+        }
+    ]
+}

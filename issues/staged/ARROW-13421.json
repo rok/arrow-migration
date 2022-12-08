@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[C++]  Add functionality for reading in columns as floats from delimited files where a comma has been used as a decimal separator",
+        "body": "***Note**: This issue was originally created as [ARROW-13421](https://issues.apache.org/jira/browse/ARROW-13421). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen reading in data where commas have been used as decimal separators (e.g. 3,141 to indicate pi), the column is read in as a character string.  If I try to specify a schema in R, i.e.:\r\n\r\n`# create table of values with decimal places`\r\n`set.seed(1)`\r\n`tbl <- tibble::tibble(x = rnorm(5))`\r\n`# write to disk with comma separator`\r\n`readr::write_csv2(tbl, \"tst.csv\")`\r\n`# read back in`\r\n`read_delim_arrow(\"tst.csv\", delim = \";\", schema = schema(x = float32()))`\r\n\r\nI get the following error:\r\n\r\n`Error: Invalid: In CSV column #0: CSV conversion error to float: invalid value 'x'`\r\n`/home/nic2/arrow/cpp/src/arrow/csv/converter.cc:437  decoder_.Decode(data, size, quoted, &value)`\r\n`/home/nic2/arrow/cpp/src/arrow/csv/parser.h:84  status`\r\n`/home/nic2/arrow/cpp/src/arrow/csv/converter.cc:441  parser.VisitColumn(col_index, visit) `\r\n\r\nPlease can we have the functionality to be able to read in data from this format as it's fairly common across a number of countries?",
+        "created_at": "2021-07-21T08:39:12.000Z",
+        "updated_at": "2021-08-03T13:40:47.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-08-03T11:41:25.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-07-21T10:59:21.921Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13421?focusedCommentId=17384829) by Nicola Crane (thisisnic):*\nHi `[~Ruser]`, thanks for reporting this!  Would you be able to provide a short reproducible example of what you're trying to do?  I tried writing my own example based on the description above, but the data was read in as a double and not a string.\r\n\r\n\r\n```r\n\r\nset.seed(1)\r\n# create a table of values\r\ntbl <- tibble::tibble(x = rnorm(5))\r\ntbl\r\n# A tibble: 5 x 1\r\n#        x\r\n#    <dbl>\r\n# 1 -0.626\r\n# 2  0.184\r\n# 3 -0.836\r\n# 4  1.60 \r\n# 5  0.330\r\n\r\n# create file to write to\r\ntf <- tempfile()\r\n\r\n# write table to file\r\nwrite.table(tbl, tf , sep = \"\\t\", row.names = FALSE)\r\n\r\n# read back in\r\ntab <- read_delim_arrow(tf, delim = \"\\t\")\r\n\r\n# display results\r\ntab\r\n# A tibble: 5 x 1\r\n#        x\r\n#    <dbl>\r\n# 1 -0.626\r\n# 2  0.184\r\n# 3 -0.836\r\n# 4  1.60\r\n# 5  0.330\r\n# \n```\r\n"
+        },
+        {
+            "created_at": "2021-07-21T12:44:44.458Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13421?focusedCommentId=17384873) by Daniel Paierl (Ruser):*\nHi `[~thisisnic]`, thanks for the super fast reply! Sorry I forgot the reprex, its easy to forget how insular these \",\" vs. \".\" problems are when european comma and thousand separators are standard here. Sadly, I cannot change the format of the source data, even using .parquet files is a major departure from what has been done in the past.\r\n\r\n\u00a0\r\n\r\nWithout further ado:\r\n## Reprex\r\n```r\n\r\nset.seed(1)\r\n\r\ntbl <- tibble::tibble(x = rnorm(5))\r\ntbl\r\n#> # A tibble: 5 x 1\r\n#>        x\r\n#>    <dbl>\r\n#> 1 -0.626\r\n#> 2  0.184\r\n#> 3 -0.836\r\n#> 4  1.60 \r\n#> 5  0.330\r\n\r\n# write to file in european format (separator = \";\", decimal mark = \".\")\r\nreadr::write_csv2(tbl, \"arrow_repex.csv\")\r\n\r\n# read in with delim set to \";\"\r\narrow::read_delim_arrow(file = \"arrow_repex.csv\",\r\n                        delim = \";\")\r\n#> # A tibble: 5 x 1\r\n#>   x                 \r\n#>   <chr>             \r\n#> 1 -0,626453810742332\r\n#> 2 0,183643324222082 \r\n#> 3 -0,835628612410047\r\n#> 4 1,595280802137792 \r\n#> 5 0,329507771815361\r\n\r\n# works with data.table::fread with sep = \";\" and dec =\",\"\r\ndata.table::fread(\"arrow_repex.csv\",\r\n                  sep = \";\", dec = \",\")\r\n#>             x\r\n#> 1: -0.6264538\r\n#> 2:  0.1836433\r\n#> 3: -0.8356286\r\n#> 4:  1.5952808\r\n#> 5:  0.3295078\r\n\r\n```\r\n\u00a0\r\n### Session Info\r\n```r\n\r\nR version 4.0.5 (2021-03-31)\r\nPlatform: x86_64-w64-mingw32/x64 (64-bit)\r\nRunning under: Windows Server x64 (build 14393)\r\n\r\nMatrix products: default\r\n\r\nlocale:\r\n[1] LC_COLLATE=German_Germany.1252  LC_CTYPE=German_Germany.1252   \r\n[3] LC_MONETARY=German_Germany.1252 LC_NUMERIC=C                   \r\n[5] LC_TIME=German_Germany.1252    \r\n\r\nattached base packages:\r\n[1] stats     graphics  grDevices utils     datasets  methods   base     \r\n\r\nother attached packages:\r\n [1] arrow_4.0.1     forcats_0.5.1   stringr_1.4.0   dplyr_1.0.6    \r\n [5] purrr_0.3.4     readr_1.4.0     tidyr_1.1.3     tibble_3.1.1   \r\n [9] ggplot2_3.3.3   tidyverse_1.3.1\r\n```\r\n\u00a0\r\n\r\n\u00a0edit: Updated reprex"
+        },
+        {
+            "created_at": "2021-07-21T12:56:21.649Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13421?focusedCommentId=17384880) by Nicola Crane (thisisnic):*\nOK, that makes a lot more sense, thanks for clarifying that!  I'll have a think about what the options are!"
+        },
+        {
+            "created_at": "2021-07-21T12:58:39.345Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13421?focusedCommentId=17384881) by Daniel Paierl (Ruser):*\nLooks like this:\r\n```r\n\r\nreadr::read_csv2(\"arrow_repex.csv\")\r\n#> i Using '\\',\\'' as decimal and '\\'.\\'' as grouping mark. Use `read_delim()` for more control.\r\n#> \r\n#> -- Column specification --------------------------------------------------------\r\n#> cols(\r\n#>   x = col_double()\r\n#> )\r\n#> # A tibble: 5 x 1\r\n#>        x\r\n#>    <dbl>\r\n#> 1 -0.626\r\n#> 2  0.184\r\n#> 3 -0.836\r\n#> 4  1.60 \r\n#> 5  0.330\r\n```\r\n\r\nIt isnt the end of the world since _fread_ does the job meanwhile. Could become bopthersome when used with automatic routines, lets say in a targets project, but I doubt we will cross that bridge anytime soon."
+        },
+        {
+            "created_at": "2021-07-21T13:25:55.486Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13421?focusedCommentId=17384894) by Nicola Crane (thisisnic):*\nThanks `[~Ruser]`, I have updated the ticket to request the relevant C++ functionality be added, after which we'll enable this functionality in R as well."
+        },
+        {
+            "created_at": "2021-07-21T13:27:51.726Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13421?focusedCommentId=17384896) by Nicola Crane (thisisnic):*\n`[~apitrou]` - Neal said to tag you on this issue"
+        },
+        {
+            "created_at": "2021-07-21T14:21:25.480Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13421?focusedCommentId=17384921) by Antoine Pitrou (apitrou):*\n`[~Ruser]` Can you upload one such offending file?"
+        },
+        {
+            "created_at": "2021-07-22T05:54:40.514Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13421?focusedCommentId=17385270) by Daniel Paierl (Ruser):*\nSadly I cannot since the files contain extremely sensititve information. What I can offer is a file created in the reprex since it reproduces the error. \r\nBasically the error conditions are: \r\n\r\n- .csv file \n- delimiter \";\"\n- comma separator \".\"\n  \n   [arrow_reprex.csv](arrow_reprex.csv) "
+        },
+        {
+            "created_at": "2021-07-22T15:03:11.653Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13421?focusedCommentId=17385589) by Antoine Pitrou (apitrou):*\nThanks `[~Ruser]`."
+        },
+        {
+            "created_at": "2021-08-03T11:41:25.085Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13421?focusedCommentId=17392254) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 10852\n<https://github.com/apache/arrow/pull/10852>"
+        }
+    ]
+}

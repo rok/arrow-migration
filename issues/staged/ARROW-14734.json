@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[C++][CI] CountingSemaphore sporadic test crash",
+        "body": "***Note**: This issue was originally created as [ARROW-14734](https://issues.apache.org/jira/browse/ARROW-14734). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis may be a fluke, but this crash appeared on CI:\r\nhttps://github.com/apache/arrow/runs/4234285140?check_suite_focus=true#step:8:110\r\n\r\n```Java\n\r\n\r\n[==========] Running 134 tests from 23 test suites.\r\n[----------] Global test environment set-up.\r\n[----------] 7 tests from CancelTest\r\n[ RUN      ] CancelTest.StopBasics\r\n[       OK ] CancelTest.StopBasics (0 ms)\r\n[ RUN      ] CancelTest.StopTokenCopy\r\n[       OK ] CancelTest.StopTokenCopy (0 ms)\r\n[ RUN      ] CancelTest.RequestStopTwice\r\n[       OK ] CancelTest.RequestStopTwice (0 ms)\r\n[ RUN      ] CancelTest.Unstoppable\r\n[       OK ] CancelTest.Unstoppable (0 ms)\r\n[ RUN      ] CancelTest.SourceVanishes\r\n[       OK ] CancelTest.SourceVanishes (0 ms)\r\n[ RUN      ] CancelTest.ThreadedPollSuccess\r\n[       OK ] CancelTest.ThreadedPollSuccess (11 ms)\r\n[ RUN      ] CancelTest.ThreadedPollCancel\r\n[       OK ] CancelTest.ThreadedPollCancel (11 ms)\r\n[----------] 7 tests from CancelTest (23 ms total)\r\n\r\n[----------] 2 tests from SignalCancelTest\r\n[ RUN      ] SignalCancelTest.Register\r\n[       OK ] SignalCancelTest.Register (1 ms)\r\n[ RUN      ] SignalCancelTest.RegisterUnregister\r\n[       OK ] SignalCancelTest.RegisterUnregister (111 ms)\r\n[----------] 2 tests from SignalCancelTest (113 ms total)\r\n\r\n[----------] 3 tests from CountingSemaphore\r\n[ RUN      ] CountingSemaphore.Basic\r\n\r\n```",
+        "created_at": "2021-11-17T09:58:32.000Z",
+        "updated_at": "2022-07-12T14:04:50.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Continuous Integration",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-17T09:58:43.626Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14734?focusedCommentId=17445052) by Antoine Pitrou (apitrou):*\ncc `[~westonpace]`"
+        },
+        {
+            "created_at": "2021-12-09T09:45:45.570Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14734?focusedCommentId=17456274) by Weston Pace (westonpace):*\nThe actual culprit appears to be SignalCancelTest.  At least, I am unable to reproduce this with running CountingSemaphore.Basic alone.  However, if I run SignalCancelTest and CountingSemaphore.Basic at the same time then it will fail (sometimes without output that matches the description of this issue so that it looks like CountingSemaphore.Basic failed)\r\n\r\nI can also reproduce it by running SignalCancelTest on repeat.  So far only with RegisterUnregister.  I was able to capture a stack trace in Visual Studio and it looks like the detached thread in cancel_test.cc:182 is raising a signal that is not caught by any custom handler and thus exits the application.\r\n\r\nI can only get it to repeat if I stress the CPU.\r\n\r\nMy guess is that somehow the test is tearing down (and removing the cancellation guard) and then the signalling thread actually raises the signal."
+        },
+        {
+            "created_at": "2021-12-22T13:06:08.651Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14734?focusedCommentId=17463796) by Antoine Pitrou (apitrou):*\nIs it enough to raise the busy wait duration, such as:\r\n\r\n```Java\n\r\ndiff --git a/cpp/src/arrow/util/cancel_test.cc b/cpp/src/arrow/util/cancel_test.cc\r\nindex b9bf94ba4..855749edd 100644\r\n--- a/cpp/src/arrow/util/cancel_test.cc\r\n+++ b/cpp/src/arrow/util/cancel_test.cc\r\n@@ -193,7 +193,7 @@ class SignalCancelTest : public CancelTest {\r\n   }\r\n \r\n   void AssertStopRequested() {\r\n-    BusyWait(1.0, [&]() { return stop_token_->IsStopRequested(); });\r\n+    BusyWait(5.0, [&]() { return stop_token_->IsStopRequested(); });\r\n     ASSERT_TRUE(stop_token_->IsStopRequested());\r\n     auto st = stop_token_->Poll();\r\n     ASSERT_RAISES(Cancelled, st);\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-07-12T14:04:50.496Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14734?focusedCommentId=17565783) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

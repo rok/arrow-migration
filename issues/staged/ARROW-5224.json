@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[Java] Add APIs for supporting directly serialize/deserialize ValueVector",
+        "body": "***Note**: This issue was originally created as [ARROW-5224](https://issues.apache.org/jira/browse/ARROW-5224). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThere is no API to directly serialize/deserialize ValueVector. The only way to implement this is to put a single FieldVector in VectorSchemaRoot and convert it to ArrowRecordBatch, and the deserialize process is as well.\u00a0\r\n\r\nProvide a utility class to implement this may be better, I know all serializations should follow IPC format so that data can be shared between different Arrow implementations. But for users who only use Java API and want to do some further optimization, this seem to be no problem and we could provide them a more option.\r\n\r\nThis may take some benefits for Java user who only use ValueVector rather than IPC series classes such as ArrowReordBatch:\r\n \\* We could do some shuffle optimization such as compression and some encoding algorithm for\u00a0numerical\u00a0type which could greatly improve performance.\r\n \\* Do serialize/deserialize with the actual buffer size within vector since the buffer size is power of 2 which is actually bigger than it really need.\r\n \\* Reduce data conversion(VectorSchemaRoot, ArrowRecordBatch etc) to make it user-friendly.\r\n\r\n\u00a0",
+        "created_at": "2019-04-28T02:49:56.000Z",
+        "updated_at": "2019-07-03T02:08:48.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-07-03T02:08:48.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-05-13T04:37:36.413Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5224?focusedCommentId=16838260) by Jacques Nadeau (jnadeau):*\nWhat is the major downside of wrapping in a batch? It seems like we should probably just do that and not introduce new APIs & protocols."
+        },
+        {
+            "created_at": "2019-05-13T04:47:31.293Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5224?focusedCommentId=16838264) by Ji Liu (tianchen92):*\n`[~jnadeau]` \u00a0Thanks very much for your feedback. There are two aspects:\r\n\r\n1\u3001It seems hard to do some specific optimization with existing API, for example, encoding for int/long is a very useful optimization which could reduce shuffle data. And this is the major inspiration.\r\n\r\n2\u3001Not sure that ArrowBuf size within ValueVector is greater than its real size since it will allocate size of next power of 2\uff1fIf so, this is a waste for network.\r\n\r\n\u00a0\r\n\r\nWe propose to add a utility class to do implement this, making it easy to do some further optimization. This can be used as a option which will not break Arrow standard format.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-05-13T06:07:33.589Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5224?focusedCommentId=16838295) by Micah Kornfield (emkornfield@gmail.com):*\nFor #1, can you provide more details on the encoding you have in mind? \r\nFor #2 I believe that only used capacity [1] is written not what is allocated (which is the power of 2?)  If this isn't the case could you provide a unit test demonstrating the wasted space?\r\n\r\n[1]https://github.com/apache/arrow/blob/87feee3d941ee41fb39b25411e108bef40a55995/java/vector/src/main/java/org/apache/arrow/vector/ipc/WriteChannel.java#L93"
+        },
+        {
+            "created_at": "2019-05-13T06:18:15.747Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5224?focusedCommentId=16838299) by Ji Liu (tianchen92):*\n[~emkornfield@gmail.com] Thanks for your reply.\r\n\r\nFor #2 you are right.\r\n\r\nFor #1, for example, if we do encoding Int or BigInt type\u00a0 like\u00a0<https://en.wikipedia.org/wiki/LEB128>, we need to read each value and reassemble byte, and the deserialize process as well. Can this be\u00a0achieved by existing implementation? Besides, is compression supported?"
+        },
+        {
+            "created_at": "2019-05-13T16:14:47.002Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5224?focusedCommentId=16838665) by Micah Kornfield (emkornfield@gmail.com):*\nFor #1, this seems fairly application specific, so I think it would be best to either agree there is interest in supporting this across languages or to have it in a separate library.   But others on the mailing list might have separate opinions.  Also, do you have benchmarks showing that encoding improves performance or your system?  At least in some cases throughput declines and latency goes up due to the extra serialization and deserialization cost on each side of the wire.  Lastly, for compression you should be able to get decent compression by using a WriteableByteChannel that compresses things on the way out (e.g. https://github.com/xerial/snappy-java/blob/master/src/main/java/org/xerial/snappy/SnappyFramedOutputStream.java)"
+        },
+        {
+            "created_at": "2019-05-13T18:00:41.172Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5224?focusedCommentId=16838761) by Bryan Cutler (bryanc):*\n`[~tianchen92]` could you encode the BigIntVector into a VarBinaryVector as LEB128 and then serialize that vector as an Arrow RecordBatch?"
+        },
+        {
+            "created_at": "2019-05-14T02:08:03.855Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5224?focusedCommentId=16839020) by Ji Liu (tianchen92):*\n[~emkornfield@gmail.com] `[~bryanc]` Thanks for your comments. Sure we have tested the performance with encoding Arrow in our application, and it shows this will significantly reduce shuffle data with equal or even less E2E time (for Int and BigInt type).\u00a0\r\n\r\nI agree with `[~bryanc]`, we could simply provide a utility class to encode BigIntVector into a VarBinaryVector(The only thing I'm worried about is whether multiple transformations will result in significant performance overhead). In this way, we won\u2018t break the existing APIs & protocol. I would like to work in this way and test the performance as well. If this works fine, we can further extend it to other languages.\r\n\r\nWhat do you think?"
+        },
+        {
+            "created_at": "2019-05-14T03:24:59.671Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5224?focusedCommentId=16839050) by Micah Kornfield (emkornfield@gmail.com):*\n`[~tianchen92]` my main concern with this change is that it shouldn't be a one-off for java.  If there is utility of these types of on the wire encodings we should come up with a supportable way to make them work across language implementations.  I think this is important to discuss on the mailing list directly (many people filter out JIRA/Pull requests).   Real performance numbers/benchmarks would be helpful in making the case to support this.  Also, I'm also curious if you measured to doing blackbox compression with something like snappy (the link I provided above) to see if there is still benefit of the encoding after applying compression, to the entire vector.\r\n\r\nIf we are going to make encodings supportable we should either extend Schema.fbs or use the custom metadata that is already built into the schema (https://github.com/apache/arrow/blob/master/format/Schema.fbs#L265) so encodings can be communicated across clients.  Again since convention/design needs to be agreed upon discussing on the mailing list is important.\r\n\r\nI think a utility class to  convert between BigIntVector and encoded VarBinaryVector could also be a potentially valuable contribution, but for this use-case I think you lose a lot of the value of encoding (you have a 4-byte overhead to keep track of the offsets per encoded entry).\r\n\r\n"
+        }
+    ]
+}

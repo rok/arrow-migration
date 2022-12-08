@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Python] coerce_timestamps + allow_truncated_timestamps does not work as expected with nanoseconds ",
+        "body": "***Note**: This issue was originally created as [ARROW-7747](https://issues.apache.org/jira/browse/ARROW-7747). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi,\r\n\r\nI've encountered what seems to me a bug using\r\n```\n\r\npyarrow==0.15.1\r\npandas==0.25.3\r\nnumpy==1.18.1\n```\r\n\u00a0\r\nI'm trying to write a table containing nanosecond timestamps to a millisecond schema. Here is a minimal example:\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nimport pandas as pd\r\nimport numpy as np\r\n\r\npyarrow_schema = pa.schema([pa.field(\"datetime_ms\", pa.timestamp(\"ms\"))])\r\n\r\ntimestamp = np.datetime64(\"2019-06-21T22:13:02.901123\")\r\n\r\nd = {\"datetime_ms\": timestamp}\r\n\r\ndf = pd.DataFrame(d, index=range(1))\r\n\r\ntable = pa.Table.from_pandas(df, schema=pyarrow_schema)\r\n\r\npq.write_table(\r\n    table,\r\n    \"test.parquet\",\r\n    coerce_timestamps=\"ms\",\r\n    allow_truncated_timestamps=True,\r\n)\r\n```\r\n\r\n```\n\r\npyarrow.lib.ArrowInvalid: ('Casting from timestamp[ns] to timestamp[ms] would lose data: 1561155182901123000', 'Conversion failed for column datetime_ms with type datetime64[ns]')\n```\r\n\r\nFrom my understanding, the expected behaviour shoud be arrow allowing the conversion anyway, even if loosing some data.\r\n\r\nRelated discussions:\r\n- https://github.com/apache/arrow/issues/1920\n- https://issues.apache.org/jira/browse/ARROW-2555\n  \n  This test https://github.com/apache/arrow/blob/f70dbd1dbdb51a47e6a8a8aac8efd40ccf4d44f2/python/pyarrow/tests/test_parquet.py#L846 does not explicitely check for nanosecond timestamps.\n  \n  To be honest I've not checked at the code yet, so let me know whether I missed something. I'd be happy to fix it if it's really a bug.",
+        "created_at": "2020-02-03T08:13:20.000Z",
+        "updated_at": "2020-02-05T14:18:47.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-02-05T14:18:46.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-02-04T11:06:46.676Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7747?focusedCommentId=17029759) by Joris Van den Bossche (jorisvandenbossche):*\n`[~theophile]` The error is thrown by the `pa.Table.from_pandas(df, schema=pyarrow_schema)` call (so not the parquet writing where you specify `coerce_timestamps=\"ms\", allow_truncated_timestamps=True`).\r\n\r\nFor that `from_pandas` call, the error is expected I think, although we currently don't have an option to allow this (to indicate you are OK with losing data).\r\n\r\nIf you leave out the expected schema (and thus convert to an Arrow table with nanosecond precision timestamps), the next step of writing ms resolution to parquet works as expected:\r\n\r\n```Java\n\r\n>>> table = pa.Table.from_pandas(df) \r\n>>> table                                                                                                                                                                                                     \r\npyarrow.Table\r\ndatetime_ms: timestamp[ns]\r\nmetadata\r\n--------\r\n{b'pandas': ...\r\n\r\n>>> pq.write_table( \r\n...     table, \r\n...     \"test.parquet\", \r\n...     coerce_timestamps=\"ms\", \r\n...     allow_truncated_timestamps=True, \r\n... )  \r\n>>> pq.read_table(\"test.parquet\").to_pandas() \r\n              datetime_ms\r\n0 2019-06-21 22:13:02.901\r\n\r\n```"
+        },
+        {
+            "created_at": "2020-02-04T11:09:19.157Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7747?focusedCommentId=17029761) by Joris Van den Bossche (jorisvandenbossche):*\n> For that from_pandas call, the error is expected I think, although we currently don't have an option to allow this (to indicate you are OK with losing data).\u00a0\r\n\r\nActually, I am mistaken here, and we already have a `safe` option here:\r\n\r\n```python\n\r\n>>> table = pa.Table.from_pandas(df, schema=pyarrow_schema, safe=False) \r\n>>> table                                                                                                                                                                                                     \r\npyarrow.Table\r\ndatetime_ms: timestamp[ms]\r\nmetadata\r\n--------\r\n{b'pandas': ...\r\n\r\n>>> table.to_pandas()  \r\n              datetime_ms\r\n0 2019-06-21 22:13:02.901\r\n```"
+        },
+        {
+            "created_at": "2020-02-05T14:18:30.337Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7747?focusedCommentId=17030690) by Joris Van den Bossche (jorisvandenbossche):*\n`[~theophile]` given my explanation above, I don't think there is an actionable item, so closing this. But if something is not clear, or if you think I am mistaken, don't hesitate to further comment!"
+        }
+    ]
+}

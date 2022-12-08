@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[C++] Make head optional in s3fs",
+        "body": "***Note**: This issue was originally created as [ARROW-8950](https://issues.apache.org/jira/browse/ARROW-8950). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen you open an input file with the f3fs, it issues a head request to S3 to check if the file is present/authorized and get the size (https://github.com/apache/arrow/blob/f16f76ab7693ae085e82f4269a0a0bc23770bef9/cpp/src/arrow/filesystem/s3fs.cc#L407).\r\n\r\nThis call comes with a non-neglictable cost:\r\n \\* adds latency\r\n \\* priced the same as a GET request by AWS\r\n\r\nI fail to see usecases where this call is really crucial:\r\n \\* if the file is not present/authorized, failing at first read seems to have mostly the same effect as failing on opening. I agree that it is kind of \"usual\" for an _open_ call to fail eagerly, so to avoid surprises we could add a flag indicating if we don't need to fail when running _OpenInputFile_ on an inaccessible file.\r\n \\* getting the size can be done on the first read, and could be mostly avoided on caller side if the filesystem api provided read-from-end capabilities (compatible with fs reads using _ios::end_ and on http filesystems with _bytes=-xxx_). Worst case scenario the call to _head_ could be done lazily when calling _getSize()._\r\n\r\nI agree that it makes things a bit more complex, and I understand that you would not want to complexify the generic fs api because of blob storage behavior. But obviously there are workloads where this has a significant impact.",
+        "created_at": "2020-05-26T17:13:45.000Z",
+        "updated_at": "2020-06-29T04:16:31.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-06-29T04:16:18.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-06-02T09:18:36.658Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8950?focusedCommentId=17123554) by R\u00e9mi Dettai (rdettai):*\n`[~apitrou]` Do you have any idea on how to address this (or if it should be addressed at all ;)) ?"
+        },
+        {
+            "created_at": "2020-06-02T16:28:37.175Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8950?focusedCommentId=17124012) by Antoine Pitrou (apitrou):*\nWould it be ok to be able to disable it in `S3Options`?"
+        },
+        {
+            "created_at": "2020-06-02T17:07:18.267Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8950?focusedCommentId=17124066) by R\u00e9mi Dettai (rdettai):*\nYou need more than this. If you don't have a \"read from end\" type function in the filesystem API, you will still need to get the size first in order to read the end of the file. The primary usecase for this is of course parquet, where you need to read the footer first.\r\n\r\nA workaround if we don't want to extend the generic filesystem API would be to provide the file size manually when opening the file, this way you could use file sizes you got in batches with list commands or from some kind of catalog."
+        },
+        {
+            "created_at": "2020-06-03T19:28:35.487Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8950?focusedCommentId=17125255) by Antoine Pitrou (apitrou):*\nThanks for the explanation. Then I think we may add an `OpenInputFile` overload that takes a `FileInfo` argument, so that the user can pass the file size (it will be trusted to be correct)."
+        },
+        {
+            "created_at": "2020-06-29T04:16:18.861Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8950?focusedCommentId=17147533) by Wes McKinney (wesm):*\nIssue resolved by pull request 7547\n<https://github.com/apache/arrow/pull/7547>"
+        }
+    ]
+}

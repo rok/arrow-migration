@@ -1,0 +1,54 @@
+{
+    "issue": {
+        "title": "[R] [C++] sorted partition keys can cause issues",
+        "body": "***Note**: This issue was originally created as [ARROW-13169](https://issues.apache.org/jira/browse/ARROW-13169). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n_This is a regression after 4.0.1 so is not a live-bug in a release version of arrow_\r\n\r\nWhen a partition key happens to be ordered, on large (>=1e7 rows), the partitions are not being written faithfully. \r\n\r\nIf the partition isn't ordered or the dataset is smaller than 1e7 the partitions appear to be correct (though we should check that the values in other rows do still match when we test this).\r\n\r\n```r\n\r\nlibrary(arrow)\r\n\r\ndir <- \"./1M_records\"\r\nn_row <- 1e6\r\ndf <- data.frame(foo = runif(n_row))\r\ndf$let <- sort(sample(letters, n_row, replace = TRUE))\r\nwrite_dataset(df, dir, partitioning = \"let\")\r\n\r\n# this should be 26, corresponding to the number of letters (and is)\r\nlength(list.files(dir))\r\n#> [1] 26\r\n\r\n\r\n\r\ndir <- \"./10M_records_not_sorted\"\r\nn_row <- 1e7\r\ndf <- data.frame(foo = runif(n_row))\r\ndf$let <- sample(letters, n_row, replace = TRUE)\r\nwrite_dataset(df, dir, partitioning = \"let\")\r\n\r\n# this should be 26, corresponding to the number of letters (and is!)\r\nlength(list.files(dir))\r\n#> [1] 26\r\n\r\n\r\ndir <- \"./10M_records\"\r\nn_row <- 1e7\r\ndf <- data.frame(foo = runif(n_row))\r\ndf$let <- sort(sample(letters, n_row, replace = TRUE))\r\nwrite_dataset(df, dir, partitioning = \"let\")\r\n\r\n# this should be 26, corresponding to the number of letters (but is not)\r\nlength(list.files(dir))\r\n#> [1] 3\r\n\r\n# the letters that were retained:\r\nlist.files(dir)\r\n#> [1] \"let=a\" \"let=b\" \"let=c\"\r\n\r\n# Oddly(?) all of the rows are here, they have just been reshuffled into one of the letters retained\r\nnrow(open_dataset(dir))\r\n#> [1] 10000000\r\n```\r\n\r\n\r\n\r\n\r\n# Original report for context:\r\nA bit of context: the data for this  example contains all the world exports in 1995, it contain 212 countries, but when saving it as parquet, only 66 countries are actually recorded. The verification I included was to check if the USA (one of the best in the reporter quality index) was present in the data.\r\n\r\n```r\n\r\nlibrary(arrow)\r\n#> \r\n#> Attaching package: 'arrow'\r\n#> The following object is masked from 'package:utils':\r\n#> \r\n#>     timestamp\r\nlibrary(dplyr)\r\n#> \r\n#> Attaching package: 'dplyr'\r\n#> The following objects are masked from 'package:stats':\r\n#> \r\n#>     filter, lag\r\n#> The following objects are masked from 'package:base':\r\n#> \r\n#>     intersect, setdiff, setequal, union\r\n\r\nurl <- \"https://ams3.digitaloceanspaces.com/uncomtrade/baci_hs92_1995.rds\"\r\nrds <- \"baci_hs92_1995.rds\"\r\n\r\nif (!file.exists(rds)) try(download.file(url, rds))\r\n\r\nd <- readRDS(\"baci_hs92_1995.rds\")\r\n\r\nrds_has_usa <- any(grepl(\"usa\", unique(d$reporter_iso)))\r\nrds_has_usa\r\n#> [1] TRUE\r\n\r\ndir <- \"parquet/baci_hs92\"\r\n\r\nd %>% \r\n  group_by(year, reporter_iso) %>% \r\n  write_dataset(dir, hive_style = F)\r\n\r\nparquet_has_usa <- any(grepl(\"usa\", list.files(paste0(dir, \"/1995\"))))\r\nparquet_has_usa\r\n#> [1] FALSE\r\n```\r\n\r\n_Created on 2021-06-24 by the reprex package (https://reprex.tidyverse.org) (v2.0.0)_\r\n",
+        "created_at": "2021-06-24T17:38:33.000Z",
+        "updated_at": "2021-07-12T08:36:06.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-07-09T15:37:43.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-24T18:04:46.511Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13169?focusedCommentId=17369021) by Jonathan Keane (jonkeane):*\nWhat version of Arrow are you using to test this? I'm not seeing this problem with the release 4.0.1 (though I do see it with the most recent nightly)"
+        },
+        {
+            "created_at": "2021-06-24T18:20:34.647Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13169?focusedCommentId=17369029) by Mauricio 'Pach\u00e1' Vargas Sep\u00falveda (pachamaltese):*\nsorry, I'm using 4.0.1.9000 sync'ed from main repo and re-built last night"
+        },
+        {
+            "created_at": "2021-06-24T18:45:28.660Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13169?focusedCommentId=17369036) by Mauricio 'Pach\u00e1' Vargas Sep\u00falveda (pachamaltese):*\nthanks, Jon.\r\nJust to confirm that 4.0.1 from CRAN works ok, the most recent night doesn't work weel at this task\r\n\r\nHere's USA (And many other countries) with 4.0.1\r\n ![screenshot-1.png](https://issues.apache.org/jira/secure/attachment/13027257/screenshot-1.png) \r\n\r\nI installed with\r\n```Java\n\r\n~$ export LIBARROW_MINIMAL=false\r\n~$ export LIBARROW_BINARY=true\r\nsource(\"https://raw.githubusercontent.com/apache/arrow/master/r/R/install-arrow.R\")\r\ninstall_arrow()\r\n```"
+        },
+        {
+            "created_at": "2021-07-01T23:54:35.979Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13169?focusedCommentId=17373105) by Weston Pace (westonpace):*\nLooks like this is a bug in the dataset partitioning / grouper.\u00a0 The grouper appears to be persisting some kind of static state between instantiations.\u00a0 I can't find anything though.\u00a0 I tried a couple of unit tests to reproduce but haven't found what the trick is.\u00a0 I an only seem to trigger it running the above R script.\u00a0 If I comment out GrouperFastImpl so it always uses GrouperImpl then everything works correctly.\u00a0 `[~bkietz]` `[~michalno]` can one of you take a look?\u00a0 If not I can keep digging but I figured I'd check if you had any ideas first.\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n```java\n\r\n\u00a0\n```\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-07-01T23:58:47.982Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13169?focusedCommentId=17373106) by Mauricio 'Pach\u00e1' Vargas Sep\u00falveda (pachamaltese):*\nI've sent you read/write access to COMTRADE data for testing."
+        },
+        {
+            "created_at": "2021-07-07T16:53:59.467Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13169?focusedCommentId=17376697) by Nicola Crane (thisisnic):*\nFurther to Weston's comment above, I've looked into this a little, and have added an R test in this PR which fails while the issue is still there but passes when it's fixed: <https://github.com/apache/arrow/pull/10675>\r\n\r\nPrior to commit c697a41ab9c (in PR: https://github.com/apache/arrow/pull/9768 ) [,](https://github.com/apache/arrow/pull/9768),) the test passes"
+        },
+        {
+            "created_at": "2021-07-07T19:45:28.108Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13169?focusedCommentId=17376807) by Nicola Crane (thisisnic):*\nI have a feeling maaaybe it could be to do with the use of `util::BitUtil::bits_to_indexes` in `arrow::compute::KeyCompare::CompareRows` which is called within\u00a0GrouperFastImpl, as there's a similar function called `util::BitUtil::bits_split_indexes` which has a comment of \"// Input and output indexes may be pointing to the same data (in-place filtering).\" which implies that there is a need for different function in this case.\u00a0 That could be completely wrong though."
+        },
+        {
+            "created_at": "2021-07-08T13:00:39.776Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13169?focusedCommentId=17377373) by Joris Van den Bossche (jorisvandenbossche):*\ncc `[~bkietz]` `[~michalno]`"
+        },
+        {
+            "created_at": "2021-07-09T15:37:43.898Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13169?focusedCommentId=17378133) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 10688\n<https://github.com/apache/arrow/pull/10688>"
+        }
+    ]
+}

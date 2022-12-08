@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] StructArray  timestamp type with timezone to_pandas convert error",
+        "body": "***Note**: This issue was originally created as [ARROW-7723](https://issues.apache.org/jira/browse/ARROW-7723). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen a `StructArray` has a child that is a timestamp with a timezone, the `to_pandas` conversion outputs an int64 instead of a timestamp\r\n```java\n\r\nIn [1]: import pyarrow as pa \r\n   ...: import pandas as pd \r\n   ...: arr = pa.array([{'start': pd.Timestamp.now(), 'end': pd.Timestamp.now()}]) \r\n   ...:                                                                                                                      \r\n\r\nIn [2]: arr.to_pandas()                                                                                   \r\nOut[2]: \r\n0    {'end': 2020-01-29 11:38:02.792681, 'start': 2...\r\ndtype: object\r\n\r\nIn [3]: ts = pd.Timestamp.now()                                                                                              \r\n\r\nIn [4]: arr2 = pa.array([ts], type=pa.timestamp('us', tz='America/New_York'))                                                \r\n\r\nIn [5]: arr2.to_pandas()                                                                                  \r\nOut[5]: \r\n0   2020-01-29 06:38:47.848944-05:00\r\ndtype: datetime64[ns, America/New_York]\r\n\r\nIn [6]: arr = pa.StructArray.from_arrays([arr2, arr2], ['start', 'stop'])                                                    \r\n\r\nIn [7]: arr.to_pandas()                                                                                   \r\nOut[7]: \r\n0    {'start': 1580297927848944000, 'stop': 1580297...\r\ndtype: object\r\n\r\n```\r\nfrom https://github.com/apache/arrow/pull/6312",
+        "created_at": "2020-01-29T19:54:58.000Z",
+        "updated_at": "2020-01-30T20:18:36.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-01-30T20:15:44.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-01-29T21:11:59.042Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7723?focusedCommentId=17026233) by Bryan Cutler (bryanc):*\nThis is a regression, so marking as blocker for now."
+        },
+        {
+            "created_at": "2020-01-29T21:44:44.561Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7723?focusedCommentId=17026260) by Wes McKinney (wesm):*\nThis looks like a casualty of the Arrow->pandas code path unification (there previous were separate code paths for DataFrame and Series). Apparently this was not tested so I think we should fix it before releasing"
+        },
+        {
+            "created_at": "2020-01-30T01:11:05.070Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7723?focusedCommentId=17026357) by Wes McKinney (wesm):*\nI'm trying to diagnose where this is failing, or what changed exactly to cause this to fail between 0.15.1 and master. "
+        },
+        {
+            "created_at": "2020-01-30T01:22:56.266Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7723?focusedCommentId=17026367) by Wes McKinney (wesm):*\nAlright, so here is what is going on.\r\n\r\n`PyArray_GETITEM` returns different data types for datetime64 depending on the unit.\r\n\r\n- For resolutions coarser than nanoseconds, datetime.datetime is returned\n- For nanoseconds, PyLong is returned\n  \n  And this makes sense because datetime.datetime cannot faithfully represent nanoseconds (this is why we have `pandas.Timestamp`).\n  \n  In ARROW-3789, while unifying the DataFrame and Series conversion paths, I altered all TZ-aware timestamp data to go through a nanosecond promotion in C++ (since things will end up as datetimetz data type \u2013 nanosecond unit only \u2013 in pandas). But then this triggers the PyLong path during the struct conversion for second through microsecond resolution.\n  \n  Note that in both 0.15.1 and master, the bad behavior that `[~bryanc]` cited is present for nanosecond resolution. \n  \n  I'm going to try to kludge things to preserve the 0.15.1 behavior at least but the inconsistency here seems broken to me and we should probably do something about it after 0.16.0"
+        },
+        {
+            "created_at": "2020-01-30T20:15:44.521Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7723?focusedCommentId=17026975) by Krisztian Szucs (kszucs):*\nIssue resolved by pull request 6322\n<https://github.com/apache/arrow/pull/6322>"
+        },
+        {
+            "created_at": "2020-01-30T20:17:52.291Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7723?focusedCommentId=17026977) by Bryan Cutler (bryanc):*\nThanks for the explaination `[~wesm]` , makes sense"
+        }
+    ]
+}

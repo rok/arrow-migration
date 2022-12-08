@@ -1,0 +1,36 @@
+{
+    "issue": {
+        "title": "[C++] Improve select_k_unstable performance",
+        "body": "***Note**: This issue was originally created as [ARROW-14183](https://issues.apache.org/jira/browse/ARROW-14183). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nRecently\u00a0`sort_indices` was optimized and refactored in ARROW-14165. One of those optimizations could also be applied to `select_k_unstable`'s implementation.",
+        "created_at": "2021-09-30T12:14:04.000Z",
+        "updated_at": "2022-10-04T17:51:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-16T07:36:25.920Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14183?focusedCommentId=17493038) by Alvin Chunga Mamani (alvinj15):*\nThe same optimization used in sort of tables was applied. The old implementation that used a fixed heap of size K was changed by doing a sort by batches, merges and selecting the first K indices, but there is no change in terms of improvement.\r\n\r\n![image-2022-02-16-02-35-42-818.png](https://issues.apache.org/jira/secure/attachment/13040086/image-2022-02-16-02-35-42-818.png)\r\nWhat could be optimized for an implementation for small K using only a merge of the first K elements per block, and by having a K=10 for example at the time of merging, only the first 10 elements of each block would be merged. And for a slightly larger K, apply the normal merge of the entire block until the total size of the block is less than K, then it would proceed to only mege K elements."
+        },
+        {
+            "created_at": "2022-02-21T13:11:37.025Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14183?focusedCommentId=17495517) by Antoine Pitrou (apitrou):*\nSo, first, I think you can assume that K will be small compared to N (for example K=100 vs. N several millions). You probably should confirm this by asking the kernels team.\r\n\r\nMaintaining a K-element max-heap is `O(N log K)`. You're unlikely to beat this by much if you switch to a sorting approach with complexity `O(N log N)`, even if the sort is more carefully optimized than the heap maintenance.\r\n\r\nSo I think you should try to explore this approach:\r\n \\* for each batch, create a K-element max-heap of the top (or bottom) elements in the batch; since the batch is contiguous, you will not be paying the cost of chunked index access\r\n \\* compute the final result from the K-element heaps: naively, we can create a new K-element max-heap and feed it from the existing onces (I don't know if there are better algorithms to exploit the fact that the input is already a bunch of max-heaps; but that's a second order concern IMHO)"
+        },
+        {
+            "created_at": "2022-03-21T19:36:29.674Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14183?focusedCommentId=17510085) by Alvin Chunga Mamani (alvinj15):*\nIn [#12582](https://github.com/apache/arrow/pull/12582) was implemented a RadixSort per batches(taking advantage of contiguous elements in memory as same of table-sort) + Merge K first Elements, and the results seems to be equal to the current implementation of use a Heap (just a ~5% more fast in some cases). With this implementation the RadixSort takes most of the time because it sort in batches the whole elements, instead of that I can implement just a Merge K first elements and for small values of K against thousands/millions of elements, but maybe it will be same complexity of the Heap, because it will sort N logK until K < length(current_block)\r\nCC: `[~lidavidm]` `[~apitrou]` \u00a0"
+        },
+        {
+            "created_at": "2022-03-23T14:56:11.882Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14183?focusedCommentId=17511299) by Antoine Pitrou (apitrou):*\nWell, K should most of the time be a lot smaller than the block length (if K is typically 10 or 100, for example).\r\n\r\nAnother idea for the RecordBatch K-top (the first step of a Table K-top, before the K-merge) is to avoid the cost of multi-column compares by doing a sort of Radix Heap.\r\n\r\nDo a (K+1)-top on the current (first) batch column. There are two possible outcomes:\r\n \\* if top[K-1] != top[K], then you don't need to handle other columns since there is no tie\r\n \\* if top[K-1] == top[K], we need to recurse into the next column by:\r\n1) finding the first J such that top[J]==top[K]\r\n2) finding all indices in the current column such that the value is equal to top[K]\r\n3) running a (K-J+1)-top on the next batch column with the row indices found in step 2) above"
+        },
+        {
+            "created_at": "2022-10-04T17:51:24.908Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14183?focusedCommentId=17612720) by Apache Arrow JIRA Bot (arrowjira):*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned per [project policy](https://arrow.apache.org/docs/dev/developers/bug_reports.html#issue-assignment). Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

@@ -1,0 +1,73 @@
+{
+    "issue": {
+        "title": "[C++] Seg. fault on make_shared<PoolBuffer>",
+        "body": "***Note**: This issue was originally created as [ARROW-2189](https://issues.apache.org/jira/browse/ARROW-2189). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen creating a `PoolBuffer`, I get a `Segmentation fault` when I use `make_shared`. If I use the `shared_ptr` constructor of `reset`, it works fine. Here is an example:\r\n```java\n\r\n#include <arrow/builder.h>\r\n\r\nint main()\r\n{\r\n    arrow::MemoryPool* pool = arrow::default_memory_pool();\r\n\r\n    arrow::Int64Builder builder(pool);\r\n    builder.Append(1);\r\n\r\n    // #1\r\n    // std::shared_ptr<arrow::PoolBuffer> buffer(new arrow::PoolBuffer(pool));\r\n    // #2\r\n    // std::shared_ptr<arrow::PoolBuffer> buffer;\r\n    // buffer.reset(new arrow::PoolBuffer(pool));\r\n    // #3\r\n    auto buffer = std::make_shared<arrow::PoolBuffer>(pool);\r\n}\r\n```\r\n```java\n\r\n> g++-4.9 -std=c++11 -larrow foo.cpp && ./a.out\r\nSegmentation fault (core dumped)\r\n```\r\nThe example works fine with `#1` or `#2` options. It also works if the builder is commented out.",
+        "created_at": "2018-02-20T03:53:22.000Z",
+        "updated_at": "2018-07-25T17:50:57.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-07-25T17:50:57.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-02-20T04:19:40.319Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2189?focusedCommentId=16369711) by Phillip Cloud (cpcloud):*\nCan you run `gdb ./a.out` and paste the stack trace here? I can't reproduce this."
+        },
+        {
+            "created_at": "2018-02-20T04:21:03.335Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2189?focusedCommentId=16369712) by Phillip Cloud (cpcloud):*\nOr, do you have a link to the Dockerfile or the image up in a docker registry?"
+        },
+        {
+            "created_at": "2018-02-20T05:01:28.365Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2189?focusedCommentId=16369721) by Rares Vernica (rvernica):*\nDoes this help?\r\n```java\n\r\n> g++-4.9 -ggdb -std=c++11 -larrow foo.cpp     \r\n> strace ./a.out \r\nstrace: test_ptrace_setoptions_for_all: PTRACE_TRACEME doesn't work: Operation not permitted\r\nstrace: test_ptrace_setoptions_for_all: unexpected exit status 1\r\n> gdb ./a.out \r\nGNU gdb (Debian 7.7.1+dfsg-5) 7.7.1\r\nCopyright (C) 2014 Free Software Foundation, Inc.\r\nLicense GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\r\nThis is free software: you are free to change and redistribute it.\r\nThere is NO WARRANTY, to the extent permitted by law.  Type \"show copying\"\r\nand \"show warranty\" for details.\r\nThis GDB was configured as \"x86_64-linux-gnu\".\r\nType \"show configuration\" for configuration details.\r\nFor bug reporting instructions, please see:\r\n<http://www.gnu.org/software/gdb/bugs/>.\r\nFind the GDB manual and other documentation resources online at:\r\n<http://www.gnu.org/software/gdb/documentation/>.\r\nFor help, type \"help\".\r\nType \"apropos word\" to search for commands related to \"word\"...\r\nReading symbols from ./a.out...done.\r\n(gdb) run\r\nStarting program: /a.out \r\nwarning: Error disabling address space randomization: Operation not permitted\r\nDuring startup program terminated with signal SIGSEGV, Segmentation fault.\r\n(gdb) strace \r\nNo default breakpoint address now.\r\n(gdb) backtrace \r\nNo stack.\r\n```\r\nOtherwise I can get you a Dockerfile.\r\n\r\nI see a bunch of SELinux errors on the host, which is a Fedora 27, every time this crushes."
+        },
+        {
+            "created_at": "2018-02-20T05:25:39.788Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2189?focusedCommentId=16369733) by Wes McKinney (wesm):*\nSeems like this could be a mixed C++ standard library toolchain issue \u2013 `[~kou]` do you know what the policy is for using Trusty packages on Debian Jessie platform? "
+        },
+        {
+            "created_at": "2018-02-20T05:46:11.531Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2189?focusedCommentId=16369743) by Kouhei Sutou (kou):*\nYou can't use Ubuntu Trusty packages on Debian Jessie.\r\n\r\nCan you try to use Debian Stretch or Ubuntu Trusty? They have packages for their platform."
+        },
+        {
+            "created_at": "2018-02-21T05:53:43.042Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2189?focusedCommentId=16370985) by Rares Vernica (rvernica):*\nIt works fine with Debian Stretch or Ubuntu Trusty. It seems to be a package/toolchain mixing issues. Sorry for the trouble."
+        },
+        {
+            "created_at": "2018-02-26T02:30:24.807Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2189?focusedCommentId=16376340) by Rares Vernica (rvernica):*\nIt works fine in Ubuntu Trusty if I use the default g++ compiler to compile this example.\r\n\r\nOn the other hand, I still get the Segmentation Fault if I use the g++-4.9 compiler from ppa:ubuntu-toolchain-r/test. \r\n\r\nIs it because arrow is compiled with g++ and I compile this example with g++-4.9?"
+        },
+        {
+            "created_at": "2018-02-26T03:21:40.615Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2189?focusedCommentId=16376363) by Wes McKinney (wesm):*\nLet's set up a Dockerfile so we can try to reproduce"
+        },
+        {
+            "created_at": "2018-02-26T08:11:53.946Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2189?focusedCommentId=16376504) by Rares Vernica (rvernica):*\nSee the attached `Dokerfile` and `foo.cpp`. You should be able to reproduce with:\r\n```java\n\r\n> docker build .\r\n...\r\nStep 18/18 : RUN /a.out\r\n---> Running in de9d8736cf20\r\nSegmentation fault (core dumped)\r\nThe command '/bin/sh -c /a.out' returned a non-zero code: 139\n```"
+        },
+        {
+            "created_at": "2018-03-31T21:38:56.450Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2189?focusedCommentId=16421483) by Rares Vernica (rvernica):*\n`[~kou]` could this issue be caused by the differences in the `rules` file used to build Ubuntu Trusty packages vs. other Debian packages?\r\n```java\n\r\n> diff debian/rules debian.ubuntu-trusty/rules\r\n12,16c12\r\n< \tdh $@ --with gir,autoreconf\r\n< \r\n< override_dh_autoreconf:\r\n< \tdh_autoreconf \\\r\n< \t  --sourcedirectory=c_glib\r\n---\r\n> \tdh $@ --with gir\r\n25,30c21\r\n< \t  -DARROW_PYTHON=ON \\\r\n< \t  -DARROW_BOOST_USE_SHARED=ON \\\r\n< \t  -DARROW_ORC=ON \\\r\n< \t  -DPythonInterp_FIND_VERSION=ON \\\r\n< \t  -DPythonInterp_FIND_VERSION_MAJOR=3 \\\r\n< \t  -DARROW_GPU=ON\r\n---\r\n> \t  -DARROW_ORC=ON\r\n56a48,49\r\n> \tmv debian/tmp/usr/lib/*/girepository-1.0/\t\\\r\n> \t  debian/tmp/usr/lib/\r\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-04-01T00:24:42.449Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2189?focusedCommentId=16421531) by Rares Vernica (rvernica):*\nI did some tests and it does not look like these differences help with the issue.\r\n\r\nOn the other hand, I compiled Arrow using `g++-4.9` and the issue is gone."
+        },
+        {
+            "created_at": "2018-04-02T00:21:56.873Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2189?focusedCommentId=16421857) by Kouhei Sutou (kou):*\nThanks. I confirmed it.\r\n\r\nI also confirmed the followings:\r\n\r\n\u00a0 \\* Apache Arrow C++ compiled with g+-4.8 + -DCMAKE_BUILD_TYPE=Debug and foo.cpp compiled with g+-4.9 work well\r\n\r\n\u00a0 \\* Apache Arrow C++ compiled with g+-4.8 + -DCMAKE_BUILD_TYPE=Release and foo.cpp compiled with g+-4.9 don't work (crashed)\r\n\r\n\u00a0Backtrace:\r\n\r\n```\n\r\nProgram received signal SIGSEGV, Segmentation fault.\r\n0x0000000000000000 in ?? ()\r\n(gdb) bt full\r\n#0  0x0000000000000000 in ?? ()\r\nNo symbol table info available.\r\n#1  0x00007ffff7941490 in arrow::ArrayBuilder::Init (\r\n    this=this@entry=0x7fffffffe640, capacity=capacity@entry=32)\r\n    at /arrow/cpp/src/arrow/builder.cc:67\r\n        _s = {state_ = 0x20}\r\n        to_alloc = 4\r\n        byte_capacity = <optimized out>\r\n#2  0x00007ffff79584e0 in arrow::PrimitiveBuilder<arrow::Int64Type>::Init (\r\n    this=0x7fffffffe640, capacity=32) at /arrow/cpp/src/arrow/builder.cc:233\r\n        _s = {state_ = 0x20}\r\n        nbytes = <optimized out>\r\n#3  0x00007ffff7948b58 in arrow::PrimitiveBuilder<arrow::Int64Type>::Resize (\r\n    this=0x7fffffffe640, capacity=32) at /arrow/cpp/src/arrow/builder.cc:253\r\n        _s = {state_ = 0x1}\r\n#4  0x00007ffff793e7ab in arrow::ArrayBuilder::Reserve (\r\n    this=this@entry=0x7fffffffe640, elements=elements@entry=1)\r\n    at /arrow/cpp/src/arrow/builder.cc:113\r\nNo locals.\r\n#5  0x000000000040168f in Append (val=1, this=0x7fffffffe640)\r\n    at /tmp/local-4.8/include/arrow/builder.h:276\r\n        _s = {state_ = 0x616848}\r\n#6  main () at foo.cpp:10\r\n        pool = \r\n    0x7ffff7dd91a0 <arrow::default_memory_pool()::default_memory_pool_>\r\n        builder = {<arrow::PrimitiveBuilder<arrow::Int64Type>> = {<arrow::ArrayBuilder> = {\r\n              _vptr.ArrayBuilder = 0x4024f0 <vtable for arrow::NumericBuilder<arrow::Int64Type>+16>, type_ = std::shared_ptr (count 2, weak 0) 0x616848, \r\n              pool_ = 0x7ffff7dd91a0 <arrow::default_memory_pool()::default_memory_pool_>, null_bitmap_ = std::shared_ptr (count 1, weak 0) 0x616890, \r\n              null_count_ = 0, null_bitmap_data_ = 0x0, length_ = 0, \r\n              capacity_ = 0, children_ = std::vector of length 0, capacity 0}, \r\n            data_ = std::shared_ptr (empty) 0x0, \r\n            raw_data_ = 0x0}, <No data fields>}\r\n        buffer = <optimized out>\r\n(gdb) f 1\r\n#1  0x00007ffff7941490 in arrow::ArrayBuilder::Init (\r\n    this=this@entry=0x7fffffffe640, capacity=capacity@entry=32)\r\n    at /arrow/cpp/src/arrow/builder.cc:67\r\n67\t  RETURN_NOT_OK(null_bitmap_->Resize(to_alloc));\r\n(gdb) list\r\n62\t}\r\n63\t\r\n64\tStatus ArrayBuilder::Init(int64_t capacity) {\r\n65\t  int64_t to_alloc = BitUtil::CeilByte(capacity) / 8;\r\n66\t  null_bitmap_ = std::make_shared<PoolBuffer>(pool_);\r\n67\t  RETURN_NOT_OK(null_bitmap_->Resize(to_alloc));\r\n68\t  // Buffers might allocate more then necessary to satisfy padding requirements\r\n69\t  const int64_t byte_capacity = null_bitmap_->capacity();\r\n70\t  capacity_ = capacity;\r\n71\t  null_bitmap_data_ = null_bitmap_->mutable_data();\r\n(gdb) p to_alloc\r\n$3 = 4\r\n```\r\n\r\n\u00a0I don't know why...\r\n\r\nBTW, why do you want to use g++-4.9?"
+        },
+        {
+            "created_at": "2018-04-02T00:40:49.911Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2189?focusedCommentId=16421861) by Rares Vernica (rvernica):*\nI'm linking Arrow to a \"plugin\" which I load in SciDB. SciDB is complied with g++-4.9.\r\n\r\nI'm also trying to use Ubuntu Trusty packages on Debian Jessie (I know this is not advised) but the problem disappears if I compile Arrow with g++ 4.9."
+        },
+        {
+            "created_at": "2018-07-25T17:50:57.749Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2189?focusedCommentId=16556050) by Wes McKinney (wesm):*\nPoolBuffer is no longer a public API per ARROW-2893. Use the `arrow::Allocate*` APIs instead"
+        }
+    ]
+}

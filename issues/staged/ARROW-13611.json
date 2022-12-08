@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[C++] Scanning datasets does not enforce back pressure",
+        "body": "***Note**: This issue was originally created as [ARROW-13611](https://issues.apache.org/jira/browse/ARROW-13611). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI have a simple test case where I scan the batches of a 4GB dataset and print out the currently used memory:\r\n\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.dataset as ds\r\n\r\ndataset = ds.dataset('/home/pace/dev/data/dataset/csv/5_big', format='csv')\r\nnum_rows = 0\r\nfor batch in dataset.to_batches():\r\n    print(pa.total_allocated_bytes())\r\n    num_rows += batch.num_rows\r\n\r\nprint(num_rows)\r\n```\r\n\r\nIn pyarrow 3.0.0 this consumes just over 5MB.  In pyarrow 4.0.0 and 5.0.0 this consumes multiple GB of RAM.",
+        "created_at": "2021-08-12T03:34:53.000Z",
+        "updated_at": "2022-01-18T19:00:19.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-10-12T19:12:19.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-12T03:35:48.095Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13611?focusedCommentId=17397792) by Weston Pace (westonpace):*\nIt appears to make no difference if `use_async` is True or False."
+        },
+        {
+            "created_at": "2021-08-12T21:42:50.354Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13611?focusedCommentId=17398306) by Weston Pace (westonpace):*\nAdditional information.\r\n\r\nThe synchronous scanner is properly applying back pressure when the source has multiple scan tasks (e.g. parquet).  However it is not applying back pressure when sources have a single scan task (e.g. CSV / IPC).  The root cause is here: https://github.com/apache/arrow/blob/f959141ece4d660bce5f7fa545befc0116a7db79/cpp/src/arrow/dataset/scanner.cc#L207\r\n\r\nThe asynchronous scanner is not applying back pressure because it is now connected to an ExecPlan and ExecPlan does not have back pressure implemented yet.\r\n\r\nI'm not sure how much effort we want to put into fixing the synchronous scanner given that it is slated for removal."
+        },
+        {
+            "created_at": "2021-09-30T22:58:10.046Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13611?focusedCommentId=17423038) by Carl Boettiger (cboettig):*\nAny news on this?\u00a0 I believe this bug is still the cause of the system crashes I see when trying to access large parquet files in arrow, e.g. in R:\r\n\r\n\r\n\r\n```r\n\r\nlibrary(arrow)\r\nlibrary(dplyr)\r\nfile <- \"part-0.parquet\"download.file(\"https://minio.cirrus.carlboettiger.info/shared-data/birddb/parquet/part-0.parquet\", file)\r\nds <- open_dataset(file, format = \"parquet\")\r\nds %>% filter(COUNTRY == \"Mexico\", `COMMON NAME`==\"Wood thrush\") %>% compute()\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-10-01T11:31:12.382Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13611?focusedCommentId=17423248) by Weston Pace (westonpace):*\nThat is actually what I've been working on today (shame on me for not toggling Start Progress).  Right now I have a PR up that adds backpressure back in for unordered scans.  I expect to have a PR ready that will add backpressure for ordered scans soon (I am hoping tomorrow).  If you are interested I can probably get you a test wheel (are you installing with conda or pypi?) sometime next week and would appreciate if you could let me know if it solves your issue."
+        },
+        {
+            "created_at": "2021-10-12T19:12:19.881Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13611?focusedCommentId=17427878) by Weston Pace (westonpace):*\nIssue resolved by pull request 11285\n<https://github.com/apache/arrow/pull/11285>"
+        }
+    ]
+}

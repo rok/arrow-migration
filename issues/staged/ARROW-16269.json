@@ -1,0 +1,16 @@
+{
+    "issue": {
+        "title": "[R][Python] Roundtrip ChunkedArray with ExtensionType drops type",
+        "body": "***Note**: This issue was originally created as [ARROW-16269](https://issues.apache.org/jira/browse/ARROW-16269). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAfter ARROW-15168 we will use ExtensionType in more cases to handle R vector types that we don't natively implement a conversion for; however, roundtripping a Table through results in a Table with a slightly inconsistent state where the type of the ChunkedArray doesn't line up with the type in the schema:\r\n\r\n```R\n\r\n# remotes::install_github(\"apache/arrow/r\")\r\nlibrary(arrow, warn.conflicts = FALSE)\r\npa <- reticulate::import(\"pyarrow\", convert = FALSE)\r\n\r\ntable <- arrow_table(\r\n  ext_col = chunked_array(vctrs_extension_array(1:10))\r\n)\r\ntable$ext_col$type\r\n#> VctrsExtensionType\r\n#> integer(0)\r\ntable$schema$ext_col$type\r\n#> VctrsExtensionType\r\n#> integer(0)\r\n\r\ntable_py <- pa$Table$from_arrays(table$columns, schema = table$schema)\r\ntable_py$column(\"ext_col\")$type\r\n#> int32\r\ntable_py$schema$field(\"ext_col\")$type\r\n#> int32\r\n\r\ncols <- reticulate::py_to_r(table_py$columns)\r\nnames(cols) <- reticulate::py_to_r(table_py$column_names)\r\ntable2 <- Table$create(!!! cols, schema = table$schema)\r\ntable2$ext_col$type\r\n#> Int32\r\n#> int32\r\ntable2$schema$ext_col$type\r\n#> VctrsExtensionType\r\n#> integer(0)\r\n```\r\n\r\nThe workaround in ARROW-15168 is to go through RecordBatchReader, which is probably fine but in some cases might result in ChunkedArray columns getting re-chunked to intersection of all the chunks. This doesn't copy any data, but isn't ideal (we should be able to roundtrip column-wise and avoid any re-chunking).\r\n\r\n```R\n\r\n# remotes::install_github(\"apache/arrow/r#12817\")\r\nlibrary(arrow, warn.conflicts = FALSE)\r\n\r\ntable <- arrow_table(\r\n  c1 = chunked_array(1:2, 3:4, 5:6), \r\n  c2 = chunked_array(1:6)\r\n)\r\n\r\ntable$c1\r\n#> ChunkedArray\r\n#> [\r\n#>   [\r\n#>     1,\r\n#>     2\r\n#>   ],\r\n#>   [\r\n#>     3,\r\n#>     4\r\n#>   ],\r\n#>   [\r\n#>     5,\r\n#>     6\r\n#>   ]\r\n#> ]\r\ntable$c2\r\n#> ChunkedArray\r\n#> [\r\n#>   [\r\n#>     1,\r\n#>     2,\r\n#>     3,\r\n#>     4,\r\n#>     5,\r\n#>     6\r\n#>   ]\r\n#> ]\r\n\r\nrbr <- as_record_batch_reader(table)\r\ntable2 <- rbr$read_table()\r\n\r\ntable2$c1\r\n#> ChunkedArray\r\n#> [\r\n#>   [\r\n#>     1,\r\n#>     2\r\n#>   ],\r\n#>   [\r\n#>     3,\r\n#>     4\r\n#>   ],\r\n#>   [\r\n#>     5,\r\n#>     6\r\n#>   ]\r\n#> ]\r\ntable2$c2\r\n#> ChunkedArray\r\n#> [\r\n#>   [\r\n#>     1,\r\n#>     2\r\n#>   ],\r\n#>   [\r\n#>     3,\r\n#>     4\r\n#>   ],\r\n#>   [\r\n#>     5,\r\n#>     6\r\n#>   ]\r\n#> ]\r\n```\r\n",
+        "created_at": "2022-04-21T15:16:03.000Z",
+        "updated_at": "2022-04-21T15:16:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": []
+}

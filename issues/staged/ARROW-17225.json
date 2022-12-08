@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[C++] Possible memory leak when registering compare functions",
+        "body": "***Note**: This issue was originally created as [ARROW-17225](https://issues.apache.org/jira/browse/ARROW-17225). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFrom the nightly builds:\r\n\r\nhttps://dev.azure.com/ursacomputing/crossbow/_build/results?buildId=30137&view=logs&j=0da5d1d9-276d-5173-c4c4-9d4d4ed14fdb&t=d9b15392-e4ce-5e4c-0c8c-b69645229181&l=25157\r\n\r\n```\n\r\n==5251== 80 bytes in 1 blocks are possibly lost in loss record 250 of 4,082\r\n==5251==    at 0x4849013: operator new(unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)\r\n==5251==    by 0x1053A46D: allocate (new_allocator.h:121)\r\n==5251==    by 0x1053A46D: allocate (alloc_traits.h:460)\r\n==5251==    by 0x1053A46D: _M_allocate (stl_vector.h:346)\r\n==5251==    by 0x1053A46D: _M_range_initialize<const arrow::compute::InputType*> (stl_vector.h:1582)\r\n==5251==    by 0x1053A46D: std::vector<arrow::compute::InputType, std::allocator<arrow::compute::InputType> >::vector(std::initializer_list<arrow::compute::InputType>, std::allocator<arrow::compute::InputType> const&) [clone .constprop.0] (stl_vector.h:629)\r\n==5251==    by 0x1053F84D: arrow::compute::ScalarKernel arrow::compute::internal::(anonymous namespace)::GetCompareKernel<arrow::compute::internal::(anonymous namespace)::Greater>(arrow::compute::InputType, arrow::Type::type, arrow::Status (*)(arrow::compute::KernelContext*, arrow::compute::ExecSpan const&, arrow::compute::ExecResult*)) (scalar_compare.cc:316)\r\n==5251==    by 0x1054479E: void arrow::compute::internal::(anonymous namespace)::AddPrimitiveCompare<arrow::compute::internal::(anonymous namespace)::Greater>(std::shared_ptr<arrow::DataType> const&, arrow::compute::ScalarFunction*) (scalar_compare.cc:334)\r\n==5251==    by 0x10544C0F: std::shared_ptr<arrow::compute::ScalarFunction> arrow::compute::internal::(anonymous namespace)::MakeCompareFunction<arrow::compute::internal::(anonymous namespace)::Greater>(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, arrow::compute::FunctionDoc) (scalar_compare.cc:397)\r\n==5251==    by 0x10548622: arrow::compute::internal::RegisterScalarComparison(arrow::compute::FunctionRegistry*) (scalar_compare.cc:894)\r\n==5251==    by 0x10237663: CreateBuiltInRegistry (registry.cc:279)\r\n==5251==    by 0x10237663: arrow::compute::GetFunctionRegistry() (registry.cc:319)\r\n==5251==    by 0xFAA04DA: compute__GetFunctionNames[abi:cxx11]() (compute.cpp:606)\r\n==5251==    by 0xF9FE4EB: _arrow_compute__GetFunctionNames (arrowExports.cpp:1122)\r\n==5251==    by 0x4953B40: R_doDotCall (dotcode.c:598)\r\n==5251==    by 0x49C2C14: bcEval (eval.c:7682)\r\n==5251==    by 0x499DB93: Rf_eval (eval.c:748)\r\n```\r\n\r\nThe R function call that triggered this was `arrow::list_compute_functions()`, probably when it was called when loading the arrow namespace (i.e., `library(arrow`}).\r\n",
+        "created_at": "2022-07-27T11:23:51.000Z",
+        "updated_at": "2022-08-27T14:41:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-07-29T01:33:15.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-07-27T15:21:54.972Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17225?focusedCommentId=17571998) by Wes McKinney (wesm):*\nThis is really strange, because the line that valgrind is pointing to is extremely innocuous:\r\n\r\n```Java\n\r\nkernel.signature = KernelSignature::Make({ty, ty}, boolean());\r\n```\r\n\r\nGiven the presence of other valgrind issues, it seems like there may be some other memory corruption somewhere"
+        },
+        {
+            "created_at": "2022-07-27T21:02:57.916Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17225?focusedCommentId=17572131) by Dewey Dunnington (paleolimbot):*\nCould it be a C++ standard library mismatch? Some leaks have\r\n\r\n\r\n```\n\r\n==5251==    at 0x4849013: operator new(unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)\r\n==5251==    by 0x101EBC74: allocate (new_allocator.h:121)\r\n```\r\n\r\nBut some have:\r\n\r\n```\n\r\n==5251==    at 0x4849013: operator new(unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)\r\n==5251==    by 0xFA920B1: __gnu_cxx::new_allocator<arrow::compute::ExecNode*>::allocate(unsigned long, void const*) (new_allocator.h:121)\r\n```"
+        },
+        {
+            "created_at": "2022-07-27T21:04:29.194Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17225?focusedCommentId=17572132) by Dewey Dunnington (paleolimbot):*\nThe thing that's leaking every time is an `unsigned long`...that's a very odd thing to have in common."
+        },
+        {
+            "created_at": "2022-07-27T21:52:19.758Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17225?focusedCommentId=17572141) by Wes McKinney (wesm):*\nFor the InputType issue, I think it's leaking a heap-allocated array of two InputTypes \u2014 InputType is 40 bytes (two shared ptrs + and integer enum) \u2014 so 80 bytes. "
+        },
+        {
+            "created_at": "2022-07-29T01:33:00.376Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17225?focusedCommentId=17572707) by Dewey Dunnington (paleolimbot):*\nThis seems to be resolved for now in the latest nightly build: https://dev.azure.com/ursacomputing/crossbow/_build/results?buildId=30204&view=logs&j=0da5d1d9-276d-5173-c4c4-9d4d4ed14fdb"
+        },
+        {
+            "created_at": "2022-08-27T14:41:54.199Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17225?focusedCommentId=17585915) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

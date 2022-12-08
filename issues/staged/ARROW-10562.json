@@ -1,0 +1,21 @@
+{
+    "issue": {
+        "title": "[Rust] Potential UB on unsafe code",
+        "body": "***Note**: This issue was originally created as [ARROW-10562](https://issues.apache.org/jira/browse/ARROW-10562). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe function `set_bits_raw` may be (unsafely) accessing memory out of bounds.\r\n\r\nSpecifically, if I re-write it in a safe manner, it panics (instead of UB)\r\n\r\n```java\n\r\npub fn set_bits_raw(data: &mut [u8], start: usize, end: usize) {\r\n    let start_byte = start >> 3;\r\n    let end_byte = end >> 3;\r\n\r\n    let start_offset = (start & 7) as u8;\r\n    let end_offset = (end & 7) as u8;\r\n\r\n    // All set apart from lowest `start_offset` bits\r\n    let start_mask = !((1 << start_offset) - 1);\r\n    // All clear apart from lowest `end_offset` bits\r\n    let end_mask = (1 << end_offset) - 1;\r\n\r\n    if start_byte == end_byte {\r\n        data[start_byte] |= start_mask & end_mask;\r\n    } else {\r\n        data[start_byte] |= start_mask;\r\n        for i in (start_byte + 1)..end_byte {\r\n            data[i] = 0xFF;\r\n        }\r\n        data[end_byte] |= end_mask;\r\n    }\r\n}\r\n```\r\n\r\nA test that panics (and that represents an operation that we peform in `BufferBuilder` would be)\r\n\r\n```java\n\r\n    #[test]\r\n    fn test_set_bits_raw_from_start() {\r\n        let mut buf = vec![0; 1];\r\n        unsafe {set_bits_raw(buf.as_mut(), 0, 0)};\r\n        // 00000000\r\n        assert_eq!(buf[0], 0);\r\n        unsafe {set_bits_raw(buf.as_mut(), 0, 1)};\r\n        // 00000001\r\n        assert_eq!(buf[0], 1);\r\n        unsafe {set_bits_raw(buf.as_mut(), 0, 2)};\r\n        // 00000001\r\n        assert_eq!(buf[0], 3);\r\n        unsafe {set_bits_raw(buf.as_mut(), 0, 7)};\r\n        // 01111111\r\n        assert_eq!(buf[0], 127);\r\n        unsafe {set_bits_raw(buf.as_mut(), 0, 8)};\r\n        // 11111111\r\n        assert_eq!(buf[0], 255);\r\n    }\r\n```\r\n\r\nI think that it is related to the fact that the documentation states that the bounds are non-inclusive, but the `end` seems to be inclusive.\r\n",
+        "created_at": "2020-11-12T08:00:02.000Z",
+        "updated_at": "2020-11-14T07:28:12.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-11-14T07:28:12.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-11-14T07:28:12.974Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10562?focusedCommentId=17231952) by Jorge Leit\u00e3o (jorgecarleitao):*\nFixed on PR https://github.com/apache/arrow/pull/8645"
+        }
+    ]
+}

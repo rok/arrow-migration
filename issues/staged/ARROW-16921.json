@@ -1,0 +1,52 @@
+{
+    "issue": {
+        "title": "[C#] Add decompression support for Record Batches",
+        "body": "***Note**: This issue was originally created as [ARROW-16921](https://issues.apache.org/jira/browse/ARROW-16921). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nC# Implementation does not support reading batches written in other implementations of Arrow when the compression is specified in IPC Write options.\r\n\r\ne.g. Reading this batch from pyarrow in C# will fail:\r\n\r\npyarrow.ipc.RecordStreamBatchWriter(sink, schema, options=pyarrow,ipcWriteOptions(compression=\"lz4\"))\r\n\r\n\u00a0\r\n\r\nThis is to support decompression (lz4 & zstd) in the C# implementation.",
+        "created_at": "2022-06-28T12:41:36.000Z",
+        "updated_at": "2022-09-15T04:40:35.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C#",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-28T12:47:44.916Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16921?focusedCommentId=17559751) by Rishabh Rana (rishabhrana):*\n`[~eerhardt]` `[~HashidaTKS]` I have a small query for this change. I would be grateful if you can answer/ point me to the correct person to help me with this:\r\n\r\nAre we allowed to add a dependency to Arrow for an lz4 compression/ decompression library as part of this change? If not can you suggest another way forward?"
+        },
+        {
+            "created_at": "2022-06-28T15:24:12.754Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16921?focusedCommentId=17559830) by Eric Erhardt (eerhardt):*\nOne option would be to add an extension point into the reader/writer where a compression library could be \"plugged in\". That way the core Arrow library doesn't need to depend on all the different compression libraries, especially when they might not be used."
+        },
+        {
+            "created_at": "2022-07-06T08:11:13.014Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16921?focusedCommentId=17563043) by Rishabh Rana (rishabhrana):*\n`[~eerhardt]` I looked at the possible options and the least intrusive one I could find is exposing an interface to the user for the library. They must write a \"Decode\" class based on that interface and pass that to the reader. This way users can use any library they want to decode the body.\u00a0\r\n\r\nexample:\r\n```java\n\r\ninterface Decoder {\r\n  public void Lz4Decode(Stream input, Stream output);\r\n  public void ZstdDecode(Stream input, Stream output);\r\n}\r\n\r\n// usage\r\npublic class LZ4Decoder: Decoder {\r\n  public void Lz4Decode(Stream input, Stream output) {\r\n    LZ4Stream.Decode(input).CopyTo(output);\r\n  }\r\n public void Lz4Decode(Stream input, Stream output) {\r\n    throw new NotImplementedException();\r\n  }\r\n}\r\n\r\nArrowStreamReader(stream, new LZ4Decoder());\r\n\r\n```\r\nDoes this sound good to you?\r\n\r\nApologies for confirming again but this would impact quite a bit of code, So I wanted to make sure that I follow the best practices. Thanks!"
+        },
+        {
+            "created_at": "2022-07-21T14:36:44.741Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16921?focusedCommentId=17569459) by Rishabh Rana (rishabhrana):*\n`[~eerhardt]` pinging you for the query above. Do you think this approach looks good?"
+        },
+        {
+            "created_at": "2022-08-25T00:23:44.731Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16921?focusedCommentId=17584512) by Weston Pace (westonpace):*\n`[~rishabhrana]` I think this approach could be slightly improved.  What you have described would require the reader to know ahead of time what compression method was used on the IPC file.  Could you perhaps do something like...\r\n\r\n```\n\r\ninterface Decoder {\r\n  public void Decode(Stream input, Stream output);\r\n}\r\ninterface CompressionProvider {\r\n  public Decoder GetDecoder(Apache.Arrow.Flatbuf.CompressionType compressionType);\r\n}\r\npublic class LZ4Decoder : Decoder {\r\n  public void Lz4Decode(Stream input, Stream output) {\r\n    LZ4Stream.Decode(input).CopyTo(output);\r\n  }\r\n}\r\npublic class LZ4OnlyCompressionProvider : CompressionProvider {\r\n\r\n  private readonly LZ4Decoder _lz4Decoder = new LZ4Decoder();\r\n\r\n  public Decoder GetDecoder(Apache.Arrow.Flatbuf.CompressionType compressionType) {\r\n    if (compressionType == CompressionType.LZ4_FRAME) {\r\n      return _lz4Decoder;\r\n    } else {\r\n      throw new NotImplementedException();\r\n    }\r\n  }\r\n}\r\n\r\nArrowStreamReader(stream, new LZ4OnlyCompressionProvider());\r\n```\r\n\r\nThis opens the door for a future where someone could write a compression provider that supported both LZ4 and gzip (I think that gzip is part of System.IO.Compression and so should be very easy to support)."
+        },
+        {
+            "created_at": "2022-08-25T00:33:47.861Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16921?focusedCommentId=17584514) by Weston Pace (westonpace):*\nAlso, it might be nice if there were a standard compression provider which auto-detected the presence of common compression packages and added support automatically if the package was installed.  That way the user wouldn't have to do anything except make sure they had the appropriate compression package installed.\r\n\r\nFor example, you could use Type.GetType to check if System.IO.Compression.GZipStream exists and, if it does, add a GZipDecoder automatically.  However, this would require reflection to create the GZipStream. Maybe someone can think of a more clever solution."
+        },
+        {
+            "created_at": "2022-09-07T22:04:14.976Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16921?focusedCommentId=17601527) by Adam Reeve (adreeve):*\nHi, we're interested in this feature at G-Research and believe compression support is important for use at scale. We're keen to help out where we can. I agree that it would be nice if there was a way for compression support to be added more automatically, without users needing to implement decoders themselves. An alternative approach that builds on the Type.GetType idea would be to provide wrapper packages for each compression format used in the IPC format (currently only Zstd and LZ4 I believe), and these could provide implementations of an IDecoder interface defined in the main dotnet Arrow library. So instead of getting the LZ4Stream type with Type.GetType for example, we could do something like this to work with the IDecoder interface without needing to use reflection:\r\n```java\n\r\nvar lz4DecoderType = Type.GetType(\"Apache.Arrow.Compression.Lz4.Lz4Decoder, Apache.Arrow.Compression.Lz4\", false);\r\nif (lz4DecoderType != null)\r\n{\r\n\u00a0 \u00a0 if (Activator.CreateInstance(lz4DecoderType) is IDecoder decoder)\r\n\u00a0 \u00a0 {\r\n\u00a0 \u00a0 \u00a0 \u00a0 // use decoder\r\n\u00a0 \u00a0 }\r\n\u00a0 \u00a0 else\r\n\u00a0 \u00a0 {\r\n\u00a0 \u00a0 \u00a0 \u00a0 throw new Exception(\"Failed to cast Lz4Decoder to IDecoder\");\r\n\u00a0 \u00a0 }\r\n}\r\n```\r\nHaving to maintain these extra wrapper packages would be a bit more work from an operational point of view though. It does seem like just adding new dependencies directly to the Arrow package would be a lot more straightforward, and given there are only two compression formats currently used is this really a problem?\r\n\r\nOn a more minor point, would Decompressor be a more precise term to use rather than Decoder? At least in the Parquet world, which I'm a bit more familiar with, encodings are a separate concept to compression formats."
+        },
+        {
+            "created_at": "2022-09-08T02:57:55.628Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16921?focusedCommentId=17601595) by Rishabh Rana (rishabhrana):*\nThanks for your responses `[~adreeve]` and `[~westonpace]`.\r\n\r\nPersonally, I am more inclined towards the approach that Eric and Weston have proposed. To avoid any unnecessary dependencies on Arrow. I will try to put the code together for the issue soon for a more fruitful discussion on the PR itself.\r\n\r\nThanks!"
+        },
+        {
+            "created_at": "2022-09-15T04:40:35.240Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16921?focusedCommentId=17605105) by Adam Reeve (adreeve):*\nHi `[~rishabhrana]`, I wanted to get some proof-of-concept code working using decompression so I've implemented basic Zstd decompression support in my Arrow fork: <https://github.com/apache/arrow/compare/master...adamreeve:arrow:dotnet_decompression>\r\n\r\nIt isn't in a state suitable for a pull request and just adds ZstdNet as a dependency of Apache.Arrow, which required bumping the target framework to netstandard2.0, but it might still be useful to you as a starting point, depending on how far you've already got with this."
+        }
+    ]
+}

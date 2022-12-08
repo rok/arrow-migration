@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[C++][Gandiva] Expression::ToString() doesn't distinguish null and string literal 'null', causing issues with FilterCacheKey",
+        "body": "***Note**: This issue was originally created as [ARROW-11549](https://issues.apache.org/jira/browse/ARROW-11549). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nGandiva's caching mechanism for filters relies on `FilterCacheKey` to return the correct cached filter. `FilterCacheKey`'s hash function factors in the string representation of a given expression, however `Expression::ToString()` doesn't really distinguish null and string literal 'null'. As a result, incorrect filters may be returned from the cache.\r\n\r\nIn our case, we are building a SQL parser on top of gandiva, but, for instance, both of\r\n```java\n\r\nWHERE null = null\r\n```\r\nand\r\n```java\n\r\nWHERE 'null' = 'null'\r\n```\r\nresult in the same string representation of gandiva expression:\r\n```java\n\r\nbool equal((const string) null, (const string) null)\r\n```\r\nA simple test to demonstrate the issue:\r\n```java\n\r\n  auto f = field(\"foo\", utf8());\r\n  auto schema = arrow::schema({f});\r\n  auto node_a = TreeExprBuilder::MakeStringLiteral(\"null\");\r\n  auto node_b = TreeExprBuilder::MakeStringLiteral(\"null\");\r\n  auto equal_func =\r\n      TreeExprBuilder::MakeFunction(\"equal\", {node_a, node_b}, arrow::boolean());\r\n  auto condition = TreeExprBuilder::MakeCondition(equal_func);\r\n  std::shared_ptr<Filter> filter1;\r\n  auto status = Filter::Make(schema, condition, &filter1);\r\n  EXPECT_TRUE(status.ok());\r\n\r\n  auto string_type = std::make_shared<arrow::StringType>();\r\n  node_a = TreeExprBuilder::MakeNull(string_type);\r\n  node_b = TreeExprBuilder::MakeNull(string_type);\r\n  equal_func =\r\n      TreeExprBuilder::MakeFunction(\"equal\", {node_a, node_b}, arrow::boolean());\r\n  condition = TreeExprBuilder::MakeCondition(equal_func);\r\n  std::shared_ptr<Filter> filter2;\r\n  status = Filter::Make(schema, condition, &filter2);\r\n  EXPECT_TRUE(status.ok());\r\n\r\n  EXPECT_TRUE(filter1.get() != filter2.get()); // fails here\r\n```\r\n\u00a0\r\n Making `LiteralToStream` add quotes around the literal seems like a quick-and-dirty fix.",
+        "created_at": "2021-02-08T06:47:55.000Z",
+        "updated_at": "2021-12-07T20:41:20.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++ - Gandiva",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-12-07T08:20:51.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-22T08:08:36.505Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11549?focusedCommentId=17367112) by Kirill Lykov (klykov):*\nLooks like PR is ready to be merged, but stale for unknown reason. I hope that my comment will find the author of PR"
+        },
+        {
+            "created_at": "2021-12-07T08:20:51.830Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11549?focusedCommentId=17454457) by Pindikura Ravindra (pravindra):*\nIssue resolved by pull request 11635\n<https://github.com/apache/arrow/pull/11635>"
+        }
+    ]
+}

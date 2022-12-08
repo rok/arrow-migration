@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[R] as_date and similar methods fail with digit seconds",
+        "body": "***Note**: This issue was originally created as [ARROW-17905](https://issues.apache.org/jira/browse/ARROW-17905). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nArrow 9.0\u00a0 R client introduced support for dates with lubridate (and base R as.Date()) functions, which is awesome.\u00a0\r\n\r\nHowever, these functions fail to handle decimal dates.\u00a0 This will especially confuse R users because the native R functions work as expected, and R users will not realize the metaprogramming translation.\u00a0 Easiest to see this in a minimal reprex:\r\n\r\n\r\n\r\n```java\n\r\nlibrary(arrow); library(lubridate); library(dplyr)\n```\r\n```java\n\r\nf <- tempfile()\r\ndata.frame(t = Sys.time(), A = 1) |>\r\n  write_dataset(f, partitioning = \"t\")\r\n\r\n# ERRORS\r\nopen_dataset(f) |> mutate(as_date(t)) |> collect() \n```\r\n\r\nThis errors with message:\r\n\r\n\r\n```java\n\r\nopen_dataset(f) |> mutate(as_date(t)) |> collect()\r\nError in `collect()`:\r\n! Invalid: Failed to parse string: '2022-09-30 22:03:32.123248' as a scalar of type timestamp[s] \n```\r\nWhich is strange because lubridate::as_date('2022-09-30 22:03:32.123248') works fine.\u00a0 \r\n\r\nIt's easy to see the cause of the error prior to collect:\r\n\r\n\r\n```java\n\r\nas_date(t): date32[day] (cast(strptime(t, {format=\"%Y-%m-%d\", unit=SECOND, error_is_null=false}), {to_type=date32[day], allow_int_overflow=false, allow_time_truncate=false, allow_time_overflow=false, allow_decimal_truncate=false, allow_float_truncate=false, allow_invalid_utf8=false}))\n```\r\n\r\nWe can see a lot of assumptions there about units of parsing, but afaik from R we have no way to control them.\u00a0 The issue is particularly ironic because as you see in my example, the column has only become a string because we used it as a partition.\u00a0 So arrow coerced the timestamp to a string originally (using microsecond precision \u2013 which is an understandable choice because it is loss-less, though it is different from R's as.character() behavior).\u00a0 But ironically, now arrow doesn't understand how to reverse it's own timestamp->string behavior to get a back to a timestamp!\u00a0 \r\n\r\nIdeally the user would have more control of these, and the default assumptions would be consistent.\u00a0 Ideally, as_datetime, as_date, etc should not choke regardless of the precision of the seconds, matching the existing behavior of the base R (as.Date etc) and lubridate functions.\u00a0",
+        "created_at": "2022-09-30T22:16:35.000Z",
+        "updated_at": "2022-10-01T16:04:57.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-01T01:00:12.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-30T23:04:29.126Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17905?focusedCommentId=17611785) by Rok Mihevc (rokm):*\nThanks for reporting this `[~cboettig]`!\r\nThis is a known issue and would be resolved by ARROW-15883.\r\n\r\nA temporary workaround would be separating the decimal part of the string, parsing it separately and adding it to the parsed timestamp (see python example here https://stackoverflow.com/a/73780999/10615379)"
+        },
+        {
+            "created_at": "2022-10-01T00:33:40.619Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17905?focusedCommentId=17611796) by Carl Boettiger (cboettig):*\nVery cool.\u00a0 I actually tried to do that but can't figure out the syntax for dplyr.\u00a0 looks like I should even be able to pass dplyr the literal cast() command and modify the units or truncation options, but couldn't get that one to work, or any of the functions listed in `list_compute_functions()`.\u00a0 (e.g. I tried:\r\n\r\n\u00a0\r\n```java\n\r\nopen_dataset(f) |> mutate(t = arrow_ascii_ltrim(t,10)) |> collect()\r\n```\r\n\u00a0 I did get it to work using\u00a0 substr(),\r\n\r\n\r\n```java\n\r\nopen_dataset(f) |> mutate(t = substr(t,1,10)) |> collect() \n```\r\nwhich kinda surprised me because substr wasn't listed in list_compute_functions(), and most other base or dplyr verbs that trim strings failed.\u00a0 (e.g. strtrim() isn't recognized, nor is stringr::str_trim() ).\u00a0 \r\n\r\nIs there a list of what R functions like substr() and as_date() that arrow understands?\u00a0 \r\n\r\n(Also would be great to have more examples of using the compute functions with dplyr)\r\n\r\nAnyway thanks! I'll keep an eye on the issue you mentioned.\u00a0 We can close this one out.\u00a0 \r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-10-01T00:59:46.943Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17905?focusedCommentId=17611802) by Rok Mihevc (rokm):*\nI'm not familiar enough with arrow's dplyr verbs to say what's been wrapped and what not but PRs are typically welcome. At a quick glance https://github.com/apache/arrow/blob/master/r/R/dplyr-funcs-string.R would be a good place to start looking for what's currently there.\r\n\r\nAnother approach would be to use call_function (https://arrow.apache.org/cookbook/r/manipulating-data---arrays.html#call-arrow-compute-functions-directly-on-arrays)\r\nand directly call arrow's c++ functions (https://arrow.apache.org/docs/r/reference/list_compute_functions.html)."
+        },
+        {
+            "created_at": "2022-10-01T02:57:00.022Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17905?focusedCommentId=17611808) by Carl Boettiger (cboettig):*\nthanks for the pointers! I see that collection of dplyr-funcs-\\*.R\nfiles is just what I was looking for.  So many great bindings, I'm\nlike a kid in a candy shop right now.\n\u2014\nCarl Boettiger\nhttp://carlboettiger.info/\n\n"
+        },
+        {
+            "created_at": "2022-10-01T11:41:05.931Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17905?focusedCommentId=17611875) by Rok Mihevc (rokm):*\nI just realised I pasted the wrong link for the list of Arrow's c++ functions so here's the one I wanted to give: https://arrow.apache.org/docs/cpp/compute.html"
+        },
+        {
+            "created_at": "2022-10-01T13:26:32.609Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17905?focusedCommentId=17611904) by Neal Richardson (npr):*\nThis also sounds like ARROW-17637, which is a bug in R. "
+        },
+        {
+            "created_at": "2022-10-01T15:13:26.132Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17905?focusedCommentId=17611922) by Rok Mihevc (rokm):*\nI think ARROW-17637 is a timestamp[xs] to timestamp[s] casting issue. Here we're hitting a string to timestamp[xs] parsing issue. I might have misread ARROW-17637 of course."
+        },
+        {
+            "created_at": "2022-10-01T16:04:57.436Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17905?focusedCommentId=17611928) by Neal Richardson (npr):*\nYou're right. I saw that the column was a datetime in R (Sys.time()) but since it is used in partitioning, it is stringified in the directory name. "
+        }
+    ]
+}

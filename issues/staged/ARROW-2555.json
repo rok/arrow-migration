@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[Python]\u00a0Provide an option to convert on coerce_timestamps instead of error",
+        "body": "***Note**: This issue was originally created as [ARROW-2555](https://issues.apache.org/jira/browse/ARROW-2555). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAt the moment, we error out on `coerce_timestamps='ms'` on `pyarrow.parquet.write_table`\u00a0if the data contains a timestamp that would loose information when converted to milliseconds. In a lot of cases the user does not care about this granularity and rather wants the comfort functionality that the timestamp are stored regardlessly in Parquet. Thus we should provide an option to ignore the error and do the lossy conversion.",
+        "created_at": "2018-05-08T16:54:08.000Z",
+        "updated_at": "2019-03-26T21:17:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2018-10-01T10:08:05.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-09-25T16:20:59.434Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2555?focusedCommentId=16627586) by Eric Conlon (econlon):*\nWe have been hitting this, here is a very simple repro:\r\n```java\n\r\nfrom datetime import datetime\r\nimport pandas as pd\r\n\r\ndt = datetime(day=1, month=1, year=2017, hour=1, minute=1, second=1, microsecond=1)\r\nvalues = [(dt,)]\r\ndf = pd.DataFrame.from_records(values, columns=['testname'])\r\ndf.to_parquet('/tmp/repro.parquet', coerce_timestamps='ms')\r\n```\r\nThis fails with:\r\n```java\n\r\nTraceback (most recent call last):\r\n<SNIP>\r\nFile \"pyarrow/_parquet.pyx\", line 922, in pyarrow._parquet.ParquetWriter.write_table\r\nFile \"pyarrow/error.pxi\", line 81, in pyarrow.lib.check_status\r\npyarrow.lib.ArrowInvalid: Casting from timestamp[ns] to timestamp[ms] would lose data: 1483232461000001000\r\nSegmentation fault (core dumped)\r\n```"
+        },
+        {
+            "created_at": "2018-09-26T01:47:22.851Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2555?focusedCommentId=16628143) by Eric Conlon (econlon):*\nStarted a PR:\u00a0https://github.com/apache/arrow/pull/2629"
+        },
+        {
+            "created_at": "2018-10-01T10:08:05.458Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2555?focusedCommentId=16633801) by Wes McKinney (wesm):*\nIssue resolved by pull request 2629\n<https://github.com/apache/arrow/pull/2629>"
+        },
+        {
+            "created_at": "2019-03-26T20:20:18.538Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2555?focusedCommentId=16802129) by Jakub Oko\u0144ski (farnoy):*\nDoes this depend on a specific pandas version? I'm still having problems on pyarrow 0.12.0:\r\n\r\n\u00a0\r\n\r\n`In [35]: pyarrow.__version__`\r\n`Out[35]: '0.12.0'`\r\n\r\n`In [36]: pd.__version__`\r\n`Out[36]: '0.20.3'`\r\n\r\n`In [38]: from datetime import datetime`\r\n`\u00a0\u00a0\u00a0 ...: import pandas as pd`\r\n`\u00a0\u00a0\u00a0 ...: `\r\n`\u00a0\u00a0\u00a0 ...: dt = datetime(day=1, month=1, year=2017, hour=1, minute=1, second=1, microsecond=1)`\r\n`\u00a0\u00a0\u00a0 ...: values = [(dt,)]`\r\n`\u00a0\u00a0\u00a0 ...: df = pd.DataFrame.from_records(values, columns=['ts'])`\r\n`\u00a0\u00a0\u00a0 ...: `\r\n\r\n`In [39]: df`\r\n`Out[39]: `\r\n`\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 ts`\r\n`0 2017-01-01 01:01:01.000001`\r\n\r\n`In [40]: pyarrow.parquet.write_table(table=pyarrow.Table.from_pandas(df, schema=pyarrow.schema([pyarrow.field('ts', pyarrow.timestamp('ms'))])), coerce_timestamps='ms', where='/array/test.parquet', allow_truncated_timestamps=True)`\r\n`---------------------------------------------------------------------------`\r\n`ArrowInvalid\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 Traceback (most recent call last)`\r\n`...`\r\n\r\n`ArrowInvalid: ('Casting from timestamp[ns] to timestamp[ms] would lose data: 1483232461000001000', 'Conversion failed for column ts with type datetime64[ns]')`"
+        },
+        {
+            "created_at": "2019-03-26T20:24:23.993Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2555?focusedCommentId=16802134) by Eric Conlon (econlon):*\n`[~farnoy]` the first thing I would track down is if write_table is passing kwargs through to the right place."
+        },
+        {
+            "created_at": "2019-03-26T20:49:17.597Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2555?focusedCommentId=16802161) by Jakub Oko\u0144ski (farnoy):*\n<https://github.com/apache/arrow/blob/apache-arrow-0.12.0/python/pyarrow/parquet.py#L1140-L1167> It seems so"
+        },
+        {
+            "created_at": "2019-03-26T20:53:59.163Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2555?focusedCommentId=16802169) by Eric Conlon (econlon):*\nAnd here's a test asserting as much through write_table:\u00a0<https://github.com/apache/arrow/blob/f70dbd1dbdb51a47e6a8a8aac8efd40ccf4d44f2/python/pyarrow/tests/test_parquet.py#L846>\r\n\r\n\u00a0\r\n\r\nEDIT: Although it only tests microsecond truncation, not nanosecond..."
+        },
+        {
+            "created_at": "2019-03-26T21:17:54.129Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2555?focusedCommentId=16802187) by Jakub Oko\u0144ski (farnoy):*\nI think it works if I specify the arrow schema in `timestamp('us')` resolution (was doing ms here before). But I have a different, unrelated problem so I can't confirm 100%. Thanks for the help"
+        }
+    ]
+}

@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] PyArrow fails to load partitioned parquet files with non-primitive types",
+        "body": "***Note**: This issue was originally created as [ARROW-1459](https://issues.apache.org/jira/browse/ARROW-1459). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen reading partitioned parquet files (tested with those produced by Spark), that contain lists, the resulting table seems to contain data loaded only from one partition. Primitive types seems to be loaded correctly.\n\nIt can be reproduced using following code (arrow 0.6.0, spark 2.1.1):\n\n\n```\n>>> df = spark.createDataFrame(list(zip(np.arange(10).tolist(), np.arange(20).reshape((10,2)).tolist())))\n>>> df.toPandas()\n   _1        _2\n0   0    [0, 1]\n1   1    [2, 3]\n2   2    [4, 5]\n3   3    [6, 7]\n4   4    [8, 9]\n5   5  [10, 11]\n6   6  [12, 13]\n7   7  [14, 15]\n8   8  [16, 17]\n9   9  [18, 19]\n>>> df.repartition(2).write.parquet('df_parts.parquet')\n>>> pq.read_table('df_parts.parquet').to_pandas()\n   _1        _2\n0   0    [0, 1]\n1   2    [4, 5]\n2   4    [8, 9]\n3   6  [12, 13]\n4   8  [16, 17]\n5   1    [0, 1]\n6   3    [4, 5]\n7   5    [8, 9]\n8   7  [12, 13]\n9   9  [16, 17]\n```\n\nWhen the data is loaded using Spark or coalesced into one partition, everything works as expected:\n\n```\n>>> spark.read.parquet('df_parts.parquet').toPandas()\n   _1        _2\n0   1    [2, 3]\n1   3    [6, 7]\n2   5  [10, 11]\n3   7  [14, 15]\n4   9  [18, 19]\n5   0    [0, 1]\n6   2    [4, 5]\n7   4    [8, 9]\n8   6  [12, 13]\n9   8  [16, 17]\n>>> df.coalesce(1).write.parquet('df_single.parquet')\n>>> pq.read_table('df_single.parquet').to_pandas()\n   _1        _2\n0   0    [0, 1]\n1   1    [2, 3]\n2   2    [4, 5]\n3   3    [6, 7]\n4   4    [8, 9]\n5   5  [10, 11]\n6   6  [12, 13]\n7   7  [14, 15]\n8   8  [16, 17]\n9   9  [18, 19]\n```\n",
+        "created_at": "2017-09-04T14:51:42.000Z",
+        "updated_at": "2017-09-12T07:13:11.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-09-12T07:13:11.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-09-04T15:45:03.555Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1459?focusedCommentId=16152738) by Wes McKinney (wesm):*\nI think this is ARROW-1357, and has already been fixed in trunk. If you are on Linux can you try out a nightly build and confirm\n\n`conda install pyarrow -c twosigma`"
+        },
+        {
+            "created_at": "2017-09-04T16:31:08.289Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1459?focusedCommentId=16152787) by Jonas Amrich (jonasamrich):*\nYes, that looks very similar - I must have overlooked that issue before. However it seems that the fix doesn't solve the problem. Using 0.6.1.dev64+g9968d95d only makes thing stranger:\n\n```\n>>> pq.read_table('df_parts.parquet').to_pandas()\n   _1        _2\n0   5  [10, 11]\n1   7  [14, 15]\n2   9  [18, 19]\n3   0    [0, 1]\n4   2    [4, 5]\n5   4    [8, 9]\n6   6    [0, 1]\n7   8    [4, 5]\n8   1    [8, 9]\n9   3  [12, 13]\n```\n"
+        },
+        {
+            "created_at": "2017-09-04T17:30:49.334Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1459?focusedCommentId=16152817) by Wes McKinney (wesm):*\nOK, one of us ( `[~xhochy]` or me) will have to take a look so we can resolve this before 0.7.0 final goes out. If you find the problem feel free to submit a patch"
+        },
+        {
+            "created_at": "2017-09-05T07:43:53.502Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1459?focusedCommentId=16153232) by Jonas Amrich (jonasamrich):*\nI'll try to look deeper into this. However I'm not so familiar with Arrow's internals, so I expect it will take some time.."
+        },
+        {
+            "created_at": "2017-09-12T02:27:00.902Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1459?focusedCommentId=16162391) by Wes McKinney (wesm):*\nPR: https://github.com/apache/arrow/pull/1090"
+        },
+        {
+            "created_at": "2017-09-12T07:13:11.833Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1459?focusedCommentId=16162588) by Uwe Korn (uwe):*\nIssue resolved by pull request 1090\n<https://github.com/apache/arrow/pull/1090>"
+        }
+    ]
+}

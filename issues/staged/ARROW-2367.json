@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[Python] ListArray has trouble with sizes greater than kMaximumCapacity",
+        "body": "***Note**: This issue was originally created as [ARROW-2367](https://issues.apache.org/jira/browse/ARROW-2367). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen creating a Pandas dataframe with lists as elements as a column the following error occurs when converting to a `pyarrow.Table` object.\r\n```Java\n\r\nTraceback (most recent call last):\r\nFile \"arrow-2227.py\", line 16, in <module>\r\narr = pa.array(df['strings'], from_pandas=True)\r\nFile \"array.pxi\", line 177, in pyarrow.lib.array\r\nFile \"error.pxi\", line 77, in pyarrow.lib.check_status\r\nFile \"error.pxi\", line 77, in pyarrow.lib.check_status\r\npyarrow.lib.ArrowInvalid: BinaryArray cannot contain more than 2147483646 bytes, have 2147483647\r\n```\r\n\r\nThe following code was used to generate the error (adapted from ARROW-2227):\r\n```Java\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\n\r\n# Commented lines were used to test non-binary data types, both cause the same error\r\nv1 = b'x' * 100000000\r\nv2 = b'x' * 147483646\r\n# v1 = 'x' * 100000000\r\n# v2 = 'x' * 147483646\r\n\r\ndf = pd.DataFrame({\r\n     'strings': [[v1]] * 20 + [[v2]] + [[b'x']]\r\n# 'strings': [[v1]] * 20 + [[v2]] + [['x']]\r\n})\r\narr = pa.array(df['strings'], from_pandas=True)\r\nassert isinstance(arr, pa.ChunkedArray), type(arr)\r\n```\r\nCode was run using Python 3.6 with PyArrow installed from conda-forge on macOS High Sierra.",
+        "created_at": "2018-03-29T19:21:45.000Z",
+        "updated_at": "2020-09-28T09:22:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-09-28T09:22:55.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-04-10T15:26:53.897Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2367?focusedCommentId=16432461) by Krisztian Szucs (kszucs):*\nWhat's the expected output? It should be able to hold `2^31 - 1` bytes?\r\n\r\nAccording to my investigation the limit is set to `((2^31) - 1) - 1`.\r\n\r\nhttps://github.com/apache/arrow/blob/f9c070162acd87caf031723fb8d7e9c9a7317c0e/cpp/src/arrow/builder.h#L44"
+        },
+        {
+            "created_at": "2018-04-10T17:15:27.861Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2367?focusedCommentId=16432606) by Uwe Korn (uwe):*\nThe expected output would be that the resulting `pyarrow.Table`\u00a0has a `ChunkedArray` instance for the respective column that consists of multiple chunks. Currently we only generate a single `pa.Array` and wrap that simply in a `pa.ChunkedArray`. Thus we are limited to what a single `pa.Array` can hold.\r\n\r\nThis should only happen on `pa.Table.from_pandas()`\u00a0though. When a user calls `pa.array()`\u00a0the current error is expected behaviour. We could add a second method `pa.chunked_array()` that would return a `ChunkedArray` with more than one chunk if necessary."
+        },
+        {
+            "created_at": "2018-04-10T17:17:00.345Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2367?focusedCommentId=16432609) by Krisztian Szucs (kszucs):*\nGot it now Uwe, thanks! Just saw the assertion line, totally missed it."
+        },
+        {
+            "created_at": "2018-04-10T18:02:06.492Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2367?focusedCommentId=16432692) by Bryant Menn (bmenn):*\nSo would the ideal implementation then create `pa.chunked_array()` and have `pa.Table.from_pandas()`\u00a0call that instead or would there be some criteria to decide between `pa.array()` (I believe this is the current flow for `pa.Tablefrom_pandas()`) and `pa.chunked_array()`? I was trying to follow the process implemented for `BinaryArray` conversion to `ChunkedArray` but not\u00a0finished working through and understanding it.."
+        },
+        {
+            "created_at": "2018-04-12T14:33:01.231Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2367?focusedCommentId=16435688) by Uwe Korn (uwe):*\n`pa.chunked_array()` would probably call the same C++ code as `pa.Table.from_pandas()` does. There are some slight difference between the creation of a Table from a DataFrame and a single Array from a Series/NumPy Array.\r\n\r\nAn important point is that  a Table is a collection of Columns that are made up of a ChunkedArray each where each CunkedArray consists of one or more Arrays. So the change in `pa.Table.from_pandas()` will not affect user-facing code. `pa.chunked_array()` would be introducing a whole new API as we don't want `pa.array()` to return different classes depending on the size of the input."
+        },
+        {
+            "created_at": "2019-02-06T04:39:24.055Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2367?focusedCommentId=16761468) by Wes McKinney (wesm):*\nThere were some improvements around chunked data handling. I'll take a peek at this to see what needs to be done"
+        },
+        {
+            "created_at": "2019-02-12T02:25:05.361Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2367?focusedCommentId=16765603) by Wes McKinney (wesm):*\nThis appears to be core-dumping right now\r\n\r\n```Java\n\r\nIn [1]: paste                                                                                     \r\nimport pandas as pd\r\nimport pyarrow as pa\r\n\r\n# Commented lines were used to test non-binary data types, both cause the same error\r\nv1 = b'x' * 100000000\r\nv2 = b'x' * 147483646\r\n# v1 = 'x' * 100000000\r\n# v2 = 'x' * 147483646\r\n\r\ndf = pd.DataFrame({\r\n     'strings': [[v1]] * 20 + [[v2]] + [[b'x']]\r\n# 'strings': [[v1]] * 20 + [[v2]] + [['x']]\r\n})\r\n\r\n## -- End pasted text --\r\n\r\nIn [2]: arr = pa.array(df['strings'], from_pandas=True)                                           \r\n\r\nIn [3]: arr                                                                                       \r\nOut[3]: WARNING: Logging before InitGoogleLogging() is written to STDERR\r\nF0211 20:23:23.905639 31682 array.cc:128]  Check failed: (offset) <= (data.length) \r\n*** Check failure stack trace: ***\r\nAborted (core dumped)\r\n```\r\n\r\nI'll dig in a bit"
+        },
+        {
+            "created_at": "2019-02-12T02:51:58.968Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2367?focusedCommentId=16765616) by Wes McKinney (wesm):*\nThe case where the child builder yields chunked children is not handled, as already noted in the code:\r\n\r\nhttps://github.com/apache/arrow/blob/master/cpp/src/arrow/python/python_to_arrow.cc#L611\r\n\r\nI'll try to work out a patch"
+        },
+        {
+            "created_at": "2019-02-12T03:21:27.370Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2367?focusedCommentId=16765637) by Wes McKinney (wesm):*\nOof, ok, this is complicated. \r\n\r\nWe need to return a chunked array in the example above, where each chunk is a `ListArray`. The serious problem here is that a binary overflow can occur _in the middle of a list element_. \r\n\r\nSo we need to determine if appending the list values (e.g. an array slot's list of strings) is going to overflow the builder, and in that case start the next array chunk. \r\n\r\nThis is made more complicated by the SeqConverter initialization pattern in python_to_arrow.cc. \r\n\r\nI'll leave this issue in 0.13 but it feels like a solid 2-3 hours of refactoring to get things sorted out"
+        },
+        {
+            "created_at": "2019-08-21T16:51:34.183Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2367?focusedCommentId=16912514) by Wes McKinney (wesm):*\nThis is nearly the same issue as ARROW-6281. I'll leave both open for now"
+        }
+    ]
+}

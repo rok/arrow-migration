@@ -1,0 +1,84 @@
+{
+    "issue": {
+        "title": "[C++] interval_between(timestamptz, timestamptz) -> struct kernel",
+        "body": "***Note**: This issue was originally created as [ARROW-14108](https://issues.apache.org/jira/browse/ARROW-14108). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nGiven two timestamps that each have time zones this function should return an interval from the first timestamp to the second timestamp according to the following rules (postgres rules):\r\n\r\n- 1 day is 24 physical hours (which may not exactly equal 1 calendar day).\n- Intervals returned will never contain a months/years field\n  \n  Examples:\n  \n  interval_between('2021-03-14 00:00:00 America/Denver', '2021-03-15 00:00:00 America/Denver') => { \"hours\": 23 }\n  interval_between('2021-03-14 00:00:00 UTC', '2021-03-15 00:00:00 UTC') => { \"days\": 1}\n  interval_between('2021-03-14 00:00:00 UTC', '2020-03-14 00:00:00 UTC') => { \"days\": 365}\n  \n  If the first timestamp is larger than the second timestamp then the interval will be negative.",
+        "created_at": "2021-09-23T19:58:37.000Z",
+        "updated_at": "2022-10-11T17:53:50.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: task"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-09-23T20:00:35.676Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14108?focusedCommentId=17419434) by David Li (lidavidm):*\nARROW-13548 implements this for the actual month, day-time, and month-day-nano intervals. I suppose this falls under day-time except the resolution may not be fine enough?"
+        },
+        {
+            "created_at": "2021-09-23T20:01:17.355Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14108?focusedCommentId=17419435) by David Li (lidavidm):*\nOh, on a closer reading, this is different, given the days are not calendar days."
+        },
+        {
+            "created_at": "2021-09-23T20:02:56.521Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14108?focusedCommentId=17419437) by Weston Pace (westonpace):*\nRight, this also returns intervals (not integers) and it can return, for example, \r\n\r\n```java\n\r\n{ \"days\": 1, \"hours\": 10, \"minutes\": 5 }\r\n```"
+        },
+        {
+            "created_at": "2021-09-23T20:04:27.328Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14108?focusedCommentId=17419439) by David Li (lidavidm):*\n(To be clear, ARROW-13548 implements kernels returning both integers and the interval types)\r\n\r\nI suppose we'd need this to be 1:1 compatible with Postgres, but it feels like a bit of a waste having just added a new interval type (month-day-nano) which IIRC from the discussions, was supposed to be as general as possible."
+        },
+        {
+            "created_at": "2021-09-23T20:13:12.587Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14108?focusedCommentId=17419443) by Weston Pace (westonpace):*\nI was basing my understanding of ARROW-13548 on SQL's DATEDIFF (which requires you to specify a time unit and only returns an integer).  I see now the month_day_nano between which is very cool.\r\n\r\nIn a certain sense this is not needed for full postgres compatibility.  A user that want's that behavior can just grab a duration from two timestamptz objects and do the math themselves.  However, it would make postgres compatibility much easier.\r\n\r\nThat being said, isn't this just another flavor of the extraction kernels?  It can be day_nano_between.\r\n\r\nIt's hard to say one is more canonical than the other when someone could also presumably ask for year_month_day_nano_between.\r\n"
+        },
+        {
+            "created_at": "2021-09-23T20:16:19.007Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14108?focusedCommentId=17419446) by David Li (lidavidm):*\nThat's fair, I'm more lamenting all the permutations here :)\r\n\r\nThat said, presuming we'd then turn around and implement date/time arithmetic with these \"interval\" structs, we'd effectively be defining additional, custom interval types (which is fine, just something to note)."
+        },
+        {
+            "created_at": "2022-02-11T16:19:29.747Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14108?focusedCommentId=17491018) by Rok Mihevc (rokm):*\nI'm not sure how to read this - are we looking to implement a new interval type here or using one of the existing ones? e.g. DayTimeIntervalType\r\nWould a struct serve better? `[~lidavidm]` `[~westonpace]`"
+        },
+        {
+            "created_at": "2022-02-14T13:01:39.708Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14108?focusedCommentId=17491975) by David Li (lidavidm):*\nI'm not sure if we strictly need this in the first place, but it seems this would return a struct, yes. (Though, it's pretty much redundant with using something like seconds_between and just dividing out the hours yourself.)"
+        },
+        {
+            "created_at": "2022-02-14T14:30:14.042Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14108?focusedCommentId=17492024) by Rok Mihevc (rokm):*\nYeah, that makes sense."
+        },
+        {
+            "created_at": "2022-02-14T21:37:38.673Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14108?focusedCommentId=17492231) by Weston Pace (westonpace):*\nI agree it is low priority.  We could probably sit on it unless it comes up wrt Substrait compatibility though it seems it isn't included in the function set just yet: https://github.com/substrait-io/substrait/blob/main/extensions/functions_datetime.yaml"
+        },
+        {
+            "created_at": "2022-02-14T21:38:38.146Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14108?focusedCommentId=17492232) by Weston Pace (westonpace):*\nAlso, a struct is fine."
+        },
+        {
+            "created_at": "2022-02-22T08:16:57.829Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14108?focusedCommentId=17495943) by Joris Van den Bossche (jorisvandenbossche):*\nI find it a bit questionable that we need a kernel to return a day/hour struct, while we already have a kernel that returns the day_time interval, from which you can easily extract the day and milliseconds (and thus day and computed hour) if you want those. \r\n(and also a kernel that returns month_day_nano interval between, although that is harder to convert into a day/hour combo)\r\n\r\nOr at least, if we add a convenience to directly get day/hour struct, could it be a simple wrapper around `day_time_interval_between`? `[~rokm]` Or would that give different results than the custom implementation you did now?"
+        },
+        {
+            "created_at": "2022-02-22T12:57:04.995Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14108?focusedCommentId=17496066) by Rok Mihevc (rokm):*\n`[~jorisvandenbossche]` Thanks for reviewing! I'm not sure how this will get consumed in the end and how much convenience this kernel brings. Since the output is a struct I don't really see much of possibility for reuse, but I might (very likely) just be missing it.\r\n\r\nPerhaps an elegant way would be to add _cast(DayTimeBetween) -> dayhours_between_ and handle this via dispatchBest. I'm not sure how much overhead that brings.\r\n\r\n`[~westonpace]` could you quantify the convenience gained by having this kernel?"
+        },
+        {
+            "created_at": "2022-02-22T13:14:48.734Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14108?focusedCommentId=17496077) by Joris Van den Bossche (jorisvandenbossche):*\n>  Since the output is a struct I don't really see much of possibility for reuse, but I might (very likely) just be missing it.\r\n\r\nThis might not yet be implemented, but based on my limited understanding of the DayTimeInterval type, you _should_ be able to extract the days and milliseconds from such values. If that is implemented, you could in theory have a kernel that uses `day_time_interval_between`, then extracts the days / milliseconds as separate fields and put them in a struct array. Yes, that will be less efficient (as you have the intermediate interval array). But unless there is a strong demand for an optimal \"day_hour_between\", I would start with reusing the existing interval kernel.\r\n\r\n(note, this are a bit naive comments, not really knowing the use case for this, and just from looking at your PR and seeing that this adds quite some custom logic for something that basically already exists elsewhere)\r\n"
+        },
+        {
+            "created_at": "2022-02-22T13:52:01.985Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14108?focusedCommentId=17496099) by Rok Mihevc (rokm):*\n`[~jorisvandenbossche]` I agree that we could use `day_time_interval_between` as an intermediate step.\r\n\r\nThe reason for a lot of boiler plate here is lack (as far as I understand) of templates for kernels with StructArray output. Even if doing `cast(day_hours, day_time_interval_between(ts_arr0, ts_arr1))` we would need some of it. Although there would be less due to that cast being a unary kernel. Perhaps we could even abstract out a template and reuse it on ISOCalendar and YearMonthDay kernels.\r\n\r\nEither way I would be perhaps be useful to hear about Westons usecase. `[~westonpace]`"
+        },
+        {
+            "created_at": "2022-07-12T14:04:26.269Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14108?focusedCommentId=17565608) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        },
+        {
+            "created_at": "2022-10-11T17:51:26.446Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14108?focusedCommentId=17616006) by Apache Arrow JIRA Bot (arrowjira):*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned per [project policy](https://arrow.apache.org/docs/dev/developers/bug_reports.html#issue-assignment). Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

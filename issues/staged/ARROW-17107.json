@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[Java] JSONFileWriter throws IOOBE writing an empty list",
+        "body": "***Note**: This issue was originally created as [ARROW-17107](https://issues.apache.org/jira/browse/ARROW-17107). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHey folks,\r\n\r\nI'm trying to write an empty ListVector out through the `JsonFileWriter`, and am getting an IOOBE. Stack trace is as follows:\r\n\r\n\u00a0\r\n\r\n```\r\n\r\njava.lang.IndexOutOfBoundsException: index: 0, length: 4 (expected: range(0, 0))\r\n\u00a0at org.apache.arrow.memory.ArrowBuf.checkIndexD (ArrowBuf.java:318)\r\n\u00a0 \u00a0 org.apache.arrow.memory.ArrowBuf.chk (ArrowBuf.java:305)\r\n\u00a0 \u00a0 org.apache.arrow.memory.ArrowBuf.getInt (ArrowBuf.java:424)\r\n\u00a0 \u00a0 org.apache.arrow.vector.ipc.JsonFileWriter.writeValueToGenerator (JsonFileWriter.java:270)\r\n\u00a0 \u00a0 org.apache.arrow.vector.ipc.JsonFileWriter.writeFromVectorIntoJson (JsonFileWriter.java:237)\r\n\u00a0 \u00a0 org.apache.arrow.vector.ipc.JsonFileWriter.writeFromVectorIntoJson (JsonFileWriter.java:253)\r\n\u00a0 \u00a0 org.apache.arrow.vector.ipc.JsonFileWriter.writeFromVectorIntoJson (JsonFileWriter.java:253)\r\n\u00a0 \u00a0 org.apache.arrow.vector.ipc.JsonFileWriter.writeFromVectorIntoJson (JsonFileWriter.java:253)\r\n\u00a0 \u00a0 org.apache.arrow.vector.ipc.JsonFileWriter.writeBatch (JsonFileWriter.java:200)\r\n\u00a0 \u00a0 org.apache.arrow.vector.ipc.JsonFileWriter.write (JsonFileWriter.java:190)\r\n\r\n```\r\n\r\nIt's trying to write the offset buffer of the list, which is empty. L224 of JFW.java sets `bufferValueCount` to 1 (because we're not a DUV), so we enter the `for` loop. We don't hit the `valueCount=0` condition in L230 (because we're not a varbinary or a varchar vector). So we fall into the `else`, which tries to write the 0th element in the offset vector, and IOOBE.\r\n\r\nCould we include 'list' in either the L224 or the L230 checks?\r\n\r\nAdmittedly, I'm not aware of the history of this section, but it seems that, by the time we hit L230 (i.e. excluding DUV), any empty vector should yield a single 0?\r\n\r\nLet me know if there's any more info I can provide!\r\n\r\nCheers,\r\n\r\nJames",
+        "created_at": "2022-07-18T14:22:19.000Z",
+        "updated_at": "2022-07-25T13:11:37.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-07-25T10:58:53.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-07-18T14:44:36.636Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17107?focusedCommentId=17568038) by David Li (lidavidm):*\nNote that the JSON writer won't construct JSONL as you might expect, it's actually there to generate an internal format for our integration tests - so maybe we should note the stability/scope more explicitly in the docs. But we should probably still fix this regardless while making that more clear.\r\n\r\nCC `[~dsusanibara]`"
+        },
+        {
+            "created_at": "2022-07-18T14:49:27.419Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17107?focusedCommentId=17568041) by James Henderson (jarohen):*\nOur workaround: <https://github.com/xtdb/arrow/commit/f36eb4059da8a4368a5754a5e46ae12308d6365d>"
+        },
+        {
+            "created_at": "2022-07-18T14:50:06.510Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17107?focusedCommentId=17568045) by James Henderson (jarohen):*\n> it's actually there to generate an internal format for our integration test\r\n\r\n`[~lidavidm]` yep, same for us!"
+        },
+        {
+            "created_at": "2022-07-18T14:52:45.585Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17107?focusedCommentId=17568047) by David Li (lidavidm):*\nAh ok - just want to make sure that's clear!\r\n\r\nThat fix doesn't look like it would work if we have a \"large\" variant of the vector - since the offsets are 8 bytes not 4 bytes as that branch assumes. But indeed, it seems the check should include all types with offsets, not just binary/utf8. (And actually, that means it probably doesn't handle large variants correctly at all\u2026)"
+        },
+        {
+            "created_at": "2022-07-18T14:55:59.079Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17107?focusedCommentId=17568050) by James Henderson (jarohen):*\nIn the writer, it seems (to my untrained eye, at least) like that buffer only exists to write a JSON zero out, so maybe doesn't matter?"
+        },
+        {
+            "created_at": "2022-07-18T14:59:47.789Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17107?focusedCommentId=17568051) by David Li (lidavidm):*\nAll vectors that use offsets must have at least one offset (or more specifically: the number of offsets is always the number of values + 1, see [the spec](https://arrow.apache.org/docs/format/Columnar.html#variable-size-binary-layout)), so it should account for large/regular binary, utf8, and list vectors. It looks like originally it only accounted for regular binary/utf8 and as you found, we need to cover lists, and then we should cover large binary/utf8/list as well. (That said I wonder why the check is even needed, given that the vectors should already follow the spec; possibly empty vectors may not have allocated any memory as a micro-optimization?)"
+        },
+        {
+            "created_at": "2022-07-18T15:10:36.852Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17107?focusedCommentId=17568056) by James Henderson (jarohen):*\n> All vectors that use offsets must have at least one offset (or more specifically: the number of offsets is always the number of values + 1, see [the spec](https://arrow.apache.org/docs/format/Columnar.html#variable-size-binary-layout))\r\n\r\nmm, although this isn't the case for dense unions - I guess their 'offsets' are conceptually different from the offsets in the variable-width vectors?\r\n\r\n\u00a0\r\n\r\n> possibly empty vectors may not have allocated any memory as a micro-optimization?\r\n\r\nthat was my assumption too, yeah :)"
+        },
+        {
+            "created_at": "2022-07-18T15:12:50.964Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17107?focusedCommentId=17568057) by David Li (lidavidm):*\nYeah, (dense) union gets to be special as usual.\r\n\r\nThat said, your fix is basically there and we should just add tests and make sure large list/binary/utf8 get covered."
+        },
+        {
+            "created_at": "2022-07-25T10:58:53.157Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17107?focusedCommentId=17570842) by David Li (lidavidm):*\nIssue resolved by pull request 13676\n<https://github.com/apache/arrow/pull/13676>"
+        }
+    ]
+}

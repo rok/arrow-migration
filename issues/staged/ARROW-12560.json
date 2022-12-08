@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[C++] Investigate utilizing aggressive thread task creation when adding callback to finished future",
+        "body": "***Note**: This issue was originally created as [ARROW-12560](https://issues.apache.org/jira/browse/ARROW-12560). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nImagine there is a slow map function (that could run in parallel) and a vector generator given a long vector of tasks.\u00a0 If we apply map to the generator and then readahead we won't actually get any parallelism because the vector generator returns everything synchronously and so no thread task will ever be submitted.\r\n\r\nThis hypothetical situation is a reality in some situations in the scanner.\u00a0 For example, if scanning CSV files and the CPU threads fall behind the I/O threads then all callbacks will be synchronous (since the futures will already have been completed by the I/O threads).\r\n\r\nIn such a situation we might benefit from creating a new thread task even though we wouldn't normally create one.\u00a0 For example, if we have an idle core.\u00a0 You can think of this as an analogue of work stealing.\r\n\r\nOn the other hand, creating new thread tasks at any random callback might not be the most efficient. We could mitigate this by marking a callback as \"potentially long\" as some kind of hint when we add the callback to indicate it as eligible for eager thread creation.",
+        "created_at": "2021-04-27T00:19:47.000Z",
+        "updated_at": "2021-06-07T15:54:48.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-06-07T15:54:48.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-04-27T08:31:39.349Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12560?focusedCommentId=17333037) by Antoine Pitrou (apitrou):*\nI don't understand. If you want parallelism, why not use the CPU thread pool?"
+        },
+        {
+            "created_at": "2021-04-27T19:39:50.132Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12560?focusedCommentId=17333511) by Weston Pace (westonpace):*\nThe problem is that we are using the CPU thread pool.\u00a0 So, imagine for a moment that we are able to parse/decode CSV blocks in parallel (this may indeed be possible someday so hopefully it isn't too hard to imagine).\r\n\r\nAlso imagine that we have some fixed block readahead of 10.\r\n\r\nThen we have something like the following (this is just rough pseudocode, we can assume ParseAndDecode is dropping the result in a vector somewhere and we aren't checking errors)...\r\n```java\n\r\nfor (int i = 0; i < 10; i++)\r\n{\r\n\u00a0\u00a0\u00a0 source().Then(block => ParseAndDecode(block));\r\n}\r\n```\r\nWe want `source()` to be a background generator (reading along on its own I/O thread).\u00a0 We want `ParseAndDecode` to run on the CPU thread.\r\n\r\nEverything works fine if the I/O is slower than `ParseAndDecode`.\u00a0 Every call to `source()` returns an unfinished future and, when it is finished, we will transfer to the CPU pool (creating a new thread task) and run the thread task.\u00a0 So there will be 10 thread tasks for 10 blocks and some of those thread tasks may run in parallel (which is what we are after with parallel readahead here).\r\n\r\nOn the other hand, if I/O is faster than `ParseAndDecode` then calls to `source()` will start returning finished futures (the call to `Transfer` would have done nothing because the future was already finished).\u00a0 There is no need to transfer, we are already on the CPU thread pool.\u00a0 However, no thread task is created.\u00a0 The entire operation runs serially as a single thread task.\u00a0 In this case we want to create a new thread task to do our CPU work.\u00a0 The cost of `ParseAndDecode` is expensive so we know we aren't creating too many thread tasks.\u00a0 The main thread can then carry on and issue the next call to `source()`."
+        },
+        {
+            "created_at": "2021-04-27T19:48:43.750Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12560?focusedCommentId=17333515) by Antoine Pitrou (apitrou):*\nI see, thanks. So, basically, our current transfer functionality doesn't work as expected. Perhaps we need a TransferAlways that does what we need here?"
+        },
+        {
+            "created_at": "2021-04-27T19:56:18.136Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12560?focusedCommentId=17333518) by Weston Pace (westonpace):*\nYes, a `TransferAlways` would work.\u00a0 I tried a few iterations but they didn't work as intended.\u00a0 The thread task has to be spawned by the consumer in this case instead of the producer.\u00a0 One way it could work is by having `Transfer` \"mark\" the future in some way so that callbacks added to the future are always spawned as new thread tasks.\r\n\r\nThe utility could be more generally used outside of transfer (e.g. it could be used with an expensive map function to get a partitioned fan-out) but the synchronous utilities we have (e.g. TaskGroup) could achieve the same thing in those cases."
+        },
+        {
+            "created_at": "2021-04-27T20:36:30.288Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12560?focusedCommentId=17333538) by Weston Pace (westonpace):*\nActually, just to clarify, it wouldn't be `TransferAlways` exactly. If there are no CPU cores free then there is no advantage to transfer (and potentially a disadvantage of creating many excess thread tasks)."
+        },
+        {
+            "created_at": "2021-04-27T20:43:15.882Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12560?focusedCommentId=17333540) by Antoine Pitrou (apitrou):*\nWell, as you said, even if there are no CPU cores free, there may be still an advantage in requesting an IO before the callback actually runs."
+        },
+        {
+            "created_at": "2021-06-07T15:54:48.607Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12560?focusedCommentId=17358681) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 10258\n<https://github.com/apache/arrow/pull/10258>"
+        }
+    ]
+}

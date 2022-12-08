@@ -1,0 +1,21 @@
+{
+    "issue": {
+        "title": "[Gandiva] Add helper to determine valid decimal function return type",
+        "body": "***Note**: This issue was originally created as [ARROW-13917](https://issues.apache.org/jira/browse/ARROW-13917). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nTo evaluate a Gandiva function, you need to pass it's return type. For most types, we can look up the possible return types by using the `GetRegisteredFunctionSignatures` method, but those don't include details of the precision and scale parameters of the decimal type.\r\n\r\nSpecifying the precision and scale parameters of the decimal type is left up to the user, but if the user  gets it wrong, they can get invalid answers. See the reproducible example at the bottom.\r\n\r\nThe precision and scale of the return type depend on the input types and the implementation of the decimal operations. Given the variation of logic across different functions (add, divide, trunc, round), it would be best if we were able to provide some utility to help the user determine the precise return type.\r\n\r\nNow return types aren't unique for every given function name and parameter types. For example, `add(date64[ms], int64` can return either `date64[ms]` or `timestamp[ms]`. So a generic utility has to return multiple possible return types.\r\n\r\n\r\nExample of invalid decimal results from bad return type:\r\n\r\n```python\n\r\nfrom decimal import Decimal\r\nimport pyarrow as pa\r\nfrom pyarrow.gandiva import TreeExprBuilder, make_projector\r\n\r\ndef call_on_value(func, values, params, out_type):\r\n    builder = TreeExprBuilder()\r\n    \r\n    param_literals = []\r\n    for param, param_type in params:\r\n        param_literals.append(builder.make_literal(param, param_type))\r\n    \r\n    inputs = []\r\n    arrays = []\r\n    for i, value in enumerate(values):\r\n        inputs.append(builder.make_field(pa.field(str(i), value[1])))\r\n        arrays.append(pa.array([value[0]], value[1]))\r\n    \r\n    record_batch = pa.record_batch(arrays, [str(i) for i in range(len(values))])\r\n    \r\n    func_x = builder.make_function(func, inputs + param_literals, out_type)\r\n    \r\n    expressions = [builder.make_expression(func_x, pa.field('result', out_type))]\r\n    \r\n    \r\n    projector = make_projector(record_batch.schema, expressions, pa.default_memory_pool())\r\n    \r\n    return projector.evaluate(record_batch)\r\n\r\ncall_on_value(\r\n    'round',\r\n    (Decimal(\"123.459\"), pa.decimal128(28, 3)),\r\n    [(2, pa.int32())],\r\n    pa.decimal128(28, 3)\r\n)\r\n# Returns: 123.459 (not rounded!)\r\n\r\ncall_on_value(\r\n    'round',\r\n    (Decimal(\"123.459\"), pa.decimal128(28, 3)),\r\n    [(-2, pa.int32())],\r\n    pa.decimal128(28, 3)\r\n)\r\n# Returns:  0.100 (\ud83d\ude35)\r\n```\r\n",
+        "created_at": "2021-09-06T20:23:48.000Z",
+        "updated_at": "2021-09-25T02:47:08.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++ - Gandiva",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-09-25T02:47:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-09-25T02:46:42.324Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13917?focusedCommentId=17420050) by Will Jones (willjones127):*\nActually, there is a helper for decimal operations in the [Gandiva C++ base](https://github.com/apache/arrow/blob/master/cpp/src/gandiva/decimal_type_util.h) and in the [Java implementation](https://github.com/apache/arrow/blob/master/java/gandiva/src/main/java/org/apache/arrow/gandiva/evaluator/DecimalTypeUtil.java).\r\n\r\nI'm thinking I will close this issue and instead:\r\n\r\n1. Add exposing the Decimal utility to the Python implementation to ARROW-13918\n1. Add documentation of this utility to ARROW-10154"
+        }
+    ]
+}

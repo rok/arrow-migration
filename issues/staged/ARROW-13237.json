@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[C++] S3 FileSystem doesn't seem to handle redirects",
+        "body": "***Note**: This issue was originally created as [ARROW-13237](https://issues.apache.org/jira/browse/ARROW-13237). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn some conditions AWS S3 seems to respond with a redirect, but Arrow seems to consider it an error instead of following the redirect.\r\n\r\nFor example see\r\n\r\n```Java\n\r\n    s3, bucket = fs.FileSystem.from_uri(\"s3://ursa-labs-taxi-data/?region=us-east-1\")\r\n    print(s3.get_file_info(fs.FileSelector(bucket+\"/2011\", recursive=True)))\r\n```\r\n\r\nThe error that you get is\r\n\r\n```Java\n\r\n OSError: When listing objects under key '2011' in bucket 'ursa-labs-taxi-data': AWS Error [code 100]: Unable to parse ExceptionName: PermanentRedirect Message: The bucket you are attempting to access must be addressed using the specified endpoint. Please send all future requests to this endpoint.\r\n```\r\n\r\nIt should probably follow the `PermanentRedirect` instead of choking over it\r\n\r\nIT is also possible to reproduce it using\r\n```Java\n\r\n    from pyarrow import fs\r\n\r\n    s3 = fs.SubTreeFileSystem(\"ursa-labs-taxi-data\", fs.S3FileSystem())\r\n    print(s3.get_file_info(fs.FileSelector(\"2011\", recursive=True)))\r\n```\r\n",
+        "created_at": "2021-07-01T12:46:43.000Z",
+        "updated_at": "2022-07-04T17:41:28.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-07-28T14:02:54.341Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13237?focusedCommentId=17388799) by Antoine Pitrou (apitrou):*\nDo other S3 toolkits follow the redirect automatically in this particular case? I wonder what we're missing exactly."
+        },
+        {
+            "created_at": "2021-10-14T08:14:42.626Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13237?focusedCommentId=17428680) by Alessandro Molina (amol-):*\nIf we don't want to follow the redirect (which I think we should, I guess it's a reasonable expectation that HTTP clients handle redirects), it would at least be convenient to print the target URL in the exception, so that the user has a way to know how it should change the code."
+        },
+        {
+            "created_at": "2021-12-13T11:38:58.625Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13237?focusedCommentId=17458330) by Antoine Pitrou (apitrou):*\nOk, it seems you can use (on recent AWS SDK versions perhaps?) a pseudo-region named \"aws-global\" that will automatically handle redirects:\r\n```Java\n\r\n>>> f = fs.S3FileSystem(region='aws-global')\r\n>>> f.get_file_info(fs.FileSelector('ursa-labs-taxi-data'))\r\n[<FileInfo for 'ursa-labs-taxi-data/2009': type=FileType.Directory>,\r\n <FileInfo for 'ursa-labs-taxi-data/2010': type=FileType.Directory>,\r\n <FileInfo for 'ursa-labs-taxi-data/2011': type=FileType.Directory>,\r\n <FileInfo for 'ursa-labs-taxi-data/2012': type=FileType.Directory>,\r\n <FileInfo for 'ursa-labs-taxi-data/2013': type=FileType.Directory>,\r\n <FileInfo for 'ursa-labs-taxi-data/2014': type=FileType.Directory>,\r\n <FileInfo for 'ursa-labs-taxi-data/2015': type=FileType.Directory>,\r\n <FileInfo for 'ursa-labs-taxi-data/2016': type=FileType.Directory>,\r\n <FileInfo for 'ursa-labs-taxi-data/2017': type=FileType.Directory>,\r\n <FileInfo for 'ursa-labs-taxi-data/2018': type=FileType.Directory>,\r\n <FileInfo for 'ursa-labs-taxi-data/2019': type=FileType.Directory>]\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-12-20T15:58:06.515Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13237?focusedCommentId=17462685) by Alessandro Molina (amol-):*\nShould we make `aws-global` the default region? That seems to improve the user experience"
+        },
+        {
+            "created_at": "2021-12-20T16:00:56.663Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13237?focusedCommentId=17462690) by Antoine Pitrou (apitrou):*\nI don't know. One problem is that it will probably always query the us-east-1 region before redirecting, so 1) there is an added latency especially if on the wrong continent 2) perhaps this costs more API calls (I have no idea about the latter)."
+        },
+        {
+            "created_at": "2021-12-20T16:04:26.836Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13237?focusedCommentId=17462693) by Antoine Pitrou (apitrou):*\nNote that there is automatic region resolution when you use a URI:\r\n```python\n\r\n>>> from pyarrow.fs import _resolve_filesystem_and_path\r\n>>> fs, path = _resolve_filesystem_and_path(\"s3://ursa-labs-taxi-data\")\r\n>>> fs\r\n<pyarrow._s3fs.S3FileSystem at 0x7f348cd0b7b0>\r\n>>> fs.region\r\n'us-east-2'\r\n>>> path\r\n'ursa-labs-taxi-data'\r\n```\r\n"
+        }
+    ]
+}

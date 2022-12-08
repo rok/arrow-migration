@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[C++] Casting a chunked array with 0 chunks critical failure",
+        "body": "***Note**: This issue was originally created as [ARROW-8142](https://issues.apache.org/jira/browse/ARROW-8142). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen casting a schema of an empty table from dict encoded to non-dict encoded type a critical error is raised and not handled causing the interpreter to shut down.\r\n\r\nThis only happens after a parquet roundtrip\r\n\r\n\u00a0\r\n```python\n\r\nimport pyarrow as pa\r\nimport pandas as pd\r\nimport pyarrow.parquet as pq\r\n\r\ndf = pd.DataFrame({\"col\": [\"a\"]}).astype({\"col\": \"category\"}).iloc[:0]\r\ntable = pa.Table.from_pandas(df)\r\nfield = table.schema[0]\r\nnew_field = pa.field(field.name, field.type.value_type, field.nullable, field.metadata)\r\n\r\nbuf = pa.BufferOutputStream()\r\npq.write_table(table, buf)\r\nreader = pa.BufferReader(buf.getvalue().to_pybytes())\r\ntable = pq.read_table(reader)\r\n\r\nschema = table.schema.remove(0).insert(0, new_field)\r\nnew_table = table.cast(schema)\r\nassert new_table.schema == schema\r\n \n```\r\n\u00a0\r\n\r\nOutput\r\n```java\n\r\nWARNING: Logging before InitGoogleLogging() is written to STDERR\r\nF0318 09:55:14.266649 299722176 table.cc:47] Check failed: (chunks.size()) > (0) cannot construct ChunkedArray from empty vector and omitted type \n```\r\n\u00a0",
+        "created_at": "2020-03-18T08:59:27.000Z",
+        "updated_at": "2020-03-30T06:39:23.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-03-25T18:54:07.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-03-18T11:00:08.500Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8142?focusedCommentId=17061622) by Joris Van den Bossche (jorisvandenbossche):*\n`[~fjetter]` thanks for the report! \r\n(we have several issues with such 0-chunks chunked arrays .., eg also ARROW-7907)\r\n\r\nA smaller reproducer without parquet (the parquet reading generated a ChunkedArray with 0 chunks instead of 1 chunk of length 0, but it's the actual 0-chunk array that causes the problem):\r\n\r\n```Java\n\r\ntyp = pa.dictionary(pa.int8(), pa.string())                                                                                                                                                               \r\ntyp2 = pa.string()                      \r\n                                                                                                                                                                  \r\narr = pa.chunked_array([], type=typ)             \r\n                                                                                                                                                         \r\narr.cast(typ2)  \r\n```"
+        },
+        {
+            "created_at": "2020-03-19T16:01:52.973Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8142?focusedCommentId=17062709) by Joris Van den Bossche (jorisvandenbossche):*\nIt's also not specific to dictionary, it fails for eg int8 -> int16 cast as well."
+        },
+        {
+            "created_at": "2020-03-25T18:54:07.176Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8142?focusedCommentId=17066984) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 6668\n<https://github.com/apache/arrow/pull/6668>"
+        }
+    ]
+}

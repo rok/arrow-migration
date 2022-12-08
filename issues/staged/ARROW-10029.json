@@ -1,0 +1,60 @@
+{
+    "issue": {
+        "title": "[Python] Deadlock in the interaction of pyarrow FileSystem and ParquetDataset",
+        "body": "***Note**: This issue was originally created as [ARROW-10029](https://issues.apache.org/jira/browse/ARROW-10029). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n@martindurant good news (for you): I have a repro test case that is 100% `pyarrow`, so it looks like `s3fs` is not involved.\r\n\r\n@jorisvandenbossche how should I follow up with this, based on `pyarrow.filesystem.LocalFileSystem`?\r\n\r\nViewing the File System **directories** as a tree, one thread is required for every non-leaf node, in order to avoid deadlock.\r\n\r\n1) dataset\r\n2) dataset/foo=1\r\n3) dataset/foo=1/bar=2\r\n4) dataset/foo=1/bar=2/baz=0\r\n5) dataset/foo=1/bar=2/baz=1\r\n6) dataset/foo=1/bar=2/baz=2\r\n\\*) dataset/foo=1/bar=2/baz=0/qux=false\r\n\\*) dataset/foo=1/bar=2/baz=1/qux=false\r\n\\*) dataset/foo=1/bar=2/baz=1/qux=true\r\n\\*) dataset/foo=1/bar=2/baz=0/qux=true\r\n\\*) dataset/foo=1/bar=2/baz=2/qux=false\r\n\\*) dataset/foo=1/bar=2/baz=2/qux=true\r\n\r\n```Java\n\r\nimport pyarrow.parquet as pq\r\nimport pyarrow.filesystem as fs\r\n\r\nclass LoggingLocalFileSystem(fs.LocalFileSystem):\r\n    def walk(self, path):\r\n        print(path)\r\n        return super().walk(path)\r\n\r\nfs = LoggingLocalFileSystem()\r\ndataset_url = \"dataset\"\r\n\r\nthreads = 6\r\ndataset = pq.ParquetDataset(dataset_url, filesystem=fs, validate_schema=False, metadata_nthreads=threads)\r\nprint(len(dataset.pieces))\r\n\r\nthreads = 5\r\ndataset = pq.ParquetDataset(dataset_url, filesystem=fs, validate_schema=False, metadata_nthreads=threads)\r\nprint(len(dataset.pieces))\r\n```\r\n\r\n**_Call with 6 threads completes._**\r\n\r\n**_Call with 5 threads hangs indefinitely._**\r\n\r\n```Java\n\r\n$ python repro.py \r\ndataset\r\ndataset/foo=1\r\ndataset/foo=1/bar=2\r\ndataset/foo=1/bar=2/baz=0\r\ndataset/foo=1/bar=2/baz=1\r\ndataset/foo=1/bar=2/baz=2\r\ndataset/foo=1/bar=2/baz=0/qux=false\r\ndataset/foo=1/bar=2/baz=0/qux=true\r\ndataset/foo=1/bar=2/baz=1/qux=false\r\ndataset/foo=1/bar=2/baz=1/qux=true\r\ndataset/foo=1/bar=2/baz=2/qux=false\r\ndataset/foo=1/bar=2/baz=2/qux=true\r\n6\r\ndataset\r\ndataset/foo=1\r\ndataset/foo=1/bar=2\r\ndataset/foo=1/bar=2/baz=0\r\ndataset/foo=1/bar=2/baz=1\r\ndataset/foo=1/bar=2/baz=2\r\n^C\r\n...\r\nKeyboardInterrupt\r\n^C\r\n...\r\nKeyboardInterrupt\r\n```\r\n\r\n\\***NOTE:**\\* this **also** happens with the un-decorated `LocalFileSystem`, and when omitting the `filesystem` argument.",
+        "created_at": "2020-09-17T06:19:38.000Z",
+        "updated_at": "2022-09-23T13:55:20.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-17T06:32:02.502Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10029?focusedCommentId=17197415) by David McGuire (dmcguire):*\nRepro test case attached, since I don't understand the formatting here."
+        },
+        {
+            "created_at": "2020-09-17T06:33:13.652Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10029?focusedCommentId=17197416) by David McGuire (dmcguire):*\n`[~jorisvandenbossche]` FYI."
+        },
+        {
+            "created_at": "2020-09-17T06:45:54.055Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10029?focusedCommentId=17197424) by Joris Van den Bossche (jorisvandenbossche):*\nThanks for the reproducer!\r\n\r\nJust to be sure, can you try with `pq.ParquetDataset(....., use_legacy_dataset=False)` as well? (you might need to remove the `metadata_nthreads` argument, as it's not yet supported to configure the multithreading there)\r\n"
+        },
+        {
+            "created_at": "2020-09-17T16:08:09.340Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10029?focusedCommentId=17197784) by David McGuire (dmcguire):*\nIf it's not multi-threaded, then there won't be deadlock:\r\n\r\n```Java\n\r\n# This completes\r\nthreads = 6\r\ndataset = pq.ParquetDataset(dataset_url, filesystem=fs, use_legacy_dataset=False)\r\nprint(len(dataset.pieces))\r\n\r\n# This also completes\r\nthreads = 5\r\ndataset = pq.ParquetDataset(dataset_url, filesystem=fs, use_legacy_dataset=False)\r\nprint(len(dataset.pieces))\r\n```\r\n\r\nRunning:\r\n\r\n```Java\n\r\n$ python repro.py \r\n6\r\n6\r\n```"
+        },
+        {
+            "created_at": "2020-09-23T20:14:07.882Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10029?focusedCommentId=17201068) by David McGuire (dmcguire):*\n`[~jorisvandenbossche]` best I can tell, this impacts all Hive-style partitioned datasets across S3 and local storage, and going back as many versions as I was able to test (until `0.10.0`, with the dependency on `Cython`). This makes me think that supporting this use case was never very important, and might not be in the future. Can you help inform my understanding of the relative priority of fixing this defect?\r\n\r\nAlso, if the lack of traction is owing to it using the _legacy_ implementation, should I start exploring the new implementation available starting with `1.0.0`, and reporting defects against it? Seems like it trips up on something pretty simple, to start (a Spark `_SUCCESS` file):\r\n\r\n\u00a0\r\n```java\n\r\nOSError: Could not open parquet input source 'our-bucket/some/partitioned/dataset/_SUCCESS': Invalid: Parquet file size is 0 bytes\r\n```"
+        },
+        {
+            "created_at": "2020-09-23T20:43:50.281Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10029?focusedCommentId=17201082) by Wes McKinney (wesm):*\nI agree it would be good for this bug to be fixed, but as this is a project formed of volunteers it's hard to say when it will be a priority for someone. For example, my organization does prioritize fixing bugs that affect our corporate sponsors, but for everything else we do our best to fix bugs when we can relative to our other priorities. "
+        },
+        {
+            "created_at": "2020-09-23T20:48:30.876Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10029?focusedCommentId=17201086) by David McGuire (dmcguire):*\nI'm sympathetic to the economic reality of the FOSS funding model, which is why I'm trying to read between the lines on what I can expect to work well and get high-priority support. Just like any other project, I'm not asking you to change the priority, just clue me into it. :)\r\n\r\nWould it be better to pursue debugging the new implementation, or continue with the old, given the priorities stemming from your corporate sponsorships?"
+        },
+        {
+            "created_at": "2020-09-23T20:51:31.904Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10029?focusedCommentId=17201088) by David McGuire (dmcguire):*\n`[~wesm]` put more succinctly, where can I find and report defects in a place that might be more inline with the teams existing priorities?"
+        },
+        {
+            "created_at": "2020-09-23T21:10:07.838Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10029?focusedCommentId=17201097) by Joris Van den Bossche (jorisvandenbossche):*\n`[~dmcguire]` yes, this is indeed less of a priority for us because it happens in legacy, soon to be deprecated, code (and not only from a corporate sponsorship standpoint, also from the general project standpoint). Which doesn't mean it wouldn't be nice to fix it, to be clear, since ParquetDataset is still used a lot.\r\n\r\n> should I start exploring the new implementation available starting with 1.0.0, and reporting defects against it? \r\n\r\nYes, I think that is best. Certainly if putting considerable effort in experimenting and using pyarrow for parquet datasets, that is best targetting the new implementation.\r\n\r\n> Seems like it trips up on something pretty simple, to start (a Spark _SUCCESS file):\r\n\r\nIt _should_ be able to handle that (at least I thought we have tests for it), so if that is not working, very welcome to open a JIRA for it"
+        },
+        {
+            "created_at": "2020-09-23T21:14:23.006Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10029?focusedCommentId=17201100) by David McGuire (dmcguire):*\n`[~jorisvandenbossche]` great information, thank you! I'll follow up on the other apparent defect, and hopefully, I'm just doing something wrong. If so, that might be a path forward to pursue with the Petastorm maintainer."
+        },
+        {
+            "created_at": "2020-09-23T21:17:26.769Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10029?focusedCommentId=17201102) by Joris Van den Bossche (jorisvandenbossche):*\n(I was actually planning to open an issue on the Petastorm issue tracker to bring up their usage of ParquetDataset going to be deprecated in the future (after seeing the usage in the issues you opened), but didn't come to it yet)"
+        }
+    ]
+}

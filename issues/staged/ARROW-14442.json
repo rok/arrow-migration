@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[R] fix behaviour when converting timestamps with \"\" as tzone",
+        "body": "***Note**: This issue was originally created as [ARROW-14442](https://issues.apache.org/jira/browse/ARROW-14442). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nForm the comments, we've decided to go with option 3:\r\n\r\n- Set the timezone to local time without changing the integer value fo the timestamp. We store whatever integer R passes to us (21600), with CST as the timezone set. Display is then \"1970-01-01 00:00:00 CST\"\n  This is surprising because we are asserting the local timezone when that is not specified in R.\n  \n  ============================================\n  \n  `POSIXct` in R can have timezones specified as `\"\"` which is typically interpreted as the session local timezone. \n  \n  This can lead to surprising results like:\n  \n  ```r\n  \n  > Sys.timezone()\n  [1] \"America/Chicago\"\n  > as.integer(as.POSIXct(\"1970-01-01\"))\n  [1] 21600\n  > Sys.setenv(TZ = \"UTC\")\n  > as.integer(as.POSIXct(\"1970-01-01\"))\n  [1] 0\n  > Sys.setenv(TZ = \"Australia/Brisbane\")\n  > as.integer(as.POSIXct(\"1970-01-01\"))\n  [1] -36000\n  ```\n  \n  See also: https://stackoverflow.com/questions/69670142/how-can-i-store-timezone-agnostic-dates-for-sharing-between-r-and-python-using-p/69678923#69678923 \n  \n  This runs counter to what timestamps without timezones are interpreted as in Arrow: https://github.com/apache/arrow/blob/03669438bbce53078616c7f943a63fb0c11db196/format/Schema.fbs#L333-L336\n  \n  > However, it may also be encoded into a Timestamp column with an empty timezone. The timestamp values should be computed \"as if\" the timezone of the date-time values was UTC; for example, the naive date-time \"January 1st 1970, 00h00\" would be encoded as timestamp value 0.\n  \n  Critically in R, when `as.POSIXct(\"1970-01-01 00:00:00\")` is run, the timestamp value is computed \"as if\" the timezone of the date-time values was the local timezone (and **not** UTC like the Arrow spec says).\n  \n  This can lead to some surprising results when converting these timezoneless timestamps from R to Arrow. Using `as.POSIXct(\"1970-01-01 00:00:00\")` as an example, and presume US Central time.  We have a few options:\n  \n- Warn when the timezone is \"\" or not set that the behavior might be surprising\n    We store whatever integer R passes to us (21600), with no timezone set. When someone sees this formatted, the times/dates will be what the time was at UTC (\"1970-01-01 06:00:00\")\n- Set the timezone to UTC without changing the integer value of the timestamp.   We store whatever integer R passes to us (21600), with UTC as the timezone set. When someone sees this formatted, the times/dates will be in UTC (\"1970-01-01 06:00:00 UTC\") This might be surprising / counterintuitive because the timestamps will suddenly be different and will be based in UTC and not local time like people are expecting.\n- Set the timezone to local time without changing the integer value fo the timestamp. We store whatever integer R passes to us (21600), with CST as the timezone set. Display is then \"1970-01-01 00:00:00 CST\"\n  This is surprising because we are asserting the local timezone when that is not specified in R.\n  \n  If someone is using a timestamp without tzone in R to represent a timezoneless timestamp, options 2 and 3 above violate that when it is put into Arrow. Whereas, if someone is using a timestamp that just so happens to be without a tzone but they assume it's in local time, option 1 leads to (very) surprising results",
+        "created_at": "2021-10-22T17:32:45.000Z",
+        "updated_at": "2022-04-11T20:01:22.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-04-11T17:15:15.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-10-22T18:53:31.230Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14442?focusedCommentId=17433126) by Weston Pace (westonpace):*\nI believe the third option is correct.\r\n\r\n>  This is surprising because we are asserting the local timezone when that is not specified in R.\r\n\r\nBut that is exactly what was specified in R if I understand these statements correctly:\r\n\r\n> Critically in R, when as.POSIXct(\"1970-01-01 00:00:00\") is run, the timestamp value is computed \"as if\" the timezone of the date-time values was the local timezone\r\n\r\n> in R can have timezones specified as \"\" which is typically interpreted as the session local timezone.\r\n\r\nIt sound to me like the user specified \"session local timezone\" so that is what I would expect to see in the time zone value in Arrow."
+        },
+        {
+            "created_at": "2021-10-25T06:07:36.832Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14442?focusedCommentId=17433575) by Nicola Crane (thisisnic):*\nThinking back to when I used R as a consultant (and as someone who only really has learned about the different ways of representing timezones since interacting with the problem working on Arrow), I would have assumed that a timestamp without a timezone was in my timezone (or the timezone of the data's source), but it just hadn't been expressed explicitly. I wouldn't have even had any idea of the concept of a timezoneless timestamp.\r\n\r\nOption 3 would represent the most \"natural\" behaviour from that point of view."
+        },
+        {
+            "created_at": "2021-12-16T16:55:01.130Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14442?focusedCommentId=17460878) by Carl Boettiger (cboettig):*\nFWIW, I also think option 3 is correct.\u00a0"
+        },
+        {
+            "created_at": "2021-12-16T17:23:15.700Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14442?focusedCommentId=17460897) by Rok Mihevc (rokm):*\nWe already do something like this for strftime (https://github.com/apache/arrow/blob/master/r/R/dplyr-functions.R#L830-L839) and indeed option 3 seems best as R users would expect this behavior. "
+        },
+        {
+            "created_at": "2022-01-24T12:43:56.370Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14442?focusedCommentId=17481056) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nIf I understand correctly how timestamps (with a missing tz) work in R and how they are converted to arrow, it is not enough to store the integer value R passes to us together with the local timezone, because that timezone is not used when during the conversion - it is mostly metadata.\r\n\r\nTherefore, \"1970-01-01\" in \"BST\" will always be incorrect by a hour (BST is UTC +0100). I think we need to account for the offset too. Without correcting for the offset, we have the correct timezone, but the wrong time. See below.\r\n```r\n\r\n> a <- as.POSIXct(\"1970-01-01\")\r\n# the print method adds local tz when it is unspecified\r\n> a \r\n[1] \"1970-01-01 BST\"\r\n\r\n> attributes(a)\r\n$class\r\n[1] \"POSIXct\" \"POSIXt\" \r\n\r\n$tzone\r\n[1] \"\"\r\n\r\n> attr(a, \"tzone\") <- Sys.timezone()\r\n> attributes(a)\r\n$class\r\n[1] \"POSIXct\" \"POSIXt\" \r\n\r\n$tzone\r\n[1] \"Europe/London\"\r\n# print result looks the same as with an unspecified `tzone` attribute\r\n> a\r\n[1] \"1970-01-01 BST\"\r\n\r\n# yet this is not enough for conversion to arrow, which makes no use of the tzone attribute and converts the equivalent UTC time, but with the desired timezone and, thus, introduces a \"mistake\".\r\n> Array$create(a)\r\nArray\r\n<timestamp[us, tz=Europe/London]>\r\n[\r\n  1969-12-31 23:00:00.000000\r\n]\r\n```"
+        },
+        {
+            "created_at": "2022-01-24T13:06:54.030Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14442?focusedCommentId=17481069) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nI think the solution needs to take the integer value, figure out the offset to UTC, apply the offset, and only then transform it to an arrow timestamp. In this way we will counter arrow's ignoring of the tzone argument during conversion.\u00a0"
+        },
+        {
+            "created_at": "2022-01-24T13:16:59.463Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14442?focusedCommentId=17481073) by Joris Van den Bossche (jorisvandenbossche):*\nThat is essentially what the \"assume_timezone\" kernel does. "
+        },
+        {
+            "created_at": "2022-01-26T08:58:04.386Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14442?focusedCommentId=17482330) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nMy understanding of this issue has evolved a bit.\u00a0\r\n\r\n> Set the timezone to local time without changing the integer value fo the timestamp. We store whatever integer R passes to us (21600), with CST as the timezone set. Display is then \"1970-01-01 00:00:00 CST\"\r\n> This is surprising because we are asserting the local timezone when that is not specified in R.\r\n\r\nI think this is a 2 part problem:\r\n1. If the timezone information is missing in an R POSIXct vector, assume it is the system timezone and pass this info to arrow without modifying the absolute value (seconds since epoch). I think a _warning_ a maybe a bit too strong as a condition when this happens so maybe a _message_ might be more suitable.\n1. Adjust the print method so that the displayed time matches the timezone recorded as metadata.\n   \n   The first part will be addressed by this Jira, while part 2 will be addressed by https://issues.apache.org/jira/browse/ARROW-14567 "
+        },
+        {
+            "created_at": "2022-04-11T17:15:15.205Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14442?focusedCommentId=17520726) by Jonathan Keane (jonkeane):*\nIssue resolved by pull request 12240\n<https://github.com/apache/arrow/pull/12240>"
+        }
+    ]
+}

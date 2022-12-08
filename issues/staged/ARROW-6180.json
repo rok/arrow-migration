@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[C++] Create InputStream that is an isolated reader of a segment of a RandomAccessFile",
+        "body": "***Note**: This issue was originally created as [ARROW-6180](https://issues.apache.org/jira/browse/ARROW-6180). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIf different threads wants to do buffered reads over different portions of a file (and they are unable to create their own separate file handles), they may clobber each other. I would propose creating an object that keeps the RandomAccessFile internally and implements the InputStream API in a way that is safe from other threads changing the file position",
+        "created_at": "2019-08-08T19:09:40.000Z",
+        "updated_at": "2019-08-15T16:45:43.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-15T16:45:31.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-08-11T15:43:23.872Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6180?focusedCommentId=16904683) by Wes McKinney (wesm):*\nThe way I would do this is as follows:\r\n\r\n- Add `RandomAccessFile::GetStream(int64_t offset, int64_t length, std::shared_ptr<InputStream>* out)` (or similarly named \u2013 might need to be a top-level function so that it can retain a shared_ptr to the parent file)\n- Implement the object returned by this method privately. So no need to add any new class to public headers"
+        },
+        {
+            "created_at": "2019-08-12T12:54:20.826Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6180?focusedCommentId=16905155) by Antoine Pitrou (apitrou):*\nI don't really understand what this does concretely. Is it some kind of BufferReader over some area of memory maintained by the RandomAccessFile itself?"
+        },
+        {
+            "created_at": "2019-08-13T20:20:35.119Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6180?focusedCommentId=16906584) by Wes McKinney (wesm):*\n`[~pitrou]` the problem is that multiple threads are creating their own `BufferedInputStream` that references different segments of a `RandomAccessFile` that was passed into say `ParquetFileReader`\r\n\r\nSuppose you have a file that's 100MB and contains 10 10MB chunks. And you have different threads that do buffered processing of each chunk. If you naively pass `RandomAccessFile` into `BufferedInputStream` in different threads then the threads will clobber each other"
+        },
+        {
+            "created_at": "2019-08-13T21:06:14.600Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6180?focusedCommentId=16906614) by Zherui Cao (czxrrr):*\n`[~wesmckinn]` If I don't change BufferedInputStream, I need to make every BufferedInputStream has their own copy of raw_ (RadomAccessFile) rather than just have a shared pointer, it this what you mean?"
+        },
+        {
+            "created_at": "2019-08-13T21:48:55.897Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6180?focusedCommentId=16906643) by Wes McKinney (wesm):*\nThe idea is to have an private implementation of `InputStream` like this:\r\n\r\n```Java\n\r\n/// \\brief Reads a segment of a RandomAccessFile in a thread-safe manner\r\nclass FileSegmentReader : public InputStream {\r\n public:\r\n   FileSegmentReader(std::shared_ptr<RandomAccessFile> file, int64_t offset, int64_t length) ...\r\n\r\n   ...\r\n\r\n private:\r\n  std::shared_ptr<RandomAccessFile> file_;\r\n  int64_t position_;\r\n  int64_t file_offset_;\r\n  int64_t total_length_;\r\n}\r\n```\r\n"
+        },
+        {
+            "created_at": "2019-08-13T21:50:01.886Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6180?focusedCommentId=16906647) by Antoine Pitrou (apitrou):*\nI see. That sounds reasonable to me."
+        },
+        {
+            "created_at": "2019-08-13T21:56:39.175Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6180?focusedCommentId=16906653) by Deepak Majeti (mdeepak):*\n`[~wesmckinn]`, `[~pitrou]` \u00a0looks like the issue can also happen in a single-threaded application when you read multiple column chunks in a row-by-row fashion from each chunk. You end up creating a BufferedInputStream for each\u00a0chunk and all these InputStreams share the same RandomAccessFile and thereby getting clobbered."
+        },
+        {
+            "created_at": "2019-08-13T22:05:31.016Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6180?focusedCommentId=16906659) by Wes McKinney (wesm):*\nYou can let me take care of this so we aren't going back and forth over the details. "
+        },
+        {
+            "created_at": "2019-08-14T15:12:08.313Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6180?focusedCommentId=16907344) by Zherui Cao (czxrrr):*\nI saw your patch, and Thanks for that."
+        },
+        {
+            "created_at": "2019-08-15T16:45:31.214Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6180?focusedCommentId=16908277) by Wes McKinney (wesm):*\nIssue resolved by pull request 5085\n<https://github.com/apache/arrow/pull/5085>"
+        }
+    ]
+}

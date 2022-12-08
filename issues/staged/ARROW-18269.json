@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[C++] Slash character in partition value handling",
+        "body": "***Note**: This issue was originally created as [ARROW-18269](https://issues.apache.org/jira/browse/ARROW-18269). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n\u00a0\r\n\r\nProvided example shows that pyarrow does not handle partition value that contains '/' correctly:\r\n```java\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\n\r\nfrom pyarrow import dataset as ds\r\n\r\ndf = pd.DataFrame({\r\n    'value': [1, 2],\r\n    'instrument_id': ['A/Z', 'B'],\r\n})\r\n\r\nds.write_dataset(\r\n    data=pa.Table.from_pandas(df),\r\n    base_dir='data',\r\n    format='parquet',\r\n    partitioning=['instrument_id'],\r\n    partitioning_flavor='hive',\r\n)\r\n\r\ntable = ds.dataset(\r\n    source='data',\r\n    format='parquet',\r\n    partitioning='hive',\r\n).to_table()\r\n\r\ntables = [table]\r\n\r\ndf = pa.concat_tables(tables).to_pandas() \u00a0tables = [table]\r\n\r\ndf = pa.concat_tables(tables).to_pandas() \r\n\r\nprint(df.head())\n```\r\nResult:\r\n```java\n\r\n\u00a0 \u00a0value instrument_id\r\n0 \u00a0 \u00a0 \u00a01 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 A\r\n1 \u00a0 \u00a0 \u00a02 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 B \n```\r\nExpected behaviour:\r\nOption 1: Result should be:\r\n```java\n\r\n  \u00a0value instrument_id\r\n0 \u00a0 \u00a0 \u00a01 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 A/Z\r\n1 \u00a0 \u00a0 \u00a02 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 B \n```\r\nOption 2: Error should be raised to avoid '/' in partition value.\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2022-11-07T15:11:37.000Z",
+        "updated_at": "2022-11-17T23:29:06.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-11-07T20:01:02.220Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18269?focusedCommentId=17630000) by Weston Pace (westonpace):*\nToday we URI unescape fields as we read them.  For this to work I think we need to URI escape fields as we write them which it does not appear we are doing."
+        },
+        {
+            "created_at": "2022-11-08T11:01:12.256Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18269?focusedCommentId=17630346) by Vadym Dytyniak (dytyniak):*\n`[~westonpace]` Can I wait for a fix?"
+        },
+        {
+            "created_at": "2022-11-08T17:26:26.115Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18269?focusedCommentId=17630536) by Weston Pace (westonpace):*\nI'm not personally working on this at the moment but it seems pretty straightforward if someone wants to pick it up."
+        },
+        {
+            "created_at": "2022-11-11T03:02:29.220Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18269?focusedCommentId=17632043) by Vibhatha Lakmal Abeykoon (vibhatha):*\n`[~dytyniak]` Imagine the following situation\r\n\r\n```python\n\r\n    import pandas as pd\r\n    import pyarrow as pa\r\n\r\n    from pyarrow import dataset as ds\r\n    \r\n    path = tmpdir / \"slash-writer-x\"\r\n\r\n    df = pd.DataFrame({\r\n        'exp_id': [1, 2, 1, 3, 6],\r\n        'exp_meta': [\"experiment/A/f.csv\", \"experiment/B/f.csv\", \r\n                     \"experiment/A/d.csv\", \"experiment/C/k.csv\",\r\n                     \"experiment/M/i.csv\"],\r\n    })\r\n    \r\n    dt_table = pa.Table.from_pandas(df)\r\n\r\n    ds.write_dataset(\r\n        data=dt_table,\r\n        base_dir=path,\r\n        format='parquet',\r\n        partitioning=['exp_meta'],\r\n        partitioning_flavor='hive',\r\n    )\r\n\r\n    table = ds.dataset(\r\n        source=path,\r\n        format='parquet',\r\n        partitioning='hive',\r\n        schema = pa.schema([pa.field(\"exp_id\", pa.int32()), pa.field(\"exp_meta\", pa.utf8())])\r\n    ).to_table()\r\n    \r\n    print(table)\r\n\r\n    df = pa.concat_tables([table]).to_pandas()  \r\n\r\n    print(df.head())\r\n```\r\n\r\nIf we go for option2, the users won't be able to handle such situation. But we could suggest them to do it in a different way. But it would require them to encode and decode the URIs. If this is billions of raws, and that would be really expensive. \r\n\r\nWDYT? \r\n\r\ncc `[~westonpace]`"
+        },
+        {
+            "created_at": "2022-11-11T05:09:21.864Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18269?focusedCommentId=17632074) by Weston Pace (westonpace):*\nI think we should encode and decode the URIs for the user.  In fact, we already decode URIs.  I don't expect the encoding to be too expensive."
+        },
+        {
+            "created_at": "2022-11-11T08:18:50.917Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18269?focusedCommentId=17632152) by Vibhatha Lakmal Abeykoon (vibhatha):*\n`[~westonpace]` \u00a0\r\n\r\nSo here the context is that, the partition column data is being used to formulate the save directory path. When there is a '/' in data, this value get implicitly considered as a separator when we form the directory path. Thus `A/Z` makes a `A` folder and `Z` inside it. Not sure we can remove that part or ask the code to ignore it.\u00a0\r\n\r\nBut, in the reading part, when we recreate the fragments, we could decide whether to consider it as a path or just as a single value. If we consider it as a path (which is being done at the moment), we would get the erroneous output, but if we say don't consider it as a path, but as a non-path, we could retrieve the value accurately.\u00a0\r\n\r\nThis is one viable option. If we do that, we can provide a lamda or flag to determine this behavior.\u00a0\r\n\r\nI think a function to determine the key decoding from the file path would be better.\u00a0\r\n\r\nIs this overly complicated or a non-generic solution?\r\n\r\nAlthough I am inclined towards option 1 and not option 2. Option 2 is pretty straightforward to do, but a case as mentioned above could be very common.\r\n\r\nHow is the URL encoding/decoding part relevant here? Am I missing something?\r\n\r\nCould you please clarify a bit?\u00a0"
+        },
+        {
+            "created_at": "2022-11-14T16:29:44.424Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18269?focusedCommentId=17633925) by Weston Pace (westonpace):*\nOn writing, we encode each component.  If there is a `/` in the data, it should turn into `%2F` and so `A/Z` makes `A%2FZ` and the file would be stored at `A%2FZ/chunk-0.parquet`.  On reading, we decode each component.  So if we read `A%2FZ` then that turns into the string `A/Z`.\r\n\r\nThere is no configuration from the user required and so I think it is simpler."
+        },
+        {
+            "created_at": "2022-11-15T03:58:05.781Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18269?focusedCommentId=17634143) by Vibhatha Lakmal Abeykoon (vibhatha):*\nNice idea, although when we are reading, how do we know if this is encoded field or not? Just imagine the original key was `A%2FZ` and even if we detected encoded data, if it was the original data in the dataset, how do we know whether to decode or not? Or we just do encode decode no matter what. Is it a wise thing to do considering the performance?"
+        }
+    ]
+}

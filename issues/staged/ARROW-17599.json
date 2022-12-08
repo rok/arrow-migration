@@ -1,0 +1,52 @@
+{
+    "issue": {
+        "title": "[C++] ReadRangeCache should not retain data after read",
+        "body": "***Note**: This issue was originally created as [ARROW-17599](https://issues.apache.org/jira/browse/ARROW-17599). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI've added a unit test of the issue here: https://github.com/westonpace/arrow/tree/experiment/read-range-cache-retention\r\n\r\nWe use the ReadRangeCache for pre-buffering IPC and parquet files.  Sometimes those files are quite large (gigabytes).  The usage is roughly:\r\n\r\nfor X in num_row_groups:\r\n  CacheAllThePiecesWeNeedForRowGroupX\r\n  WaitForPiecesToArriveForRowGroupX\r\n  ReadThePiecesWeNeedForRowGroupX\r\n\r\nHowever, once we've read in row group X and passed it on to Acero, etc. we do not release the data for row group X.  The read range cache's entries vector still holds a pointer to the buffer.  The data is not released until the file reader itself is destroyed which only happens when we have finished processing an entire file.\r\n\r\nThis leads to excessive memory usage when pre-buffering is enabled.\r\n\r\nThis could potentially be a little difficult to implement because a single read range's cache entry could be shared by multiple ranges so we will need some kind of reference counting to know when we have fully finished with an entry and can release it.",
+        "created_at": "2022-09-02T02:28:51.000Z",
+        "updated_at": "2022-10-20T21:04:13.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-02T11:27:55.331Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17599?focusedCommentId=17599444) by David Li (lidavidm):*\nYou could perhaps store each entry as a custom Buffer subclass (which delegates to the actual buffer) and hand out shared pointers of that."
+        },
+        {
+            "created_at": "2022-09-11T17:53:53.019Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17599?focusedCommentId=17602893) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nShould [ReadRangeCache::read](https://github.com/westonpace/arrow/blob/5cf0deaf82f090718350fd3d8d0ee5c4795df7a0/cpp/src/arrow/io/caching.cc#L193) remove the cache entry after performing the read?\r\n\r\nFrom the documentation, is not clear if that method should remove the cache entry; I did a simple experiment (removing the range) and the [unit test](https://github.com/westonpace/arrow/blob/5cf0deaf82f090718350fd3d8d0ee5c4795df7a0/cpp/src/arrow/io/memory_test.cc#L772) provided by `[~westonpace]` is passing:\r\n\r\n\u00a0\r\n```java\n\r\nif (it != entries.end() && it->range.Contains(range)) {\r\n\u00a0 ...\r\n\u00a0 this->entries.erase(it);\r\n\u00a0 \u00a0...\r\n}\r\n```\r\n\u00a0\r\n\r\nThis is just an experiment to understand better the issue.\r\n\r\nAlso, I tried to explore `[~lidavidm]`'s idea, but I think I need more hints about how we can store each cache entry as a custom buffer; so far what I understand is that the data is being wrapped/eaten by the RandomAccessFile and that is the reason why the release won't happen until the file reader is destroyed (there is no way to access to the internal data buffer held by RandomAccessFile)\u00a0\r\n\r\nWeston, it would be great to know full use case you were running; right now I'm using the unit test, but it would help to replicate the issue with the full use case locally (maybe the use case needs an override method for ReadRangeCache::read that can delete the range at the end)"
+        },
+        {
+            "created_at": "2022-09-12T17:05:40.807Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17599?focusedCommentId=17603200) by Weston Pace (westonpace):*\n> Should ReadRangeCache::read remove the cache entry after performing the read?\r\n\r\nYes.  I don't think this is mentioned in the documentation.  It may not have been a concern at the time.  I think we should also update the documentation so that we are very clear that this happens.\r\n\r\n> Also, I tried to explore David Li's idea, but I think I need more hints about how we can store each cache entry as a custom buffer; so far what I understand is that the data is being wrapped/eaten by the RandomAccessFile and that is the reason why the release won't happen until the file reader is destroyed (there is no way to access to the internal data buffer held by RandomAccessFile) \r\n\r\nThe FileReader owns a single instance of ReadRangeCache.  That instance won't be deleted until the FileReader is deleted.\r\nThe ReadRangeCache has a vector of RangeCacheEntry.  Currently, nothing removes items from that vector.  A RangeCacheEntry has a `Future<std::shared_ptr<Buffer>>`.  Once that future has been filled it will hold the result (in case callbacks are added later) and so this will keep the buffer alive (because there is still a shared_ptr referencing it).\r\n\r\n> Weston, it would be great to know full use case you were running; right now I'm using the unit test, but it would help to replicate the issue with the full use case locally (maybe the use case needs an override method for ReadRangeCache::read that can delete the range at the end)\r\n\r\nThe use case is described in more detail in https://issues.apache.org/jira/browse/ARROW-17590 (which has a reproducing script) but a slightly more involved test would be:\r\n\r\nCreate a 4GiB parquet file with 20 row groups.  Each row group should be about 200MiB.  Scan the file with pyarrow to_batches (just count the rows or something).  The scanner should only read at most 2 row groups in at a time.  So I'd expect to see around 0.5GiB peak RAM.  However, in practice, you will see 4GiB peak RAM."
+        },
+        {
+            "created_at": "2022-09-20T14:56:01.485Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17599?focusedCommentId=17607252) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nThanks Weston,\r\n\r\n>> Should ReadRangeCache::read remove the cache entry after performing the read?\r\n\r\n>Yes. I don't think this is mentioned in the documentation. It may not have been a concern at the time. I think we should also update the documentation so that we are very clear that this happens.\r\n\r\nIt seems that [ParquetFileReader::PreBuffer](https://github.com/apache/arrow/blob/40ec95646962cccdcd62032c80e8506d4c275bc6/cpp/src/parquet/file_reader.h#L156) was implemented under a different assumption, from the API docs:\r\n\r\n_\"After calling this, creating readers for row groups/column indices that were not buffered may fail. {**}Creating multiple readers for the a subset of the buffered regions is acceptable{**}. This may be called again to buffer a different set of row groups/columns.\"_\r\n\r\nI did run the script provided in ARROW-17590 and was able to reproduce the issue.\r\nAlso, I was able to check that we are reading multiple times the same cache entry and observe that removing the entry after ReadRangeCache::read is breaking the contract required by ParquetFileReader::PreBuffer.\r\n\r\nI'll keep investigating, any other ideas are more than welcome!"
+        },
+        {
+            "created_at": "2022-09-20T16:10:46.125Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17599?focusedCommentId=17607287) by Weston Pace (westonpace):*\nAck.  I was not really aware that was how the parquet reader operated.  That comment is very helpful.  Hmm, in that case maybe a better fix is to improve how we scan parquet files.  Currently we get an async generator from a parquet reader for the entire file.  The code for it is [here](https://github.com/apache/arrow/blob/master/cpp/src/parquet/arrow/reader.cc#L1162).\r\n\r\nThis prebuffers the entire range of row groups before we even start reading.  In practice I think we only want to prebuffer a row group right before we're ready to actually read that row group."
+        },
+        {
+            "created_at": "2022-09-20T16:24:43.050Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17599?focusedCommentId=17607293) by Weston Pace (westonpace):*\nAlthough the more I think about it the less I'm sure that parquet reader API makes sense.  Why would someone want to prebuffer a chunk of data and then read from it multiple times?\r\n\r\n`[~lidavidm]` any thoughts on which approach we should take?"
+        },
+        {
+            "created_at": "2022-09-20T16:34:51.640Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17599?focusedCommentId=17607297) by David Li (lidavidm):*\nI think a lot of this was just because of how it was historically added: originally, the cache was added without adding an iterator interface, so the cache would necessarily have to preserve the input data. I think now that we're changing things here, we should perhaps consider adding an explicit cache-based, iterator/generator-based API so that the API contract is clear.\r\n\r\nHowever, I think we still do want to pre-buffer all row groups, because that way the read coalescing can do the best job possible. That said it probably needs benchmarking to determine what makes sense. It could work to only start reads for a row group when we read it (with the understanding that some I/O may 'spill over' into the next row group for optimal I/O patterns)"
+        },
+        {
+            "created_at": "2022-10-14T22:41:31.802Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17599?focusedCommentId=17617987) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nFollow up ticket:\r\n\r\nhttps://issues.apache.org/jira/browse/ARROW-18065"
+        },
+        {
+            "created_at": "2022-10-20T21:04:13.860Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17599?focusedCommentId=17621368) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nAnother follow up/related ticket:\r\n\r\nhttps://issues.apache.org/jira/browse/ARROW-18113"
+        }
+    ]
+}

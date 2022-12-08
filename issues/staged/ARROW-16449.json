@@ -1,0 +1,60 @@
+{
+    "issue": {
+        "title": "[Java] java.lang.reflect.InaccessibleObjectException on Java 18",
+        "body": "***Note**: This issue was originally created as [ARROW-16449](https://issues.apache.org/jira/browse/ARROW-16449). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nGetting the following stack trace when running on Java 18.\r\n\r\n`BaseAllocator` throws this when it calls the `DefaultAllocationManagerFactory`.\r\n\r\n```Java\n\r\n    private ArrowBuf createEmpty() {\r\n        return this.allocationManagerFactory.empty();\r\n    }\r\n```\r\n\r\n```java\n\r\nCaused by: java.lang.RuntimeException: Failed to initialize MemoryUtil.\r\n\tat org.apache.arrow.memory.util.MemoryUtil.<clinit>(MemoryUtil.java:136)\r\n\t... 20 more\r\nCaused by: java.lang.reflect.InaccessibleObjectException: Unable to make field long java.nio.Buffer.address accessible: module java.base does not \\\"opens java.nio\\\" to unnamed module @3453e479\r\n\tat java.base/java.lang.reflect.AccessibleObject.checkCanSetAccessible(AccessibleObject.java:354)\r\n\tat java.base/java.lang.reflect.AccessibleObject.checkCanSetAccessible(AccessibleObject.java:297)\r\n\tat java.base/java.lang.reflect.Field.checkCanSetAccessible(Field.java:178)\r\n\tat java.base/java.lang.reflect.Field.setAccessible(Field.java:172)\r\n\tat org.apache.arrow.memory.util.MemoryUtil.<clinit>(MemoryUtil.java:84)\r\n\t... 20 more\r\n \n```",
+        "created_at": "2022-05-03T15:22:28.000Z",
+        "updated_at": "2022-10-11T13:23:44.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-05-03T16:01:10.982Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16449?focusedCommentId=17531269) by David Li (lidavidm):*\nCan you test with Arrow 8.0.0 once it releases (in the next few weeks)? Until ARROW-15755 was implemented there was no support for Java > 11"
+        },
+        {
+            "created_at": "2022-05-03T16:01:57.108Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16449?focusedCommentId=17531270) by David Li (lidavidm):*\nCC `[~dsusanibara]`"
+        },
+        {
+            "created_at": "2022-05-03T16:05:09.431Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16449?focusedCommentId=17531271) by Ra\u00fal Cumplido (raulcd):*\nHi Daniel,\r\n\r\nThanks for your report. We are working towards supporting newer JDK versions.\r\n\r\nSupport for JDK 17 will be added to the next 8.0.0 release as you can see from this ticket https://issues.apache.org/jira/browse/ARROW-15755 .\r\n\r\nSupport for JDK 18 is expected to be added to a following release. You can follow how support for JDK 18 progresses on this ticket: https://issues.apache.org/jira/browse/ARROW-16267"
+        },
+        {
+            "created_at": "2022-05-03T16:13:38.026Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16449?focusedCommentId=17531277) by Daniel Gl\u00f6ckner (gloeckner.daniel@googlemail.com):*\nThanks `[~lidavidm]` and `[~raulcd]`. I will trace the Arrow release and re-test."
+        },
+        {
+            "created_at": "2022-05-08T18:46:41.846Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16449?focusedCommentId=17533515) by Daniel Gl\u00f6ckner (gloeckner.daniel@googlemail.com):*\n`[~lidavidm]` I re-tested with the Arrow 8.0 release and java 17.0.2. \r\n\r\nThe minimal code below only works if I add `--add-opens java.base/java.nio=ALL-UNNAMED` VM option. Is this expected?\r\n\r\n```Java\n\r\nimport org.apache.arrow.memory.RootAllocator;\r\n\r\npublic class Arrow {\r\n\r\n  public static void main(String[] args) {\r\n    RootAllocator rootAllocator = new RootAllocator();\r\n    var buf = rootAllocator.buffer(1024);\r\n    System.out.println(buf);\r\n  }\r\n}\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-05-10T15:08:19.303Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16449?focusedCommentId=17534394) by David Li (lidavidm):*\n[~gloeckner.daniel@googlemail.com] I believe this is currently unavoidable because of Arrow/Netty's use of direct memory, cc `[~dsusanibara]` for comments. (JEP419 may help but we are a very long way off from being able to rely on that.)"
+        },
+        {
+            "created_at": "2022-05-10T15:58:32.002Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16449?focusedCommentId=17534429) by David Dali Susanibar Arce (dsusanibara):*\nHi [~gloeckner.daniel@googlemail.com]\u00a0 as per the jar artifacts are exposed as a legacy mode (it means any jar are running in the classpath is consider as a unnamed module) and base on JEP 200 The Modular JDK: yes, this is needed:\r\n\r\n--add-opens ${module}/${package}=${target_modules}\r\nLet the ${target_modules} access all types and members, regardless of visibility, from ${module}'s ${package}\r\n\r\nAlso this is added to the Arrow Java documentation 8.0.0 at <https://arrow.apache.org/docs/java/install.html>\r\n\r\n\u00a0\r\n\r\n\u2014\r\n\r\n\u00a0\r\n\r\nThis is a draft for implement JEP 200 The Modular JDK and be more restrict about to not give ALL-UNNAMED access but there is a lot of discussion we need to close before to convert this draft into PR: <https://github.com/apache/arrow/pull/13072>\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-07-08T17:33:02.922Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16449?focusedCommentId=17564376) by David Dali Susanibar Arce (dsusanibara):*\nHi [~gloeckner.daniel@googlemail.com] please could you help us if we could close this issue as resolved ?, thank you in advance."
+        },
+        {
+            "created_at": "2022-10-11T13:05:36.989Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16449?focusedCommentId=17615771) by Fabian Mastenbroek (fabianishere):*\nHi,\r\n\r\nI stumbled upon this issue today and ideally I would like to avoid having to open `java.base` to unnamed modules. I took a look at the source code of [MemoryUtil](https://github.com/apache/arrow/blob/master/java/memory/memory-core/src/main/java/org/apache/arrow/memory/util/MemoryUtil.java) today and it seems there might be workaround for this issue.\r\n\r\nThe [reflective call](https://github.com/apache/arrow/blob/3d7f2f22a0fc441a41b8fa971e11c0f4290ebb24/java/memory/memory-core/src/main/java/org/apache/arrow/memory/util/MemoryUtil.java#L84) that is currently causing the failure is not necessary. Applying [this patch](https://github.com/fabianishere/arrow/commit/7386cdbb9e67b91c763aad647bc0b407c8b5e9e7) to the Arrow tree seems to resolve this issue for me. However, without the suggested _add-opens_ parameter, any call to _MemoryUtil.directBuffer_ will now fail during runtime.\r\n\r\n[This patch](https://github.com/fabianishere/arrow/commit/5a32dcaa7d4732742d65b69a149f560e61aa36c7) resolves that issue for me. However, this is a rather hairy solution, since it overwrites fields of _DirectByteBuffer_ using _Unsafe_ to construct a buffer for an arbitrary memory address."
+        },
+        {
+            "created_at": "2022-10-11T13:13:10.520Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16449?focusedCommentId=17615776) by David Li (lidavidm):*\nThanks `[~fabianishere]`! \r\n\r\nThe first patch seems reasonable. But the second patch seems rather risky, and from a quick look, without directBuffer, much of the Arrow library will still fail at runtime."
+        },
+        {
+            "created_at": "2022-10-11T13:23:44.707Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16449?focusedCommentId=17615786) by David Li (lidavidm):*\nCC `[~dsusanibara]` `[~ljw1001]` for opinions"
+        }
+    ]
+}

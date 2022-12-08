@@ -1,0 +1,69 @@
+{
+    "issue": {
+        "title": "[Java] Remove non-nullable vectors in new vector class hierarchy ",
+        "body": "***Note**: This issue was originally created as [ARROW-1710](https://issues.apache.org/jira/browse/ARROW-1710). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSo far the consensus seems to be remove all non-nullable vectors. ",
+        "created_at": "2017-10-23T02:14:36.000Z",
+        "updated_at": "2017-11-28T17:52:06.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2017-11-28T17:32:50.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-10-23T07:07:45.726Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1710?focusedCommentId=16214748) by Gonzalo Ortiz (gortizja):*\nI'm a little bit concern about performance loss if non-nullable vectors are removed. Arrow on Java has quite bad performance so far (compared with plan ByteBuffers) and to remove non-nullable vectors can make it even worst."
+        },
+        {
+            "created_at": "2017-10-23T13:13:02.953Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1710?focusedCommentId=16215113) by Wes McKinney (wesm):*\nAs the saying goes, \"you only have a performance problem if you can prove it\". So we shouldn't make any technical decisions about performance unless we have hard numbers to back them up. Since you always have the option to ignore the validity bitmap if the null count is 0, I am not sure why not having non-nullable containers would preclude performance optimizations for data without nulls. \r\n\r\nIt would be helpful to understand the reason for the bad performance that you're talking about, whether it's something about the Java class structure or something lower level (e.g. ByteBuffer vs. netty's AbstractByteBuf)"
+        },
+        {
+            "created_at": "2017-10-24T19:49:10.248Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1710?focusedCommentId=16217560) by Ethan Levine (e.levine):*\nThe BitVector is an extra object that has to be allocated (both in terms of the backing data and in terms of the Java objects involved). You'd also need to perform bit masking of the underlying data with every write, which could involve a cache miss if the data for the BitVector isn't neatly colocated with the actual data for the nullable vector.\r\n\r\nPerhaps a tracking flag could be added to the nullable vectors, though. It would start out \"false\", and get set to \"true\" if you ever write a null value. That way you could avoid the extra allocation and computation involved with tracking the validity of each value in the case where there are no null values. This seems like it would be more complicated than just keeping non-nullable vectors around, however."
+        },
+        {
+            "created_at": "2017-10-25T13:22:27.625Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1710?focusedCommentId=16218606) by Wes McKinney (wesm):*\nSee https://github.com/apache/arrow/blob/master/format/Layout.md#null-bitmaps. \"Arrays having a 0 null count may choose to not allocate the null bitmap.\". So when there are no nulls, it is not necessary to create a BitVector. It is also not necessary to populate the bit vector, so as you say waiting until the first null to create the bitmap might be the way to go."
+        },
+        {
+            "created_at": "2017-10-26T01:39:32.435Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1710?focusedCommentId=16219836) by Jacques Nadeau (jnadeau):*\nI'm one of the voices strongly arguing for dropping the additional class objects. (I also was the one who originally introduced the two separate sets when the code was first developed.) My experience has been the following:\r\n\r\n- Extra complexity of managing two different runtime classes is very expensive (maintenance, coercing between, managing runtime code generation, etc)\n- Most source data is actually declared as nullable but rarely has nulls\n  \n  As such, having an adaptive interaction where you look at cells 64 values at a time and adapt your behavior based on actual nullability (as opposed to declared nullability) provides a much better performance lift in real world use cases than having specialized code for declared non-nullable situations.\n  \n  FYI: [~e.levine], the updated approach with vectors is moving to a situation where we don't have a bit vector and ultimately also consolidates the buffer for the bits and the fixed bytes in the same buffer. In that case, there is no heap memory overhead and the direct memory overhead is 1 bit per value, far less than necessary.\n  \n  Also note that in reality, most people focused on super high performance Java implementations interact directly with the memory. You can see an example of how we do this here: https://github.com/dremio/dremio-oss/blob/master/sabot/kernel/src/main/java/com/dremio/sabot/op/common/ht2/Pivots.java#L89\n  \n  If, in the future, if people need the vector classes to have an additional set of methods such as: \n  allocateNewNoNull()\n  setSafeIgnoreNull(int index, int value) \n  \n  let's just add those when someone's usecase requires it. No need to have an extra set of vectors for that purpose.\n"
+        },
+        {
+            "created_at": "2017-10-26T12:56:00.770Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1710?focusedCommentId=16220392) by Ethan Levine (e.levine):*\n`[~jnadeau]`: I'd be interested to learn more about that consolidation. It sounds like the validity bits will be stored inline with the data? It seems like eliding that could be difficult.\r\n\r\nOur use case involves data that's mostly not nullable, and we take care to ensure that it's declared that way. If the costs of writing only non-null values to a nullable array (in terms of memory and computation) become insignificant, then it makes sense to only include nullable arrays. But if that's not the case then I think it makes sense to keep both."
+        },
+        {
+            "created_at": "2017-10-26T18:26:03.197Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1710?focusedCommentId=16220962) by Jacques Nadeau (jnadeau):*\nThe consolidation doesn't inline the values. They are simply prepended. All validity bits come before all data bytes. They are just in the same ArrowBuf rather than maintaining two ArrowBufs. Normally we use different buffers to support resizing only one. However, in the case of validity and data, both will get resized at the same time depending on the values held."
+        },
+        {
+            "created_at": "2017-11-07T19:17:55.527Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1710?focusedCommentId=16242687) by Li Jin (icexelloss):*\nSeems we agree to remove non nullable vectors.\r\n\r\nThe next question is, what do people feel about dropping the \"Nullable\" prefix in new vector classes? `[~bryanc]` brought this up initially.\r\n\r\nI am +1 for dropping the \"Nullable\" prefix. I think It makes the code more concise. "
+        },
+        {
+            "created_at": "2017-11-18T02:10:40.371Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1710?focusedCommentId=16257872) by Wes McKinney (wesm):*\nI would also propose to remove the Nullable prefix and add \"dirty\" accessor methods for users who are working with data without nulls (or that can be used on the hot path when you see that the null count for a vector is 0)"
+        },
+        {
+            "created_at": "2017-11-18T16:45:07.010Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1710?focusedCommentId=16258123) by Jacques Nadeau (jnadeau):*\nAgree to both nullable prefix removable and adding \"dirty\" accessor/mutator methods but i think the latter could come in 0.9.0 since it is enhancement to the api."
+        },
+        {
+            "created_at": "2017-11-18T21:43:27.405Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1710?focusedCommentId=16258231) by Wes McKinney (wesm):*\n+1. See ARROW-1833"
+        },
+        {
+            "created_at": "2017-11-20T07:16:11.774Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1710?focusedCommentId=16258884) by Bryan Cutler (bryanc):*\nSounds good to me, I'll work on this and have a PR soon."
+        },
+        {
+            "created_at": "2017-11-28T17:32:50.924Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1710?focusedCommentId=16269096) by Wes McKinney (wesm):*\nIssue resolved by pull request 1341\n<https://github.com/apache/arrow/pull/1341>"
+        }
+    ]
+}

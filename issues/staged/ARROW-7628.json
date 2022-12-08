@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[Python] Better document some read_csv corner cases",
+        "body": "***Note**: This issue was originally created as [ARROW-7628](https://issues.apache.org/jira/browse/ARROW-7628). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi, I have found two problematic cases, possibly bugs, in pyarrow **read_csv** module. I have written the following piece of code and run a test on the attached CSV file. \r\n\r\nThe code compares pandas read_csv with pyarrow csv to show that the second is not behaving correctly with the following set of parameters:\r\n\r\n1. change parameter skip_rows = 10, \r\n```python\n\r\nTraceback (most recent call last):\r\n  File \"/home/athan/anaconda3/envs/TRIADB/lib/python3.7/site-packages/IPython/core/interactiveshell.py\", line 3326, in run_code\r\n    exec(code_obj, self.user_global_ns, self.user_ns)\r\n  File \"<ipython-input-21-8c5c88b190c4>\", line 4, in <module>\r\n    read_options=csv.ReadOptions(skip_rows=skip_rows, autogenerate_column_names=False, use_threads=True, column_names=column_names)\r\n  File \"pyarrow/_csv.pyx\", line 541, in pyarrow._csv.read_csv\r\n  File \"pyarrow/error.pxi\", line 84, in pyarrow.lib.check_status\r\npyarrow.lib.ArrowKeyError: Column 'catcost' in include_columns does not exist in CSV file\r\n```\r\n\r\n2. change parameters skip_rows = 12, columns = None\r\nIn this case you don't get the error above, all columns are fetched, but compare the two dataframes, the one from pyarrow with to_pandas() and the one from the output of pandas read_csv(). You will notice that the first one has not parsed correctly the null values ('\nN') in the last column catname. On the contrary pandas read_csv managed to parse all the null values correctly.\r\n\r\n```python\n\r\nOut[28]: \r\n   1082  991   16.5    200 2014-09-10  1  bar\r\n0  1082  997   0.55  100.0 2014-09-10  1  bar\r\n1  1082  998   7.95  200.0 2014-03-03  0   \\N\r\n2  1083  998  12.50    NaN        NaT  0  bar\r\n3  1083  999   1.00    NaN        NaT  0  foo\r\n4  1084  994  57.30  100.0 2014-12-20  1   \\N\r\n5  1084  995  22.20    NaN        NaT  0  foo\r\n6  1084  998  48.60  200.0 2014-12-20  1  foo\r\n\r\n```\r\n\r\nPython code to test the attached CSV file for the bugs reported above\r\n\r\n\r\n```python\n\r\nfrom pyarrow import csv\r\nimport pyarrow as pa\r\nimport pandas as pd\r\n\r\nfile_location = 'spc_catalog.tsv'\r\n\r\nsep = '\\t'\r\nnulls=['\\\\N']\r\n\r\ncolumns = ['catcost', 'catqnt', 'catdate', 'catchk', 'catname']\r\ncolumn_names = None\r\ncolumn_types = None\r\n\r\nskip_rows = None\r\nnrecords = None\r\n\r\ncsv.read_csv(file_location,\r\n    parse_options=csv.ParseOptions(delimiter=sep),\r\n    convert_options=csv.ConvertOptions(include_columns=columns, column_types=column_types, null_values=nulls),\r\n    read_options=csv.ReadOptions(skip_rows=skip_rows, autogenerate_column_names=False, use_threads=True, column_names=column_names)\r\n).to_pandas()\r\n\r\npd.read_csv(file_location, sep=sep, na_values='\\\\N', usecols=columns, nrows=nrecords, names=column_names, dtype=column_types)\r\n\r\n```",
+        "created_at": "2020-01-21T10:17:04.000Z",
+        "updated_at": "2020-02-21T13:17:05.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-02-21T13:17:05.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-02-17T15:42:13.336Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7628?focusedCommentId=17038453) by Antoine Pitrou (apitrou):*\nThanks for reporting this issue. I'm answering your concerns below.\r\n\r\nPoint (1): this is the normal semantics of `skip_rows`. As the documentation says for [ReadOptions.autogenerate_column_names](https://arrow.apache.org/docs/python/generated/pyarrow.csv.ReadOptions.html#pyarrow.csv.ReadOptions):\r\n\r\n> If false, column names will be read from the first CSV row **after** skip_rows.\r\n(emphasis mine)\r\n\r\nPoint (2): by default, string columns are not checked for null values, because null values are also valid string values. But you can change this behaviour by passing `strings_can_be_null=True` to `ConvertOptions`.\r\n(again, see the documentation for [ConvertOptions](https://arrow.apache.org/docs/python/generated/pyarrow.csv.ConvertOptions.html#pyarrow.csv.ConvertOptions) :-))\r\n\r\n"
+        },
+        {
+            "created_at": "2020-02-17T15:43:58.291Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7628?focusedCommentId=17038455) by Antoine Pitrou (apitrou):*\nSo I don't think there is an Arrow bug here. However, perhaps we can try to make these things easier to find out. cc `[~npr]` \u00a0 any thoughts?"
+        },
+        {
+            "created_at": "2020-02-19T07:33:58.658Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7628?focusedCommentId=17039767) by Athanassios Hatzis (athanassios):*\nThanks `[~apitrou]` for clearing these cases. Yes, I agree, it is a matter of semantics, \r\n\r\nPoint2: perhaps it would be better to set < strings_can_be_null=True > if the user specifies the < null_values > parameter.\r\n\r\nPoint1: I am confused with <include_columns > and <column_names> options, in my example above, if I specify <column_names=['catcost', 'catqnt', 'catdate', 'catchk', 'catname'] > for ReadOptions and <skip_rows=10> then you also get the following error, \r\n\r\npyarrow.lib.ArrowInvalid: CSV parse error: Expected 5 columns, got 7\r\n\r\nSo I guess the corner case in the example above is what is the right combination of parameters to read a subset of columns from CSV and also skip the first N lines of the file ? "
+        },
+        {
+            "created_at": "2020-02-19T09:11:53.908Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7628?focusedCommentId=17039823) by Antoine Pitrou (apitrou):*\nWell, `column_names` has to map to the CSV file's columns, and the file has 7 columns, so you need to pass  7 names there.\r\n\r\n`include_columns` will allow you to select which columns inside `column_names` are actually returned. Concretely, you probably want to pass something like:\r\n```python\n\r\nread_options=csv.ReadOptions(column_names=['catsid', 'catpid', 'catcost', 'catqnt', 'catdate', 'catchk', 'catname'])\r\nconvert_options=csv.ConvertOptions(include_columns=['catcost', 'catqnt', 'catdate', 'catchk', 'catname'])\r\n```\r\n"
+        },
+        {
+            "created_at": "2020-02-19T09:50:41.420Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7628?focusedCommentId=17039855) by Athanassios Hatzis (athanassios):*\nYes, that works, thank you for your assistance"
+        },
+        {
+            "created_at": "2020-02-20T11:34:56.258Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7628?focusedCommentId=17040879) by Joris Van den Bossche (jorisvandenbossche):*\n> > Point (1): this is the normal semantics of skip_rows. As the documentation says for ReadOptions.autogenerate_column_names:\r\n>\r\n>    If false, column names will be read from the first CSV row after skip_rows.\r\n\r\n`[~apitrou]` but that seems to contradict with the documentation of `skip_rows` itself:\r\n\r\n> The number of rows to skip at the start of the CSV data, not including the row of column names (if any)."
+        },
+        {
+            "created_at": "2020-02-20T11:44:05.452Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7628?focusedCommentId=17040884) by Joris Van den Bossche (jorisvandenbossche):*\n`[~athanassios]` Note that pandas.read_csv has the same behaviour regarding skiprows (skipping rows from the beginning of the file, so potentially loosing the header line). But in your code example, you didn't pass `skip_rows` (you used `nrows`, which has different behaviour). \r\n\r\nSo using your example, if I run:\r\n\r\n```python\n\r\nIn [16]: skip_rows = 10  \r\n\r\nIn [17]: pd.read_csv(file_location, sep=sep, na_values='\\\\N', skiprows=skip_rows) \r\nOut[17]: \r\n   1082  991   16.5    200  2014-09-10  1  bar\r\n0  1082  997   0.55  100.0  2014-09-10  1  bar\r\n1  1082  998   7.95  200.0  2014-03-03  0  NaN\r\n2  1083  998  12.50    NaN         NaN  0  bar\r\n3  1083  999   1.00    NaN         NaN  0  foo\r\n4  1084  994  57.30  100.0  2014-12-20  1  NaN\r\n5  1084  995  22.20    NaN         NaN  0  foo\r\n6  1084  998  48.60  200.0  2014-12-20  1  foo\r\n```\r\n\r\nyou see that it also looses the header file. And thus when specifying the column names to read, you also get an error:\r\n\r\n```python\n\r\nIn [18]: pd.read_csv(file_location, sep=sep, na_values='\\\\N', skiprows=skip_rows, usecols=columns)  \r\n...\r\nValueError: Usecols do not match columns, columns expected but not found: ['catdate', 'catqnt', 'catname', 'catchk', 'catcost']\r\n```\r\n\r\n\r\n"
+        },
+        {
+            "created_at": "2020-02-20T12:42:43.905Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7628?focusedCommentId=17040928) by Joris Van den Bossche (jorisvandenbossche):*\nI repurposed the issue to update the docs, will look into doing a PR."
+        },
+        {
+            "created_at": "2020-02-21T13:17:05.391Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7628?focusedCommentId=17041850) by Francois Saint-Jacques (fsaintjacques):*\nIssue resolved by pull request 6463\n<https://github.com/apache/arrow/pull/6463>"
+        }
+    ]
+}

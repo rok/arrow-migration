@@ -1,0 +1,30 @@
+{
+    "issue": {
+        "title": "[C++] Parquet: Object type and stats lost when using 96-bit timestamps",
+        "body": "***Note**: This issue was originally created as [ARROW-4967](https://issues.apache.org/jira/browse/ARROW-4967). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nRun the following code:\r\n\r\n```python\n\r\nimport datetime as dt\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\ndataframe = pd.DataFrame({'foo': [dt.datetime.now()]})\r\ntable = pa.Table.from_pandas(dataframe, preserve_index=False)\r\n\r\npq.write_table(table, 'int64.parq')\r\npq.write_table(table, 'int96.parq', use_deprecated_int96_timestamps=True)\r\n```\r\n\r\nExamining the `int64.parq` file, we see that the column metadata includes an object type of `TIMESTAMP_MICROS` and also gives some stats. All is well.\r\n\r\n```Java\n\r\nfile schema: schema \r\n--------------------------------------------------------------------------------\r\nfoo:         OPTIONAL INT64 O:TIMESTAMP_MICROS R:0 D:1\r\n\r\nrow group 1: RC:1 TS:76 OFFSET:4 \r\n--------------------------------------------------------------------------------\r\nfoo:          INT64 SNAPPY ... ST:[min: 2019-12-31T23:59:59.999000, max: 2019-12-31T23:59:59.999000, num_nulls: 0]\r\n```\r\n\r\n\r\nHowever, if we look at `int96.parq`, it appears that that metadata is lost. No object type, and no column stats.\r\n\r\n```Java\n\r\nfile schema: schema \r\n--------------------------------------------------------------------------------\r\nfoo:         OPTIONAL INT96 R:0 D:1\r\n\r\nrow group 1: RC:1 TS:58 OFFSET:4 \r\n--------------------------------------------------------------------------------\r\nfoo:          INT96 SNAPPY ... ST:[no stats for this column]\r\n```\r\n\r\nThis is a bit confusing since the metadata for the exact same data can look differently depending on an unrelated flag being set or cleared.",
+        "created_at": "2019-03-20T01:10:05.000Z",
+        "updated_at": "2019-08-21T23:59:38.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-21T23:43:03.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-05-08T09:53:25.450Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4967?focusedCommentId=16835477) by Joris Van den Bossche (jorisvandenbossche):*\n`[~yiannisliodakis]` Regarding the logical type, I think this is expected: INT96 is only a physical type in the parquet format, and there is no timestamp-like logical type that uses INT96 as physical type.\u00a0\r\n\r\nThe usage of INT96 for timestamps only stems from a convention in some of the parquet implementations (I think Hive and Impala, but not very familiar with it), and therefore arrow has the option to write them, for compatibility with those systems. But note that this type is actually deprecated in the parquet format.\r\n\r\nSee eg <https://stackoverflow.com/a/54665645/653364>, <https://stackoverflow.com/questions/42628287/sparks-int96-time-type> and the discussion in <https://github.com/apache/parquet-format/pull/49>\r\n\r\n\u00a0\r\n\r\nThat's the explanation for the missing logical type. For the missing stats, I am not sure."
+        },
+        {
+            "created_at": "2019-08-21T23:43:03.502Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4967?focusedCommentId=16912799) by Wes McKinney (wesm):*\nComputation of statistics is disabled for INT96. We don't intend to do anything about this AFAIK cc `[~mdeepak]`"
+        },
+        {
+            "created_at": "2019-08-21T23:59:38.158Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4967?focusedCommentId=16912811) by Deepak Majeti (mdeepak):*\nThe comments above are correct! INT96 type is deprecated and it statistics are disabled by default. The timestamp byte layout in INT96 is big endian and does not comply with the standard sort orders in the spec."
+        }
+    ]
+}

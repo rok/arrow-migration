@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[C++] Add max_rows parameter to csv ReadOptions",
+        "body": "***Note**: This issue was originally created as [ARROW-10419](https://issues.apache.org/jira/browse/ARROW-10419). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI'm trying to read only the first 1,000 rows of a huge CSV with PyArrow.\r\n\r\nI don't see a way to do this with Arrow. I guess it should be easy to implement by adding a `max_rows` parameter to\u00a0pyarrow.csv.ReadOptions.\r\n\r\nAfter reading the first 1,000, it should be possible to load the next 1,000 (or any other chunk) by using both the new `max_rows` together with `skip_rows` (e.g. `pyarrow.csv.read_csv(path, pyarrow.csv.ReadOption(skip_rows=1_000, max_rows=1_000)` would read from 1,000 to 2,000).\r\n\r\nThanks!",
+        "created_at": "2020-10-29T15:08:04.000Z",
+        "updated_at": "2020-10-30T13:10:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-10-30T12:23:28.403Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10419?focusedCommentId=17223614) by Joris Van den Bossche (jorisvandenbossche):*\nAgreed that such a keyword would be useful (just for being able to peek at the first rows of a big file this would be important).\r\n\r\nI think in general the problem with this is that the reader processes different blocks of data in parallel (there is a `block_size` option in `ReadOptions`), so this might not work with the default of multithreaded reading (you need to know the number of rows of the first block to know if you need to process the next block as well). \r\n\r\nFor the \"chunked\" reader case you mention, there is already `pyarrow.csv.open_csv` which returns a streaming reader, which reads batch by batch:\r\n\r\n```Java\n\r\nIn [1]: pd.DataFrame({'a': np.arange(1_000_000)}).to_csv(\"test.csv\", index=False)\r\n\r\nIn [2]: from pyarrow import csv\r\n\r\nIn [3]: reader = csv.open_csv(\"test.csv\")\r\n\r\nIn [4]: reader\r\nOut[4]: <pyarrow._csv.CSVStreamingReader at 0x7fe629398278>\r\n\r\nIn [5]: reader.read_next_batch().to_pandas()\r\nOut[5]: \r\n             a\r\n0            0\r\n1            1\r\n2            2\r\n3            3\r\n4            4\r\n...        ...\r\n165664  165664\r\n165665  165665\r\n165666  165666\r\n165667  165667\r\n165668  165668\r\n\r\n[165669 rows x 1 columns]\r\n\r\nIn [5]: reader.read_next_batch().to_pandas()\r\nOut[5]: \r\n             a\r\n0       165669\r\n1       165670\r\n2       165671\r\n3       165672\r\n4       165673\r\n...        ...\r\n149791  315460\r\n149792  315461\r\n149793  315462\r\n149794  315463\r\n149795  315464\r\n\r\n[149796 rows x 1 columns]\r\n```\r\n\r\nThe number of rows depends on the `block_size`, so you _can_ control this, but not that easily by just specifying the number of `max_rows`. \r\n\r\n```Java\n\r\nIn [13]: reader = csv.open_csv(\"test.csv\", read_options=csv.ReadOptions(block_size=20))\r\n\r\nIn [14]: reader.read_next_batch().to_pandas()\r\nOut[14]: \r\n   a\r\n0  0\r\n1  1\r\n2  2\r\n3  3\r\n4  4\r\n5  5\r\n6  6\r\n7  7\r\n8  8\r\n\r\nIn [15]: reader.read_next_batch().to_pandas()\r\nOut[15]: \r\n    a\r\n0   9\r\n1  10\r\n2  11\r\n3  12\r\n4  13\r\n5  14\r\n6  15\r\n```\r\n\r\nSo using this streaming reader with `open_csv`, you can actually already somewhat achieve what you want, I think? (it could also be used to read only the first xx rows, instead of using `read_csv`)\r\n\r\nThe question is still if we can make this easier directly with pyarrow, to be able to specify a `max_rows` instead of a `block_size`. For the general multithreaded reader, I don't think this easy (as mentioned above), but for the streaming reader (which is single threaded anyway) it should be possible I suppose. \r\n\r\ncc `[~apitrou]`"
+        },
+        {
+            "created_at": "2020-10-30T12:58:17.310Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10419?focusedCommentId=17223634) by Antoine Pitrou (apitrou):*\nHave you looked at incremental reading? https://arrow.apache.org/docs/python/csv.html#incremental-reading"
+        },
+        {
+            "created_at": "2020-10-30T13:10:40.179Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10419?focusedCommentId=17223639) by Joris Van den Bossche (jorisvandenbossche):*\n`[~apitrou]` that's the example I show above ;)"
+        }
+    ]
+}

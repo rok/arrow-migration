@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[R] collect int64, uint32, uint64 as R integer type if not out of bounds",
+        "body": "***Note**: This issue was originally created as [ARROW-9083](https://issues.apache.org/jira/browse/ARROW-9083). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n`bit64::integer64` can be awkward to work with in R (one example: https://github.com/apache/arrow/issues/7385). Often in Arrow we get `int64` types from [compute methods](https://github.com/apache/arrow/pull/7308) or other translation methods that auto-promote to the largest integer type, but they would fit fine in a 32-bit integer, which is R's native type. \r\n\r\nWhen calling `Array__as_vector` on an int64, we could first call the minmax function on the array, and if the extrema are within the range of a 32-bit int, return a regular R integer vector. This would add a little bit of ambiguity as to what R type you'll get from an Arrow type, but I wonder if the benefits are worth it since you can't do much with an integer64 in R. (We could also make this optional, similar to ARROW-7657, so you could specify a \"strict\" mode if you are in a use case where roundtrip fidelity is more important than R usability.)\r\n\r\nLikewise, uint32 and uint64 could be kept as integers and prevent the conversion to double that is currently implemented.",
+        "created_at": "2020-06-09T17:45:18.000Z",
+        "updated_at": "2021-03-04T21:30:56.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-07-01T15:48:57.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-06-11T20:26:27.302Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9083?focusedCommentId=17133666) by Neal Richardson (npr):*\nThoughts `[~wesm]` `[~romainfrancois]`?"
+        },
+        {
+            "created_at": "2020-06-12T18:37:13.730Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9083?focusedCommentId=17134460) by Wes McKinney (wesm):*\nSounds good to me. We could implement a generalized version of `internal::IndexBoundsCheck` that checks whether the int64 values fit in the int32 range. Opening a JIRA issue about that"
+        },
+        {
+            "created_at": "2020-06-16T19:00:24.194Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9083?focusedCommentId=17137857) by Francois Saint-Jacques (fsaintjacques):*\nNote that casting them to smaller width will negate the effect of zero-copy (except for uint32_t if they're all smaller than INT32_MAX)."
+        },
+        {
+            "created_at": "2020-06-16T19:04:58.480Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9083?focusedCommentId=17137859) by Neal Richardson (npr):*\nTrue, though currently there is no zero-copy at all when pulling data to R. Assuming that there is someday, I could see the value in having some option to control whether to downcast to fit into natural R vector types."
+        },
+        {
+            "created_at": "2020-06-21T22:16:04.597Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9083?focusedCommentId=17141584) by Wes McKinney (wesm):*\nMy patch for ARROW-9197 implements the boundschecking you need to do this type narrowing, so this should be doable this week"
+        },
+        {
+            "created_at": "2020-07-01T15:48:57.316Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9083?focusedCommentId=17149528) by Neal Richardson (npr):*\nIssue resolved by pull request 7602\n<https://github.com/apache/arrow/pull/7602>"
+        },
+        {
+            "created_at": "2021-03-04T17:18:03.834Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9083?focusedCommentId=17295431) by Matthew Summersgill (msummersgill):*\nHate to dredge up an issue that was settled last year, but the current behavior is yielding inconsistent result structures depending on the contents of an int64 column in my query. `[~npr]` \u2013 Did you ever implement any kind of system option I can set to maintain int64 type regardless of the contents?\r\n\r\nIf not, would you be open to a PR with that option? I'd imagine something along the lines of checking a user configurable option .Options$arrow.strict.integer64, and if\u00a0.Options$arrow.strict.integer64==TRUE, skip the step of checking max. In addition, an error would be thrown if this option was enabled and the bit64 package was not enabled.\r\n\r\n\u00a0\r\n```r\n\r\nstr(collect(SparkR::sql(\"SELECT bigint('2147483648') AS x;\"))$x[[1]])\r\n## integer64 2147483648 \r\nstr(collect(SparkR::sql(\"SELECT bigint('1') AS x;\"))$x[[1]])\r\n## int 1\r\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-03-04T17:26:20.214Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9083?focusedCommentId=17295453) by Neal Richardson (npr):*\nYes, there is an option. See the changelog from where this feature was added: https://arrow.apache.org/docs/r/news/index.html#bug-fixes-and-other-enhancements\r\n\r\nIt appears that's the only documentation of the feature though, so if you'd like to add a note about it elsewhere (the arrow.Rmd vignette where the type conversion is discussed seems like an appropriate place), please do open a PR/issue."
+        },
+        {
+            "created_at": "2021-03-04T20:49:08.442Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9083?focusedCommentId=17295580) by Matthew Summersgill (msummersgill):*\nThanks Neal for the prompt response! I opened a pull request to add the comment from the changelog to that vignette\u00a0(<https://github.com/apache/arrow/pull/9634>\u00a0) but the place I would normally look first is in the R package reference manual. The \"Details\" section \"data-type\" section seems to me like the most sensible place to document this option, would that make sense to you, or is there somewhere else it might fit better?"
+        },
+        {
+            "created_at": "2021-03-04T21:30:56.992Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9083?focusedCommentId=17295587) by Neal Richardson (npr):*\nFeel free to add in more places you think would help. I opened ARROW-11864 and assigned it to you; we can discuss more there or on your PR."
+        }
+    ]
+}

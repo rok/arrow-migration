@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "VariableLengthVectors don't reAlloc offsets",
+        "body": "***Note**: This issue was originally created as [ARROW-886](https://issues.apache.org/jira/browse/ARROW-886). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n",
+        "created_at": "2017-04-24T15:04:23.000Z",
+        "updated_at": "2017-08-03T01:39:04.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-04-26T19:17:00.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-04-26T19:17:00.409Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-886?focusedCommentId=15985398) by Wes McKinney (wesm):*\nIssue resolved by pull request 591\n<https://github.com/apache/arrow/pull/591>"
+        },
+        {
+            "created_at": "2017-06-09T01:27:54.343Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-886?focusedCommentId=16043775) by Steven Phillips (sphillips):*\nI'm just now noticing this, but this change (along with ARROW-815) actually breaks the way that reAlloc was designed to work. It was originally meant to be an internal method, which was used by the various setSafe() methods. The idea was that a user of the ValueVector could call setSafe() instead of set(), and this would automatically and transparently handle the expansion of the underlying buffer in the event that we reached the end of the currently allocated buffer.\n\nFor variable length vectors, the re-allocation of the data buffer should be completely independent of the re-allocation of the offset vector's buffer. But this change causes reAlloc() to be called on the offset vector anytime reAlloc() is called on the parent vector."
+        },
+        {
+            "created_at": "2017-06-09T13:36:16.474Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-886?focusedCommentId=16044444) by Emilio Lahr-Vivaz (elahrvivaz):*\nI forget exactly what scenario led to this being an issue, but I think using the writer framework, possibly with FixedSizeListVectors (which aren't accessible through writers), caused the vector to run out of space. Possibly instead of the changes that were made to reAlloc, we instead need to make sure setSafe() is being called appropriately, and add it where needed."
+        },
+        {
+            "created_at": "2017-06-09T22:42:56.181Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-886?focusedCommentId=16045155) by Steven Phillips (sphillips):*\nDo you have any external code that is using the reAlloc() method explicitly, since ARROW-815 made that method public?"
+        },
+        {
+            "created_at": "2017-06-12T13:20:34.060Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-886?focusedCommentId=16046549) by Emilio Lahr-Vivaz (elahrvivaz):*\nWe are calling it explicitly. In our use case we have a NullableMapVector with a bunch of child vectors of varying types. Currently we just check the size of the top-level vector and call re-alloc if we need to grow. For variable length child vectors, we call setSafe - however, for fixed size vectors it would be nice to be able to just do the check once on the MapVector, then expand as needed, instead of using setSafe and checking on each vector. We're trying to minimize reads and checks during write."
+        },
+        {
+            "created_at": "2017-06-12T13:23:10.257Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-886?focusedCommentId=16046550) by Emilio Lahr-Vivaz (elahrvivaz):*\nIs the only issue with variable length buffers? Possibly in those classes we could just not reAlloc the data buffer, and leverage setSafe for that."
+        },
+        {
+            "created_at": "2017-06-12T18:12:41.278Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-886?focusedCommentId=16046885) by Steven Phillips (sphillips):*\nThe original idea was that a user of this interface would know in advance how many records they intended to write in a given batch, but wouldn't necessarily know the total length of the variable length columns. So a user would use the setInitialCapacity() method. Then they could use set() for the fixed length vectors, and setSafe() for the variable length vectors.\n\nAlso, we could add a new method to the valuevector interface, such as expandValueCapacity(int values) which would allow expanding the value capacity of the vectors (including child vectors) but wouldn't touch the variable length data buffer."
+        },
+        {
+            "created_at": "2017-08-01T21:48:22.674Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-886?focusedCommentId=16109858) by Siddharth Teotia (siddteotia):*\n`[~elahrvivaz]`,\n\nJust picking up the conversation. Are you fine with the following changes?\n\n(1) Make realloc() back to being an internal method\n\n(2) Don't do explicit re-allocation of the offsetVector() from the realloc() function in VariableLengthVectors.java. If we call setSafe() on variable length vector, it will internally invoke setSafe() on the corresponding offsetVector and the latter function can decide whether to reallocate the offsetVector or not.\n\n(3) Finally, as Steven suggested, we can add a new method to the ValueVector interface that can allow growing the offsetVector() independent of calling realloc() and  growing the variable length data buffer.\n\nThanks,\nSiddharth "
+        },
+        {
+            "created_at": "2017-08-02T12:23:23.729Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-886?focusedCommentId=16110778) by Emilio Lahr-Vivaz (elahrvivaz):*\nThat would probably be fine. My use case is:\n\n1. Create a parent vector (NullableMapVector) with several children of different types (some fixed width, some variable width)\n2. Write an unknown number of elements to the vectors, using the child vector mutators\n\nFor the variable-width vectors, I'm using `mutator.setSafe`, as there is no other way to guarantee sufficient size (to my knowledge). But for the fixed with vectors, I'd like to check size once on the parent, then expand them all as needed, instead of having to use `.setSafe` for every write. Having a way to externally grow a vector (outside of setSafe) seems like it would be useful any time you don't know the number of elements you're writing up front."
+        },
+        {
+            "created_at": "2017-08-03T01:36:31.785Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-886?focusedCommentId=16112039) by Siddharth Teotia (siddteotia):*\n`[~elahrvivaz]`,\n\nAs far as the commit https://github.com/apache/arrow/pull/591 is concerned, are you fine with undoing the changes?\n\n(1) Don't explicitly reallocate the offsetVector in realloc() function of Variable Length Vectors.\n(2) Doing (1) will break the unit test added as part of PR 591 so we need to remove that as well.\n\nI have created a PR  for the above two items \u2013 https://github.com/apache/arrow/pull/937 this basically reverts your change for the above items.\n\nThanks,\nSiddharth"
+        }
+    ]
+}

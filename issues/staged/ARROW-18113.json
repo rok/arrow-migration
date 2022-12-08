@@ -1,0 +1,80 @@
+{
+    "issue": {
+        "title": "Implement a read range process without caching",
+        "body": "***Note**: This issue was originally created as [ARROW-18113](https://issues.apache.org/jira/browse/ARROW-18113). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe current [ReadRangeCache](https://github.com/apache/arrow/blob/e06e98db356e602212019cfbae83fd3d5347292d/cpp/src/arrow/io/caching.h#L100) is mixing caching with coalescing and making difficult to implement readers capable to really perform concurrent reads on coalesced data (see this [github comment](https://github.com/apache/arrow/pull/14226#discussion_r999334979) for additional context); for instance, right now the prebuffering feature of those readers cannot handle concurrent invocations.\r\n\r\nThe goal for this ticket is to implement a similar component to ReadRangeCache for performing non-cache reads (doing only the coalescing part instead).\u00a0 So, once we have that new capability, we can port the parquet and IPC readers to this new component and keep improving the reading process (that would be part of other set of follow-up tickets).\u00a0 Similar ideas were mentioned here https://issues.apache.org/jira/browse/ARROW-17599\r\n\r\nMaybe a good place to implement this new capability is inside the file system abstraction (as part of a dedicated method to read coalesced data) and where the abstract file system can provide a default implementation.",
+        "created_at": "2022-10-20T18:14:58.000Z",
+        "updated_at": "2022-11-16T16:18:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-20T18:26:05.980Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18113?focusedCommentId=17621308) by David Li (lidavidm):*\nI'd like to raise my comments in ARROW-17913 and ARROW-17917 as well, especially https://issues.apache.org/jira/browse/ARROW-17913?focusedCommentId=17614155&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-17614155\u00a0. Note Weston offers suggestions there too about how we might handle this.\r\n\r\nThe API would probably be an extension of RandomAccessFile::ReadAsync. The file system would come into play by returning a subclass of RAF that overrides the new method and does coalescing appropriate to the underlying device"
+        },
+        {
+            "created_at": "2022-10-20T18:27:12.085Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18113?focusedCommentId=17621309) by David Li (lidavidm):*\n(Of course, that's only if you choose to go with an explicit API, vs Weston's suggestion of possibly doing it 'automagically')"
+        },
+        {
+            "created_at": "2022-10-20T22:53:23.455Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18113?focusedCommentId=17621398) by Weston Pace (westonpace):*\nOn reflection, I don't really prefer my automagic suggestion.  I think an explicit multi-read API added to the filesystem would be a good way to go.  I don't see it as an extension of ReadAsync though.  Something like:\r\n\r\n```\n\r\n  /// \\brief Request multiple reads at once\r\n  ///\r\n  /// The underlying filesystem may optimize these reads by coalescing small reads into\r\n  /// large reads or by breaking up large reads into multiple parallel smaller reads.  The\r\n  /// reads should be issued in parallel if it makes sense for the filesystem.\r\n  ///\r\n  /// One future will be returned for each input read range.  Multiple returned futures\r\n  /// may correspond to a single read.  Or, a single returned future may be a combined\r\n  /// result of several individual reads.\r\n  ///\r\n  /// \\param[in] ranges The ranges to read\r\n  /// \\return A future that will complete with the data from the requested range is\r\n  /// available\r\n  virtual std::vector<Future<std::shared_ptr<Buffer>>> ReadManyAsync(\r\n      const IOContext&, const std::vector<ReadRange>& ranges);\r\n```\r\n\r\nThere could be a default implementation (perhaps relying on configurable protected min_hole_size_ and max_contiguous_read_size_ variables) so that filesystems would only need to provide a specialized alternative where it made sense.  In the future it would be interesting to benchmark and see if [preadv](https://linux.die.net/man/2/preadv) can be used to provide a more optimized version for the local filesystem.\r\n\r\nI'd also be curious to know how an API like this could be adapted (or whether my proposal fits) for something like io_uring `[~sakras]`"
+        },
+        {
+            "created_at": "2022-10-20T23:02:02.940Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18113?focusedCommentId=17621401) by David Li (lidavidm):*\nJust to be clear: to the filesystem, or on the reader itself?\r\n\r\nAlso, I'm not clear on: \"Multiple returned futures may correspond to a single read.  Or, a single returned future may be a combined result of several individual reads.\" Isn't this saying the same thing twice?"
+        },
+        {
+            "created_at": "2022-10-21T00:42:49.332Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18113?focusedCommentId=17621427) by Weston Pace (westonpace):*\n> Just to be clear: to the filesystem, or on the reader itself?\r\n\r\nOops, I mean on `RandomAccessFile`.\r\n\r\n> Also, I'm not clear on: \"Multiple returned futures may correspond to a single read. Or, a single returned future may be a combined result of several individual reads.\" Isn't this saying the same thing twice?\r\n\r\nI might call\r\n\r\n```\n\r\nfile->ReadMany({0, 3}, {3, 8}, {1024, 16Mi})\r\n```.\r\n\r\nThe filesystem could then implement this as:\r\n\r\n```\n\r\nstd::vector<Future> futures;\r\n# The first two futures correspond to the same read\r\nFuture<Buffer> coalesced_read = ReadAsync(0, 8);\r\nfutures.push_back(coalesced_read.Then(buf => buf.Split(0, 3)));\r\nfutures.push_back(coalesced_read.Then(buf => buf.Split(3, 5)));\r\n\r\n# The third future corresponds to two reads\r\nFuture<Buffer> part_one = ReadAsync(1024, 8Mi);\r\nFuture<Buffer> part_two = ReadAsync(1024+8Mi, 8Mi-1024);\r\nfutures.push_back(AllComplete({part_one, part_two}).Then(bufs => Concatenate(bufs));\r\n```"
+        },
+        {
+            "created_at": "2022-10-21T00:45:10.778Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18113?focusedCommentId=17621428) by David Li (lidavidm):*\nAh ok I was forgetting that we could theoretically split up reads. Thanks!"
+        },
+        {
+            "created_at": "2022-10-22T06:57:00.801Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18113?focusedCommentId=17622565) by Sasha Krassovsky (sakras):*\nLinking io_uring to the Future API could be a bit challenging because Linux doesn't have a builtin thread pool API, so you still end up having to poll the completion queue. I was thinking this could probably be integrated into the Executor implementation we have. In between tasks it would poll the completion queue and schedule the individual continuation futures that get finished. Using preadv would map pretty well but it would only ever return _one_ future, I guess something like `Future<std::vector<Buffer>>`. \r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-10-24T20:49:15.510Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18113?focusedCommentId=17623386) by Weston Pace (westonpace):*\n> Linking io_uring to the Future API could be a bit challenging because Linux doesn't have a builtin thread pool API, so you still end up having to poll the completion queue. I was thinking this could probably be integrated into the Executor implementation we have. In between tasks it would poll the completion queue and schedule the individual continuation futures that get finished.\r\n\r\nDoes io_uring have any kind of select-style API method like \"wait until at least one pending read has finished\"\r\n\r\n> Using preadv would map pretty well but it would only ever return one future, I guess something like `Future<std::vector<Buffer>>`.\r\n\r\nMaybe this would be a better interface.  I suppose it would boil down on whether or not the code can proceed with partial results.  I think there might be cases where this is true but I'd really have to dive into the readers to recall exactly."
+        },
+        {
+            "created_at": "2022-10-24T20:58:23.375Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18113?focusedCommentId=17623416) by David Li (lidavidm):*\nFor Parquet, the reader can submit reads for all ColumnChunks at once, and then decode them as they come back. So a single Future may not be great here? (Especially if the chunks are very large and don't get coalesced.)"
+        },
+        {
+            "created_at": "2022-10-24T21:02:18.099Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18113?focusedCommentId=17623419) by Sasha Krassovsky (sakras):*\nYes, io_uring has `io_uring_wait_cqe` which will wait until at least one response has finished. You can also do `io_uring_wait_cqe_nr` I think which will wait until a specific number of tasks have finished.\u00a0\r\n\r\n\u00a0\r\n\r\nWe could still use io_uring without `preadv`. We'd just have to ensure that the ring is big enough to handle as many requests as we need.\u00a0"
+        },
+        {
+            "created_at": "2022-11-14T23:18:12.673Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18113?focusedCommentId=17634076) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nThanks for all the feedback!\r\n\r\nQuick question: I see we have {_}arrow::io::CacheOptions{_}, but it seems that most of its contents are related to coalescing (except perhaps {_}arrow::io::CacheOptions::lazy{_}); does it sounds a good idea to rename it to _arrow::io::CoalesceOptions_ and move it into {_}interfaces.h{_}?\r\n\r\nThe reason why I think we may need to move it into _interfaces.h_ is that _ReadManyAsync_ would be part of _RandomAccessFile_ and we may need some of the attributes we have in _arrow::io::CacheOptions_ (like _hole_size_limit_ and {_}range_size_limit{_}) ... mostly becouse for the the implementation of _ReadManyAsync_ we may need to use _arrow::io::internal::CoalesceReadRanges_ and this function needs _hole_size_limit_ and {_}range_size_limit{_}."
+        },
+        {
+            "created_at": "2022-11-14T23:48:40.260Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18113?focusedCommentId=17634082) by David Li (lidavidm):*\nSounds reasonable to me, at first glance. Maybe leave behind a `using CacheOptions = CoalesceOptions` for compatibility (can you deprecate a `using` declaration?)"
+        },
+        {
+            "created_at": "2022-11-15T02:06:17.061Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18113?focusedCommentId=17634111) by Weston Pace (westonpace):*\nI would think that coalescing would be an implementation detail specific to individual filesystems.  For example, a local filesystem might not bother with it (the OS already does coalescing).  However, an S3 filesystem would definitely want to coalesce.  So if we add a _ReadManyAsync_ then I think it should not have a cache options parameter.  Instead that should be a property of the filesystem if it needs to be configurable."
+        },
+        {
+            "created_at": "2022-11-16T05:09:28.722Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18113?focusedCommentId=17634647) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\n> Sounds reasonable to me, at first glance. Maybe leave behind a using CacheOptions = CoalesceOptions for compatibility (can you deprecate a using declaration?)\r\nDavid, I think we can deprecate it (in case we choose to rename&move it).\r\n> So if we add a\u00a0ReadManyAsync\u00a0then I think it should not have a cache options parameter. Instead that should be a property of the filesystem if it needs to be configurable.\r\nWeston, yes initially I thought that _CoalesceOptions_ would be part of _arrow::io::IOContext_ (as an attribute) and _ReadManyAsync_ could use/pass the _CoalesceOptions_ to the filesystem.\u00a0 But it make sense to let the filesystem handle all of that, so in that case:\r\n1. we still may choose to rename _arrow::io::CacheOptions_ to {_}arrow::io::{_}{_}CoalesceOptions{_} and move it into {_}interfaces.h{_}, so each filesystem's ctor will require {_}arrow::io::CoalesceOptions{_}.\n1. or we just can include _caching.h_ in every filesystem declaration without changing/renaming _arrow::io::CacheOptions_ (so each filesystem's ctor will require {_}arrow::io::{_}{_}CacheOptions{_})\n   \n   Let me know which one sounds better to you, thanks."
+        },
+        {
+            "created_at": "2022-11-16T12:36:20.639Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18113?focusedCommentId=17634819) by David Li (lidavidm):*\nAh sorry, ignore what I said - Weston is right. Though if you still want to rename it that sounds OK as long as we can have some sort of alias for compatibility."
+        },
+        {
+            "created_at": "2022-11-16T16:18:29.383Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18113?focusedCommentId=17634916) by Weston Pace (westonpace):*\n> or we just can include caching.h in every filesystem declaration without changing/renaming arrow::io::CacheOptions (so each filesystem's ctor will require arrow::io::CacheOptions)\r\n\r\nI prefer this, with the caveat that it should only be included in the constructors for filesystems that need it.  So, for example, it should be included in `S3FileSystem` but not `LocalFileSystem`.  Unless we find some benefit to coalescing in `LocalFileSystem`"
+        }
+    ]
+}

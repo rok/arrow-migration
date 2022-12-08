@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[C++] Feather: slow writing of NullArray",
+        "body": "***Note**: This issue was originally created as [ARROW-6529](https://issues.apache.org/jira/browse/ARROW-6529). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFrom https://stackoverflow.com/questions/57877017/pandas-feather-format-is-slow-when-writing-a-column-of-none\r\n\r\nSmaller example with just using pyarrow, it seems that writing an array of nulls takes much longer than an array of for example ints, which seems a bit strange:\r\n\r\n```Java\n\r\nIn [93]: arr = pa.array([None]*1000, type='int64')\r\n\r\nIn [94]: %%timeit \r\n    ...: w = pyarrow.feather.FeatherWriter('__test.feather') \r\n    ...: w.writer.write_array('x', arr) \r\n    ...: w.writer.close() \r\n\r\n31.4 \u00b5s \u00b1 464 ns per loop (mean \u00b1 std. dev. of 7 runs, 10000 loops each)\r\n\r\nIn [95]: arr = pa.array([None]*1000)  \r\n\r\nIn [96]: arr    \r\nOut[96]: \r\n<pyarrow.lib.NullArray object at 0x7fa47a23ca40>\r\n1000 nulls\r\n\r\nIn [97]: %%timeit \r\n    ...: w = pyarrow.feather.FeatherWriter('__test.feather') \r\n    ...: w.writer.write_array('x', arr) \r\n    ...: w.writer.close() \r\n\r\n3.75 ms \u00b1 64.1 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 100 loops each)\r\n```\r\n\r\nSo writing the same length NullArray takes ca 100x more time compared to an array of nulls but with Integer type.",
+        "created_at": "2019-09-11T13:35:16.000Z",
+        "updated_at": "2020-03-24T22:26:39.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-03-24T22:26:38.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-09-17T15:47:32.912Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6529?focusedCommentId=16931583) by Antoine Pitrou (apitrou):*\nConfirmed here. `[~wesmckinn]` \u00a0 any thoughts?"
+        },
+        {
+            "created_at": "2019-09-17T18:18:46.712Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6529?focusedCommentId=16931728) by Wes McKinney (wesm):*\nThat's very weird. Let me have a look"
+        },
+        {
+            "created_at": "2019-09-17T21:21:28.896Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6529?focusedCommentId=16931820) by Wes McKinney (wesm):*\nThe reason is that the Feather writer is \"faking\" a NULL type by writing a UTF8 column with all nulls\r\n\r\nhttps://github.com/apache/arrow/blob/master/cpp/src/arrow/ipc/feather.cc#L615\r\n\r\nIn both R and Python this results in an all-null array when read back.\r\n\r\nProbably the easiest quick way to fix this would be to write \"user_metadata\" for the Column to signal to C++ that the output should be NullArray. Longer term we need to deprecate the details in feather.fbs and make Feather a wrapper around the standard IPC protocol which is much better supported and featureful\r\n\r\nI don't think this is urgent for 0.15.0 so I'm removing from the milestone"
+        },
+        {
+            "created_at": "2020-03-01T21:09:00.387Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6529?focusedCommentId=17048676) by Wes McKinney (wesm):*\nThis will be addressed by ARROW-5510 which replaces the custom Feather data layout with the Arrow IPC protocol"
+        },
+        {
+            "created_at": "2020-03-24T22:26:39.019Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6529?focusedCommentId=17066239) by Wes McKinney (wesm):*\nThis is a non-issue in Feather V2 in ARROW-5510 (which uses exactly the Arrow IPC file format) so we won't spend any more energy improving performance in Feather V1"
+        }
+    ]
+}

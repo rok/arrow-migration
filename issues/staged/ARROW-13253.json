@@ -1,0 +1,30 @@
+{
+    "issue": {
+        "title": "[C++][FlightRPC] Segfault when sending record batch >2GB",
+        "body": "***Note**: This issue was originally created as [ARROW-13253](https://issues.apache.org/jira/browse/ARROW-13253). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen sending a record batch > 2GiB, the server will segfault. Although Flight checks for this case and returns an error, it turns out that gRPC always tries to increment the refcount of the result buffer whether the serialization handler returned successfully or not:\r\n```cpp\n\r\n// From gRPC 1.36\r\nStatus CallOpSendMessage::SendMessagePtr(const M* message,\r\n                                         WriteOptions options) {\r\n  msg_ = message;\r\n  write_options_ = options;\r\n  // Store the serializer for later since we have access to the message\r\n  serializer_ = [this](const void* message) {\r\n    bool own_buf;\r\n    // TODO(vjpai): Remove the void below when possible\r\n    // The void in the template parameter below should not be needed\r\n    // (since it should be implicit) but is needed due to an observed\r\n    // difference in behavior between clang and gcc for certain internal users\r\n    Status result = SerializationTraits<M, void>::Serialize(\r\n        *static_cast<const M*>(message), send_buf_.bbuf_ptr(), &own_buf);\r\n    if (!own_buf) {\r\n      // XXX(lidavidm): This should perhaps check result.ok(), or Serialize should\r\n      // unconditionally initialize send_buf_\r\n      send_buf_.Duplicate();\r\n    }\r\n    return result;\r\n  };\r\n  return Status();\r\n}\r\n```\r\nHence when Flight returns an error without initializing the buffer, we get a segfault.\r\n\r\nOriginally reported on StackOverflow: <https://stackoverflow.com/questions/68230146/pyarrow-flight-do-get-segfault-when-pandas-dataframe-over-3gb>",
+        "created_at": "2021-07-02T19:46:37.000Z",
+        "updated_at": "2021-07-15T13:22:42.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: FlightRPC",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-07-15T13:21:14.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-07-02T20:11:35.838Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13253?focusedCommentId=17373755) by David Li (lidavidm):*\nNow this is annoying: gRPC fails an assertion later on anyways if the serialization handler raises an error. For Flight to do what it intends, it needs to move the check up. But then we may want to move the computation of the body size up as well, or we'll be duplicating work."
+        },
+        {
+            "created_at": "2021-07-14T15:08:30.567Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13253?focusedCommentId=17380677) by David Li (lidavidm):*\nLinking an upstream bug report."
+        },
+        {
+            "created_at": "2021-07-15T13:21:15.016Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13253?focusedCommentId=17381343) by yibocai#1 (yibocai#1):*\nIssue resolved by pull request 10663\n<https://github.com/apache/arrow/pull/10663>"
+        }
+    ]
+}

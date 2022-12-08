@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "Large (>~20 GB) files written to Parquet via PyArrow are corrupted",
+        "body": "***Note**: This issue was originally created as [ARROW-2369](https://issues.apache.org/jira/browse/ARROW-2369). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen writing large Parquet files (above 10 GB or so) from Pandas to Parquet via the command\r\n\r\n`pq.write_table(my_df, 'table.parquet')`\r\n\r\nThe write succeeds, but when the parquet file is loaded, the error message\r\n\r\n`ArrowIOError: Invalid parquet file. Corrupt footer.`\r\n\r\nappears. This same error occurs when the parquet file is written chunkwise as well. When the parquet files are small, say < 5 GB or so (drawn randomly from the same dataset), everything proceeds as normal. I've also tried this with Pandas df.to_parquet(), with the same results.\r\n\r\nUpdate: Looks like any DataFrame with size above ~5GB (on disk) returns the same error.",
+        "created_at": "2018-03-30T13:00:03.000Z",
+        "updated_at": "2018-04-16T19:11:10.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-04-12T12:11:26.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-03-31T23:15:24.562Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2369?focusedCommentId=16421506) by Babak Alipour (babak.alipour@gmail.com):*\nI've got the same issue on Win 10, Arrow v0.9.0. The file was created with `to_parquet(..., engine='pyarrow', compression='brotli')` and cannot be read with `read_parquet(..., engine='pyarrow')` due to `Invalid parquet file. Corrupt footer. error.`\r\n\r\nSurprisingly, the same file created by pyarrow can be read using the fastparquet engine! File size on disk is 5,214,407,947 bytes (brotli compressed)."
+        },
+        {
+            "created_at": "2018-03-31T23:33:20.801Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2369?focusedCommentId=16421510) by Wes McKinney (wesm):*\nSounds like there's a `uint32_t` overflow somewhere, which is the sort of thing that often happens on Windows"
+        },
+        {
+            "created_at": "2018-04-09T14:07:27.839Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2369?focusedCommentId=16430571) by Justin Tan (jtan):*\nLooks like the file is readable by early pyarrow versions (0.5.0 - but created by v0.5.0 as well), so maybe something went wrong from 0.5.0 -> 0.9.0"
+        },
+        {
+            "created_at": "2018-04-09T14:08:26.275Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2369?focusedCommentId=16430572) by Antoine Pitrou (apitrou):*\nOk, there are two things going on:\r\n- when `write_table()` is called with a filepath string, it goes through `PythonFile`, which is probably inefficient\n- `PythonFile.Seek` doesn't handle seek offsets greater than 2\\*\\*32 properly:\n  ```python\n  \n  >>> f = open('/tmp/empty', 'wb')\n  >>> f.truncate(1<<33 + 10)\n  8796093022208\n  >>> f.close()\n  >>> f = open('/tmp/empty', 'rb')\n  >>> paf = pa.PythonFile(f, 'rb')\n  >>> paf.tell()\n  0\n  >>> paf.seek(5)\n  5\n  >>> paf.tell()\n  5\n  >>> paf.seek(1<<33 + 6)\n  0\n  >>> paf.tell()\n  0\n  >>> f.seek(1<<33 + 6)\n  549755813888\n  >>> f.tell()\n  549755813888\n  ```"
+        },
+        {
+            "created_at": "2018-04-12T12:11:26.420Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2369?focusedCommentId=16435448) by Uwe Korn (uwe):*\nIssue resolved by pull request 1866\n<https://github.com/apache/arrow/pull/1866>"
+        }
+    ]
+}

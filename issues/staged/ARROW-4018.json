@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[C++] RLE decoder may not big-endian compatible",
+        "body": "***Note**: This issue was originally created as [ARROW-4018](https://issues.apache.org/jira/browse/ARROW-4018). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis issue was found by Coverity. The `RleDecoder::NextCounts` method has the following code to fetch the repeated literal in repeated runs:\r\n\r\n```c++\n\r\n    bool result =\r\n        bit_reader_.GetAligned<T>(static_cast<int>(BitUtil::CeilDiv(bit_width_, 8)),\r\n                                  reinterpret_cast<T*>(&current_value_));\r\n```\r\n\r\nCoverity says this:\r\n> Pointer \"&this->current_value_\" points to an object whose effective type is \"unsigned long long\" (64 bits, unsigned) but is dereferenced as a narrower \"unsigned int\" (32 bits, unsigned). This may lead to unexpected results depending on machine endianness.\r\n> \r\n\r\nIn addition, it's not obvious whether `current_value_` also needs byte-swapping (presumably, at least in the Parquet file format, it's supposed to be stored in little-endian format in the RLE bitstream).\r\n",
+        "created_at": "2018-12-13T13:07:59.000Z",
+        "updated_at": "2020-05-11T13:20:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-05-11T13:20:54.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-09-17T16:54:30.911Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4018?focusedCommentId=16931653) by Antoine Pitrou (apitrou):*\nAlso [~emkornfield@gmail.com]\r\n"
+        },
+        {
+            "created_at": "2019-09-18T04:05:35.309Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4018?focusedCommentId=16932031) by Micah Kornfield (emkornfield@gmail.com):*\nHmm, i think we've gone back and forth on Endianness support.\u00a0 I know when the project started I thought it was important because at the time it seemed like Spark was intending to support both (I don't know if it still does).\u00a0\u00a0\r\n\r\n\u00a0\r\n\r\nAre we actually clean in terms of endianness in other places?\u00a0 I would need to investigate further, but it sounds strange to be slicing a long like coverity describes have you looked to see if this is intended?"
+        },
+        {
+            "created_at": "2019-09-18T08:28:22.930Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4018?focusedCommentId=16932199) by Antoine Pitrou (apitrou):*\n> Are we actually clean in terms of endianness in other places?\r\n\r\nPresumably no, because we're reinterpreting array bytes as larger types such as int64_t etc. And we're also serializing those bytes directly to disk or wire.\r\n\r\n>  it sounds strange to be slicing a long like coverity describes have you looked to see if this is intended?\r\n\r\nI think it's just a dirty implementation shortcut. Instead of doing:\r\n```cpp\n\r\n    bool result =\r\n        bit_reader_.GetAligned<T>(static_cast<int>(BitUtil::CeilDiv(bit_width_, 8)),\r\n                                  reinterpret_cast<T*>(&current_value_));\r\n```\r\nThe code could presumably be written as:\r\n```cpp\n\r\n    T value;\r\n    bool result =\r\n        bit_reader_.GetAligned<T>(static_cast<int>(BitUtil::CeilDiv(bit_width_, 8)), &value);\r\n    current_value_ = static_cast<uint64_t>(value);\r\n```\r\n\r\n"
+        },
+        {
+            "created_at": "2020-02-11T19:47:52.110Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4018?focusedCommentId=17034775) by Kazuaki Ishizaki (kiszk):*\nMinor comment. This code should be\r\n```c++\n\r\n    T value = 0;\r\n    bool result =\r\n        bit_reader_.GetAligned<T>(static_cast<int>(BitUtil::CeilDiv(bit_width_, 8)), &value);\r\n    current_value_ = static_cast<uint64_t>(value);\r\n```"
+        },
+        {
+            "created_at": "2020-05-11T13:20:54.573Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4018?focusedCommentId=17104449) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 7144\n<https://github.com/apache/arrow/pull/7144>"
+        }
+    ]
+}

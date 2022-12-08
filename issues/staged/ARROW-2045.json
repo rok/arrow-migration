@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[C++][Plasma] More primitive operations on plasma store",
+        "body": "***Note**: This issue was originally created as [ARROW-2045](https://issues.apache.org/jira/browse/ARROW-2045). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi Developers,\r\n\r\nI found plasma store very useful \u2013 it's fast and simple to use. However, I think there are more operations that can make it a more general IPC/messaging\u00a0tool and potentially helpful in more scenarios.\r\n\r\nConceptually, an object store can support the following \"put\" methods:\r\n1. Evict when full\n1. Wait for space when full, perhaps with a timeout (i.e. blocking)\n1. Return failure when full (i.e. non-blocking)\n   \n   And the following \"get\" methods:\n1. Wait for the object to appear (i.e. blocking)\n1. Return failure when object doesn't exist (i.e. non-blocking)\n1. Remove the object after get\n   \n   Some of the above features can be implemented with others. But some of them are primitives (e.g. return failure when full) that needs to be supported.\n   \n   \u00a0\n   \n   My use case: I wanted to use plasma to send/recv large buffers between processes, i.e. build a message passing interface on top of shared memory. Plasma has made it quite easy (only have to send/recv the id) and efficient (faster than unix pipe). But \"evict when full\" is now the only available \"put\" method, so that could create many trouble if I want to ensure message delivery.",
+        "created_at": "2018-01-27T04:17:08.000Z",
+        "updated_at": "2020-11-26T14:15:49.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++ - Plasma",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2018-01-27T04:40:41.859Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2045?focusedCommentId=16341955) by Robert Nishihara (robertnishihara):*\nGlad to hear that it's working well! And thanks for filing the issue.\r\n\r\nWhich combination of the above put/get methods would you use to ensure message delivery?\r\n\r\nAnother approach would be to have the ability to \"pin\" an object in memory so it doesn't get evicted until it is \"unpinned\" (potentially by a different process)."
+        },
+        {
+            "created_at": "2018-01-27T08:02:09.587Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2045?focusedCommentId=16342019) by Yuxin Wu (ppwwyyxx):*\nBlocking put + blocking get (already exists) would be sufficient. This is just the interface of a python queue.\r\n\r\nA blocking pop (get & remove the object) instead of get would be better but this can be implemented by get+release anyway.\r\n\r\n\u00a0\r\n\r\nPin also sounds like a way. But I guess you still can have both blocking and non-blocking interface when everything is pinned and there is no space. This is more like customizing the eviction strategy, orthogonal to the put/get interface."
+        },
+        {
+            "created_at": "2018-01-28T05:51:34.333Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2045?focusedCommentId=16342457) by Robert Nishihara (robertnishihara):*\nThat makes sense. So if I understand correctly, the smallest change that would enable this to work for you is to be able to call `put`\u00a0and pass in a flag that says not to evict anything if there is not enough space.\r\n\r\nThen you could implement a blocking put by calling `put`, catching any exceptions, and looping until the `put` call succeeds.\r\n\r\nAnd the blocking `get` is already implemented.\r\n\r\nDoes that sound right?"
+        },
+        {
+            "created_at": "2018-01-28T09:16:04.280Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2045?focusedCommentId=16342505) by Yuxin Wu (ppwwyyxx):*\nYes, non-blocking put +\u00a0loop is blocking put. Sounds like it will waste a lot of communication on the socket, so not sure if there are performance issues. If that's an easy change I'm willing to try it out!"
+        }
+    ]
+}

@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[R] dplyr::count and dplyr::tally implementation return NA instead of 0",
+        "body": "***Note**: This issue was originally created as [ARROW-18102](https://issues.apache.org/jira/browse/ARROW-18102). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI'm using dplyr with FileSystemDataset objects. The expected behavior is similar (or the same as) dataframe behavior. When the FileSystemDataset has zero rows dplyr::count and dplyr::tally return NA instead of 0. I would expect the result to be 0.\r\n\r\n\u00a0\r\n```r\n\r\n\r\nlibrary(arrow)\r\n#>\u00a0\r\n#> Attaching package: 'arrow'\r\n#> The following object is masked from 'package:utils':\r\n#>\u00a0\r\n#> \u00a0 \u00a0 timestamp\r\nlibrary(dplyr)\r\n#>\u00a0\r\n#> Attaching package: 'dplyr'\r\n#> The following objects are masked from 'package:stats':\r\n#>\u00a0\r\n#> \u00a0 \u00a0 filter, lag\r\n#> The following objects are masked from 'package:base':\r\n#>\u00a0\r\n#> \u00a0 \u00a0 intersect, setdiff, setequal, union\r\n\r\npath <- tempfile(fileext = \".feather\")\r\n\r\nzero_row_dataset <- cars %>% filter(dist < 0)\r\n\r\n# expected behavior\r\nzero_row_dataset %>%\u00a0\r\n\u00a0 count()\r\n#> \u00a0 n\r\n#> 1 0\r\n\r\nzero_row_dataset %>%\u00a0\r\n\u00a0 tally()\r\n#> \u00a0 n\r\n#> 1 0\r\n\r\nnrow(zero_row_dataset)\r\n#> [1] 0\r\n\r\n# now test behavior with a FileSystemDataset\r\nwrite_feather(zero_row_dataset, path)\r\nds <- open_dataset(path, format = \"feather\")\r\nds\r\n#> FileSystemDataset with 1 Feather file\r\n#> speed: double\r\n#> dist: double\r\n#>\u00a0\r\n#> See $metadata for additional Schema metadata\r\n\r\n# actual behavior\r\nds %>%\u00a0\r\n\u00a0 count() %>%\u00a0\r\n\u00a0 collect() # incorrect result\r\n#> # A tibble: 1 \u00d7 1\r\n#> \u00a0 \u00a0 \u00a0 n\r\n#> \u00a0 <int>\r\n#> 1 \u00a0 \u00a0NA\r\n\r\nds %>%\u00a0\r\n\u00a0 tally() %>%\u00a0\r\n\u00a0 collect() # incorrect result\r\n#> # A tibble: 1 \u00d7 1\r\n#> \u00a0 \u00a0 \u00a0 n\r\n#> \u00a0 <int>\r\n#> 1 \u00a0 \u00a0NA\r\n\r\nnrow(ds) # works as expected\r\n#> [1] 0\r\n\r\n```",
+        "created_at": "2022-10-19T21:27:17.000Z",
+        "updated_at": "2022-10-21T12:41:53.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-20T09:09:41.440Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18102?focusedCommentId=17620931) by Nicola Crane (thisisnic):*\nThanks for opening this ticket [~adam.black].  I've tried this with the dev version of Arrow, and can confirm this bug still exists there too."
+        },
+        {
+            "created_at": "2022-10-20T13:42:59.452Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18102?focusedCommentId=17621118) by Neal Richardson (npr):*\nWe could work around this in R but it seems reasonable that this should be fixed in C++. What do you think `[~westonpace]`?"
+        },
+        {
+            "created_at": "2022-10-21T00:36:51.712Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18102?focusedCommentId=17621425) by Weston Pace (westonpace):*\nSupposedly both behaviors are useful (returning null is SQL standards compliant.  See https://database.guide/sqlite-sum-vs-total-whats-the-difference/).  I think we could add an option to the sum function.  See also: https://github.com/substrait-io/substrait/issues/259 so I expect we will eventually need both behaviors."
+        },
+        {
+            "created_at": "2022-10-21T12:40:13.552Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18102?focusedCommentId=17622235) by Adam Black (adam.black):*\nHere a reprex using SQLite in R. As a user I would expect the behavior to be similar with FileSystemDataset objects.\r\n\r\n\u00a0\r\n\r\n```` r`\r\n`library(DBI)`\r\n`library(dplyr)`\r\n\r\n`con <- dbConnect(RSQLite::SQLite(), \":memory:\")`\r\n\r\n`zero_row_table <- cars %>% filter(speed < 0)`\r\n`nrow(zero_row_table)`\r\n`#> [1] 0`\r\n\r\n`dbWriteTable(con, \"zero_row_table\", zero_row_table)`\r\n\r\n`dbGetQuery(con, \"select count(1) as n from zero_row_table\")`\r\n`#> \u00a0 n`\r\n`#> 1 0`\r\n\r\n`tbl(con, \"zero_row_table\") %>%\u00a0`\r\n`\u00a0 count()`\r\n`#> # Source: \u00a0 SQL [1 x 1]`\r\n`#> # Database: sqlite 3.39.4 [:memory:]`\r\n`#> \u00a0 \u00a0 \u00a0 n`\r\n`#> \u00a0 <int>`\r\n`#> 1 \u00a0 \u00a0 0`\r\n\r\n`tbl(con, \"zero_row_table\") %>%\u00a0`\r\n`\u00a0 count() %>%\u00a0`\r\n`\u00a0 show_query()`\r\n`#> <SQL>`\r\n`#> SELECT COUNT(*) AS `n``\r\n`#> FROM `zero_row_table``\r\n\r\n`tbl(con, \"zero_row_table\") %>%\u00a0`\r\n`\u00a0 tally()`\r\n`#> # Source: \u00a0 SQL [1 x 1]`\r\n`#> # Database: sqlite 3.39.4 [:memory:]`\r\n`#> \u00a0 \u00a0 \u00a0 n`\r\n`#> \u00a0 <int>`\r\n`#> 1 \u00a0 \u00a0 0`\r\n\r\n`tbl(con, \"zero_row_table\") %>%\u00a0`\r\n`\u00a0 tally() %>%\u00a0`\r\n`\u00a0 show_query()`\r\n`#> <SQL>`\r\n`#> SELECT COUNT(*) AS `n``\r\n`{}#> FROM `zero_row_table`{`}`{}dbDisconnect(con){`}\r\n`````"
+        }
+    ]
+}

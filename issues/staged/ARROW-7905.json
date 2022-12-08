@@ -1,0 +1,93 @@
+{
+    "issue": {
+        "title": "[Go][Parquet] Port the C++ Parquet implementation to Go",
+        "body": "***Note**: This issue was originally created as [ARROW-7905](https://issues.apache.org/jira/browse/ARROW-7905). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI\u2019m currently in the progress of porting the C++ version of Parquet in the Apache Arrow project to Golang. Many projects and companies have been and are building their data lakes and persistence layer using Parquet. Apache Spark uses it heavily for persistence (including Databricks DeltaLake).\r\n\r\nTo me this is the missing component for people to truly begin using the Go implementation of Arrow with any existing data architectures.\r\n\r\nIf you have any interest in this project, give this issue a watch as it will keep me motivated to finish the port. Also, if you have specific use cases feel free to drop them in here so I can keep them in mind as I continue with the port.\r\n\r\nThings with the code base are rather in flux at the moment as I figure out how to solve various nuances between the features of C++ and Go. As soon as I have a solid chunk of the port working, I\u2019ll create a PR in the Apache Arrow project on Github and let everyone know in here.",
+        "created_at": "2020-02-21T14:31:40.000Z",
+        "updated_at": "2022-08-29T14:15:17.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Go",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-08-29T14:13:58.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-05-09T21:46:06.054Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17103494) by Nick Poorman (nickpoorman):*\nHere is the branch I'm working off of (code is a mess right now)\u00a0<https://github.com/apache/arrow/compare/master...nickpoorman:ARROW-7905-go-parquet>"
+        },
+        {
+            "created_at": "2020-05-10T02:26:48.266Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17103594) by Micah Kornfield (emkornfield@gmail.com):*\nYou might want to take a critical eye while porting the implementation there are several places that could likely be improved upon algorithmically and the Read side is still incomplete."
+        },
+        {
+            "created_at": "2020-05-10T13:35:13.412Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17103797) by Nick Poorman (nickpoorman):*\n[~emkornfield@gmail.com]\u00a0I'd love to hear some of things that you think can be improved upon. Can you point me in the direction of anything you would change algorithmically? Is there anything you think I should be aware of or keep in mind as I build this out?\r\n\r\nAny context you could provide I'm sure would be immensely helpful as I continue to implement this.\r\n\r\nThanks!"
+        },
+        {
+            "created_at": "2020-05-10T18:34:39.190Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17103908) by Micah Kornfield (emkornfield@gmail.com):*\nThere are a few areas I've been mulling over:\r\n\r\n1.\u00a0 Trying to do better to separate our pure parquet reading/writing from Arrow Reading/Writing (if\u00a0 this is important).\r\n\r\n2.\u00a0 Better APIs for incremental reading to Arrow (I think there are some TODOs sprinkled around places).\r\n\r\n3.\u00a0 Better APIs to exposing RLE information (and making use of it when translating to arrow). For example\u00a0<https://github.com/apache/arrow/pull/7143>\u00a0starts to make better use of RLE but could potentially be better if we didn't have to reconstruct runs based on null (note there is currently a performance regression which I need to fix).\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-05-10T23:40:50.823Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17103976) by Wes McKinney (wesm):*\n[~emkornfield@gmail.com] I'm curious what you mean about #1. Are you referring to the presence of the Arrow-specific APIs in column_reader.h / column_writer.h (and the encoders/decoders)? "
+        },
+        {
+            "created_at": "2020-05-11T03:16:01.883Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17104028) by Micah Kornfield (emkornfield@gmail.com):*\nMore on the reader/writer.\u00a0 I think it is OK to take a bitmap for reading/writing spaced values.\u00a0 Having an API called WriteArrow on the column_writer.h seems a little out of place.\u00a0 Not a huge deal in the grand scheme of things given the mono-repo but it still seems strange.\u00a0\r\n\r\n\u00a0\r\n\r\nI haven't looked closely enough to know if there is a good alternative that keeps a clean abstraction between Arrow and Parquet, but if I where reimplementing from scratch, I would certainly consider it."
+        },
+        {
+            "created_at": "2020-05-11T12:57:14.986Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17104426) by Wes McKinney (wesm):*\nWe can discuss more on the mailing list, but keep in mind that it didn't start out that way, and only is this way as a shortest path to prevent certain previous serialization steps (for example, converting `arrow::BinaryArray` to `ByteArray*` on route to encoding) and to provide access to internal encoding details (like the dictionary encoding). I would guess with a from-scratch rewrite there might be some way around this through some substantial template structures that serve the same ends (exposing encoding internals via ~zero cost abstractions). "
+        },
+        {
+            "created_at": "2020-05-13T03:23:08.725Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17105935) by Micah Kornfield (emkornfield@gmail.com):*\n@wesm I don't think this really warrants more discussion.\u00a0 I agree with your points, and I don't think this is really something it warrants an effort to change the C++ code base.\u00a0 I just listed it as a potential thing to look critically at when porting the code.\u00a0 \u00a0Mostly, my metapoint is to avoid cargo culting when doing a fresh implementation."
+        },
+        {
+            "created_at": "2021-03-04T22:10:59.340Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17295606) by Matthew Topol (zeroshade):*\nSo, there hasn't really been any activity on here since May/June last year but I wanted to comment on here that at this point because of the need for it, I've successfully made a Go Port of the Parquet implementation (including some of the improvements suggested by [~emkornfield@gmail.com] as I agree with trying to keep a better separation between the Arrow and pure Parquet portions, while still encouraging the performance benefits. \r\n\r\nThis came from a need for this in my organization and as of this week is actually starting to get used in a production context giving me enough confidence in the implementation to potentially put up a PR or at least coordinate to see where `[~nickpoorman]` is in his implementation. Rather than just dumping a code bomb of a PR i figured it might be better to make this comment and solicit opinions from `[~wesm]` and everyone else as to what a good path forward might be here. At this point I've been adding more tests, benchmarks and performance analysis/testing/improvements to my implementation but since i'm in a place I'm happy with it, I figured it was a good time to reach out here.\r\n\r\nThoughts?"
+        },
+        {
+            "created_at": "2021-03-06T03:57:48.175Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17296426) by Micah Kornfield (emkornfield):*\nIt seems the contribution would be valuable one way or another.\u00a0 Its ashame work was potentially duplicated. `[~nickpoorman]` \u00a0did you get very far in you implementation?\r\n\r\n\u00a0\r\n\r\nI'm not sure if we need any sort of IP clearance for a contribution of this size.\u00a0 @wesm thoughts?"
+        },
+        {
+            "created_at": "2021-03-08T20:53:32.194Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17297696) by Matthew Topol (zeroshade):*\n`[~emkornfield]` from my end, the intention was always for the code to be released under Apache v2 license (like the rest of the arrow code) to be contributed so if there's any sort of IP clearance needed just let me know.\r\n\r\nGiven the size of this, should I try to chunk it up into multiple PRs or otherwise? Or just drop the code bomb?"
+        },
+        {
+            "created_at": "2021-03-10T03:49:02.002Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17298511) by Micah Kornfield (emkornfield):*\n`[~zeroshade]` \u00a0thanks.\u00a0 I'm not sure of exact requirements here, but for something of this size it might pay to have an ICLA on file with Apache.\u00a0 `[~wesm]` \u00a0any thoughts here?\r\n\r\n\u00a0\r\n> Given the size of this, should I try to chunk it up into multiple PRs or otherwise?\r\nPlease chunk it up.\u00a0 We are a little bit low on active Go contributors these days, but I can at least try to do reviews to sanity check it if no one else steps forward."
+        },
+        {
+            "created_at": "2021-03-10T16:13:38.622Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17298934) by Nick Poorman (nickpoorman):*\n`[~zeroshade]` \u00a0I'm happy you were able to pick this up. I started a new job and so this really hasn't been a priority for me. I was also waiting for generics to stabilize as the amount of code generation required was getting out of hand.\r\n\r\nIn any event, I'd be happy to help with the review."
+        },
+        {
+            "created_at": "2021-03-10T16:19:55.628Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17298940) by Matthew Topol (zeroshade):*\nI ended up needing this at work, and is actually currently being used for a few different projects and has already been used to produce files that have been sent to clients so it has real-world production usage which makes me happy :)\r\n\r\nI've put the first chunk up as https://github.com/apache/arrow/pull/9671/files Due to the interconnection of the various pieces chunking it up into smaller pieces without it being hugely strange, the code on that PR isn't particularly interesting but is rather a smaller basis of pieces that i was able to extract with minimal dependencies. Once that is reviewed and merged, i'll push the next chunk up which is the schema package. I'll wait mainly so that i can easily incorporate any changes/suggestions and ensure that things don't get out of sync when i'm pushing the chunks."
+        },
+        {
+            "created_at": "2021-04-09T23:07:48.361Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17318371) by Renato Javier Marroqu\u00edn Mogrovejo (renato2099):*\nhey `[~zeroshade]`, thanks for porting this code!\r\n\r\nJust wondering if there are any docs / examples / tests that I could look into?"
+        },
+        {
+            "created_at": "2021-04-12T23:52:38.130Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17319779) by Matthew Topol (zeroshade):*\nHey `[~renato2099]` as I put the chunks up for PR, it includes the tests which provide various examples that can be used. So far the PRs haven't gotten to the top level yet which would have examples of actually full reading/writing parquet files yet, but there will be tests and examples in the docs once those parts of the code get PRs made for them."
+        },
+        {
+            "created_at": "2021-04-15T11:28:35.306Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17322100) by Renato Javier Marroqu\u00edn Mogrovejo (renato2099):*\nCool `[~zeroshade]`! Just wondering if there is any tasks that you might need help on? or should we just wait the PRs (or some of them at least) to land on master first?"
+        },
+        {
+            "created_at": "2021-04-28T15:58:40.840Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17334828) by Micah Kornfield (emkornfield):*\n`[~renato2099]` \u00a0one thing that could be helpful is trying to review some of the PRs as they come up, even if there are no specific code tasks.\u00a0 Also, once the code is merged, I think there will still be gaps with the parquet spec (e.g. new encodings) so those would be good follow-on tasks."
+        },
+        {
+            "created_at": "2022-03-17T20:10:10.326Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7905?focusedCommentId=17508411) by Matthew Topol (zeroshade):*\nAll pieces fully implemented and merged. Go Parquet implementation is released. huzzah!"
+        }
+    ]
+}

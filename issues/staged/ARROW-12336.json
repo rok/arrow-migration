@@ -1,0 +1,34 @@
+{
+    "issue": {
+        "title": "[C++][Python] Empty Int64 array is of wrong size",
+        "body": "***Note**: This issue was originally created as [ARROW-12336](https://issues.apache.org/jira/browse/ARROW-12336). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSetup:\r\n\r\nTable with Int64 and str columns; generated using the dataset api; filtered on str column.\r\n\r\n\u00a0\r\n\r\nBug Description:\r\n\r\nCalling `table.to_pandas()` fails due to an empty array of the ChunkedArray of the Int64 column. This empty array has a size of 4 Byte when using the arrow nightly builds and 0 Byte when using arrow 3.0.0.\r\n\r\nNote: The bug does not occur when the table only contains an Int64 column.\r\n\r\n\u00a0\r\n\r\nMinimal example:\r\n```python\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nimport pyarrow.parquet\r\nimport pyarrow.dataset\r\n\r\nprint(\"Arrow version: \" + str(pa.__version__))\r\nprint(\"---------------\")\r\n\r\n# Only Int64 works fine\r\ndf = pd.DataFrame({\"Int_col\": [1, 2, 10]}, dtype=\"Int64\")\r\ntable = pa.table(df)\r\npath_0 = \"./test_0.parquet\"\r\npa.parquet.write_table(table, path_0)\r\n\r\nschema = pa.parquet.read_schema(path_0)\r\nds = pa.dataset.FileSystemDataset.from_paths(\r\n    paths=[path_0],\r\n    filesystem=pa.fs.LocalFileSystem(),\r\n    schema=schema, \r\n    format=pa.dataset.ParquetFileFormat(),\r\n)\r\ntable = ds.to_table(filter=(pa.dataset.field(\"Int_col\") == 3))\r\n\r\nprint(\"Size of array: \" + str(table.column(0).nbytes))\r\ndf = table.to_pandas()\r\nprint(\"---------------\")\r\n\r\n\r\n# Int64 and str crashes\r\ndf = pd.DataFrame({\"Int_col\": [1, 2, 10], \"str_col\": [\"A\", \"B\", \"Z\"]})\r\ndf = df.astype({\"Int_col\": \"Int64\"})\r\ntable = pa.table(df)\r\npath_1 = \"./test_1.parquet\"\r\npa.parquet.write_table(table, path_1)\r\n\r\nschema = pa.parquet.read_schema(path_1)\r\nds = pa.dataset.FileSystemDataset.from_paths(\r\n    paths=[path_1],\r\n    filesystem=pa.fs.LocalFileSystem(),\r\n    schema=schema, \r\n    format=pa.dataset.ParquetFileFormat(),\r\n)\r\ntable = ds.to_table(filter=(pa.dataset.field(\"str_col\") == \"C\"))\r\n\r\nprint(\"Size of array: \" + str(table.column(0).nbytes))\r\ndf = table.to_pandas()\r\n```\r\n\u00a0\r\n\r\nOutput :\r\n```bash\n\r\nArrow version: 3.1.0.dev578\r\n---------------\r\nSize of array: 0\r\n---------------\r\nSize of array: 4\r\nTraceback (most recent call last):\r\n  File \"/Users/xxx/empty_array_buffer_size.py\", line 47, in <module>\r\n    df = table.to_pandas()\r\n  File \"pyarrow/array.pxi\", line 756, in pyarrow.lib._PandasConvertible.to_pandas\r\n  File \"pyarrow/table.pxi\", line 1740, in pyarrow.lib.Table._to_pandas\r\n  File \"/usr/local/mambaforge/envs/pa_nightly/lib/python3.9/site-packages/pyarrow/pandas_compat.py\", line 794, in table_to_blockmanager\r\n    blocks = _table_to_blocks(options, table, categories, ext_columns_dtypes)\r\n  File \"/usr/local/mambaforge/envs/pa_nightly/lib/python3.9/site-packages/pyarrow/pandas_compat.py\", line 1135, in _table_to_blocks\r\n    return [_reconstruct_block(item, columns, extension_columns)\r\n  File \"/usr/local/mambaforge/envs/pa_nightly/lib/python3.9/site-packages/pyarrow/pandas_compat.py\", line 1135, in <listcomp>\r\n    return [_reconstruct_block(item, columns, extension_columns)\r\n  File \"/usr/local/mambaforge/envs/pa_nightly/lib/python3.9/site-packages/pyarrow/pandas_compat.py\", line 753, in _reconstruct_block\r\n    pd_ext_arr = pandas_dtype.__from_arrow__(arr)\r\n  File \"/usr/local/mambaforge/envs/pa_nightly/lib/python3.9/site-packages/pandas/core/arrays/integer.py\", line 117, in __from_arrow__\r\n    data, mask = pyarrow_array_to_numpy_and_mask(arr, dtype=self.type)\r\n  File \"/usr/local/mambaforge/envs/pa_nightly/lib/python3.9/site-packages/pandas/core/arrays/_arrow_utils.py\", line 32, in pyarrow_array_to_numpy_and_mask\r\n    data = np.frombuffer(buflist[1], dtype=dtype)[arr.offset : arr.offset + len(arr)]\r\nValueError: buffer size must be a multiple of element size\r\n```",
+        "created_at": "2021-04-12T09:27:27.000Z",
+        "updated_at": "2021-04-15T09:22:46.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-04-15T09:22:46.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-04-12T15:01:10.880Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12336?focusedCommentId=17319497) by Joris Van den Bossche (jorisvandenbossche):*\n`[~ThomasBlauthQC]` thanks a lot for the report. I can reproduce this on latest master."
+        },
+        {
+            "created_at": "2021-04-12T15:31:39.936Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12336?focusedCommentId=17319513) by Joris Van den Bossche (jorisvandenbossche):*\nThis is actually a bug in the pandas implementation, as it shouldn't assume anything about the length of the buffer (the buffer size can be larger than needed for the actual length of the array, even after taking into account the offset).\r\n\r\nI opened https://github.com/pandas-dev/pandas/issues/40896 for this. `[~ThomasBlauthQC]` would you be interested in doing a PR for this? (in pandas) Happy to provide some pointers to get started."
+        },
+        {
+            "created_at": "2021-04-12T15:49:43.593Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12336?focusedCommentId=17319526) by Thomas Blauth (ThomasBlauthQC):*\n`[~jorisvandenbossche]` \u00a0Yes, I can definitely do that!"
+        },
+        {
+            "created_at": "2021-04-15T09:22:12.420Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12336?focusedCommentId=17322028) by Joris Van den Bossche (jorisvandenbossche):*\nOK, going to close it here then"
+        }
+    ]
+}

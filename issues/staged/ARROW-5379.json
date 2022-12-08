@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[Python] support pandas' nullable Integer type in from_pandas",
+        "body": "***Note**: This issue was originally created as [ARROW-5379](https://issues.apache.org/jira/browse/ARROW-5379). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFrom https://github.com/apache/arrow/issues/4168. We should add support for pandas' nullable Integer extension dtypes, as those could map nicely to arrows integer types. \r\n\r\nIdeally this happens in a generic way though, and not specific for this extension type, which is discussed in ARROW-5271",
+        "created_at": "2019-05-20T18:55:31.000Z",
+        "updated_at": "2020-11-02T19:56:15.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-03-12T08:55:22.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-07-18T17:05:16.063Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5379?focusedCommentId=16888163) by Thomas Buhrmann (buhrmann):*\nFor the particular case of pd.Int64Dtype, the following may be a workaround for now, in case that's useful to anybody. In short, cast pandas Int64 columns to 'object' before converting to Arrow. When converting back to pandas, import with _integer_object_nulls=True_ and cast back to Int64. Seems to work correctly for the below cases of pandas integer columns with or without NaNs, and different integer sizes:\r\n\r\n\u00a0\r\n```java\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\n\r\n\r\ndef from_pandas(df):\r\n    \"\"\"Cast Int64 to object before 'serializing'\"\"\"\r\n    for col in df:\r\n        if isinstance(df[col].dtype, pd.Int64Dtype):\r\n            df[col] = df[col].astype('object')\r\n    return pa.Table.from_pandas(df)\r\n\r\n\r\ndef to_pandas(tbl):\r\n    \"\"\"After 'deserializing', recover the correct int type\"\"\"\r\n    df = tbl.to_pandas(integer_object_nulls=True)\r\n\r\n    for col in df:\r\n        if (pa.types.is_integer(tbl.schema.field_by_name(col).type) and\r\n            pd.api.types.is_object_dtype(df[col].dtype)):\r\n                df[col] = df[col].astype('Int64')\r\n    \r\n    return df\r\n\r\n\r\ndf = pd.Series([0, 1, None, 2, 822215679726100500], dtype='Int64', name='x').to_frame()\r\n# df = pd.Series([0, 1, 3, 2, 822215679726100500], dtype='Int64', name='x').to_frame()\r\n# df = pd.Series([0, 1, 3, 2, 15], dtype='Int64', name='x').to_frame()\r\n# df = pd.Series([0, 1, 3, 2, 15], dtype='int16', name='x').to_frame()\r\n\r\ndf2 = to_pandas(from_pandas(df))    \r\ndf2.dtypes\r\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-09-24T20:28:56.767Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5379?focusedCommentId=16937175) by Daniel Nugent (nugend):*\nIs this actually something that would be appropriate to implement with extension types? It just requires that the mask parameter of pa.Array actually be used with Pandas integer columns, right?"
+        },
+        {
+            "created_at": "2019-09-25T08:38:50.157Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5379?focusedCommentId=16937522) by Joris Van den Bossche (jorisvandenbossche):*\nIt's indeed not needed to have an extension type for this.  \r\n\r\nWith pandas master, the conversion of pandas -> arrow already works (using the `\\_\\_arrow_array\\_\\_` protocol added in ARROW-3829, indeed using the mask of the pandas integer array). \r\n\r\nThe conversion the other way around (arrow -> pandas) is not yet working, but work in progress: see ARROW-2428"
+        },
+        {
+            "created_at": "2019-10-28T10:37:06.262Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5379?focusedCommentId=16960912) by Joris Van den Bossche (jorisvandenbossche):*\nSo the pandas -> arrow/feather conversion already works with pandas master and the latest Arrow release (0.15).\r\n\r\nIf you want to use this feature without relying on pandas master, you can use this monkeypatch (it's basically what is added in the development version of pandas master):\r\n\r\n```Java\n\r\nimport pandas as pd\r\nimport pyarrow\r\n\r\npd.arrays.IntegerArray.__arrow_array__ = lambda self, type: pyarrow.array(self._data, mask=self._mask, type=type)\r\n```"
+        },
+        {
+            "created_at": "2020-03-12T08:55:10.251Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5379?focusedCommentId=17057723) by Joris Van den Bossche (jorisvandenbossche):*\nWith the latest releases of pandas and pyarrow, full roundtrip for DataFrames with nullable integer dtype works (due to `\\_\\_arrow_array\\_\\_` and `\\_\\_from_arrow\\_\\_` being implemented on the pandas side) , so we can close this issue."
+        },
+        {
+            "created_at": "2020-10-31T23:00:02.786Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5379?focusedCommentId=17224201) by Adam Lippai (alippai):*\nWhat's the correct way to use this?\r\n\r\n```python\r\narr3 = pa.array([1, 2, 3, None], type=pa.int64())\r\npa.table([arr3], ['first']).to_pandas().dtypes\r\n```\r\nThis results in:\r\n```\r\nfirst    float64\r\ndtype: object```\r\n\r\nSetting a `types_mapper` to the pandas Int64DType throw.s"
+        },
+        {
+            "created_at": "2020-11-02T19:14:29.306Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5379?focusedCommentId=17224903) by Joris Van den Bossche (jorisvandenbossche):*\n> Setting a `types_mapper` to the pandas Int64DType throw.s\r\n\r\nCan you show what you tried and the error? As that should normally work"
+        },
+        {
+            "created_at": "2020-11-02T19:42:25.825Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5379?focusedCommentId=17224916) by Adam Lippai (alippai):*\nI was testing with pandas 1.1.3 and pyarrow 1.0.1. I don't know how I managed to get the exception :/\r\n\r\nNow it works as expected without any problems and I can't reproduce the exception I got.\r\n\r\nI'm sorry for the false (and incomplete) bug report, next time I'll be more careful.\u00a0\r\n```python\n\r\nimport pyarrow as pa\r\narr = pa.array([1, 2, 3, None], type=pa.int64())\r\npa.table([arr], ['first']).to_pandas(types_mapper={pa.int64(): pd.Int64Dtype()}.get).dtypes\r\n```\r\n\r\n```Java\n\r\nfirst    Int64\r\ndtype: object\r\n```"
+        },
+        {
+            "created_at": "2020-11-02T19:56:15.663Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5379?focusedCommentId=17224924) by Joris Van den Bossche (jorisvandenbossche):*\nGood to hear it is working!"
+        }
+    ]
+}

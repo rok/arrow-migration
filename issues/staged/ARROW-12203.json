@@ -1,0 +1,158 @@
+{
+    "issue": {
+        "title": "[C++][Python] Switch default Parquet version to 2.4",
+        "body": "***Note**: This issue was originally created as [ARROW-12203](https://issues.apache.org/jira/browse/ARROW-12203). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently, Parquet write APIs default to maximum-compatibility Parquet version \"1.0\", which disables some logical types such as UINT32. We may want to switch the default to \"2.0\" instead, to allow faithful representation of more types.",
+        "created_at": "2021-04-05T10:27:40.000Z",
+        "updated_at": "2022-06-01T17:48:10.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-06-01T17:47:49.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-04-05T10:28:34.897Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17314768) by Antoine Pitrou (apitrou):*\n`[~wesm]` `[~emkornfield]` Thoughts?"
+        },
+        {
+            "created_at": "2021-04-05T10:55:40.171Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17314786) by Antoine Pitrou (apitrou):*\nI'll note that ParquetVersion::PARQUET_2_0 guards several unrelated things:\r\n- TIME_MILLIS, TIMESTAMP_MILLIS and UINT32, which were added in Parquet format 2.1 (PARQUET-12, July 2014)\n- TIME_MICROS, TIMESTAMP_MICROS, which were added in Parquet format 2.3 (PARQUET-200, June 2015)\n- the NANOS unit for times and timestamps, which was added in Parquet format 2.5 (PARQUET-1387, August 2018)\n- RLE_DICTIONARY, which was added in Parquet format 1.0 (commit eb2f34ca775476ec9955aa88a8ac5c0583114f72, no associated JIRA, November 2013)\n- the value written in FileMetaData.version (1 or 2), which isn't described anywhere in the format spec (presumably version == 2 starting from Parquet format 2.0.0?)\n  \n  So it's a mess. Some of those changes are very old, though. It seems we could enable all of them by default, except NANOS?\n  \n  One possibility would be to enable them for \"1.0\" and keep NANOS in \"2.0\".\n  Another possibility would be to add a new \"1.9\" pseudo-version, enable them in \"1.9\", and make \"1.9\" the default.\n  Or we bite the bullet and make \"2.0\" the default, including all of the above.\n"
+        },
+        {
+            "created_at": "2021-04-05T12:57:04.233Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17314834) by Joris Van den Bossche (jorisvandenbossche):*\n`[~apitrou]` see also the mailing list discussion from December (with title \"Should we default to write parquet format version 2.0? (not data page version 2.0)\", https://mail-archives.apache.org/mod_mbox/arrow-dev/202012.mbox/%3CCALQtMBYqPPkE6RQiNDxXz7yOtnbqtQGH%2Bk%2B20ryomGtLE9EfVA%40mail.gmail.com%3E)\r\n\r\nSee also this overview of converted/logical types added in which versions: https://nbviewer.jupyter.org/gist/jorisvandenbossche/3cc9942eaffb53564df65395e5656702 (for types, not for encodings)\r\n\r\nMy conclusion in that email-thread was also that the NANOS might be problematic to already enable by default (I don't know what the status of this feature is in other implementations ..)\r\n\r\nAnother option could also be to have a `version=\"2.4\"` which eg would enable the logical types for integers but not yet for nanoseconds (then it maps more or less to the actual parquet format version, instead of the pseudo \"1.9\")\r\n\r\n> the value written in FileMetaData.version (1 or 2), which isn't described anywhere in the format spec (presumably version == 2 starting from Parquet format 2.0.0?)\r\n\r\nThere is indeed not spec about this, there was some discussion about this on the \"core features\" PR: https://github.com/apache/parquet-format/pull/164#discussion_r569228238\r\n\r\n"
+        },
+        {
+            "created_at": "2021-04-05T13:02:46.290Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17314838) by Antoine Pitrou (apitrou):*\nCurrently \"2.0\" will emit NANOS, and we don't want to change that. That's why I was proposing a \"1.9\" in-between."
+        },
+        {
+            "created_at": "2021-04-05T15:35:41.264Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17314932) by Micah Kornfield (emkornfield):*\nI think switches like this should follow a policy similar to API deprecation.  i.e. something like we put in release notes that we intend to switch the default version (maybe for more then one release) and then make the change in some subsequent release.   It might be worth an ML discussion on policy around this.\r\n\r\nThank you for the analysis.  Based upon it, I would suggest maybe instead of 1.9 we try to make this value correspond with release (introduce a 2.3 and and 2.5) if we don't think it will make the code to horrendous."
+        },
+        {
+            "created_at": "2021-04-05T15:54:33.632Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17314941) by Antoine Pitrou (apitrou):*\n>  Based upon it, I would suggest maybe instead of 1.9 we try to make this value correspond with release (introduce a 2.3 and and 2.5) if we don't think it will make the code to horrendous.\r\n\r\nAs I said above, we want \"2.0\" to still enable all features. But the additional version must be lower than \"2.0\", because it will enable only some of the features.\r\n"
+        },
+        {
+            "created_at": "2021-04-05T16:02:13.399Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17314944) by Joris Van den Bossche (jorisvandenbossche):*\nThe `version=\"2.0\"` could be an alias of \"latest 2.x\" version with all features. That's of course also confusing (since 2.0 is also an explicit version, and which is lower than the 2.4 or 2.5), but IMO less confusing than having a \"1.9\" which is 1) a non-existing version and 2) enabling 2.x features."
+        },
+        {
+            "created_at": "2021-04-05T16:03:40.194Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17314946) by Antoine Pitrou (apitrou):*\n> The version=\"2.0\" could be an alias of \"latest 2.x\" version with all features\r\n\r\nThat's already the case. What change are you suggesting?"
+        },
+        {
+            "created_at": "2021-04-06T14:44:12.461Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17315624) by Joris Van den Bossche (jorisvandenbossche):*\nI was trying to argue that IMO we don't need to use a pseudo-version like \"1.9\", but can rather use the actual version like \"2.4\". Yes, \"2.0\" is lower than \"2.4\", but if we clearly say that \"2.0\" means the \"latest 2.x\", then I think that is fine. \r\n\r\nBut anyway, that's only a naming discussion, and both ways to name the version have pros and cons. The main discussion point is whether we need such an additional version number to have more fine-grained control over which features are used. If that makes it easier to make \"1.9\"/\"2.4\" the default, then I think that's a good idea.  "
+        },
+        {
+            "created_at": "2021-04-06T15:01:06.830Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17315642) by Antoine Pitrou (apitrou):*\nHaving \"2.0\" mean something later than \"2.4\" sounds absolutely bonkers to me."
+        },
+        {
+            "created_at": "2021-04-06T15:01:53.681Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17315643) by Antoine Pitrou (apitrou):*\nI am fine with enabling everything current in \"2.0\", but then we shouldn't introduce a higher version number with less features enabled.\r\n\r\nAlso, I am not convinced we need more fine-grained feature selection. That's more control than most people want to have. My primary concern here is that people don't get a completely outdate feature set (no UINT32!) by default."
+        },
+        {
+            "created_at": "2021-04-07T15:34:34.005Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17316431) by Micah Kornfield (emkornfield):*\nUnless there is an agreement to bump the next format release to 3.0 I think this might inevitable?  I'm not actually sure what the cross version guarantees for the parquet format are at this point?"
+        },
+        {
+            "created_at": "2021-04-07T15:45:37.304Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17316436) by Antoine Pitrou (apitrou):*\n`[~emkornfield]` I'm not sure what you say is inevitable?"
+        },
+        {
+            "created_at": "2021-04-07T15:54:25.518Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17316444) by Micah Kornfield (emkornfield):*\n> I am fine with enabling everything current in \"2.0\", but then we shouldn't introduce a higher version number with less features enabled.\r\nSorry I misread this.\u00a0 I thought we wouldn't be able to introduce additional guarding flags for new features."
+        },
+        {
+            "created_at": "2021-04-14T16:20:51.907Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17321119) by Antoine Pitrou (apitrou):*\nIt seems fastparquet doesn't support the RLE_DICTIONARY encoding (even though it's part of the Parquet 1.0 format version). Do we care enough about being compatible with fastparquet by default?"
+        },
+        {
+            "created_at": "2021-04-14T16:27:18.129Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17321126) by Antoine Pitrou (apitrou):*\nOpened https://github.com/dask/fastparquet/issues/583"
+        },
+        {
+            "created_at": "2021-04-14T16:47:56.306Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17321148) by Joris Van den Bossche (jorisvandenbossche):*\nRegarding RLE_DICTIONARY, if enabled (so now with specifying `format=\"2.0\"`) is it actually used for many types? (I am not very familiar with the logic how gets decided which encoding is used while writing;  but so to have an idea of the impact of enabling it for compatibility with other readers like fastparquet)\r\n\r\nOn another note, this is still tagged as 4.0. But it might not be the best feature to switch just before the release. It might be safer to switch directly after the 4.0 release, so we have some time to gather feedback? (although that depends on how many people use the dev version, of course ..)"
+        },
+        {
+            "created_at": "2021-04-14T16:54:44.840Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17321154) by Antoine Pitrou (apitrou):*\nRLE_DICTIONARY is used for dictionary indices of dictionary-encoded columns. That probably comes up in a lot of situations :-)"
+        },
+        {
+            "created_at": "2021-06-29T19:41:33.433Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17371602) by Antoine Pitrou (apitrou):*\nThe kind of misunderstanding that will keep happening until we finally bump the Parquet version : ARROW-13214 ;)"
+        },
+        {
+            "created_at": "2021-07-05T15:13:31.703Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17374891) by Jorge Leit\u00e3o (jorgecarleitao):*\nI am of the opinion that it is time to move on; version 2.0 by default (NANOS out for now).\r\n\r\nFor the data pages, I do not think there are so many differences between 1 and 2, right? it is mostly where is the compression is applied and where the byte length of the def and rep levels are declared (in the page data or in the header).\r\n\r\nSo, in that context keeping data pages v1 by default seems ok.\r\n"
+        },
+        {
+            "created_at": "2021-07-05T16:50:10.319Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17374930) by Micah Kornfield (emkornfield):*\nI'm OK moving the default logical types to 2.0 and keeping datapage v1 for now.\u00a0 Lets do this after this current release and send an e-mail out to dev@ and user@ to notify people way ahead of time that this is a potential breaking change."
+        },
+        {
+            "created_at": "2021-07-06T18:13:09.373Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17375923) by Joris Van den Bossche (jorisvandenbossche):*\nIf we would enable all available logical types with a default of `version=\"2.0\"`, what do we do if the next Parquet format release adds a new logical type? (eg if 2.10.0 adds a new Interval logical type) Maybe something we can defer until it happens, but unless we would directly enable it, we would then still need to add a `version=\"2.10\"` option or so to enable it on demand.  \r\n\r\n\r\nBut +1 on Micah's proposal to notify the mailing list (and put it in the release notes for 5.0.0 maybe as well) that we plan to switch in the next release.\r\n"
+        },
+        {
+            "created_at": "2021-08-31T12:53:30.985Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17407320) by Antoine Pitrou (apitrou):*\nI've updated the title now that ARROW-13794 has introduced `PARQUET_2_4` and `PARQUET_2_6` to better select enabled features. We may be able to switch to \"2.4\" by default as that format version was released in October 2017."
+        },
+        {
+            "created_at": "2021-09-02T03:48:47.118Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17408513) by Micah Kornfield (emkornfield):*\nPossibly, I need to double check if this would break things in my organization in the short term.\u00a0 \u00a0At the very least, I guess I would ask for an extension to 7.0.0 before changing the default."
+        },
+        {
+            "created_at": "2021-12-13T12:15:26.985Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17458349) by Antoine Pitrou (apitrou):*\n`[~emkornfield]` \u00a0 Did you have the opportunity to inquire?"
+        },
+        {
+            "created_at": "2021-12-15T04:44:56.525Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17459648) by Micah Kornfield (emkornfield):*\nUnfortunately not yet, I think if we could wait until after the 7.0 release that should finally be sufficient."
+        },
+        {
+            "created_at": "2022-02-04T17:56:56.637Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17487210) by Joris Van den Bossche (jorisvandenbossche):*\nNow the 7.0 release is out, shall we switch the default early in the 8.0 cycle?"
+        },
+        {
+            "created_at": "2022-02-06T04:18:43.572Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17487623) by Micah Kornfield (emkornfield):*\n8.0 release is targeted in the April time frame?"
+        },
+        {
+            "created_at": "2022-02-06T18:43:21.170Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17487746) by Antoine Pitrou (apitrou):*\nPresumably, yes."
+        },
+        {
+            "created_at": "2022-04-20T10:32:57.785Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17524874) by Ra\u00fal Cumplido (raulcd):*\n`[~jorisvandenbossche]` `[~apitrou]` is this something we still want to do before the release?"
+        },
+        {
+            "created_at": "2022-04-20T11:42:09.104Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17524909) by Antoine Pitrou (apitrou):*\n`[~emkornfield]` \u00a0 Would have to answer. Hopefully we can do it."
+        },
+        {
+            "created_at": "2022-04-21T03:15:33.639Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17525397) by Micah Kornfield (emkornfield):*\nCC [~willb_google]\u00a0\r\n\r\n\u00a0\r\n\r\nThis will still potentially cause issues with imports into BQ if unsigned types are used I think.\u00a0 I think the project has generally been pretty patient, so I understand if there is a strong desire to move forward with it.\u00a0 Will can probably give a better timeline on when BQ would be able to handle the logical types."
+        },
+        {
+            "created_at": "2022-04-22T16:44:07.120Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17526556) by Krisztian Szucs (kszucs):*\nPostponing to 9.0"
+        },
+        {
+            "created_at": "2022-04-22T16:48:05.731Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17526558) by Antoine Pitrou (apitrou):*\nMarking this is as critical for 9.0 so that we finally do it."
+        },
+        {
+            "created_at": "2022-06-01T17:47:49.052Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12203?focusedCommentId=17545062) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 13280\n<https://github.com/apache/arrow/pull/13280>"
+        }
+    ]
+}

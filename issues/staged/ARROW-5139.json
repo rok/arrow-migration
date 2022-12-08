@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python/C++] Empty column selection no longer restores index",
+        "body": "***Note**: This issue was originally created as [ARROW-5139](https://issues.apache.org/jira/browse/ARROW-5139). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe index of a dataframe is no longer reconstructed when using empty column selection. This is a regression to 0.12.1 and probably only happens for pd.RangeIndex\r\n\r\n```python\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nfrom kartothek.serialization import ParquetSerializer\r\nfrom storefact import get_store_from_url\r\nprint(pa.__version__)\r\ndf = pd.DataFrame(\r\n    {\"a\": [1, 2]}\r\n)\r\nprint(df.index)\r\n\r\ntable = pa.Table.from_pandas(df)\r\nbuf = pa.BufferOutputStream()\r\npq.write_table(table, buf)\r\nreader = pa.BufferReader(buf.getvalue().to_pybytes())\r\ntable_restored = pq.read_pandas(reader, columns=[])\r\ndf_restored = table_restored.to_pandas()\r\nprint(len(df_restored))\r\n```",
+        "created_at": "2019-04-08T13:53:24.000Z",
+        "updated_at": "2021-08-05T13:33:53.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2019-05-06T08:34:24.501Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5139?focusedCommentId=16833597) by Joris Van den Bossche (jorisvandenbossche):*\n`[~fjetter]` thanks for the report! A little bit simpler reproducible example, without parquet (but the same underlying reason, the rangeindex is indeed not constructed again for empty tables):\r\n\r\n```Java\n\r\nIn [1]: import pyarrow as pa\r\n\r\nIn [2]: pa.__version__  \r\nOut[2]: '0.12.0'\r\n\r\nIn [3]: df = pd.DataFrame( \r\n   ...:     {\"a\": [1, 2]} \r\n   ...: ) \r\n\r\nIn [4]: table = pa.Table.from_pandas(df, columns=[], preserve_index=True)     \r\n\r\nIn [5]: table\r\nOut[5]: \r\npyarrow.Table\r\n__index_level_0__: int64\r\nmetadata\r\n--------\r\nOrderedDict([(b'pandas',\r\n              b'{\"index_columns\": [\"__index_level_0__\"], \"column_indexes\": ['\r\n              b'{\"name\": null, \"field_name\": null, \"pandas_type\": \"unicode\",'\r\n              b' \"numpy_type\": \"object\", \"metadata\": {\"encoding\": \"UTF-8\"}}]'\r\n              b', \"columns\": [{\"name\": null, \"field_name\": \"__index_level_0_'\r\n              b'_\", \"pandas_type\": \"int64\", \"numpy_type\": \"int64\", \"metadata'\r\n              b'\": null}], \"pandas_version\": \"0.23.4\"}')])\r\n\r\nIn [6]: print(table.to_pandas())\r\nEmpty DataFrame\r\nColumns: []\r\nIndex: [0, 1]\r\n\r\nIn [7]: table.to_pandas().index\r\nOut[7]: Int64Index([0, 1], dtype='int64')\r\n```\r\n\u00a0\r\nBut the above, now gives:\r\n\r\n```Java\n\r\nIn [4]: table \r\nOut[4]: \r\npyarrow.Table\r\n\r\nmetadata\r\n--------\r\n{b'pandas': b'{\"index_columns\": [{\"kind\": \"range\", \"name\": null, \"start\": 0, \"'\r\n            b'stop\": 2, \"step\": 1}], \"column_indexes\": [{\"name\": null, \"field_'\r\n            b'name\": null, \"pandas_type\": \"unicode\", \"numpy_type\": \"object\", \"'\r\n            b'metadata\": {\"encoding\": \"UTF-8\"}}], \"columns\": [], \"creator\": {\"'\r\n            b'library\": \"pyarrow\", \"version\": \"0.13.1.dev126+ga9ae4a9f.d201905'\r\n            b'03\"}, \"pandas_version\": \"0.24.2\"}'}\r\n\r\nIn [5]: print(table.to_pandas())   \r\nEmpty DataFrame\r\nColumns: []\r\nIndex: []\r\n\r\nIn [6]: table.to_pandas().index    \r\nOut[6]: RangeIndex(start=0, stop=0, step=1)\r\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-05-06T09:45:38.571Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5139?focusedCommentId=16833656) by Joris Van den Bossche (jorisvandenbossche):*\nA \"quick and dirty\" fix would be to special case tables with zero rows and zero columns in the check in `_reconstruct_index` (<https://github.com/apache/arrow/blob/982f341bc81e1e22d4b25f8cf00ef882a34766b6/python/pyarrow/pandas_compat.py#L695-L697>), when recreating the pandas DataFrame from an empty arrow Table. \r\n\r\nBut I think the proper fix to this would be to allow the Table to have a non-zero `num_rows`. However, this would need separate fixes depending on where the Table is created (so eg a separate fix in the `Table.from_pandas(columns=[])` and the parquet read code, for both examples above), and complicate the code in several places, so I am not sure we want to go down that route. (cc `[~wesmckinn]` ?)"
+        },
+        {
+            "created_at": "2019-08-22T22:21:56.508Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5139?focusedCommentId=16913743) by Wes McKinney (wesm):*\nAdded to 0.15.0 in case something can be done"
+        },
+        {
+            "created_at": "2019-09-17T12:57:48.661Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5139?focusedCommentId=16931417) by Joris Van den Bossche (jorisvandenbossche):*\nNow we add the `preserve_index=None / True` distinction, the original example with `preserve_index=True` is working again as expected. \r\n\r\nWhen doing the same example with the default of None (`pa.Table.from_pandas(df, columns=[], preserve_index=None).to_pandas()`), that still gives the same problem as reported.\r\n\r\nFor that one, I am not sure what is the best solution (do we want to go down the route of a Table having 0 columns but a non-zero `num_rows` ?)"
+        },
+        {
+            "created_at": "2021-08-05T13:33:53.570Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5139?focusedCommentId=17394008) by Antoine Pitrou (apitrou):*\nDo we want to act on this?"
+        }
+    ]
+}

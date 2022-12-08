@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[Python] Python does not find the DLLs correctly on Windows",
+        "body": "***Note**: This issue was originally created as [ARROW-17771](https://issues.apache.org/jira/browse/ARROW-17771). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIt seems that after the Python refactoring PR <https://github.com/apache/arrow/pull/13311> (ARROW-16340) Python is unable to find `arrow_python` even though the library it is imported into the correct directory.\r\n\r\nCurrently this issue is fixed with setting an additional environment variable:\r\n\r\n```Java\n\r\nCONDA_DLL_SEARCH_MODIFICATION_ENABLE=1\r\n```\r\n\r\nWe need to investigate further why this error is happening after the [refactoring](https://github.com/apache/arrow/pull/13311) and make sure Python is able to find the libraries on Windows without the additional env vars being specified.",
+        "created_at": "2022-09-19T07:09:16.000Z",
+        "updated_at": "2022-10-06T11:31:44.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-06T07:42:30.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-19T07:22:05.396Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17771?focusedCommentId=17606463) by Antoine Pitrou (apitrou):*\ncc `[~h-vetinari]` for potential guidance."
+        },
+        {
+            "created_at": "2022-09-19T08:53:34.055Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17771?focusedCommentId=17606501) by H. Vetinari (h-vetinari):*\n> Currently this issue is fixed with setting an additional environment variable `CONDA_DLL_SEARCH_MODIFICATION_ENABLE=1`\r\n\r\nI've only ever seen this be necessary for prioritizing conda-DLLs over stuff in C:/System32 (e.g. openssl), but AFAIU the efforts of Isuru and other people in core is to make this variable obsolete (by having things work correctly by default). I think newer CPython versions by conda-forge might not even have it anymore. Which version of Python is this failing with, and what libraries are missing?\r\n"
+        },
+        {
+            "created_at": "2022-09-19T09:06:06.227Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17771?focusedCommentId=17606507) by Alenka Frim (alenka):*\nThank you for helping with this issue `[~h-vetinari]`!\r\n\r\nIt is failing with Python 3.8 and 3.9. I haven't tried with version 3.10 locally but can do so later today.\r\n\r\nCould the issue be that Arrow DLLs and Arrow Python (PyArrow C++) DLL are in a different location?\r\n \\* Arrow libraries are installed into `ARROW_HOME` location\r\n \\* `arrow_python` is installed into `arrow/python/pyarrow` location which is different from `ARROW_HOME` and this lib is the one that is missing/can't be found"
+        },
+        {
+            "created_at": "2022-09-19T09:34:04.744Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17771?focusedCommentId=17606519) by H. Vetinari (h-vetinari):*\n> Could the issue be that Arrow DLLs and Arrow Python (PyArrow C++) DLL are in a different location?\r\n\r\nYes, it sounds like the new location of the Arrow Python DLL is not taken into account (curious that it's still found with the ENABLE-stuff).\r\n\r\nIn any case, from the POV of conda-forge (i.e. when we get around to packaging the next released version), this would probably get installed somewhere in `site-packages/arrow/...`. I think it might be best to open a PR to the arrow-cpp-feedstock that points to the current master here (use `git_url:` etc., I can help if necessary), and we can figure out what needs to be done (either on the build script side or through patches) so that this runs through."
+        },
+        {
+            "created_at": "2022-09-20T11:40:04.215Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17771?focusedCommentId=17607135) by Joris Van den Bossche (jorisvandenbossche):*\nBased on some of the other issues where I found some discussion about this (https://github.com/ContinuumIO/anaconda-issues/issues/12475#issuecomment-913223071, https://github.com/scipy/scipy/issues/11062#issuecomment-913007215, https://github.com/conda/conda/issues/10897#issuecomment-917402957), it might be that this is only an issue for _inplace_ development builds (`pip install --editable` or `python setup.py develop`), which is also what we are doing on Appveyor.\r\n\r\nAnd for inplace builds, the libarrow_python.dll now no longer lives in the conda env prefix (where Arrow C++ build artifacts end up), but inside the arrow/python/pyarrow directory. \r\nBut what I don't understand is why this is a problem, since in either case (having the env variable or not), the same directory as the other DLL (the cython one that links to libarrow_python) should always be searched. \r\n\r\nSee https://github.com/conda-forge/python-feedstock/pull/481/files#diff-f43d77242cb37d5edf48db1155b6a2ef37972c418918229ea1d00a56c2b961ee for more details (the {{Add-CondaEcosystemModifyDllSearchPath.patch} file) and the comment at https://github.com/conda-forge/python-feedstock/pull/481#discussion_r716153174 for some additional context and discussion. Isuru indeed changed this for Python 3.10 (as far as I understand, this env variable should no longer be set by default starting with Python 3.10, but if it's the default for 3.8/3.9, I don't really understand why we have to set it explicitly here ...)."
+        },
+        {
+            "created_at": "2022-09-20T11:41:47.521Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17771?focusedCommentId=17607136) by Joris Van den Bossche (jorisvandenbossche):*\nThe updated conda patch for Python 3.11 (which is removing the effect of this env variable, https://github.com/conda-forge/python-feedstock/pull/577) has the following explainer:\r\n> Note that in conda python <3.11, there was an option\n> CONDA_DLL_SEARCH_MODIFICATION=1 to add directories in PATH to the search\n> order, but this was deprecated in 3.10 and removed in 3.11 in favour of using\n> AddDllDirectory"
+        },
+        {
+            "created_at": "2022-09-27T15:32:00.828Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17771?focusedCommentId=17610127) by Alenka Frim (alenka):*\nI did some testing on my local Windows machine and this is what I found:\r\n \\* With Python 3.8, without setting `CONDA_DLL_SEARCH_MODIFICATION=1` and running\r\n```java\n\r\npython install -e .\r\n```\r\ninstead of making an inplace build there is no difference, the {**}arrow_python lib is not found{**}. I had to add `CONDA_DLL_SEARCH_MODIFICATION` env var to make it work.\r\nhttps://gist.github.com/AlenkaF/bb12bbe2051db5854e10747e13ca5b91\r\n\r\n \\* With **Python 3.10** the inplace build works and there is no need to set `CONDA_DLL_SEARCH_MODIFICATION` as the libs are found correctly.\r\nhttps://gist.github.com/AlenkaF/0dc8bc837472f83731dd6fa22fce558b\r\n\r\nI still do not understand why is this happening and why is `CONDA_DLL_SEARCH_MODIFICATION` needed as we do not use `os.add_dll_directory` in the project. But am happy to see that the issue is resolved with Python 3.10.\r\n\r\nI propose keeping the `CONDA_DLL_SEARCH_MODIFICATION` env var set to 1 in case older versions of Python are used. What I can do is to add a check for Python version in setup.py and set the `CONDA_DLL_SEARCH_MODIFICATION` env var automatically for older versions of Python."
+        },
+        {
+            "created_at": "2022-10-06T07:42:30.384Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17771?focusedCommentId=17613349) by Joris Van den Bossche (jorisvandenbossche):*\nIssue resolved by pull request 14302\n<https://github.com/apache/arrow/pull/14302>"
+        }
+    ]
+}

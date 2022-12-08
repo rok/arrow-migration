@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Python] Scanner.count_rows() doesn't properly handle null expressions",
+        "body": "***Note**: This issue was originally created as [ARROW-16495](https://issues.apache.org/jira/browse/ARROW-16495). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nPassing an expression filter with `is_null()` doesn't properly remove null values, when computing row counts. I have reproduced this with both strings and integer. Here is a reproducer.\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n```java\n\r\ndf = pd.DataFrame({\"C\": pd.array([None, None, 1], dtype=pd.Int64Dtype())})\r\nprint(df)\r\ndf.to_parquet(\"test.pq\")\r\n\u00a0\r\n# Create a dataset\r\ndataset = ds.dataset(\"test.pq\")\r\nfragments = [f for f in dataset.get_fragments()]\r\n#There should just be 1 fragment.\r\nfragment = fragments[0]\r\n# Get the null row count\r\nexpr = ds.field(\"C\").is_null()\r\nscanner = fragment.scanner(filter=expr)\r\nprint(scanner.count_rows())\r\n```\r\n\u00a0\r\n\r\n\u00a0\r\n\r\nI expect this print 2 as there are 2 NULL values.",
+        "created_at": "2022-05-06T17:21:06.000Z",
+        "updated_at": "2022-05-10T18:27:10.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-05-10T18:12:04.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-05-06T18:32:22.185Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16495?focusedCommentId=17533027) by Nick Riasanovsky (njriasan):*\nFor additional context, `scanner.to_table()``\u00a0does read the`\u00a0data correct with ~ is_null, but not is_null, so its just a count_rows issue.\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n```java\n\r\nexpr = ds.field(\"C\").is_null()\r\nscanner = fragment.scanner(filter=expr)\r\nprint(scanner.to_table())\n```\r\nOutputs:\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n```java\n\r\nC: string\r\n----\r\nC: [[]]\n```\r\nWhile\r\n\r\n\u00a0\r\n```java\n\r\nexpr = ds.field(\"C\").is_null()\r\nscanner = fragment.scanner(filter=~expr)\r\nprint(scanner.to_table()) \n```\r\nOutputs\r\n```java\n\r\npyarrow.Table\r\nC: string\r\n----\r\nC: [[\"A\"]]\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-05-10T06:32:30.946Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16495?focusedCommentId=17534166) by Alenka Frim (alenka):*\nRunning locally on latest master I get the following (which should be the correct behaviour):\r\n```python\n\r\n>>> import pandas as pd\r\n>>> import pyarrow.dataset as ds\r\n\r\n>>> df = pd.DataFrame({\"C\": pd.array([None, None, 1], dtype=pd.Int64Dtype())})\r\n>>> df\r\n      C\r\n0  <NA>\r\n1  <NA>\r\n2     1\r\n>>> df.to_parquet(\"test.pq\")\r\n\r\n# Create a dataset\r\n>>> dataset = ds.dataset(\"test.pq\")\r\n>>> fragments = [f for f in dataset.get_fragments()]\r\n\r\n# One fragment\r\n>>> fragments\r\n[<pyarrow.dataset.ParquetFileFragment path=test.pq>]\r\n\r\n>>> expr = ds.field(\"C\").is_null()\r\n\r\n# Selects the rows that have null values in C\r\n>>> scanner = fragment.scanner(filter=expr)\r\n>>> scanner.count_rows()\r\n2\r\n\r\n# Selects the rows that do not have null values in C\r\n>>> scanner = fragment.scanner(filter=~expr)\r\n>>> scanner.count_rows()\r\n1\r\n>>> scanner.to_table()\r\npyarrow.Table\r\nC: int64\r\n----\r\nC: [[1]]\r\n```\r\nI am a bit confused as why would `is_null` remove null values? Apologies if I am misunderstanding the issue."
+        },
+        {
+            "created_at": "2022-05-10T18:11:36.809Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16495?focusedCommentId=17534515) by Nick Riasanovsky (njriasan):*\nMy apologies for being unclear in my issue. What I meant to was `is_null` filters did not work properly with Arrow 7. As my examples should show, `is_null` was not returning the two null entries using `to_table()` and `count_rows()`.\r\n\r\n\r\nHowever, you are correct this is fixed in Arrow 8. I will mark this as resolved. Thank you for taking the time to review this."
+        },
+        {
+            "created_at": "2022-05-10T18:27:10.737Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16495?focusedCommentId=17534526) by Alenka Frim (alenka):*\nNo problem, happy to see it works for you in the new version."
+        }
+    ]
+}

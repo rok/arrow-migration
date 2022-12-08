@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Rust] Support writing dictionaries nested in a list to IPC stream",
+        "body": "***Note**: This issue was originally created as [ARROW-14785](https://issues.apache.org/jira/browse/ARROW-14785). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAttempting to write/read dictionaries nested in a list to an IPC stream results in an error:\r\n```java\n\r\nfn send_receive() -> std::result::Result<(), Box<dyn std::error::Error>> {\r\n\u00a0 \u00a0 let fields_vec = vec![\"fields1\", \"fields2\"];\r\n\u00a0 \u00a0 let fields_list = {\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 let mut b = ListBuilder::with_capacity(StringDictionaryBuilder::new(PrimitiveBuilder::<Int32Type>::new(2), StringBuilder::new(2)), 1);\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 for f in &fields_vec {\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 b.values().append(f).unwrap();\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 }\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 b.append(true)?;\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 b.finish()\r\n\u00a0 \u00a0 \u00a0 \u00a0 };\r\n\u00a0 \u00a0 let schema = Arc::new(Schema::new(vec![Field::new(\"fields\", fields_list.data_type().clone(), false)]));\r\n\u00a0 \u00a0 let batch = RecordBatch::try_new(schema.clone(),vec![Arc::new(fields_list)])?;\r\n\u00a0 \u00a0 let buf = Vec::with_capacity(1024 * 32);\r\n\u00a0 \u00a0 let mut writer = arrow::ipc::writer::StreamWriter::try_new(buf, &schema)?;\r\n\u00a0 \u00a0 writer.write(&batch)?;\r\n\u00a0 \u00a0 writer.finish()?;\u00a0 \u00a0 let reader = &writer.into_inner()?[..];\r\n\u00a0 \u00a0 let mut reader = arrow::ipc::reader::StreamReader::try_new(reader)?;\r\n\u00a0 \u00a0 while let Some(n) = reader.next() {\r\n\u00a0 \u00a0 \u00a0 \u00a0 let b = n?;\r\n\u00a0 \u00a0 \u00a0 \u00a0 println!(\"Parsed batch: {:?}\", b);\r\n\u00a0 \u00a0 }\r\n\u00a0 \u00a0 Ok(())\r\n}\r\n\r\nfn main() {\r\n\u00a0 \u00a0 println!(\"Sending DictionaryArray in a list\");\r\n\u00a0 \u00a0 match send_receive() {\r\n\u00a0 \u00a0 \u00a0 \u00a0 Ok(_) => println!(\"Encoded and decoded successfully\"),\r\n\u00a0 \u00a0 \u00a0 \u00a0 Err(e) => panic!(\"{:?}\", e)\r\n\u00a0 \u00a0 }\r\n} \n```\r\nThe error:\r\n```java\n\r\nSending DictionaryArray in a list\r\nthread 'main' panicked at 'index out of bounds: the len is 1 but the index is 1', .cargo/registry/src/github.com-1ecc6299db9ec823/arrow-6.2.0/src/ipc/reader.rs:176:31\r\nstack backtrace:\r\n\u00a0 \u00a00: rust_begin_unwind\r\n\u00a0 \u00a01: core::panicking::panic_fmt\r\n\u00a0 \u00a02: core::panicking::panic_bounds_check\r\n\u00a0 \u00a03: arrow::ipc::reader::create_array\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0at .cargo/registry/src/github.com-1ecc6299db9ec823/arrow-6.2.0/src/ipc/reader.rs:176:31\r\n\u00a0 \u00a04: arrow::ipc::reader::create_array\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0at .cargo/registry/src/github.com-1ecc6299db9ec823/arrow-6.2.0/src/ipc/reader.rs:100:26\r\n\u00a0 \u00a05: arrow::ipc::reader::read_record_batch\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0at .cargo/registry/src/github.com-1ecc6299db9ec823/arrow-6.2.0/src/ipc/reader.rs:432:22\r\n\u00a0 \u00a06: arrow::ipc::reader::StreamReader<R>::maybe_next\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0at .cargo/registry/src/github.com-1ecc6299db9ec823/arrow-6.2.0/src/ipc/reader.rs:875:17\r\n\u00a0 \u00a07: <arrow::ipc::reader::StreamReader<R> as core::iter::traits::iterator::Iterator>::next\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0at .cargo/registry/src/github.com-1ecc6299db9ec823/arrow-6.2.0/src/ipc/reader.rs:908:9\r\n\u00a0 \u00a08: rust_arrow::send_receive\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0at ./src/main.rs:58:25\r\n\u00a0 \u00a09: rust_arrow::main\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0at ./src/main.rs:81:11\n```",
+        "created_at": "2021-11-22T06:40:05.000Z",
+        "updated_at": "2021-11-23T12:59:21.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-11-23T12:59:21.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-23T10:13:26.392Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14785?focusedCommentId=17447874) by Joris Van den Bossche (jorisvandenbossche):*\nRust issues are now tracked at https://github.com/apache/arrow-rs/. Can you open an issue there?"
+        },
+        {
+            "created_at": "2021-11-23T11:40:28.454Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14785?focusedCommentId=17447949) by Ameya Vikram (amvikram):*\nThanks for letting me know `[~jorisvandenbossche]`.\r\n\r\nOpened an issue: https://github.com/apache/arrow-rs/issues/972"
+        },
+        {
+            "created_at": "2021-11-23T12:58:20.650Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14785?focusedCommentId=17447996) by Joris Van den Bossche (jorisvandenbossche):*\nOK, closing this one then!"
+        }
+    ]
+}

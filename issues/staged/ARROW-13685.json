@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[C++] Cannot write dataset to S3FileSystem if bucket already exists",
+        "body": "***Note**: This issue was originally created as [ARROW-13685](https://issues.apache.org/jira/browse/ARROW-13685). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI'm trying to write a parquet file to an existing S3 bucket using the new S3FileSystem interface. However, this is failing with an AWS Access Denied error (I do have necessary access). It appears to be trying to recreate the bucket which already exists.\r\n```java\n\r\nimport numpy as np\r\nimport pyarrow as pa\r\nfrom pyarrow import fs\r\nimport pyarrow.dataset as ds\r\n\r\ns3 = fs.S3FileSystem(region=\"us-west-2\")\r\ntable = pa.table({\"a\": range(10), \"b\": np.random.randn(10), \"c\": [1, 2] * 5})\r\nds.write_dataset(\r\n    table,\r\n    \"my-bucket/test.parquet\",\r\n    format=\"parquet\",\r\n    filesystem=s3,\r\n)\n```\r\n```java\n\r\nOSError: When creating bucket 'my-bucket': AWS Error [code 15]: Access Denied\r\n```\r\nI'm seeing the same behavior using `S3FileSystem.create_dir` when `recursive=True`.\r\n```java\n\r\ns3.create_dir(\"my-bucket/test_dir/\", recursive=True) # Fails\r\ns3.create_dir(\"my-bucket/test_dir/\", recursive=False) # Succeeds\r\n```\r\n\u00a0",
+        "created_at": "2021-08-20T16:52:41.000Z",
+        "updated_at": "2022-03-09T01:10:15.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-10-01T11:41:15.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-20T19:25:53.753Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13685?focusedCommentId=17402391) by Weston Pace (westonpace):*\nArrow will always try and create the bucket (unless creating a directory with recursive=False).  It then checks to see if the error is BUCKET_ALREADY_EXISTS or BUCKET_ALREADY_OWNED_BY_YOU and, if it is, it treats it as a success.\r\n\r\nDo you perhaps have some more sophisticated permissions set on the bucket?  Maybe your user is allowed to create files inside the bucket but not allowed to modify the bucket and so S3 is returning a permission denied error instead of BUCKET_ALREADY_EXISTS?"
+        },
+        {
+            "created_at": "2021-08-23T13:55:55.676Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13685?focusedCommentId=17403196) by Caleb Overman (coverman):*\nYou are correct. I've got the following permissions on the bucket:\r\n```java\n\r\n\"s3:PutObject\",\r\n\"s3:GetObjectAcl\",\r\n\"s3:GetObject\",\r\n\"s3:ListBucket\",\r\n\"s3:PutObjectTagging\",\r\n\"s3:DeleteObject\",\r\n\"s3:GetObjectVersion\"\r\n```"
+        },
+        {
+            "created_at": "2021-08-23T18:42:21.975Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13685?focusedCommentId=17403334) by Weston Pace (westonpace):*\nThanks for the detailed information.  I confirm I get the same error when I setup with the permissions you've specified.  Then when I run as a root user everything works correctly.  It appears MinIO accepts the same kinds of policy files as S3 so I should be able to create a unit/regression test for this scenario."
+        },
+        {
+            "created_at": "2021-08-23T19:46:13.994Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13685?focusedCommentId=17403361) by Caleb Overman (coverman):*\nThank you for looking into this. I'm not familiar with the filesystem implementation, but if there's anything I can do to help please let me know!"
+        },
+        {
+            "created_at": "2021-09-07T19:45:12.567Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13685?focusedCommentId=17411449) by Kyle Hamlin (hamlinkn):*\nI'm also now running into this issue after having the following issue resolved in 5.0.0: https://issues.apache.org/jira/browse/ARROW-13228\r\n\r\n`[~westonpace]` Curious what the intended resolution is as it's pretty uncommon to give create bucket permission to a data, ETL, or ML application. I think it would be preferable to have bucket creation separate from writing to a bucket/prefix or to have something like `create_bucket=True` as a parameter to write_dataset. "
+        },
+        {
+            "created_at": "2021-09-07T20:22:28.466Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13685?focusedCommentId=17411464) by Weston Pace (westonpace):*\nHmm, datasets are filesystem-agnostic so I'd prefer to avoid `create_bucket` as a dataset option.  It could be an option added to the S3 filesystem (create_bucket_if_not_exists or something) but I think my preferred fix for this issue would be to modify S3FileSystem::CreateBucket so that it first does a check to see if the bucket exists.  I suspect the current implementation is the way that it is just to reduce complexity (why make more calls than needed) but it isn't working here so the more complex solution is warranted.  I'll go ahead and put a PR up for this soon.  The trickiest part will probably be the regression test more than the implementation."
+        },
+        {
+            "created_at": "2021-09-10T15:45:24.908Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13685?focusedCommentId=17413256) by Kyle Hamlin (hamlinkn):*\n`[~westonpace]` Checking for a buckets existence sound like a fine solution to me. Do you know what extra, if any, permissions would be required for that check?"
+        },
+        {
+            "created_at": "2021-09-10T19:20:37.407Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13685?focusedCommentId=17413349) by Weston Pace (westonpace):*\nIt appears [HeadBucket](https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadBucket.html) is the operation for this and it only requires permission to perform the \"s3:ListBucket\" action so it should suffice for `[~coverman]`'s case."
+        },
+        {
+            "created_at": "2021-10-01T11:41:15.305Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13685?focusedCommentId=17423252) by Weston Pace (westonpace):*\nIssue resolved by pull request 11136\n<https://github.com/apache/arrow/pull/11136>"
+        },
+        {
+            "created_at": "2021-10-07T09:30:31.295Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13685?focusedCommentId=17425435) by Mark van der Broek (1mvdb):*\nNot checking for existing buckets actually results in another issue if multiple processes try to create this bucket at exactly the same time.\r\n\r\n\u00a0\r\n\r\nI get the following error:\r\n\r\nOSError: When creating bucket '<MY-BUCKET>': AWS Error [code 100]: Unable to parse ExceptionName: OperationAborted Message: A conflicting conditional operation is currently in progress against this resource. Please try again."
+        },
+        {
+            "created_at": "2021-10-07T17:22:45.743Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13685?focusedCommentId=17425706) by Weston Pace (westonpace):*\n`[~1mvdb]` I expect you would've been able to get this error with the old path too.  I didn't remove the old behavior or any checks, I just added an additional check.  It might be best to create a new JIRA.  It's not clear to me that translating error code 100 into \"bucket already exists\" is the correct thing to do.  We could maybe create an auto-retry if we see \"Please try again\" but from some googling it appears this condition could take 15 minutes or more to resolve in some situations (e.g. when creating a bucket with the same name as a recently deleted bucket)."
+        }
+    ]
+}

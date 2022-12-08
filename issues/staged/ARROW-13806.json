@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[Python] Add conversion to/from Pandas/Python for Month, Day Nano Interval Type",
+        "body": "***Note**: This issue was originally created as [ARROW-13806](https://issues.apache.org/jira/browse/ARROW-13806). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n<https://github.com/apache/arrow/pull/10177>\u00a0has been merged we should support conversion to and from this type for standard python surface areas.",
+        "created_at": "2021-08-31T03:27:55.000Z",
+        "updated_at": "2021-10-07T23:37:00.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-10-07T10:36:58.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-31T08:41:43.732Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13806?focusedCommentId=17407179) by Joris Van den Bossche (jorisvandenbossche):*\nNote that the existing interval types (Month, and DayTime) are also not yet supported, not even basic bindings of the types / arrays. So I think a first step would be to add that (with simple conversion based on the raw values?).\r\n\r\nFor proper conversion to/from Python, the question is also what kind of value to use on the Python side. AFAIK there is not really a Python scalar from the standard library that represents such interval values (`datetime.timedelta` maps to our Duration type, I think). The dateutil package has a `relativedelta` object that can be used for this (but it's an external package, and not sure how widely used it is).\r\n\r\nFor numpy-based conversion, the Months unit could be represented by \"timedelta64[M]\", as both are a count of number of months (although not a zero-copy conversion, since in numpy it's always 64bit). But for DayTime and MonthDayNano, there is no equivalent (or maybe as a numpy record/struct array?)."
+        },
+        {
+            "created_at": "2021-09-02T04:14:32.860Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13806?focusedCommentId=17408527) by Micah Kornfield (emkornfield):*\n`[~tswast]` \u00a0suggested <https://pandas.pydata.org/docs/reference/api/pandas.tseries.offsets.DateOffset.html>\u00a0as a possible type I didn't look into how fields are stored in it yet.\u00a0 Open to suggestion, if no type really maps well then numpy struct seems like a reasonable default to me.\r\n\r\n\u00a0\r\n\r\nI'll try to tackle conversion of the existing types as well.\u00a0 After reviewing I'll try to make reasonable choices but if there are strong inclinations.\u00a0 For standard python types my inclination is to map:\r\n\r\nDayMillis to datetime.timedelta (according to docs it stores days, seconds and microseconds as separate fields).\u00a0 Not sure about the reverse mapping though\r\n\r\nFor numpy-based conversion of months, timedelta64[M] sounds good to me.\u00a0\r\n\r\n\u00a0\r\n\r\nFor month day nanos, I think if DateOffset doesn't work for numpy, the struct type seems correct to me.\u00a0 For python, I think maybe just a triple (namedtuple) in the arrow namespace might make sense."
+        },
+        {
+            "created_at": "2021-09-02T14:34:59.330Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13806?focusedCommentId=17408893) by Tim Swast (tswast):*\nRegarding \"Python\" conversion, we decided in the Python BigQuery client that dateutil is widely used (including by pandas) to go with\u00a0relativedelta for a similar conversion from this data type to Python object. <https://github.com/googleapis/python-bigquery/pull/840>\r\n\r\nThe package appears to be widely used and from what I can tell from <https://github.com/dateutil/dateutil>\u00a0no additional transitive dependencies to worry about.\r\n\r\nThat said, a namedtuple or dict where the names match the arguments to relativedelta (months, days, microseconds) would be pretty easy to convert to a relativedelta if not."
+        },
+        {
+            "created_at": "2021-09-12T22:14:30.647Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13806?focusedCommentId=17413808) by Micah Kornfield (emkornfield):*\nPandas is an optional dependency of Arrow.\u00a0 Given that `relativedelta` only supports microsecond precision and the to_pylist methods on arrays don't support parameterization, I think I will go with a named tuple approach for pure python and use DateOffset for pandas conversion. I'll see how hard it would be to import relativedelta's optional from python to construct the array."
+        },
+        {
+            "created_at": "2021-09-29T17:02:09.712Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13806?focusedCommentId=17422255) by Micah Kornfield (emkornfield):*\nSo I've started implementation.  The approach I'm going to go with:\r\n\r\n- Conversion to Pandas will use DateOffset (object dtype).\n- Conversion to Python will used a named tuple\n- Inference from python will detect DateOffset, relevativedelta or the named tuple \n- Conversion (once type is inferred or provided) from python will use duck typing that should support timedelta (timedelta is inferred today to be duration and that won't change),  DateOffset, relativedelta and the named tuple of export.  It will ignore \"absolute\" fields in the latter two and also ignore leapdays in relativedelta.\n  \n  Please provide feedback if this is reasonable."
+        },
+        {
+            "created_at": "2021-10-01T07:25:16.303Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13806?focusedCommentId=17423151) by Joris Van den Bossche (jorisvandenbossche):*\n`[~amol-]` I moved this back to the 6.0 milestone. It's of course no blocker, but as long as we have the intention to try to get it done for 6.0, I think we can keep the milestone on it."
+        },
+        {
+            "created_at": "2021-10-01T07:33:57.714Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13806?focusedCommentId=17423155) by Joris Van den Bossche (jorisvandenbossche):*\n`[~emkornfield]` that sounds good to me. \r\n\r\nMaybe one note that we could also do this in several PRs (eg already start with plain Python tuples conversion, so we have at least basic bindings for the interval type; cfr ARROW-14018)"
+        },
+        {
+            "created_at": "2021-10-04T06:51:07.157Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13806?focusedCommentId=17423775) by Micah Kornfield (emkornfield):*\n`[~jorisvandenbossche]` I posted a PR for MonthDayNanos interval.  I'll think this was large enough that I will try to do another one for the other types (the PR contains a proposal for moving most of the logic to C++ and didn't want to put too much in it, if this looks good I think the other interval types probably won't be too bad)."
+        },
+        {
+            "created_at": "2021-10-07T10:36:58.603Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13806?focusedCommentId=17425470) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 11302\n<https://github.com/apache/arrow/pull/11302>"
+        }
+    ]
+}

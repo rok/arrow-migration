@@ -1,0 +1,133 @@
+{
+    "issue": {
+        "title": "[Python] Improve ergonomics of new FileSystem API",
+        "body": "***Note**: This issue was originally created as [ARROW-7584](https://issues.apache.org/jira/browse/ARROW-7584). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe [new Python FileSystem API ](https://github.com/apache/arrow/blob/master/python/pyarrow/_fs.pyx#L185) is nice but seems to be very verbose to use.\r\n\r\nThe documentation of the old FS API is [here](https://arrow.apache.org/docs/python/filesystems.html)\r\n\r\n## Here are some examples\r\n\r\n**Filesystem access:**\r\n\r\nBefore:\r\nfs.ls()\r\nfs.mkdir()\r\nfs.rmdir()\r\n\r\nNow:\r\nfs.get_target_stats()\r\nfs.create_dir()\r\nfs.delete_dir()\r\n\r\nWhat is the advantage of having a longer method ? The short ones seem clear and are much easier to use. Seems like an easy change.  Also this is consistent with what is doing hdfs in the [fs api\\| https://arrow.apache.org/docs/python/filesystems.html] and works naturally with a local filesystem.\r\n\r\n**File opening:**\r\n\r\nBefore:\r\nwith fs.open(self, path, mode=u'rb', buffer_size=None)\r\n\r\nNow:\r\nfs.open_input_file()\r\nfs.open_input_stream()\r\nfs.open_output_stream()\r\n\r\nIt seems more natural to fit to Python standard open function which works for local file access as well. Not sure if this is possible to do easily as there is `_wrap_output_stream` method.\r\n\r\n## Possible solutions\r\n\r\n- If the current Python API is still unused we could just rename the methods\n- We could keep everything as is and add some alias methods, it would make the FileSystem class a bit messy I think becasue there would be always 2 methods to do the work\n- Make everything compatible to FSSpec and reference the Spec, see https://issues.apache.org/jira/browse/ARROW-7102, \n      I like the idea of a https://github.com/intake/filesystem_spec repo. Some comments on the proposed solutions there:\n      Make a fsspec wrapper for pyarrow.fs => seems strange to me, it would be having to wrap again a FileSystem that is not good enough in yet another repo\n      Make a pyarrow.fs wrapper for fsspec => if the wrapper becomes the documented \"official\" pyarow FileSystem it is fine I think, otherwise I would be yet another wrapper on top of the pyarrow \"official\" fs\n  \n  \n  ## Tensorflow RFC on FileSystems\n  \n  Tensorflow is also doing some standardization work on their FileSystem:\n  https://github.com/tensorflow/community/blob/master/rfcs/20190506-filesystem-plugin-modular-tensorflow.md#python-considerations\n  \n  Not clear (to me) what they will do with Python file API though. it seems like they will also just wrap the C code back to [tf.Gfile](https://www.tensorflow.org/api_docs/python/tf/io/gfile/GFile)\n  \n  ## Other considerations on FS ergonomics\n  \n  In the long run I would also like to enhance the FileSystem API and add more methods that use the basic ones to provide new features for example:\n- introduce put and get on top of the streams that directly upload/download files\n- introduce [touch](https://github.com/dask/hdfs3/blob/master/hdfs3/core.py#L601) from dask/hdfs3\n- introduce [du](https://github.com/dask/hdfs3/blob/master/hdfs3/core.py#L252) from dask/hdfs3\n- check if selector works with globs or add https://github.com/dask/hdfs3/blob/master/hdfs3/core.py#L349\n- be able to write strings to the file streams (instead of only bytes, already implemented by https://github.com/dask/hdfs3/blob/master/hdfs3/utils.py#L96), it would permit to directly use some Python API's like json.dump\n  \n  ```Java\n  \n  with fs.open(path, \"wb\") as fd:\n    res = {\"a\": \"bc\"}\n    json.dump(res, fd)\n  ```\n  \n  instead of\n  \n  ```Java\n  \n  with fs.open(path, \"wb\") as fd:\n    res = {\"a\": \"bc\"}\n    fd.write(json.dumps(res))\n  ```\n  \n  or like currently (with old API, which required encore each time, untested with new one)\n  \n  ```Java\n  with fs.open(path, \"wb\") as fd:\n    res = {\"a\": \"bc\"}\n    fd.write(json.dumps(res).encode())\n  ```\n  \n- implementing [readline](https://github.com/dask/hdfs3/blob/master/hdfs3/core.py#L809), needed for:\n  \n   ```Java\n  \n  with hdfs.open(\"file\", 'wb') as outfile:\n    pickle.dump({\"a\": \"b\"}, outfile)\n  \n  with hdfs.open(\"file\", 'wb') as infile:\n    pickle.load(infile) \n  ```\n  \n- not clear how to make this also work when reading from files ",
+        "created_at": "2020-01-15T13:22:12.000Z",
+        "updated_at": "2020-06-24T14:57:37.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-06-24T14:57:37.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-01-15T13:53:13.324Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17015999) by Fabian H\u00f6ring (fhoering):*\n`[~apitrou]` `[~kszucs]`"
+        },
+        {
+            "created_at": "2020-01-15T14:03:19.714Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17016007) by Antoine Pitrou (apitrou):*\nAlso cc `[~jorisvandenbossche]` for advice."
+        },
+        {
+            "created_at": "2020-01-15T14:09:18.484Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17016010) by Fabian H\u00f6ring (fhoering):*\nAs indicated I can work on that if there is consensus of what needs to be done and PRs will be accepted. \r\n\r\nIf I were to choose I would \r\n- rename all new methods to stick to the olds ones\n- make open() work\n- add some useful methods from dask/hdfs3 (that we use on our side).\n  \n  I also like the idea of fsspec but not if it will be yet another wrapper again. Only if pyarrow pulls the spec for real and implements it (would introduce a new dependency though)"
+        },
+        {
+            "created_at": "2020-01-15T14:19:42.765Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17016020) by Antoine Pitrou (apitrou):*\nKeep in mind that the filesystem API is meant mainly to be used in conjunction with other Arrow facilities, primarily the new datasets facility (which may not be documented yet?). Making it nicer to use is a respectable goal as well, but the primary goal might be kept in mind.\r\n\r\nAs for fsspec, the abstract filesystem API is so big that it doesn't seem very convenient to implement (e.g. do we have to support transactions?)."
+        },
+        {
+            "created_at": "2020-01-15T14:51:16.159Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17016054) by Fabian H\u00f6ring (fhoering):*\nI agree for not needing to support transactions. Something lightweight would be better."
+        },
+        {
+            "created_at": "2020-01-15T15:00:02.555Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17016057) by Fabian H\u00f6ring (fhoering):*\nImo each language has its specificities. While it is a good idea to get a consistent API cross language trying to do (exactly) the same thing in each language will also confuse people.\r\nI don't know arrow very well but protobuf for example doesn't use the same wrappers in c# and Java.\r\n\r\nCan you explain on how you intend using this for reading parquet from Python for example ?"
+        },
+        {
+            "created_at": "2020-01-15T15:03:31.915Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17016063) by Antoine Pitrou (apitrou):*\nI think the plan would be to have a high-level function that takes a URI or a list of URIs and then constructs a dataset reader from them. Those URIs could point to simple files or partitioned data sources.\r\n\r\nThat high-level function doesn't exist yet, though."
+        },
+        {
+            "created_at": "2020-01-24T10:02:00.394Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17022819) by Fabian H\u00f6ring (fhoering):*\nSo that means the DataSet API is somehow abstracted away from the FileSystem anyway ? So we could tune the FileSystem ergonomics independently from this constraint."
+        },
+        {
+            "created_at": "2020-01-24T10:03:52.014Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17022820) by Fabian H\u00f6ring (fhoering):*\nOne other use case:\r\n\r\n```Java\n\r\nwith hdfs.open(\"file\", 'wb') as outfile:\r\n  pickle.dump({\"a\": \"b\"}, outfile)\r\n\r\nwith hdfs.open(\"file\", 'wb') as infile:\r\n  pickle.load(infile) \r\n```\r\n\r\n=> fails because readline is not implemented"
+        },
+        {
+            "created_at": "2020-01-24T10:06:08.930Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17022824) by Antoine Pitrou (apitrou):*\nEven if not, we could fix DataSet if we decide to change the FileSystem API.\r\nThe real question is whether we want to change the FileSystem API and, if so, what we want to replace it with.\r\nI do not have any strong opinion on it, but I would suggest starting a discussing on the dev mailing-list."
+        },
+        {
+            "created_at": "2020-01-24T10:06:36.570Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17022826) by Antoine Pitrou (apitrou):*\nAs for `pickle`, you should really use a modern pickle protocol (protocol 3 or higher). It will not use readline."
+        },
+        {
+            "created_at": "2020-01-24T10:26:28.326Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17022838) by Fabian H\u00f6ring (fhoering):*\nThanks for the tip for pickle. I will have a look.\r\n\r\nIndeed if the FileSystem API is only intended for internal use then it doesn't make any sense to change it.\r\n\r\nUnfortunately currently there is no project that has a clean generic FileSystem API for S3 and HDFS. The only viable concurrent is TensorFlow and I think it should not be Tensorflow's role to define a generic FileSystem API.\r\n\r\nI don't intend to create a generic FileSystem project on on my own. I would prefer to improve PyArrows FileSystem API to get it reusable by other projects. Reusable could even mean \"interactive mode\" and to replace the fs bash shell commands (i.e. hdfs dfs -ls) and only use Python. That's how we used dask/hdfs3 and it worked well. But unfortunately it is deprecated in favor of PyArrow and doesn't support viewfs.\r\n\r\n"
+        },
+        {
+            "created_at": "2020-01-24T11:33:35.654Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17022877) by Antoine Pitrou (apitrou):*\nBy the way, if you look at https://github.com/intake/filesystem_spec/blob/master/fsspec/implementations/hdfs.py , there is  some non-trivial wrapping going on to adapt the old PyArrow filesystem interface to `fsspec`. Some of that wrapping seems to involve implementation details of `fsspec`."
+        },
+        {
+            "created_at": "2020-01-24T12:54:52.876Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17022917) by Fabian H\u00f6ring (fhoering):*\nYes, that's why I suggest to not to do yet another wrapper but to directly change the new FileSystem (could be even in C++ for more consistency for the stuff that applies like renaming a method).  Also I agree that it is better not to pull in fsspec but to work directly in PyArrow."
+        },
+        {
+            "created_at": "2020-01-24T12:56:44.007Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17022919) by Antoine Pitrou (apitrou):*\nAt some point someone has to show that it would work and what kind of code complexity it would lead to. Would you like to do the experiment?"
+        },
+        {
+            "created_at": "2020-01-24T13:04:36.961Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17022923) by Fabian H\u00f6ring (fhoering):*\nYou mean by wrapping everything on top of PyArrow ?\r\n\r\nI would expect the complexity of this class to be something like 1000 lines of code, basically something like this:\r\nhttps://github.com/dask/hdfs3/blob/master/hdfs3/core.py\r\n\r\nSeems strange to me to do this again and again in every project and I don't really understand the advantage. Maybe that you can change the FileSystem internally in PyArrow more easily but when it is done I expect this to be stable for years. I don't think this will change very often as it must always stay compatible and the underlying libs are stable and don't change.\r\nHow often did this doc change https://arrow.apache.org/docs/python/filesystems.html ? Seems like never for years. So for this proposal it would change like now and then stay like this for quite a long time.\r\n\r\nFor some existing wrappers the one your sent and my own:\r\nhttps://github.com/intake/filesystem_spec/blob/master/fsspec/implementations/hdfs.py \r\nhttps://github.com/criteo/cluster-pack/blob/master/cluster_pack/filesystem.py"
+        },
+        {
+            "created_at": "2020-01-24T13:06:20.248Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17022925) by Antoine Pitrou (apitrou):*\nI mean whatever you're proposing we should do. I'm not sure exactly what it is, and what kind of maintenance burden it would imply."
+        },
+        {
+            "created_at": "2020-01-24T13:12:25.152Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17022929) by Fabian H\u00f6ring (fhoering):*\nWhat I propose is written in the description. I don't want to spend too much time on stuff that won't be accepted or at least have a basic agreement to break the new API.\r\n\r\nHere is a recap what I propose:\r\n- rename all methods in Python/C++ to something more compact (fs.get_target_stats() => ls, fs.create_dir() => fs.mkdir())\n- support open()\n- check what to do with open_input_stream(), open_output_stream()\n- upstream additional methods from dask/hdfs3 that we use (put, get, readlines, touch, du, glob)\n  \n  => It doesn't seem like weeks of work but I would expect some days"
+        },
+        {
+            "created_at": "2020-01-24T13:17:32.636Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17022932) by Fabian H\u00f6ring (fhoering):*\nBy the way do you already use the C++ FileSystem API in other languages ? I guess in this case it would be much more work."
+        },
+        {
+            "created_at": "2020-01-24T13:26:08.745Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17022935) by Antoine Pitrou (apitrou):*\nIt's exposed in R AFAIK."
+        },
+        {
+            "created_at": "2020-01-24T13:41:33.933Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17022941) by Fabian H\u00f6ring (fhoering):*\nAn alternative would be to just do Python (and leave the rest as is at the moment). Then wait some time to get new feedback and then also rename C++ and R (or not depending if it is a real problem).  But just do the renaming only, I think it is overkill to also implement put, get, .. in C++.\r\nObviously this would work for me as it covers my use case and would be less work to do :) \r\n\r\nI also created the ticket to know what could be acceptable. If you prefer keeping everything as is please also say it."
+        },
+        {
+            "created_at": "2020-01-27T16:09:02.065Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17024453) by Wes McKinney (wesm):*\nI'm supportive of ergonomic improvements in Python (and R, FWIW). I don't see a problem with leaving in extra methods that provide specific access to certain C++ APIs"
+        },
+        {
+            "created_at": "2020-01-28T03:27:51.844Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17024843) by Wes McKinney (wesm):*\nAlso since I didn't say explicitly I don't really see a reason to change or rename methods in C+. Add yes, change no. The C+ library is catering to a different kind of developer where interactive (e.g. Jupyter-level) ergonomics isn't as much of a consideration. If there's new stuff we want to expose in GLib, R, and Ruby also then it will make sense to do the implementation in C++ (or start in Python and then port to C++ if that is the will of the contributors)"
+        },
+        {
+            "created_at": "2020-01-28T10:04:00.227Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17025007) by Fabian H\u00f6ring (fhoering):*\nOK. Thanks for the reply. I agree with this. \r\n\r\nCan I rename the Python methods from FileSystem ? \r\nhttps://github.com/apache/arrow/blob/master/python/pyarrow/_fs.pyx#L185\r\n\r\nMaybe the ticket description was not clear enough. My main main point is what is currently documented is working fine.\r\nActually all the documented methods from the [current FileSystem](https://arrow.apache.org/docs/python/filesystems.html) are fine with me. So if it just stays the same in Python it could be enough.\r\n\r\nThen, as it would already change, I also documented new methods that could be added to the Python FileSystem to fit some more use cases.\r\n\r\n\r\n\r\n\r\n"
+        },
+        {
+            "created_at": "2020-01-28T18:29:49.043Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17025358) by Joris Van den Bossche (jorisvandenbossche):*\nAs Wes said on the mailing list, best to do it in steps and start with a limited PR adding only a few things (eg the parts you think are most useful, eg the `open` method).\r\n\r\nPersonally, I think it would be nice to have a FileSystem API that is more expanded than the current one in `pyarrow.fs` (and I don't think we necessarily need to rename/change things in C++ to expand the API in Python).   \r\nBut we maybe don't want such a big API surface as eg the file systems compatible with fsspec. For that, the way forward is maybe rather providing a wrapper that gives a fsspec-compatible object (one of the options discussed in ARROW-7102) "
+        },
+        {
+            "created_at": "2020-01-28T22:01:20.037Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17025463) by Wes McKinney (wesm):*\nI think it's fine if you want to propose renames in Python"
+        },
+        {
+            "created_at": "2020-01-31T19:24:14.048Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17027755) by Wes McKinney (wesm):*\nAs a way of breaking work into many patches, you might find it helpful to create sub-task JIRA issues. Click on More > Create sub-task"
+        },
+        {
+            "created_at": "2020-01-31T20:09:28.563Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17027794) by Fabian H\u00f6ring (fhoering):*\nYes I will do it. \r\nI took the advice from `[~jorisvandenbossche]`: Take the parts I think are most useful.\r\n\r\nTo start I would like to replace get_target_stats by fsspec compatible info/ls methods.\r\n- Rename & wrap it to the new dataset reader\n- Return a dictionary instead of FileStats (maybe optional and as a next step)\n- Remove selector if possible (as a next step)\n  \n  If you want to have a look it looks like this (don't worry about the tests, they were all green at some point)\n  https://github.com/fhoering/arrow/commits/introduce_info_ls\n  \n  I will check on monday how I can keep this consistent with consuming dataset module (either by keeping selector or by propagating it all the way up)\n  \n  Even already just this could be stuff to discuss (the defaults to keep, the exposed object Selector, FileStats, FileType, ..). I will send a mail to the mailing list if needed, otherwise just the comments in each PR."
+        },
+        {
+            "created_at": "2020-04-09T14:00:07.355Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7584?focusedCommentId=17079373) by Fabian H\u00f6ring (fhoering):*\nI abandoned the idea if changing the new fs implementation, it already diverged too much.  Instead I went for what has been suggested by `[~jorisvandenbossche]`: making a wrapper on top.\r\n\r\nI started working on it but in my own project as I think I can make faster iterations (for example this for readline/readlines/iterator https://github.com/criteo/cluster-pack/commit/e88c4995797bd42e66812539d1d13a9fac25e0f9)\r\n\r\nMy plan is now to make a reasonable wrapper with the old filesystem, then switch to the new one and repropose the wrapper back to arrow at some point.\r\nI the meantime I unassign myself from this ticket."
+        }
+    ]
+}

@@ -1,0 +1,72 @@
+{
+    "issue": {
+        "title": "[Python] Arrow-to-Python conversion is slow",
+        "body": "***Note**: This issue was originally created as [ARROW-12976](https://issues.apache.org/jira/browse/ARROW-12976). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIt seems that we are 20x slower than Numpy for converting the exact same data to a Python list.\r\n\r\nWith integers:\r\n```python\n\r\n>>> arr = np.arange(0,1000, dtype=np.int64)\r\n>>> %timeit arr.tolist()\r\n8.24 \u00b5s \u00b1 3.46 ns per loop (mean \u00b1 std. dev. of 7 runs, 100000 loops each)\r\n>>> parr = pa.array(arr)\r\n>>> %timeit parr.to_pylist()\r\n218 \u00b5s \u00b1 2.39 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 1000 loops each)\r\n```\r\n\r\nWith floats:\r\n```python\n\r\n>>> arr = np.arange(0,1000, dtype=np.float64)\r\n>>> %timeit arr.tolist()\r\n10.2 \u00b5s \u00b1 25.5 ns per loop (mean \u00b1 std. dev. of 7 runs, 100000 loops each)\r\n>>> parr = pa.array(arr)\r\n>>> %timeit parr.to_pylist()\r\n199 \u00b5s \u00b1 1.04 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 10000 loops each)\r\n```",
+        "created_at": "2021-06-04T17:05:42.000Z",
+        "updated_at": "2022-07-12T14:04:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-04T17:07:41.107Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12976?focusedCommentId=17357489) by Antoine Pitrou (apitrou):*\n`[~jorisvandenbossche]` `[~amol-]`"
+        },
+        {
+            "created_at": "2021-06-07T14:42:30.941Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12976?focusedCommentId=17358643) by Joris Van den Bossche (jorisvandenbossche):*\nI see a slightly smaller difference, but anyway still big (10\u00b5s vs 200\u00b5s instead of 800\u00b5s, maybe due to release/debug build?).\r\n\r\nI suppose the main reason for the slowness here is that `to_pylist` is currently implemented by accessing each element of the array (getitem), wrapping that into a pyarrow Scalar object, and then converting that scalar to a native python object (`as_py()`). I can imagine this getitem / wrapping in a scalar object gives quite some overhead. "
+        },
+        {
+            "created_at": "2021-06-07T14:48:41.619Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12976?focusedCommentId=17358645) by Antoine Pitrou (apitrou):*\nOops, yes, I had posted my number on debug mode :-o My bad ! I'll edit the issue."
+        },
+        {
+            "created_at": "2021-06-07T14:54:05.218Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12976?focusedCommentId=17358646) by Joris Van den Bossche (jorisvandenbossche):*\nHappens to me all the time ;)"
+        },
+        {
+            "created_at": "2021-06-07T15:26:00.744Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12976?focusedCommentId=17358663) by Joris Van den Bossche (jorisvandenbossche):*\nI was thinking that we could in principle put those different steps we now take in cython in a single specialized `to_list` function on a concrete array class, eg for Int64Array:\r\n\r\n```Java\n\r\n    def to_pylist_primitive(self):\r\n        cdef:\r\n            shared_ptr[CScalar] scalar\r\n\r\n        res = []\r\n        for i in range(len(self)):\r\n            scalar = GetResultValue(self.ap.GetScalar(i))\r\n            if scalar.get().is_valid:\r\n                res.append((<CInt64Scalar*> scalar.get()).value)\r\n            else:\r\n                res.append(None)\r\n        return res\r\n```\r\n\r\nwhich still creates the C scalars, but avoids wrapping it the Python (cython) class, and avoids some function call overhead. Now, this only gives a 2x speed-up (and thus still 10x slower as numpy), and a large part of the remaining time is spent in the C++ `Array::GetScalar`. \r\n\r\nSo if we really want to improve this, it might need some more custom code at the C++ level to get vectorized access to raw data (at least for primitive arrays). But not really sure this is worth it for `to_pylist`."
+        },
+        {
+            "created_at": "2021-06-07T15:29:04.316Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12976?focusedCommentId=17358666) by Antoine Pitrou (apitrou):*\nYes, the only reasonable way to speed this up is to bypass Scalar creation entirely (which is slow).\r\n\r\nSince we spent quite some time optimizing the Python-to-Arrow case, it seems worthwhile to optimize the reverse path.\r\n\r\ncc `[~wesm]` for opinions."
+        },
+        {
+            "created_at": "2021-06-07T15:48:27.251Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12976?focusedCommentId=17358676) by Joris Van den Bossche (jorisvandenbossche):*\nActually, the APIs are already available to avoid the Scalar creation, for example for Int64Array:\r\n\r\n```Java\n\r\n    def to_pylist(self):\r\n        cdef:\r\n            CInt64Array* int_arr = (<CInt64Array*> self.ap)\r\n            int64_t val\r\n\r\n        res = []\r\n        for i in range(len(self)):\r\n            if int_arr.IsValid(i):\r\n                val = int_arr.Value(i)\r\n                res.append(val)\r\n            else:\r\n                res.append(None)\r\n        return res\r\n```\r\n\r\nThis gives me 13\u00b5s for the example case, which is now almost the same as for the numpy tolist.\r\n\r\nThis might certainly be worth including. Are there ways in cython to avoid having to duplicate this in each of Int8/Int16/Int... Array? The problem is that `NumericArray::Value\\(i)` return type is type-dependent."
+        },
+        {
+            "created_at": "2021-06-07T15:50:29.302Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12976?focusedCommentId=17358677) by Antoine Pitrou (apitrou):*\nNo, Cython doesn't allow generating templated C++ code.\r\nTo avoid repeating oneself, it's best to do it in C++. It can also help making it faster."
+        },
+        {
+            "created_at": "2021-10-10T04:46:47.413Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12976?focusedCommentId=17426744) by Micah Kornfield (emkornfield):*\n`[~apitrou]` `[~jorisvandenbossche]` going to see if I consolidate this logic in C++ (unless you were thinking of taking it up).  Any preference for trying to split up into smaller PRs or one large one to migrate all types to C++ code?"
+        },
+        {
+            "created_at": "2021-10-13T15:13:03.632Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12976?focusedCommentId=17428284) by Antoine Pitrou (apitrou):*\nMigrating all types at once sounds more logical to me. I wonder what the overall approach should be, though."
+        },
+        {
+            "created_at": "2021-10-16T04:27:22.286Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12976?focusedCommentId=17429520) by Micah Kornfield (emkornfield):*\nOne thing we discussed on the sync call is if a more explicit API should be provided to control coercion of timestamp[ns] to pd.Timestamp instead of the current behavior that will do the conversion if pandas is installed but fall back to datetime (and check nanoseconds=0) if pandas is not installed.  `[~jorisvandenbossche]` any thoughts here?\r\n\r\n"
+        },
+        {
+            "created_at": "2021-10-21T11:40:17.530Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12976?focusedCommentId=17432406) by Joris Van den Bossche (jorisvandenbossche):*\n`[~emkornfield]` this is specifically for the scalar `as_py()` and array `to_pylist()` behaviour, right? (and not the Table.to_pandas)\r\n\r\nPersonally I would be fine with a more explicit API (the idea would be to add a keyword to those functions to explicitly ask for a pandas object?). But some concerns:\r\n\r\n1) changing to use datetime.datetime instead of pd.Timestamp by default for ns resolution would be a backwards incompatible change. How do we see that? Just change, or deprecate first? (it seems a bit annoying to deprecate, although if we add a keyword, that can directly be used to silence the warning, and I suppose those functions are not used that much anyway)\r\n\r\n2) If you have nanoseconds in the timestamp value, that means we would raise an error by default? (the one we raise now if pandas is not installed) That doesn't feel super nice user experience, but I suppose this is the inevitable consequence of a more explicit API."
+        },
+        {
+            "created_at": "2021-10-24T03:39:23.145Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12976?focusedCommentId=17433399) by Micah Kornfield (emkornfield):*\nYeah, given #1 and #2, I think I'll try to simply replicate existing behavior in C++, even though it can lead to unexpected behavior."
+        },
+        {
+            "created_at": "2022-07-12T14:04:25.494Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12976?focusedCommentId=17565599) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

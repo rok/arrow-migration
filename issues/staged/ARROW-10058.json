@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[C++] Investigate performance of LevelsToBitmap without BMI2",
+        "body": "***Note**: This issue was originally created as [ARROW-10058](https://issues.apache.org/jira/browse/ARROW-10058). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently, when some Parquet nested data involves some repetition levels, converting the levels to bitmap goes through a slow scalar path unless the BMI2 instruction set is available and efficient (the latter using the PEXT instruction to process 16 levels at once).\r\n\r\nIt may be possible to emulate PEXT for 5- or 6-bit masks by using a lookup table, allowing to process 5-6 levels at once.\r\n\r\n(also, it would be good to add nested reading benchmarks for non-trivial nesting; currently we only benchmark one-level struct and one-level list)",
+        "created_at": "2020-09-21T18:52:28.000Z",
+        "updated_at": "2021-08-02T18:35:39.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2020-10-07T04:49:36.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-28T04:53:09.352Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10058?focusedCommentId=17202999) by Yibo Cai (yibocai):*\nPOC with 4 bit lookup table (uint8[16][16]) to map [mask][data] directly to the pext-ed result. See big performance improvement (637M/s -> 1074M/s).\r\nPOC patch [opt-level-conv.diff](opt-level-conv.diff). Will propose a formal PR.\r\n\r\nBenchmark result of release/parquet-level-conversion-benchmark\r\n **Current code**\r\n```bash\n\r\n---------------------------------------------------------------------------------------------------------\r\nBenchmark                                               Time             CPU   Iterations UserCounters...\r\n---------------------------------------------------------------------------------------------------------\r\nBM_DefinitionLevelsToBitmapRepeatedAllMissing        1072 ns         1072 ns       651457 bytes_per_second=1.77856G/s\r\nBM_DefinitionLevelsToBitmapRepeatedAllPresent        1226 ns         1226 ns       570829 bytes_per_second=1.55599G/s\r\nBM_DefinitionLevelsToBitmapRepeatedMostPresent       3065 ns         3065 ns       228285 bytes_per_second=637.151M/s\r\n```\r\n**With lookup table**\r\n```bash\n\r\n---------------------------------------------------------------------------------------------------------\r\nBenchmark                                               Time             CPU   Iterations UserCounters...\r\n---------------------------------------------------------------------------------------------------------\r\nBM_DefinitionLevelsToBitmapRepeatedAllMissing        1093 ns         1093 ns       640348 bytes_per_second=1.74501G/s\r\nBM_DefinitionLevelsToBitmapRepeatedAllPresent        1244 ns         1244 ns       564592 bytes_per_second=1.53301G/s\r\nBM_DefinitionLevelsToBitmapRepeatedMostPresent       1817 ns         1817 ns       384456 bytes_per_second=1074.7M/s\r\n```"
+        },
+        {
+            "created_at": "2020-09-28T06:06:25.529Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10058?focusedCommentId=17203017) by Yibo Cai (yibocai):*\nKind of lost in the code (HAVE_BMI2, HAVE_RUNTIME_BMI2, runtime dispatch). Looks I should benchmark against the scalar implementation [1], not the simd code with simulated pext [2].\r\n\"cmake - DARROW_RUNTIME_SIME_LEVEL=SSE4_2\"  enables scalar code on my skylake machine. And the benchmark result is 790M/s. So it's still promising that lookup table can improve performance big. Maybe we can drop the scalar implementation and simply the code.\r\n\r\n[1] https://github.com/apache/arrow/blob/master/cpp/src/parquet/level_conversion.cc#L39\r\n[2] https://github.com/apache/arrow/blob/master/cpp/src/parquet/level_conversion_inc.h#L75"
+        },
+        {
+            "created_at": "2020-09-28T10:19:03.656Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10058?focusedCommentId=17203136) by Antoine Pitrou (apitrou):*\nThanks for looking at this!\r\n\r\nTwo questions:\r\n 1) have you tried a higher bit count? I think 5 or even 6 bits would be reasonable, that's 1024 or 4096 entries - significantly smaller than L1 cache, and depending on actual values not all the table may be \"hot\"\r\n 2) have you tried computing `popcount(mask)` directly instead of extracting it from the lookup table? At least on x86, it seems popcount latency is generally good (~3 cycles)"
+        },
+        {
+            "created_at": "2020-09-28T10:52:35.310Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10058?focusedCommentId=17203151) by Antoine Pitrou (apitrou):*\nHere is an updated patch with 5 bits lookup and direct popcount computation:\r\nhttps://gist.github.com/pitrou/ee2cad31a7c1789fdd3d4d6db43d4a3f\r\n\r\nThis seems to give the best results on AMD Ryzen.\r\n- before (git master):\n  ```Java\n  \n  BM_ReadListColumn/0     7206061 ns      7203281 ns           98 bytes_per_second=1110.61M/s items_per_second=145.569M/s\n  BM_ReadListColumn/1     8530578 ns      8527627 ns           80 bytes_per_second=938.127M/s items_per_second=122.962M/s\n  BM_ReadListColumn/50   15790410 ns     15786876 ns           44 bytes_per_second=506.75M/s items_per_second=66.4207M/s\n  BM_ReadListColumn/99    6756996 ns      6754071 ns          102 bytes_per_second=1.15671G/s items_per_second=155.251M/s\n  \n  BM_DefinitionLevelsToBitmapRepeatedAllMissing         703 ns          703 ns       986029 bytes_per_second=2.71222G/s\n  BM_DefinitionLevelsToBitmapRepeatedAllPresent        2074 ns         2074 ns       336007 bytes_per_second=941.881M/s\n  BM_DefinitionLevelsToBitmapRepeatedMostPresent       2057 ns         2057 ns       340874 bytes_per_second=949.539M/s\n  ```\n- after:\n  ```Java\n  \n  BM_ReadListColumn/0     6807335 ns      6802293 ns          104 bytes_per_second=1.14851G/s items_per_second=154.15M/s\n  BM_ReadListColumn/1     8011510 ns      8008278 ns           86 bytes_per_second=998.966M/s items_per_second=130.937M/s\n  BM_ReadListColumn/50   12008336 ns     12005061 ns           58 bytes_per_second=666.386M/s items_per_second=87.3445M/s\n  BM_ReadListColumn/99    5854171 ns      5851619 ns          115 bytes_per_second=1.3351G/s items_per_second=179.194M/s\n  \n  BM_DefinitionLevelsToBitmapRepeatedAllMissing         827 ns          826 ns       832857 bytes_per_second=2.30799G/s\n  BM_DefinitionLevelsToBitmapRepeatedAllPresent         932 ns          932 ns       752094 bytes_per_second=2.04596G/s\n  BM_DefinitionLevelsToBitmapRepeatedMostPresent       1531 ns         1531 ns       459072 bytes_per_second=1.24599G/s\n  ```\n"
+        },
+        {
+            "created_at": "2020-09-28T14:42:44.408Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10058?focusedCommentId=17203273) by Yibo Cai (yibocai):*\nThanks. This is a quick version to verify the idea. I will try bigger table and other tuning to see if can get better performance."
+        },
+        {
+            "created_at": "2020-10-02T09:13:54.114Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10058?focusedCommentId=17206060) by Micah Kornfield (emkornfield@gmail.com):*\n`[~apitrou]` `[~yibocai]` nice performance boost.\u00a0 For `[~apitrou]`'s numbers It is strange to me that the performance varies so signifcantly for\u00a0\r\nBM_DefinitionLevelsToBitmapRepeatedAllPresent (I would only expect this to affect MostPresent in any meaningful way.). Any thoughts on why this would be the case. (better inline maybe?)"
+        },
+        {
+            "created_at": "2020-10-02T10:01:12.262Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10058?focusedCommentId=17206080) by Antoine Pitrou (apitrou):*\nYes, perhaps this particular compiler does a better job on this code."
+        },
+        {
+            "created_at": "2020-10-07T04:49:36.702Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10058?focusedCommentId=17209285) by Micah Kornfield (emkornfield):*\nIssue resolved by pull request 8320\n<https://github.com/apache/arrow/pull/8320>"
+        }
+    ]
+}

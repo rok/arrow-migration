@@ -1,0 +1,52 @@
+{
+    "issue": {
+        "title": "[R] Timezone handling in round-trip of POSIXct",
+        "body": "***Note**: This issue was originally created as [ARROW-17132](https://issues.apache.org/jira/browse/ARROW-17132). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe following:\r\n```r\n\r\ndf <- tibble::tibble(\r\n  time = as.POSIXct(seq(as.Date(\"1999-12-31\", tz = \"UTC\"), as.Date(\"2001-01-01\", tz = \"UTC\"), by = \"day\"))\r\n)\r\n\r\ncompare_dplyr_binding(\r\n  .input %>%\r\n    mutate(x = yday(time)) %>%\r\n    collect(),\r\n  df\r\n)\r\n```\r\n\r\nFails with:\r\n\r\n```bash\n\r\nFailure (test-dplyr-funcs-datetime.R:574:3): extract wday from timestamp\r\n`object` (`actual`) not equal to `expected` (`expected`).\r\n\r\n`attr(actual$time, 'tzone')` is a character vector ('UTC')\r\n`attr(expected$time, 'tzone')` is absent\r\nBacktrace:\r\n 1. arrow:::compare_dplyr_binding(...)\r\n      at test-dplyr-funcs-datetime.R:574:2\r\n 2. arrow:::expect_equal(via_batch, expected, ...)\r\n      at tests/testthat/helper-expectation.R:115:4\r\n 3. testthat::expect_equal(...)\r\n      at tests/testthat/helper-expectation.R:42:4\r\n```\r\n\r\nThis also happens for qday and probably other functions where input is temporal and output is numeric.",
+        "created_at": "2022-07-19T23:50:11.000Z",
+        "updated_at": "2022-07-21T09:30:56.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-07-20T13:07:03.967Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17132?focusedCommentId=17569011) by Neal Richardson (npr):*\nThe assertion is failing on \"time\", your input variable, not the result of `{}yday(){`}. I don't recall exactly what all of the corners are around timezones in the R <\u2013> Arrow conversion but I know there are several, `[~dragosmg]` may know better. There may be a more stable way of generating your input data."
+        },
+        {
+            "created_at": "2022-07-20T13:26:06.235Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17132?focusedCommentId=17569019) by Rok Mihevc (rokm):*\nFor the record I hit this when working on [https://github.com/apache/arrow/pull/13440](https://github.com/apache/arrow/pull/13440)) and got around it by using transmute instead of mutate so I'm not actively bothered by this."
+        },
+        {
+            "created_at": "2022-07-20T13:44:08.441Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17132?focusedCommentId=17569030) by Neal Richardson (npr):*\nRight, transmute drops the input columns, so that would work around this. Note that this isn't about `mutate()` but rather the R <\u2013> Arrow conversion, and/or how R deals with timezones, or timezone-naive data, or localized data, or something.\u00a0\r\n\r\n\u00a0```Java\n\r\n> expect_identical(as.data.frame(arrow_table(df)), df)\r\nError: as.data.frame(arrow_table(df)) (`actual`) not identical to `df` (`expected`).\r\n\r\n`attr(actual$time, 'tzone')` is a character vector ('America/Los_Angeles')\r\n`attr(expected$time, 'tzone')` is absent\r\n```\r\n\r\nI'm sure if we keep pulling on this, we'll end up back on some issue we've worked before about how R treats timestamps with no timezone as being local time but arrow reads as UTC, so we have to incorporate time zone information when converting from R to Arrow.\r\n\r\n```Java\n\r\n> attributes(as.data.frame(arrow_table(df))$time)\r\n$class\r\n[1] \"POSIXct\" \"POSIXt\" \r\n\r\n$tzone\r\n[1] \"America/Los_Angeles\"\r\n\r\n> attributes(df$time)\r\n$class\r\n[1] \"POSIXct\" \"POSIXt\" \r\n```\r\n"
+        },
+        {
+            "created_at": "2022-07-20T14:32:35.062Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17132?focusedCommentId=17569060) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nYep, I worked on ARROW-14442. I think what we are now seeing is a side-effect of that, because we are asserting a timezone when that is not specified in R. "
+        },
+        {
+            "created_at": "2022-07-20T14:41:42.722Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17132?focusedCommentId=17569065) by Neal Richardson (npr):*\nPerhaps we can add a special R metadata field when we serialize to Arrow that says this should be a naive timestamp in R, and handle that in the Arrow-->R conversion?"
+        },
+        {
+            "created_at": "2022-07-20T14:50:30.803Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17132?focusedCommentId=17569073) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nWhat I mean by not specified in R: in the call above `as.POSIXct()` is called with `tz = \"\"` which is the default value - and the difference we notice stems from there. In order to achieve the same integer value for the date, in Arrow we assert the time zone. \r\nObjects of class `Date` do not store a timezone attribute in R. In the case above, `tz = \"UTC\"` is not passed to `as.POSIXct()`. When an object created with `as.POSIXct(..., tz = \"\")` gets printed with the local timezone, but this timezone is more of an artefact of the print method and isn't actually stored as attribute.\r\n```r\n\r\nas.POSIXct(\"1999-12-31\")\r\n#> [1] \"1999-12-31 GMT\"\r\na <- as.POSIXct(\"1999-12-31\")\r\nattributes(a)\r\n#> $class\r\n#> [1] \"POSIXct\" \"POSIXt\" \r\n#> \r\n#> $tzone\r\n#> [1] \"\"\r\n```"
+        },
+        {
+            "created_at": "2022-07-20T14:51:24.065Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17132?focusedCommentId=17569074) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nWithout having looked into it, I think Neal's suggestion might solved the issue. \r\n\r\nMoreover, in the chunk above, I don't think `tz = \"UTC\"` is being used by `as.Date()` (it is an argument useful for the POSIXct method, for example, but not for the character method), but rather silently ignored. "
+        },
+        {
+            "created_at": "2022-07-20T16:38:47.734Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17132?focusedCommentId=17569122) by Rok Mihevc (rokm):*\nCould this be related to this issue coming up in CI: [1](https://github.com/apache/arrow/runs/7424773120?check_suite_focus=true#step:7:5547) [2](https://github.com/apache/arrow/runs/7431821192?check_suite_focus=true#step:7:5804) ?"
+        },
+        {
+            "created_at": "2022-07-21T09:30:56.669Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17132?focusedCommentId=17569327) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nI don't think so."
+        }
+    ]
+}

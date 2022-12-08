@@ -1,0 +1,56 @@
+{
+    "issue": {
+        "title": "[R] Skip rows after data in CSVReadOptions ",
+        "body": "***Note**: This issue was originally created as [ARROW-15252](https://issues.apache.org/jira/browse/ARROW-15252). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nNot sure if this is a bug, but if I open_dataset of a directory containing csv files with a header and a footer, I specify the following convert options to include_missing_columns. The code works fine on files with no header and footer\r\n```r\n\r\ncol_names <- c(\"col names specified as in 2nd row of file\") #ie colnames is known\r\nskip <- 2\r\nfile_path <- \"path to directory holding various files\"\r\n\r\n#schema_file <- created using arrow::schema\r\n#schema_df<- created using arrow::schema but with extra columns for the .partition_cols\r\n\r\nconv_options <- CsvConvertOptions$create(strings_can_be_null = TRUE, include_missing_columns = TRUE, include_columns = col_names) \r\n\r\nread_options <- arrow:::readr_to_csv_read_options(skip, col_names)\r\n\r\nformat <- arrow::FileFormat$create(format = \"text\", schema = schema_file, convert_options = conv_options, read_options  = read_options)\r\nds <- arrow::open_dataset(sources = file_path, schema = schema_df, partitioning = .partition_cols, format = format)\n```\r\nThe dataset gets created, but any further operation on the dataset fail with\r\n```r\n\r\nError: Invalid: CSV parse error: Row #7: Expected 41 columns, got 3: T,7,\r\n```",
+        "created_at": "2022-01-05T09:50:43.000Z",
+        "updated_at": "2022-01-06T10:03:05.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-01-05T11:00:01.869Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15252?focusedCommentId=17469199) by Nicola Crane (thisisnic):*\nThanks for opening this issue `[~martindut]`.  I think the problem here is that the CSV reader isn't expecting the footer row and is just treating it as data (and so you get that error as it's expecting as many columns as are in the actual data).  The C++ code includes the ability to skip footer rows, but this isn't exposed at the R level (yet)."
+        },
+        {
+            "created_at": "2022-01-05T11:55:36.221Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15252?focusedCommentId=17469241) by Martin du Toit (martindut):*\nHi `[~thisisnic]` , thanks for getting back to me.\u00a0\r\n\r\nI also tried it with pyarrow, although not my preferred language, but got the same error. Is it possible with pyarrow, or also not exposed to pyarrow?"
+        },
+        {
+            "created_at": "2022-01-05T12:05:00.229Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15252?focusedCommentId=17469250) by Nicola Crane (thisisnic):*\nI **think** it is; the `skip_rows_after` parameter is mentioned in the docs here: https://arrow.apache.org/docs/python/generated/pyarrow.csv.ReadOptions.html#pyarrow.csv.ReadOptions.  \r\n\r\nIf you share a reproducible example of the Python code you tried, I'll see if I can work out how to connect it up (or shout someone else who knows more about pyarrow!)"
+        },
+        {
+            "created_at": "2022-01-05T12:24:32.946Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15252?focusedCommentId=17469265) by Martin du Toit (martindut):*\nI actually used reticulate to call the pyarrow functions, not sure if that might be the problem?\r\n```r\n\r\npa <- reticulate::import(\"pyarrow\", convert = FALSE)\r\npyds <- reticulate::import(\"pyarrow.dataset\", convert = FALSE)\r\n\r\nskiphead <- 2 # skips header row and column names\r\n\r\nfs_conv = pa$csv$ConvertOptions(column_types = schema_file, strings_can_be_null = TRUE, include_missing_columns = TRUE, include_columns = col_names)\r\nfs_pars = pa$csv$ParseOptions(delimiter= delimiter, ignore_empty_lines = TRUE)\r\nfs_read = pa$csv$ReadOptions(skip_rows = skiphead, column_names = col_names)\r\n\r\ncsv_format = pyds$CsvFileFormat(read_options = fs_read, parse_options = fs_pars, convert_options = fs_conv)\r\n\r\nds = pyds$dataset(source=dl_path, schema = schema_df, format=csv_format, filesystem=fs, partitioning=.partition_cols)\r\n\r\n```"
+        },
+        {
+            "created_at": "2022-01-05T12:53:14.546Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15252?focusedCommentId=17469285) by Nicola Crane (thisisnic):*\nSorry `[~martindut]`; I just realised that I'd misread the docs entirely there and the parameter is actually called `skip_rows_after_names` which is to do with skipping rows after columns rather than footers.  I don't think the functionality for working with CSVs with footers is implemented at all in Arrow.  I can open a ticket to request this functionality though."
+        },
+        {
+            "created_at": "2022-01-05T13:17:31.793Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15252?focusedCommentId=17469303) by Martin du Toit (martindut):*\nNo problem `[~thisisnic]` . The functionality is very important for me, so yes please, can you open a ticket to request this functionality."
+        },
+        {
+            "created_at": "2022-01-05T13:42:49.538Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15252?focusedCommentId=17469319) by Nicola Crane (thisisnic):*\nHere it is: ARROW-15254"
+        },
+        {
+            "created_at": "2022-01-05T14:26:50.227Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15252?focusedCommentId=17469342) by Martin du Toit (martindut):*\nHi `[~thisisnic]` , the other option is to not throw an error, but populate the \"missing\" columns with null values, so it can be filtered out after reading the dataset. I though that include_missing_columns = TRUE will do the trick, or am I not understanding this flag correctly?"
+        },
+        {
+            "created_at": "2022-01-06T09:23:50.182Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15252?focusedCommentId=17469790) by Nicola Crane (thisisnic):*\n`[~martindut]` Looking at the docs here[1] I don't think it will but could be wrong - what happens when you try to run your code with that parameter set to TRUE?\r\n\r\n[1] https://arrow.apache.org/docs/r/reference/CsvReadOptions.html"
+        },
+        {
+            "created_at": "2022-01-06T10:03:05.095Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15252?focusedCommentId=17469809) by Martin du Toit (martindut):*\n`[~thisisnic]` I tried it with parameter set to TRUE, but still giving error. No worries, currently have a workaround, but will be nice to have this in a future release."
+        }
+    ]
+}

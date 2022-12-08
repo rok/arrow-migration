@@ -1,0 +1,42 @@
+{
+    "issue": {
+        "title": "[Python][C++] UnionArray with invalid data passes validation / leads to segfaults",
+        "body": "***Note**: This issue was originally created as [ARROW-6157](https://issues.apache.org/jira/browse/ARROW-6157). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFrom the Python side, you can create an \"invalid\" UnionArray:\r\n\r\n```Java\n\r\nbinary = pa.array([b'a', b'b', b'c', b'd'], type='binary') \r\nint64 = pa.array([1, 2, 3], type='int64') \r\ntypes = pa.array([0, 1, 0, 0, 2, 1, 0], type='int8')   # <- value of 2 is out of bound for number of childs\r\nvalue_offsets = pa.array([0, 0, 2, 1, 1, 2, 3], type='int32')\r\n\r\na = pa.UnionArray.from_dense(types, value_offsets, [binary, int64])\r\n```\r\n\r\nEg on conversion to python this leads to a segfault:\r\n\r\n```Java\n\r\nIn [7]: a.to_pylist()\r\nSegmentation fault (core dumped)\r\n```\r\n\r\nOn the other hand, doing an explicit validation does not give an error:\r\n\r\n```Java\n\r\nIn [8]: a.validate()\r\n```\r\n\r\nShould the validation raise errors for this case? (the C++ `ValidateVisitor` for UnionArray does nothing) \r\n\r\n(so that this can be called from the Python API to avoid creating invalid arrays / segfaults there)\r\n",
+        "created_at": "2019-08-07T10:30:29.000Z",
+        "updated_at": "2019-11-29T10:40:42.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-11-29T10:40:38.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-09-18T16:29:35.448Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6157?focusedCommentId=16932624) by Antoine Pitrou (apitrou):*\nIt's not obvious whether we want validate() to do a O(N) validation of the data.\r\n\r\n`[~wesmckinn]`"
+        },
+        {
+            "created_at": "2019-09-18T16:34:47.745Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6157?focusedCommentId=16932632) by Wes McKinney (wesm):*\nNot obvious to me either. It seems like there is a dual need\r\n\r\n- Checking very basic validity preconditions\n- Actual data validation (boundschecking, checking monotonicity in the case of variable offsets, etc.)\n  \n  AFAICT we haven't really implemented much in the way of the latter. I think it'd be useful to have this in C++ but separate from the current `Array::Validate` I guess, and something that users can opt in to if they need to sanitize inputs"
+        },
+        {
+            "created_at": "2019-09-18T17:22:59.079Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6157?focusedCommentId=16932693) by Antoine Pitrou (apitrou):*\nYes, we may need a `ValidateData` method that's more thorough."
+        },
+        {
+            "created_at": "2019-09-18T17:39:13.689Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6157?focusedCommentId=16932703) by Joris Van den Bossche (jorisvandenbossche):*\nThe ListArray validation actually does something like the latter (it checks if all offsets are valid), so there is at least _some_ precedent."
+        },
+        {
+            "created_at": "2019-09-18T17:53:49.749Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6157?focusedCommentId=16932715) by Antoine Pitrou (apitrou):*\nHmm. Perhaps that validation can be moved to a separate method :-)\r\nThen we'll have to make sure that all tests call the thorough validation method, rather than the light one."
+        },
+        {
+            "created_at": "2019-11-29T10:40:38.842Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6157?focusedCommentId=16984880) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 5892\n<https://github.com/apache/arrow/pull/5892>"
+        }
+    ]
+}

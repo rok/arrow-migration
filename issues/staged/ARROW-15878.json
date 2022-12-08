@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[C++] Optimize csv writer for string with quotes",
+        "body": "***Note**: This issue was originally created as [ARROW-15878](https://issues.apache.org/jira/browse/ARROW-15878). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nEscaping a string with quotes (put an extra quote before a quote) is the hotspot of csv writer [1]. This can probably be improved, possible approaches:\r\n - Find the next quote with memchr, then memcpy blocks without quotes.\r\n - Check if there are quotes with simd in 8 bytes or 16 bytes, do memcpy if no, otherwise go slow path.\r\n\r\nShould make sure the method doesn't decrease performance too much for strings with many quotes. And should be similar or better performance for short strings, which is common case.\r\n\r\n[1] <https://github.com/apache/arrow/blob/master/cpp/src/arrow/csv/writer.cc#L139>",
+        "created_at": "2022-03-09T03:23:39.000Z",
+        "updated_at": "2022-03-11T03:45:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-03-11T03:45:29.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-09T07:54:49.404Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15878?focusedCommentId=17503359) by Yibo Cai (yibocai):*\nCompared two possible optimization approaches. Not very satisfying with the results.\r\nBenchmarked two secnarios:\r\n - WriteCsvStringWithQuote is the best case, there is only one quote at string end\r\n - WriteCsvStringAllQuotes is the worse case, the whole string is filled with quote\r\n\r\n**appoach0(baseline): naive char by char copying**\r\n```bash\n\r\nWriteCsvStringWithQuote/0      938246 ns       938230 ns          745 bytes_per_second=490.029M/s null_percent=0\r\nWriteCsvStringWithQuote/1     1014895 ns      1014890 ns          688 bytes_per_second=448.751M/s null_percent=1\r\nWriteCsvStringWithQuote/10    1060796 ns      1060780 ns          659 bytes_per_second=393.06M/s null_percent=10\r\nWriteCsvStringWithQuote/50     891765 ns       891760 ns          786 bytes_per_second=269.686M/s null_percent=50\r\nWriteCsvStringAllQuotes/0     1001146 ns      1001109 ns          699 bytes_per_second=785.086M/s null_percent=0\r\nWriteCsvStringAllQuotes/1     1053971 ns      1053956 ns          664 bytes_per_second=738.526M/s null_percent=1\r\nWriteCsvStringAllQuotes/10    1102326 ns      1102258 ns          655 bytes_per_second=645.272M/s null_percent=10\r\nWriteCsvStringAllQuotes/50     894888 ns       894843 ns          781 bytes_per_second=451.882M/s null_percent=50\r\n```\r\n**approach1: continue finding next quote, memcpy**\r\n - **best case: improves 20%**\r\n - **worse case: drops 70%**\r\n\r\n```bash\n\r\nWriteCsvStringWithQuote/0      785568 ns       785549 ns          889 bytes_per_second=585.272M/s null_percent=0\r\nWriteCsvStringWithQuote/1      849845 ns       849834 ns          821 bytes_per_second=535.908M/s null_percent=1\r\nWriteCsvStringWithQuote/10     885708 ns       885696 ns          790 bytes_per_second=470.76M/s null_percent=10\r\nWriteCsvStringWithQuote/50     840687 ns       840662 ns          832 bytes_per_second=286.079M/s null_percent=50\r\nWriteCsvStringAllQuotes/0     3606928 ns      3606876 ns          192 bytes_per_second=217.905M/s null_percent=0\r\nWriteCsvStringAllQuotes/1     3765233 ns      3765083 ns          186 bytes_per_second=206.735M/s null_percent=1\r\nWriteCsvStringAllQuotes/10    3686031 ns      3685964 ns          190 bytes_per_second=192.963M/s null_percent=10\r\nWriteCsvStringAllQuotes/50    2362894 ns      2362807 ns          295 bytes_per_second=171.137M/s null_percent=50\r\n```\r\n**approach2: check 8 chars, memcpy if no quote, otherwise copy char by char**\r\n - **best case: improves 10%**\r\n - **worst case: no difference**\r\n\r\n```bash\n\r\nWriteCsvStringWithQuote/0      862995 ns       862991 ns          809 bytes_per_second=532.751M/s null_percent=0\r\nWriteCsvStringWithQuote/1      900671 ns       900650 ns          774 bytes_per_second=505.671M/s null_percent=1\r\nWriteCsvStringWithQuote/10     896087 ns       896066 ns          779 bytes_per_second=465.312M/s null_percent=10\r\nWriteCsvStringWithQuote/50     805413 ns       805363 ns          870 bytes_per_second=298.618M/s null_percent=50\r\nWriteCsvStringAllQuotes/0      993539 ns       993503 ns          702 bytes_per_second=791.097M/s null_percent=0\r\nWriteCsvStringAllQuotes/1     1043675 ns      1043650 ns          671 bytes_per_second=745.819M/s null_percent=1\r\nWriteCsvStringAllQuotes/10    1041745 ns      1041702 ns          646 bytes_per_second=682.782M/s null_percent=10\r\nWriteCsvStringAllQuotes/50     889888 ns       889870 ns          786 bytes_per_second=454.407M/s null_percent=50\r\n```"
+        },
+        {
+            "created_at": "2022-03-09T07:55:21.414Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15878?focusedCommentId=17503360) by Yibo Cai (yibocai):*\nWIP patch attached. [wip.patch](wip.patch) "
+        },
+        {
+            "created_at": "2022-03-09T09:41:29.721Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15878?focusedCommentId=17503446) by Yibo Cai (yibocai):*\nWe already counted quotes for each string to calculate csv cell length, it may be desirable to run optimized code only for strings with very few quotes, e.g., call approach1 only if `{}(len(string) > 16) && (len(string) / #quotes >= 17){`}.\r\n\r\n**See 20% improvement for best case, no regression for worse case. But with more memory used (one bit per cell -> one byte per cell). Still not very satisfied.**"
+        },
+        {
+            "created_at": "2022-03-11T01:43:21.886Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15878?focusedCommentId=17504680) by Yibo Cai (yibocai):*\nCode attached.  [0001-ARROW-15878-improve-csv-writer-for-string-with-quote.patch](0001-ARROW-15878-improve-csv-writer-for-string-with-quote.patch) "
+        },
+        {
+            "created_at": "2022-03-11T02:30:54.983Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15878?focusedCommentId=17504691) by Yibo Cai (yibocai):*\n20% improvement for best case (with more memory consumption) looks not very useful in practice.\r\n\r\nNote: for the best test case, every cell contains one quote. Real world dataset may have much fewer cells containing quotes. So the 20% improvement for best case is probably useless."
+        }
+    ]
+}

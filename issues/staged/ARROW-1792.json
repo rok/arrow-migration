@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Plasma C++] continuous write tensor failed",
+        "body": "***Note**: This issue was originally created as [ARROW-1792](https://issues.apache.org/jira/browse/ARROW-1792). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nstart plasma using \"plasma_store -m 8000000000 -s /tmp/plasma\"\r\nwrite tensor in python using  \r\n\r\n\r\n\r\n\r\n```python\n\r\nfor i in range(10):\r\n        client = plasma.connect(\"/tmp/plasma\", \"\", 0)\r\n        x = np.random.rand(1000,1000,5*256).astype(\"float32\")    # write 5 GB\r\n        object_id = pa.plasma.ObjectID(random_object_id())\r\n        tensor = pa.Tensor.from_numpy(x)\r\n        data_size = pa.get_tensor_size(tensor)\r\n        buf = client.create(object_id, data_size)\r\n        stream = pa.FixedSizeBufferWriter(buf)\r\n        stream.set_memcopy_threads(6)\r\n        pa.write_tensor(tensor, stream)\r\n        client.seal(object_id)\r\n#        client.release(object_id)\r\n#        client.disconnect()\r\n        print(i)\r\n```\r\n\r\n\r\n\r\n\r\nThe error is like below:\r\npyarrow.lib.PlasmaStoreFull: object does not fit in the plasma store\r\n\r\nIf I add \"client.release(object_id)\" ,the error is:\r\n/arrow/cpp/src/plasma/client.cc296 Check failed: object_entry != objects_in_use_.end()\r\n\r\n\r\nAlso,sometimes error is:\r\n  buf = client.create(object_id, data_size)\r\n  File \"pyarrow/plasma.pyx\", line 301, in pyarrow.plasma.PlasmaClient.create (/arrow/python/build/temp.linux-x86_64-2.7/plasma.cxx:4382)\r\n  File \"pyarrow/error.pxi\", line 79, in pyarrow.lib.check_status (/arrow/python/build/temp.linux-x86_64-2.7/lib.cxx:7888)\r\npyarrow.lib.ArrowIOError: Broken pipe\r\n\r\nAfter adding \"client.disconnect()\" it seems to work , but using the code below will fail:\r\n\r\n```python\n\r\nclient = plasma.connect(\"/tmp/plasma\", \"\", 0)\r\nfor i in range(10):\r\n        x = np.random.rand(1000,1000,5*256).astype(\"float32\")    // write 5 GB\r\n        object_id = pa.plasma.ObjectID(random_object_id())\r\n        tensor = pa.Tensor.from_numpy(x)\r\n        data_size = pa.get_tensor_size(tensor)\r\n        buf = client.create(object_id, data_size)\r\n        stream = pa.FixedSizeBufferWriter(buf)\r\n        stream.set_memcopy_threads(6)\r\n        pa.write_tensor(tensor, stream)\r\n        client.seal(object_id)\r\n#        client.release(object_id)\r\n#        client.disconnect()\r\n        print(i)\r\n```\r\n\r\nplus: I have input another issue about the memory evict policy [Arrow-1795]",
+        "created_at": "2017-11-10T05:20:54.000Z",
+        "updated_at": "2017-11-16T04:44:13.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++ - Plasma",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-11-11T01:43:57.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-11-15T04:52:46.869Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1792?focusedCommentId=16252940) by Robert Nishihara (robertnishihara):*\nOne natural way to express this, would be the following. Create only one plasma client, and use the higher-level client APIs. For example:\r\n\r\nFirst start the store with\r\n\r\n```Java\n\r\nplasma_store -m 800000000 -s /tmp/plasma\r\n```\r\n\r\nThen continuously put objects with\r\n\r\n```Java\n\r\nimport pyarrow.plasma as plasma\r\n\r\nclient = plasma.connect(\"/tmp/plasma\", \"\", 0)\r\n\r\nimport numpy as np\r\n\r\ndef write_object(num_bytes):\r\n    object_id = plasma.ObjectID(np.random.bytes(20))\r\n    x = np.ones(num_bytes, dtype=np.uint8)\r\n    client.put(x)\r\n\r\nfor i in range(10):\r\n    print(i)\r\n    write_object(500000000)\r\n```\r\n\r\nThis works for me (at least after https://github.com/apache/arrow/pull/1317, I haven't tried it on the master yet).\r\n\r\nWould something like this work for you?"
+        },
+        {
+            "created_at": "2017-11-15T05:47:18.827Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1792?focusedCommentId=16252974) by Lu Qi  (luchy0120):*\nI got client_tests failure for pr 1317"
+        },
+        {
+            "created_at": "2017-11-16T04:44:13.578Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1792?focusedCommentId=16254750) by Lu Qi  (luchy0120):*\nI got this unittest error even I didn't add pr 1317 "
+        }
+    ]
+}

@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] Error reading old Parquet file due to metadata backwards compatibility issue",
+        "body": "***Note**: This issue was originally created as [ARROW-2592](https://issues.apache.org/jira/browse/ARROW-2592). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nPyarrow 0.8 and 0.9 raises an AssertionError for one of the datasets I have (created using an older version of pyarrow). Repro steps:\r\n\r\n\r\n`In [1]: from pyarrow.parquet import ParquetDataset`\r\n\r\n`In [2]: d = ParquetDataset(['bug.parq'])`\r\n\r\n`In [3]: t = d.read()`\r\n\r\n`In [4]: t.to_pandas()`\r\n`---------------------------------------------------------------------------`\r\n`AssertionError\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 Traceback (most recent call last)`\r\n`<ipython-input-4-d17c9e2818f1> in <module>()`\r\n`----> 1 t.to_pandas()`\r\n\r\n`table.pxi in pyarrow.lib.Table.to_pandas()`\r\n\r\n`~/envs/cli3/lib/python3.6/site-packages/pyarrow/pandas_compat.py in table_to_blockmanager(options, table, memory_pool, nthreads, categories)`\r\n`\u00a0\u00a0\u00a0 529\u00a0\u00a0\u00a0\u00a0 # There must be the same number of field names and physical names`\r\n`\u00a0\u00a0\u00a0 530\u00a0\u00a0\u00a0\u00a0 # (fields in the arrow Table)`\r\n`--> 531\u00a0\u00a0\u00a0\u00a0 assert len(logical_index_names) == len(index_columns_set)`\r\n`\u00a0\u00a0\u00a0 532 `\r\n`\u00a0\u00a0\u00a0 533\u00a0\u00a0\u00a0\u00a0 # It can never be the case in a released version of pyarrow that`\r\n\r\n`AssertionError: `\r\n\r\n\u00a0\r\n\r\nHere's the file: <https://www.dropbox.com/s/oja3khjsc5tycfh/bug.parq>\r\n\r\n(I was not able to attach it here due to a \"missing token\", whatever that means.)",
+        "created_at": "2018-05-16T21:42:22.000Z",
+        "updated_at": "2018-12-23T00:37:35.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-12-23T00:37:26.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-05-17T06:27:50.820Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2592?focusedCommentId=16478609) by Uwe Korn (uwe):*\nDo you still know with which version the file was written? We had a small range of commits between 0.7 and 0.8 that produced files that were later rejected by 0.8 but those were never a part of a release."
+        },
+        {
+            "created_at": "2018-05-17T23:42:20.764Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2592?focusedCommentId=16479886) by Dima Ryazanov (dimaryaz):*\nLooks like writing with version 0.6 causes the problem - while 0.7 and later are fine.\r\n\r\nThough even if the parquet file is broken, it should be some sort of a parse error, rather than an assert, right?"
+        },
+        {
+            "created_at": "2018-10-26T22:11:45.386Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2592?focusedCommentId=16665710) by Wes McKinney (wesm):*\nI'm not quite sure what can be done here. We might have to add an option to ignore the pandas metadata, if any"
+        },
+        {
+            "created_at": "2018-12-19T04:47:36.827Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2592?focusedCommentId=16724692) by Wes McKinney (wesm):*\nI'm adding an option to be able to ignore the \"pandas\" metadata when calling \"to_pandas\", which is useful anyway.\r\n\r\nIn the meantime you can work around your issue with\r\n\r\n```Java\n\r\ntable.cast(table.schema.remove_metadata()).to_pandas()\r\n```"
+        },
+        {
+            "created_at": "2018-12-19T04:50:45.106Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2592?focusedCommentId=16724695) by Wes McKinney (wesm):*\nIt will look like\r\n\r\n```Java\n\r\nIn [6]: t.to_pandas(ignore_metadata=True).head()\r\nOut[6]: \r\n   Row ID  Order ID Order Date        ...         Product Base Margin  Ship Date  __index_level_0__\r\n0       1         3 2010-10-13        ...                         0.8 2010-10-20                  0\r\n1      49       293 2012-10-01        ...                        0.58 2012-10-02                  1\r\n2      50       293 2012-10-01        ...                        0.39 2012-10-03                  2\r\n3      80       483 2011-07-10        ...                        0.58 2011-07-12                  3\r\n4      85       515 2010-08-28        ...                         0.5 2010-08-30                  4\r\n\r\n[5 rows x 22 columns]\r\n```\r\n\r\nI'll put up a PR once I write some tests. \r\n\r\nIf others really think this is a bad idea, backwards compatibility with this old metadata _might_ be possible, but it would be a bit hacky"
+        },
+        {
+            "created_at": "2018-12-23T00:37:26.824Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2592?focusedCommentId=16727760) by Krisztian Szucs (kszucs):*\nIssue resolved by pull request 3239\n<https://github.com/apache/arrow/pull/3239>"
+        }
+    ]
+}

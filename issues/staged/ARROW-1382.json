@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] Deduplicate non-scalar Python objects when using pyarrow.serialize",
+        "body": "***Note**: This issue was originally created as [ARROW-1382](https://issues.apache.org/jira/browse/ARROW-1382). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIf a Python object appears multiple times within a list/tuple/dictionary, then when pyarrow serializes the object, it will duplicate the object many times. This leads to a potentially huge expansion in the size of the object (e.g., the serialized version of `100 * [np.zeros(10 ** 6)]` will be 100 times bigger than it needs to be).\n\n```Java\nimport pyarrow as pa\n\nl = [0]\noriginal_object = [l, l]\n\n# Serialize and deserialize the object.\nbuf = pa.serialize(original_object).to_buffer()\nnew_object = pa.deserialize(buf)\n\n# This works.\nassert original_object[0] is original_object[1]\n\n# This fails.\nassert new_object[0] is new_object[1]\n```\n\nOne potential way to address this is to use the Arrow dictionary encoding.",
+        "created_at": "2017-08-20T05:10:01.000Z",
+        "updated_at": "2021-02-17T16:04:20.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-02-17T16:04:20.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-08-20T05:29:07.513Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1382?focusedCommentId=16134303) by Robert Nishihara (robertnishihara):*\nA related example is an object that recursively contains itself (this example is a bit contrived, but you could imagine a graph data structure with cyclic references).\n\n```Java\nimport pyarrow as pa\n\nl = []\noriginal_object = l.append(l)\n\n# Serialize the object. This fails.\npa.serialize(original_object)\n```\n\nThe `pa.serialize` call fails with\n\n```Java\nArrowException: Unknown error: 'NoneType' object is not iterable\n```\n\nThe error really should be\n\n```Java\nArrowNotImplementedError: This object exceeds the maximum recursion depth. It may contain itself recursively.\n```\n\nThat's the error you run the following\n\n```Java\nimport pyarrow as pa\n\nl1 = []\nl2 = []\nl1.append(l2)\nl2.append(l1)\n\n# This fails.\npa.serialize(l1)\n```"
+        },
+        {
+            "created_at": "2017-08-20T16:34:05.764Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1382?focusedCommentId=16134495) by Wes McKinney (wesm):*\nDeduplication would be nice. I changed the issue title to reflect"
+        },
+        {
+            "created_at": "2017-08-20T20:15:53.279Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1382?focusedCommentId=16134560) by Robert Nishihara (robertnishihara):*\nSounds good. This can be addressed at different levels of generality. The problem applies even beyond ndarrays, e.g., if you serialize `100 * [[]]`."
+        },
+        {
+            "created_at": "2017-08-21T00:15:59.812Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1382?focusedCommentId=16134609) by Wes McKinney (wesm):*\nI changed the title to be \"non-scalar Python objects\". I think we can deduplicate by object id on anything that isn't a scalar value"
+        },
+        {
+            "created_at": "2017-08-21T00:23:09.067Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1382?focusedCommentId=16134611) by Robert Nishihara (robertnishihara):*\nThat sounds right :)"
+        },
+        {
+            "created_at": "2021-02-17T16:04:20.576Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1382?focusedCommentId=17285931) by Antoine Pitrou (apitrou):*\nPyArrow serialization is deprecated, closing as won't fix."
+        }
+    ]
+}

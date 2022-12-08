@@ -1,0 +1,50 @@
+{
+    "issue": {
+        "title": "[R][C++] Arrow opens too many files at once when writing a dataset",
+        "body": "***Note**: This issue was originally created as [ARROW-12321](https://issues.apache.org/jira/browse/ARROW-12321). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n_Related to:_ https://issues.apache.org/jira/browse/ARROW-12315\r\n\r\nPlease see https://drive.google.com/drive/folders/1e7WB36FPYzvdtm46dgAEEFAKAWDQs-e1?usp=sharing where I added the raw data and the output.\r\n\r\nThis works:\r\n\r\n```java\n\r\n\r\nlibrary(data.table)\r\nlibrary(dplyr)\r\nlibrary(arrow)\r\n\r\nd <- fread(\r\n        input = \"01-raw-data/sitc-rev2/parquet/type-C_r-ALL_ps-2019_freq-A_px-S2_pub-20210216_fmt-csv_ex-20210227.csv\",\r\n        colClasses = list(\r\n          character = \"Commodity Code\",\r\n          numeric = c(\"Trade Value (US$)\", \"Qty\", \"Netweight (kg)\")\r\n        ))\r\n\r\nd <- d %>%\r\n  mutate(\r\n    `Reporter ISO` = case_when(\r\n      `Reporter ISO` %in% c(NA, \"\", \" \") ~ \"0-unspecified\",\r\n      TRUE ~ `Reporter ISO`\r\n    ),\r\n    `Partner ISO` = case_when(\r\n      `Partner ISO` %in% c(NA, \"\", \" \") ~ \"0-unspecified\",\r\n      TRUE ~ `Partner ISO`\r\n    )\r\n  )\r\n\r\n# d %>%\r\n#   select(Year, `Reporter ISO`, `Partner ISO`) %>%\r\n#   distinct() %>%\r\n#   dim()\r\n\r\nd %>%\r\n  group_by(Year, `Reporter ISO`) %>%\r\n  write_dataset(\"parquet\", hive_style = F, max_partitions = 1024L)\r\n```\r\n\r\nBut, if I add an additional column for partioning and increases the max partitions to 12808 (to pass exactly the number of partitions that it needs), I get the error:\r\n\r\n```java\n\r\nd %>%\r\n  group_by(Year, `Reporter ISO`) %>%\r\n  write_dataset(\"parquet\", hive_style = F, max_partitions = 12808)\r\n\r\nError: IOError: Failed to open local file '/media/pacha/pacha_backup/tradestatistics/yearly-datasets-arrow/01-raw-data/sitc-rev2/parquet/2019/SEN/MOZ/part-5353.parquet'. Detail: [errno 24] Too many open files\r\n```\r\n\r\n\r\n\r\n",
+        "created_at": "2021-04-09T22:23:54.000Z",
+        "updated_at": "2021-12-20T17:11:15.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-12-20T17:11:15.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-07-13T02:10:25.022Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12321?focusedCommentId=17379517) by Weston Pace (westonpace):*\nI started to work on an implementation here but things got a bit tricky with S3.\u00a0 My plan was to keep an LRU of write queues.\u00a0 When a queue was expired it would close the output stream and then simply reopen it in append mode when it was ready to write more (or do nothing if the dataset write finished).\r\n\r\n\u00a0\r\n\r\nUnfortunately, for S3, there is no append equivalent.\u00a0 On the other hand, I could add the concept of \"Pause\"/\"Unpause\" to an output stream.\u00a0 For standard streams pause & unpause would simply mean close and open-append.\u00a0 For S3 pause and unpause would be a no-op (the S3 output stream already sends small independent messages and so there are no OS resources held open and nothing to pause).\u00a0 However, this adds complexity to output stream.\r\n\r\n\u00a0\r\n\r\nSo I think we have options:\r\n\r\nA) Leave OutputStream unchanged, it's up to the user to ensure they set max_open_files > max_partitions if they are using S3 (and if they don't they get an error when it tries to open an append file which is illegal on an S3 filesystem).\r\n\r\nB) Add pause/unpause to the output stream interface\r\n\r\n\u00a0\r\n\r\nNow that I write all this out it seems A is probably the clear choice but I'll leave this note here for future reference."
+        },
+        {
+            "created_at": "2021-07-13T04:52:33.231Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12321?focusedCommentId=17379582) by Mauricio 'Pach\u00e1' Vargas Sep\u00falveda (pachamaltese):*\nthanks for the summary\r\n\r\nI have created a backup S3 for nyc-taxi, if it helps, I've emailed the token a few days ago\r\n\r\nconsidering that there is rclone, I'd probably wouldn't care too much about S3"
+        },
+        {
+            "created_at": "2021-08-17T10:18:48.011Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12321?focusedCommentId=17400308) by Antoine Pitrou (apitrou):*\nIf you're under Linux, it's very easy to increase the maximum number of open files:\r\n```java\n\r\n$ LANG=C ulimit --help\r\nulimit: ulimit [-SHabcdefiklmnpqrstuvxPT] [limit]\r\n    Modify shell resource limits.\r\n    \r\n[...]\r\n      -n\tthe maximum number of open file descriptors\r\n[...]\r\n$ ulimit -n \r\n1024\r\n$ ulimit -n 100000\r\n$ ulimit -n \r\n100000\r\n \n```\r\n\r\nSo I'm not convinced there's something Arrow should do here."
+        },
+        {
+            "created_at": "2021-08-17T16:27:05.580Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12321?focusedCommentId=17400477) by Weston Pace (westonpace):*\nI'll add that both [MongoDB](https://docs.mongodb.com/manual/reference/ulimit/#recommended-ulimit-settings) and [MariaDB](https://mariadb.com/kb/en/configuring-linux-for-mariadb/) suggest bumping the limit to 64K."
+        },
+        {
+            "created_at": "2021-08-24T02:17:37.037Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12321?focusedCommentId=17403458) by Weston Pace (westonpace):*\nAt the moment https://github.com/apache/arrow/pull/10955 has `max_open_files` which would solve this (although it may not do so terribly efficiently).  Backpressure is needed anyways so the only tricky part is finding a file to close.  Feel free to review the complexity there and decide if we should fix or leave it out."
+        },
+        {
+            "created_at": "2021-08-25T13:35:58.782Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12321?focusedCommentId=17404447) by Antoine Pitrou (apitrou):*\nNo strong opinion, but I don't really like the idea of adding complexity for a problem that's easily fixed by the user."
+        },
+        {
+            "created_at": "2021-08-25T14:02:00.059Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12321?focusedCommentId=17404475) by Mauricio 'Pach\u00e1' Vargas Sep\u00falveda (pachamaltese):*\nwell, yes, maybe closing the files is much worse than passing an argument\nto open more files\n\nOn Wed, Aug 25, 2021 at 9:36 AM Antoine Pitrou (Jira) <jira@apache.org>\n\n\n\n\u2013 \n\u2014\n**Mauricio 'Pach\u00e1' Vargas Sep\u00falveda**\nSite: pacha.dev\nBlog: pacha.dev/blog\n"
+        },
+        {
+            "created_at": "2021-12-20T16:34:56.804Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12321?focusedCommentId=17462713) by David Li (lidavidm):*\nThis should have been resolved in 6.0.x right?"
+        }
+    ]
+}

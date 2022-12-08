@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "Support storing different timezone in an array ",
+        "body": "***Note**: This issue was originally created as [ARROW-16540](https://issues.apache.org/jira/browse/ARROW-16540). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAs a user, I wish I could use pyarrow to store a column of datetimes with different timezones. In certain datasets, it is ideal to a column with mixed timezones (ex - taxi pickups). Even if the data is limited to a single location (let's say a business in NYC for example) over the time span of a single year... then your timezones will be EDT/EST with offsets of -4:00 and -5:00.\r\n\r\n\u00a0\r\n\r\nCurrently, it is not possible to keep a column with different timezones.\r\n\r\n\u00a0\r\n```java\n\r\nimport pytz\r\nimport pyarrow as pa\r\nimport pytz\r\nfrom datetime import datetime\r\narr = pa.array(\r\n\u00a0 \u00a0 [datetime(year=2010, month=1, day=1, hour=9, minute=0, second=0, tzinfo=pytz.timezone('US/Eastern')),\u00a0\r\n\u00a0 \u00a0 \u00a0datetime(year=2010, month=1, day=1, hour=6, minute=0, second=0, tzinfo=pytz.timezone('US/Pacific'))\r\n\u00a0 \u00a0 ]\r\n)\n```\r\n```java\n\r\n# value at index 0, 9AM ET\r\n# value at index 1, 6AM PT is 9AM ET\n```\r\n```java\n\r\nassert arr[0].as_py().hour == 9 # fail\r\nassert arr[1].as_py().hour == 9 # fail\r\nassert arr[0].as_py().hour == 6 # fail\r\nassert arr[1].as_py().hour == 6 # fail\n```\r\n\u00a0\r\n\r\n> Both datetime values are actually at the same time (although different timezones)\r\n\r\n\u00a0",
+        "created_at": "2022-05-11T21:13:57.000Z",
+        "updated_at": "2022-05-12T09:53:51.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Format",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-05-12T00:30:28.753Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16540?focusedCommentId=17535793) by Rok Mihevc (rokm):*\nHey Gaurav,\r\n\r\nwe currently don't have a variable timezone array in arrow and introducing it would be a big change.\r\nDo notice times in your output array are still correct even though their timezone was unified. Do you need to keep timezone information for your application?\r\n\r\nIncidentally the taxi example you're giving is really a single timezone with DST/non-DST period. See TZ database name [here](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) to see definition of timezone arrow uses."
+        },
+        {
+            "created_at": "2022-05-12T01:58:57.737Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16540?focusedCommentId=17535808) by Gaurav Sheni (gsheni):*\nHi `[~rokm]` ,\r\n\r\nI don't believe they are correct even if the timezone was unified. \r\nI updated my code example. Both should be 9AM ET // 6PM PT.\r\n\r\nYes, for my application, I need to keep different timezones in a timezone array.\r\n\r\nI cited the Taxi example because imagine someone was picked up in CT timezone, and dropped off in a ET timezone. Then the same taxi picks up a person in the ET timezone. You could have a **pickup_datetime** column where two different timezones are in 1 column.\r\n\r\nThe other example I am bringing up is let's say you are collecting datetimes for 1 location. It would be important to know the EDT datetimes from the EST datetimes (they would be in 1 array).\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-05-12T06:57:24.854Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16540?focusedCommentId=17535906) by Joris Van den Bossche (jorisvandenbossche):*\n> I don't believe they are correct even if the timezone was unified. I updated my code example. Both should be 9AM ET // 6PM PT.\r\n\r\nUnfortunately, you are running into some confusing behaviour of `pytz`, and so the fact that the times are indeed incorrect is not pyarrow's fault.  \r\n\r\nTaking one of your datetime values:\r\n\r\n```Java\n\r\nIn [8]: print(datetime(year=2010, month=1, day=1, hour=9, minute=0, second=0, tzinfo=pytz.timezone('US/Eastern')))\r\n2010-01-01 09:00:00-04:56\r\n```\r\n\r\nYou can see this strange \"-04:56\" offset string (while we would expect it to be either \"-04:00\" or \"-05:00\"), and it is this offset that pyarrow applies to get the UTC value (2010-01-01 13:56:00), and then when converting back to python and attaching the timezone correctly, you end up with: \r\n\r\n```Java\n\r\nIn [10]: print(arr[0].as_py())\r\n2010-01-01 08:56:00-05:00\r\n```\r\n\r\nBut so this is due to the initial creating of the `datetime.datetime` object with a pytz timezone. The \"correct\" way to do this for pytz:\r\n\r\n```Java\n\r\nIn [11]: print(pytz.timezone('US/Eastern').localize(datetime(year=2010, month=1, day=1, hour=9, minute=0, second=0)))\r\n2010-01-01 09:00:00-05:00\r\n```\r\n\r\nSee https://bugs.launchpad.net/pytz/+bug/1746179 and https://blog.ganssle.io/articles/2018/03/pytz-fastest-footgun.html for a more detailed explanation about this."
+        },
+        {
+            "created_at": "2022-05-12T07:18:15.623Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16540?focusedCommentId=17535918) by Joris Van den Bossche (jorisvandenbossche):*\nOn your actual question about supporting different timezones in a single array, `[~rokm]` already mentioned this is not supported, and I also don't think we currently have plans to do so.\r\n\r\nFor storing data in a single timezone (eg \"US/Eastern\" or \"America/New_York\") but wanting to know if it is EDT or EST, there are a few ways to do this. First, there is an `is_dst` compute function (new in 8.0.0):\r\n\r\n```Java\n\r\nIn [14]: arr = pa.array([datetime(2010, 1, 1), datetime(2010, 6, 1)], pa.timestamp(\"us\", \"America/New_York\"))\r\n\r\nIn [15]: pc.is_dst(arr)\r\nOut[15]: \r\n<pyarrow.lib.BooleanArray object at 0x7fe60da45760>\r\n[\r\n  false,\r\n  true\r\n]\r\n```\r\n\r\nYou could also calculate the time difference if you localize the times to the local timezone and to UTC, and then calculate the time difference. But I don't think we already have a compute function to get a naive time from the tz-aware timestamp.\r\n\r\n\u2014\r\n\r\nI think the best workaround we can currently mention for actually storing multiple timezones, is to store the timestamps itself in UTC and have a separate column that keeps track of the timezone. In theory we could consider adding a timezone argument to functions that need a timezone (and currently get that from the type)."
+        },
+        {
+            "created_at": "2022-05-12T09:53:51.198Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16540?focusedCommentId=17536014) by Rok Mihevc (rokm):*\nSorry I misread timestamps in your original example.\r\n\r\nThe two column approach `[~jorisvandenbossche]` suggests could perhaps already be done with a binary UDF. See examples here: \r\nhttps://github.com/apache/arrow/blob/master/python/pyarrow/tests/test_udf.py "
+        }
+    ]
+}

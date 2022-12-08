@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Python] Sorting on pyarrow data structures ?",
+        "body": "***Note**: This issue was originally created as [ARROW-9367](https://issues.apache.org/jira/browse/ARROW-9367). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi, I consider sorting a fundamental operation for any in-memory data structures, including those of PyArrow.\r\n\r\nIt would be nice if pa.array, pa.table, etc had sorting methods but I did not find any. One has to pass sorting indices calculated from some other library, such as numpy, to sort them. Sorting indices could have been calculated directly from PyArrow. Am I missing something here ? That increases significantly complexity for the developer.\r\n\r\nDo you have any plans on implementing such a feature in the near future ?",
+        "created_at": "2020-07-08T05:48:19.000Z",
+        "updated_at": "2021-03-16T10:20:24.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-03-16T10:20:24.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-07-08T09:52:30.824Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9367?focusedCommentId=17153452) by Joris Van den Bossche (jorisvandenbossche):*\nThere is actually already a \"sorting indices\" functionality available in Arrow, but it's not yet directly exposed in the Python library. With the recently added compute kernel registry, there is already some way to call this in python:\r\n\r\n```Java\n\r\nIn [1]: import pyarrow as pa                                                                                                                                                                                       \r\n\r\nIn [2]: arr = pa.array([1, 3, 0, 5, 3])                                                                                                                                                                            \r\n\r\nIn [3]: import pyarrow.compute as pc                                                                                                                                                                               \r\n\r\nIn [4]: pc.call_function(\"sort_indices\", [arr])                                                                                                                                                                    \r\nOut[4]: \r\n<pyarrow.lib.UInt64Array object at 0x7f0638532228>\r\n[\r\n  2,\r\n  0,\r\n  1,\r\n  4,\r\n  3\r\n]\r\n\r\nIn [5]: arr.take(pc.call_function(\"sort_indices\", [arr]))                                                                                                                                                          \r\nOut[5]: \r\n<pyarrow.lib.Int64Array object at 0x7f06385322e8>\r\n[\r\n  0,\r\n  1,\r\n  3,\r\n  3,\r\n  5\r\n]\r\n```\r\n\r\nbut the Python API can certainly be improved here.\r\n\r\nThe sort indices kernel currently only support the primitive numeric types + string/binary types, and not yet nested types."
+        },
+        {
+            "created_at": "2020-08-01T06:19:54.471Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9367?focusedCommentId=17169239) by Athanassios Hatzis (athanassios):*\n`[~jorisvandenbossche]` thanks for the help, this method is fine if I want to sort a PyArrow table by one column, what if one wants to sort it by multiple columns (keys) and how do I specify the order in\u00a0\r\npc.call_function(\"sort_indices\", [arr])"
+        },
+        {
+            "created_at": "2020-08-07T14:53:49.131Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9367?focusedCommentId=17173184) by Joris Van den Bossche (jorisvandenbossche):*\n> what if one wants to sort it by multiple columns (keys)\r\n\r\nThat is not yet possible, I think (grouping on multiple columns is kind of a groupby operation, I assume, because only where the first column has equal values, a second column should be used)"
+        },
+        {
+            "created_at": "2021-03-16T10:20:11.639Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9367?focusedCommentId=17302404) by Uwe Korn (uwe):*\nThis is now working in 3.0:\r\n\r\n```Java\n\r\nimport pyarrow as pa\r\nimport pyarrow.compute as pc\r\n\r\ntable = pa.table({\r\n    \"a\": [1, 2, 3, -1],\r\n    \"b\": [10, 9, 9, 7],\r\n    \"c\": [10, 10, 8, 11]\r\n})\r\n\r\nindices = pc.sort_indices(table, sort_keys=[(\"b\", \"ascending\"), (\"c\", \"ascending\")])\r\ntable = pc.take(table, indices)\r\ntable.to_pydict()\r\n# {'a': [-1, 3, 2, 1], 'b': [7, 9, 9, 10], 'c': [11, 8, 10, 10]}\r\n```"
+        }
+    ]
+}

@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Python][Parquet] Add `write_to_dataset` option to populate the \"file_path\" metadata fields",
+        "body": "***Note**: This issue was originally created as [ARROW-8244](https://issues.apache.org/jira/browse/ARROW-8244). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nPrior to [dask#6023\\|[https://github.com/dask/dask/pull/6023]], Dask has been using the `write_to_dataset` API to write partitioned parquet datasets.\u00a0 This PR is switching to a (hopefully temporary) custom solution, because that API makes it difficult to populate the the \"file_path\"\u00a0 column-chunk metadata fields that are returned within the optional `metadata_collector` kwarg.\u00a0\u00a0Dask needs to set these fields correctly in order to generate a proper global `\"_metadata\"` file.\r\n\r\nPossible solutions to this problem:\r\n1. Optionally populate the file-path fields within\u00a0`write_to_dataset`\n1. Always populate the file-path fields within\u00a0`write_to_dataset`\n1. Return the file paths for the data written within\u00a0`write_to_dataset` (up to the user to manually populate the file-path fields)",
+        "created_at": "2020-03-27T14:51:34.000Z",
+        "updated_at": "2020-04-05T22:21:17.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-04-05T22:21:17.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-03-27T15:05:59.898Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8244?focusedCommentId=17068794) by Joris Van den Bossche (jorisvandenbossche):*\nThanks for opening the issue `[~rjzamora]`\r\n\r\nAgreed this is a problem, and I think we should at least also return the path (so it can be fixed afterwards), or otherwise set it ourselves (optionally).\r\n\r\nRegarding those different options: starting to also return the path together with the metadata is not really backwards compatible, so we would need to add additional keyword like `path_collector` in addition to `metadata_collector`. \r\n\r\nFor simply always populating the file path, that might depend on whether there are other use cases for collecting this metadata (although I assume dask is the main user of this keyword).   \r\nA github search turned up dask, cudf and spatialpandas as users of the `metadata_collector` keyword. I assume `cudf` needs the same fix as dask. I didn't check yet how it's used in spatialpandas.\r\n\r\nI suppose optionally populating it is the safest, I am only doubtful that having it optional behind a new keyword is actually useful (whether there are use cases for not wanting to populate it)."
+        },
+        {
+            "created_at": "2020-03-31T14:34:18.889Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8244?focusedCommentId=17071845) by Joris Van den Bossche (jorisvandenbossche):*\nSo to summarize the issue: the python `write_to_dataset` API provides an option to return the FileMetadata of the parquet files it has written through `metadata_collector` (the FileMetadata python objects are appended to the list passed to this `metadata_collector` option).\r\n\r\nIn practice, this feature is being used by dask to collect all FileMetadata of all parquet files in the partitioned dataset, and to concatenate them to create the `_metadata` file.\r\n\r\nFor this use case, though, the `file_path` field in the `ColumnChunkMetadata` of the `FileMetadata` object needs to be set to the relative path inside the partitioned dataset. But the problem is that dask doesn't have these paths (it only gets the list of FileMetaData objects, and the files are already written to disk by pyarrow. So we have the option to either return those paths in some way as well, or either set those paths before returning the FileMetaData object in the `write_to_dataset` function (and to be clear, we would _only_ set the path in the FileMetaData being returned to the collector, and _not_ in the actual FileMetaData in the parquet data files that are being written).\r\n\r\nI would personally just change this to set the paths in pyarrow (and consider this a bug fix), as I think creating the `_metadata` file is probably the only use case for this (but this is a not-very-much-educated guess). And that way we don't need to complicate the API further with additional options to also set or return the paths (but this is certainly possible to do, if we don't want to change the current behaviour)\r\n\r\ncc `[~wesm]` `[~fsaintjacques]`"
+        },
+        {
+            "created_at": "2020-04-02T22:05:20.268Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8244?focusedCommentId=17074114) by Wes McKinney (wesm):*\nAs long as there's a well-documented way to generate the _metadata file containing all the row group metadata and file paths in a single structure, and then construct a dataset from the _metadata file (avoiding having to parse the metadata from all the constituent files \u2013 which is time consuming), that sounds good to me"
+        },
+        {
+            "created_at": "2020-04-05T22:21:17.729Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8244?focusedCommentId=17075950) by Wes McKinney (wesm):*\nResolved by PR https://github.com/apache/arrow/commit/ac3bfe47821cb8368f657860f115e88077eaf64d"
+        }
+    ]
+}

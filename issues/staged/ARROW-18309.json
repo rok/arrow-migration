@@ -1,0 +1,46 @@
+{
+    "issue": {
+        "title": "[Go] delta_bit_packing Decode may panic",
+        "body": "***Note**: This issue was originally created as [ARROW-18309](https://issues.apache.org/jira/browse/ARROW-18309). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n<https://github.com/apache/arrow/blob/master/go/parquet/internal/encoding/delta_bit_packing.go>\r\n\r\nThe\u00a0 DeltaBitPackInt32 and DeltaBitPackInt64 Decode method did not use d.nvals subtract decoded number at end, which lead streaming decode panic.\u00a0\r\n\r\nAlso, when copy the decoded value to out, the end value should be\u00a0\r\nshared_utils.MinInt(int(d.valsPerMini), start + len(out))\r\n\r\nWhen encode 68610 timestamp data, and decode 1024 value a batch, we encounter the panic",
+        "created_at": "2022-11-11T04:06:47.000Z",
+        "updated_at": "2022-11-16T15:39:05.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Go",
+            "Component: Parquet",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-11-16T15:39:05.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-11-14T15:52:39.492Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18309?focusedCommentId=17633903) by Matthew Topol (zeroshade):*\nI'll take a look at this, could you provide some sample code which encountered the panic?"
+        },
+        {
+            "created_at": "2022-11-14T16:21:01.783Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18309?focusedCommentId=17633919) by Matthew Topol (zeroshade):*\nAlso, can you try testing with Arrow v10. There were some changes in the delta bit packing in v10 and so far I've been unable to replicate the panic you've mentioned using the data file you provided.\r\n\r\nHere's the code I used, let me know if you're able to replicate the panic as I can't replicate it on v9 either.\r\n\r\n```go\n\r\nfunc TestDeltaBitPacking(t *testing.T) {\r\n\tf, err := os.Open(\"timestamp.data\")\r\n\tif err != nil {\r\n\t\tt.Fatal(err)\r\n\t}\r\n\tdefer f.Close()\r\n\r\n\tvalues := make([]int64, 0)\r\n\r\n\tscanner := bufio.NewScanner(f)\r\n\tfor scanner.Scan() {\r\n\t\tv, err := strconv.ParseInt(scanner.Text(), 10, 64)\r\n\t\tif err != nil {\r\n\t\t\tt.Fatal(err)\r\n\t\t}\r\n\t\tvalues = append(values, v)\r\n\t}\r\n\r\n\tif err := scanner.Err(); err != nil {\r\n\t\tt.Fatal(err)\r\n\t}\r\n\r\n\tcol := schema.NewColumn(schema.MustPrimitive(schema.NewPrimitiveNode(\"foo\", parquet.Repetitions.Required,\r\n\t\tparquet.Types.Int64, -1, -1)), 0, 0)\r\n\tenc := encoding.NewEncoder(parquet.Types.Int64, parquet.Encodings.DeltaBinaryPacked, false, col, memory.DefaultAllocator).(encoding.Int64Encoder)\r\n\r\n\tenc.Put(values)\r\n\tbuf, err := enc.FlushValues()\r\n\tif err != nil {\r\n\t\tt.Fatal(err)\r\n\t}\r\n\tdefer buf.Release()\r\n\r\n\tdec := encoding.NewDecoder(parquet.Types.Int64, parquet.Encodings.DeltaBinaryPacked, col, memory.DefaultAllocator).(encoding.Int64Decoder)\r\n\tdec.SetData(len(values), buf.Bytes())\r\n\r\n\tout := make([]int64, len(values))\r\n\tn, err := dec.Decode(out)\r\n\tif err != nil {\r\n\t\tt.Fatal(err)\r\n\t}\r\n\tassert.EqualValues(t, len(values), n)\r\n\tassert.Equal(t, values, out)\r\n}\r\n```"
+        },
+        {
+            "created_at": "2022-11-15T01:55:45.514Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18309?focusedCommentId=17634106) by jun wang (lntotk):*\nI tested Arrow V10,\u00a0 it panic now, and the ValuesLeft() is broken. Here is the code I used\r\n```java\n\r\nfunc TestDeltaBitPacking(t *testing.T) {\r\n   f, err := os.Open(\"timestamp.data\")\r\n   if err != nil {\r\n      t.Fatal(err)\r\n   }\r\n   defer f.Close()\r\n\r\n   values := make([]int64, 0)\r\n\r\n   scanner := bufio.NewScanner(f)\r\n   for scanner.Scan() {\r\n      v, err := strconv.ParseInt(scanner.Text(), 10, 64)\r\n      if err != nil {\r\n         t.Fatal(err)\r\n      }\r\n      values = append(values, v)\r\n   }\r\n\r\n   if err := scanner.Err(); err != nil {\r\n      t.Fatal(err)\r\n   }\r\n\r\n   col := schema.NewColumn(schema.MustPrimitive(schema.NewPrimitiveNode(\"foo\", parquet.Repetitions.Required,\r\n      parquet.Types.Int64, -1, -1)), 0, 0)\r\n   enc := encoding.NewEncoder(parquet.Types.Int64, parquet.Encodings.DeltaBinaryPacked, false, col, memory.DefaultAllocator).(encoding.Int64Encoder)\r\n\r\n   enc.Put(values)\r\n   buf, err := enc.FlushValues()\r\n   if err != nil {\r\n      t.Fatal(err)\r\n   }\r\n   defer buf.Release()\r\n\r\n   dec := encoding.NewDecoder(parquet.Types.Int64, parquet.Encodings.DeltaBinaryPacked, col, memory.DefaultAllocator).(encoding.Int64Decoder)\r\n   dec.SetData(len(values), buf.Bytes())\r\n\r\n   ll := len(values)\r\n   for i := 0; i < ll; i += 1024 {\r\n      out := make([]int64, 1024)\r\n      n, err := dec.Decode(out)\r\n      if err != nil {\r\n         t.Fatal(err)\r\n      }\r\n      assert.Equal(t, values[:n], out)\r\n      values = values[n:]\r\n   }\r\n   assert.Equal(t, dec.ValuesLeft(), 0) \r\n}\r\n\r\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-11-15T17:14:11.149Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18309?focusedCommentId=17634451) by Matthew Topol (zeroshade):*\nThanks! I'll take a look"
+        },
+        {
+            "created_at": "2022-11-15T17:41:41.082Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18309?focusedCommentId=17634457) by Matthew Topol (zeroshade):*\n`[~lntotk]` I've put up a PR to fix this issue. Please give it a try and verify for yourself. Thanks!"
+        },
+        {
+            "created_at": "2022-11-15T22:57:24.132Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18309?focusedCommentId=17634562) by jun wang (lntotk):*\n`[~zeroshade]` I\u00a0verified this PR,\u00a0 the issue was fixed. Thanks!"
+        },
+        {
+            "created_at": "2022-11-16T15:39:05.517Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18309?focusedCommentId=17634895) by Matthew Topol (zeroshade):*\nIssue resolved by pull request 14649\n<https://github.com/apache/arrow/pull/14649>"
+        }
+    ]
+}

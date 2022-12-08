@@ -1,0 +1,65 @@
+{
+    "issue": {
+        "title": "[Gandiva] [C++] Add option to use -static-libstdc++ when building libgandiva_jni.so",
+        "body": "***Note**: This issue was originally created as [ARROW-3860](https://issues.apache.org/jira/browse/ARROW-3860). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis [commit](https://github.com/apache/arrow/commit/ba2b2ea2301f067cc95306e11546ddb6d402a55c#diff-d5e5df5984ba660e999a7c657039f6af) broke gandiva packaging by removing static linking of std c+, since dremio consumes a fat jar that includes packaged gandiva native libraries we would need to statically link std c+\r\n\r\nAs suggested in the commit message will re-introduce it as a CMake Flag.",
+        "created_at": "2018-11-23T06:30:47.000Z",
+        "updated_at": "2019-06-03T12:26:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++ - Gandiva",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2018-11-27T13:40:37.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-11-23T13:33:27.237Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3860?focusedCommentId=16697138) by Wes McKinney (wesm):*\n-1. As discussed in https://github.com/apache/arrow/commit/ba2b2ea2301f067cc95306e11546ddb6d402a55c#diff-d5e5df5984ba660e999a7c657039f6af, the way to do this is to pass CMAKE_SHARED_LINKER_FLAGS when invoking CMake\r\n\r\n```Java\n\r\ncmake -DCMAKE_SHARED_LINKER_FLAGS=\"...\" ..\r\n```\r\n\r\nAnother (possibly better) way to produce portable binaries is to use Redhat's devtoolset compiler toolchain. That's how we create portable Linux binaries for Python binary packages"
+        },
+        {
+            "created_at": "2018-11-23T18:53:12.608Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3860?focusedCommentId=16697439) by Praveen Kumar (praveenbingo):*\nIn which case the fix would be in <https://github.com/apache/arrow/blob/master/dev/tasks/gandiva-jars/build-cpp.sh>\r\n\r\nSo keep the issue open until i fix it?\r\n\r\nAlso (i am new to the open source development workflow, so please correct me if i am wrong), Is it not incorrect to add a backward incompatible change that might break existing behavior? and our priority in that case should be parity first and then modifying it in an backward compatible manner?"
+        },
+        {
+            "created_at": "2018-11-23T19:21:45.866Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3860?focusedCommentId=16697453) by Wes McKinney (wesm):*\nSorry, it wasn't clear to me that the packaging you were describing is part of the repository. In part this is because the community does not have regular visibility into these packaging jobs and whether they work or not. I'd love to be able to easily run all of the tasks as part of verifying changes to the build system. You might want to add some checks to https://github.com/apache/arrow/blob/master/dev/tasks/gandiva-jars/build-cpp.sh to assert that the shared libraries do not have a runtime dependency on libstdc++\r\n\r\nI consider hard-coding `-static-libstdc++` in a C++ build system to be a bug, see ARROW-3437. Also, these packages are not fully portable because they have a minimum glibc ABI requirement equal to the version in Ubuntu 14.04. "
+        },
+        {
+            "created_at": "2018-11-24T14:17:45.010Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3860?focusedCommentId=16697833) by Praveen Kumar (praveenbingo):*\nThanks a lot Wes. Agreed on all points.\r\n1. I will fix the crossbow build file and add some check to the crossbow file to check the shared libs do not have a runtime dependency on std-c++.\n1. Yes we will have a dependency on glibc version of Ubuntu, but the most common versions installed at the customer base seems to be CentOS 7+ and they are good with this minimum version of glibc. We have pending work to support CentOS6 like environments which have a lower version of glibc.\n1. Also when i change the crossbow script it will affect the arrow packaging of gandiva (since the shared libs with statically link to std c+) . Would it be ok to use the same for arrow distribution (or) should i make this dynamic so that arrow/crossbow still builds gandiva with dynamic dependency on std-c+ while other clients can customize as per their need?"
+        },
+        {
+            "created_at": "2018-11-24T23:29:21.879Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3860?focusedCommentId=16698025) by Wes McKinney (wesm):*\nCould you clarify what you mean by \"use the same for arrow distribution\"? "
+        },
+        {
+            "created_at": "2018-11-25T18:05:47.484Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3860?focusedCommentId=16698237) by Praveen Kumar (praveenbingo):*\nThe same packaging script is used by Kristian in the crossbow repo - <https://github.com/kszucs/crossbow/tree/build-355-gandiva-jar-trusty.> I thought these would be used in the arrow release build to release gandiva too along with the other arrow libraries. So i was wondering if i could change the script to produce the gandiva libraries statically linked to std-c++.."
+        },
+        {
+            "created_at": "2018-11-25T20:56:17.117Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3860?focusedCommentId=16698289) by Wes McKinney (wesm):*\nIt isn't appropriate to statically link libstdc++ in general binary library distributions \u2013 that's part of why I've been making a stink about this issue because the binaries produced by this can only be used in a very narrow context. \r\n\r\nIf you use the libraries to build an application, depending on the platform where you build, you may have symbol conflicts that will yield segfaults / core dumps. \r\n\r\nI can see the argument for building the binaries this way in a JAR distribution of the JNI bindings. Though, beware: if someone links to another JNI-wrapped C++ library with different symbols, it may crash. "
+        },
+        {
+            "created_at": "2018-11-26T05:44:06.412Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3860?focusedCommentId=16698492) by Praveen Kumar (praveenbingo):*\n\"beware: if someone links to another JNI-wrapped C++ library with different symbols, it may crash.\"\r\n\r\nYup ran into this already :) had to fix by hiding symbols from the jni shared library.\r\n\r\nOk will try to make this a input flag, so that arrow can continue to distribute gandiva with std-c++ dynamically linked and we can substitute that with a statically linked one.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-11-26T11:36:41.246Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3860?focusedCommentId=16698820) by Praveen Kumar (praveenbingo):*\nWes,\r\n\r\nI figured a way to customize crossbow to use the flags only in dremio build context.\r\n\r\nBut tons of tests are failing with that flag on. Here is a build [link.](https://travis-ci.org/praveenbingo/arrow-build/builds/459690214)\r\n\r\nThe tests fail even after hiding symbols so i am guessing it is a double free or something similar due to duplicate linking (the tests link dynamically to stdc++)\r\n\r\nWould it be an easier fix to only link the jni libraries statically to stdc++? They would anyway be used in the Java context and would need it work in different environments. This would prevent the core gandiva libraries having these static links.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-11-26T15:49:56.829Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3860?focusedCommentId=16699177) by Wes McKinney (wesm):*\nDo you want to just add a temporary build option to enable the behavior that was hard-coded before? That seems the simplest thing to unblock yourself. \r\n\r\nI strongly recommend that you migrate to use Redhat's devtoolset compiler toolchain so this is not necessary. Using -static-libstdc++ in shared libraries is a dangerous business; sometimes it will work, other times it won't. It is best used for producing dependency-free executables"
+        },
+        {
+            "created_at": "2018-11-26T18:44:28.217Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3860?focusedCommentId=16699430) by Praveen Kumar (praveenbingo):*\nSure Wes, we will investigate and start on moving to the redhat toolchain.\r\n\r\nThanks a ton for the PR."
+        },
+        {
+            "created_at": "2018-11-27T13:40:37.157Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3860?focusedCommentId=16700435) by Wes McKinney (wesm):*\nIssue resolved by pull request 3035\n<https://github.com/apache/arrow/pull/3035>"
+        }
+    ]
+}

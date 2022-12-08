@@ -1,0 +1,40 @@
+{
+    "issue": {
+        "title": "[Python] Make Table.cast(schema) more flexible regarding order of fields / missing fields?",
+        "body": "***Note**: This issue was originally created as [ARROW-11553](https://issues.apache.org/jira/browse/ARROW-11553). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently, `Table.cast` requires a new schema with exactly the same names and same order of those names (it simply does a `self.schema.names != target_schema.names: raise ...` check). Example:\r\n\r\n```python\n\r\n>>> table = pa.table({'a': [1, 2, 3], 'b': [.1, .2, .3]})\r\n>>> table\r\npyarrow.Table\r\na: int64\r\nb: double\r\n\r\n>>> schema = pa.schema([('a', pa.int32()), ('b', pa.float32())])\r\n>>> table.cast(schema)\r\npyarrow.Table\r\na: int32\r\nb: float\r\n\r\n>>> schema2 = pa.schema([('b', pa.float32()), ('a', pa.int32())])\r\n>>> table.cast(schema2)\r\n....\r\nValueError: Target schema's field names are not matching the table's field names: ['a', 'b'], ['b', 'a']\r\n```\r\n\r\nDo we want to make this more flexible? Allow different order? (and the follow order of the passed schema or of the original table?) Allow missing fields? (and then use the fields of the schema to \"subset\" as well?)\r\n",
+        "created_at": "2021-02-08T12:07:36.000Z",
+        "updated_at": "2021-02-22T16:58:31.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-02-08T12:46:58.042Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11553?focusedCommentId=17281010) by Antoine Pitrou (apitrou):*\nSuch options could be added to `CastOptions` I guess."
+        },
+        {
+            "created_at": "2021-02-08T12:57:04.046Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11553?focusedCommentId=17281024) by Joris Van den Bossche (jorisvandenbossche):*\nThe current implementation of Table.cast is actually not using the compute cast, but iteratively casting each column (so in this case, `CastOptions` is not involved).\r\n\r\nI don't know if `compute::Cast` is expected to support Tables?\r\n\r\n```python\n\r\n>>> import pyarrow.compute as pc\r\n>>> table = pa.table({'a': [1, 2, 3], 'b': [.1, .2, .3]})\r\n>>> schema = pa.schema([('a', pa.int32()), ('b', pa.float32())])\r\n>>> pc.cast(table, schema)\r\n...\r\nTypeError: DataType expected, got <class 'pyarrow.lib.Schema'>\r\n>>> pc.cast(table, pa.float64())\r\nSegmentation fault (core dumped)\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-02-08T13:04:40.554Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11553?focusedCommentId=17281033) by Antoine Pitrou (apitrou):*\n> I don't know if `compute::Cast` is expected to support Tables?\r\n\r\nI have no idea. If the functionality is useful, it should be available from C++ anyhow, though.\r\n\r\ncc `[~bkietz]`"
+        },
+        {
+            "created_at": "2021-02-08T13:07:34.771Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11553?focusedCommentId=17281036) by Joris Van den Bossche (jorisvandenbossche):*\nIn compute terms, and if we allow field reordering/selection as well, that's probably becoming a projection."
+        },
+        {
+            "created_at": "2021-02-08T13:10:08.335Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11553?focusedCommentId=17281038) by Antoine Pitrou (apitrou):*\nWell, there's already a compute function named \"project\", though I have no idea whether it fits the bill."
+        },
+        {
+            "created_at": "2021-02-22T16:58:31.923Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11553?focusedCommentId=17288479) by Ben Kietzman (bkietz):*\nThe `project` function is primarily intended for use in the context of dataset expressions, since expressions (and not just calls to `cast`) can be provided which are evaluated to produce the resulting columns (see ARROW-11174). It would not be very helpful in for this use case since it would only serve to collect and name columns which is pretty trivial in Python anyway. On the other hand, it might be a useful pre-dataframe feature to expedite evaluation of a dataset expression against a table, which would allow you to write something like\r\n\r\n```python\n\r\nnew_table = ds.project({\r\n  'renamed_a': ds.field('a'),\r\n  'b_float': ds.cast(ds.field('b'), to_type='float32'),\r\n  'c_plus_d': ds.field('c') + ds.field('d'),\r\n}).evaluate(some_table)\r\n```"
+        }
+    ]
+}

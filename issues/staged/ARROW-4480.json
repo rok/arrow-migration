@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] Drive letter removed when writing parquet file ",
+        "body": "***Note**: This issue was originally created as [ARROW-4480](https://issues.apache.org/jira/browse/ARROW-4480). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi everyone,\r\n \u00a0\r\n importing this from Github:\r\n \u00a0\r\n I encountered a problem while working with pyarrow: I am working on Windows 10. When I want to save a table using pq.write_table(tab, r'E:\\parquetfiles\\file1.parquet'), I get the Error \"No such file or directory\".\r\n \u00a0After searching a bit, i found out that the drive letter is getting removed while parsing the where string, but I could not find a way solve my problem: I can write the files on my C:\\ drive without problems, but I am not able to write a parquet file on another drive than C:.\r\n Am I doing something wrong or is this just how it works? I would really appreciate any help, because I just cannot fit my files on C: drive.",
+        "created_at": "2019-02-05T12:38:50.000Z",
+        "updated_at": "2019-03-19T12:38:47.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-03-19T12:38:47.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-02-05T15:30:32.468Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4480?focusedCommentId=16760937) by Wes McKinney (wesm):*\nIs `E:\\parquetfiles` a file name or a directory? \r\n\r\nI have a Windows 10 machine so I can take a look at some point"
+        },
+        {
+            "created_at": "2019-02-06T14:06:46.458Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4480?focusedCommentId=16761761) by Seb Fru (frutti93):*\nHi\u00a0Wes, in this case parquetfiles is a directory. I will also edit the original description to clarify that."
+        },
+        {
+            "created_at": "2019-02-07T03:03:43.061Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4480?focusedCommentId=16762321) by Michael Peleshenko (mpeleshenko):*\nWe ran into this issue as well, and a coworker dug into it and narrowed it down to `pyarrow.filesystem.resolve_filesystem_and_path()`. The very last return always returns `parsed_uri.path`, regardless of the schema. It seems for the non-hdfs schema, just `path` should be returned, as otherwise the drive letter seems to be stripped\u00a0by `urlparse()`. A workaround for now is to call `pyarrow.parquet.write_table()` with `filesystem=LocalFileSystem.get_instance()`\r\n```Java\n\r\ndef resolve_filesystem_and_path(where, filesystem=None):\r\n    \"\"\"\r\n    return filesystem from path which could be an HDFS URI\r\n    \"\"\"\r\n    if not _is_path_like(where):\r\n        if filesystem is not None:\r\n            raise ValueError(\"filesystem passed but where is file-like, so\"\r\n                             \" there is nothing to open with filesystem.\")\r\n        return filesystem, where\r\n\r\n# input can be hdfs URI such as hdfs://host:port/myfile.parquet\r\n    path = _stringify_path(where)\r\n\r\n    if filesystem is not None:\r\n        return _ensure_filesystem(filesystem), path\r\n\r\n    parsed_uri = urlparse(path)\r\n    if parsed_uri.scheme == 'hdfs':\r\n        netloc_split = parsed_uri.netloc.split(':')\r\n        host = netloc_split[0]\r\n        if host == '':\r\n            host = 'default'\r\n        port = 0\r\n        if len(netloc_split) == 2 and netloc_split[1].isnumeric():\r\n            port = int(netloc_split[1])\r\n        fs = pa.hdfs.connect(host=host, port=port)\r\n    else:\r\n        fs = LocalFileSystem.get_instance()\r\n\r\n    return fs, parsed_uri.path\r\n```"
+        },
+        {
+            "created_at": "2019-03-19T10:33:33.917Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4480?focusedCommentId=16795957) by Antoine Pitrou (apitrou):*\n`[~mpeleshenko]` If this is the case, then this is probably fixed in git master by now. There were other instances where this algorithm produced issues, so now we use the original path if it's not an actual URI (i.e. it has no scheme such as \"file\" or \"hdfs\")."
+        },
+        {
+            "created_at": "2019-03-19T12:29:06.502Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4480?focusedCommentId=16796029) by Antoine Pitrou (apitrou):*\nIt turns out I even added a test for it:\r\nhttps://github.com/apache/arrow/pull/3718/files#diff-5d9bf88ded394e015db5898636458b61R28\r\n"
+        }
+    ]
+}

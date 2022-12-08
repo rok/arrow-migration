@@ -1,0 +1,70 @@
+{
+    "issue": {
+        "title": "[C++/Format] Harden Decimal Format",
+        "body": "***Note**: This issue was originally created as [ARROW-1588](https://issues.apache.org/jira/browse/ARROW-1588). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe should finalize and harden the decimal format. The remaining issues are officially writing down the choice of making every decimal value 16 bytes and byte order.\n\nFor byte order we'll need to run some benchmarks to compare little endian vs big endian. I plan to work on this over the next week or two.\n\n[~jacques@dremio.com] `[~wesmckinn]` If there are any additional items you'd like to see addressed here please chime in. ",
+        "created_at": "2017-09-21T00:29:06.000Z",
+        "updated_at": "2017-10-25T13:10:48.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Format",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2017-10-25T13:10:46.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-09-21T15:49:18.736Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1588?focusedCommentId=16174984) by Phillip Cloud (cpcloud):*\n`[~nongli]`, [~jacques@dremio.com] mentioned that you and he discussed why big-endian might be the optimal choice for byte ordering. Do you remember how you determined that to be the case?"
+        },
+        {
+            "created_at": "2017-09-21T15:54:03.807Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1588?focusedCommentId=16174993) by Wes McKinney (wesm):*\ncc `[~henryr]` `[~tarmstrong]`"
+        },
+        {
+            "created_at": "2017-09-21T16:09:21.667Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1588?focusedCommentId=16175019) by Tim Armstrong (tarmstrong):*\nThanks for the CC Wes. Is there some additional context here about the goals? Those decisions (16 bytes and big-endian) are not what I'd expect if we were optimising for in-memory processing speed on little-endian architectures. \n\n`[~tarasbob]` has recently been working on Impala's decimal implementation so may have some thoughts too."
+        },
+        {
+            "created_at": "2017-09-21T16:14:19.383Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1588?focusedCommentId=16175026) by Tim Armstrong (tarmstrong):*\nParquet does encodes some decimals as big-endian values when encoded as FIXED_LEN_BYTE_ARRAY but Impala byte-swaps them when reading. I always found this curious. This was actually a major source of runtime overhead so we ended up with a complicated SIMD byte-swap implementation https://github.com/apache/incubator-impala/blob/2e63752858d71cc745534367a686980e060a8180/be/src/util/bit-util.cc#L210"
+        },
+        {
+            "created_at": "2017-09-21T16:31:49.995Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1588?focusedCommentId=16175056) by Wes McKinney (wesm):*\nThis seems to support the hypothesis that we should be 16-bytes, little-endian in-memory. It would be helpful to get the historical context on why things are the way the are in Parquet, though"
+        },
+        {
+            "created_at": "2017-09-21T16:34:41.217Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1588?focusedCommentId=16175062) by Wes McKinney (wesm):*\n`[~tarmstrong]` in the not-too-distant future we will be creating a columnar function kernel library in C++ to process arrays of contiguous decimals in-memory, so we would want operations like `arr * 2`, where `arr` contains multiple decimal values in a buffer to evaluate as fast as possible. For the moment the only place where Arrow users are doing analytics on Decimals in in Dremio https://github.com/dremio/dremio-oss. "
+        },
+        {
+            "created_at": "2017-09-21T17:34:22.475Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1588?focusedCommentId=16175166) by Tim Armstrong (tarmstrong):*\nAh ok, makes sense. I don't know to what extent this applies but our experience is that decimal operations are a lot faster on narrower 4-byte and 8-byte representations. One reason is that the 4 byte and 8 byte decimal values fit in registers and can be manipulated with normal integer operations. A more subtle reason is that implementing some operations correctly (at least in Impala's implementation) requires temporarily promoting to a wider type, e.g. 4 byte -> 8 byte or 8 byte -> 16 bytes. Emulated 128-bit and 256-bit operations are pretty slow."
+        },
+        {
+            "created_at": "2017-10-18T17:21:31.083Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1588?focusedCommentId=16209706) by Phillip Cloud (cpcloud):*\nHere's the state of the in memory decimal format on the C++ side of things.\r\n\r\nRight now, arrow's in memory decimal format is actually a mixture of both big and little endian (when the platform is little endian, when the platform is big endian it's just big endian).\r\n\r\nThe `Decimal128` class that holds the upper and lower 64 bits of a 2's complement 128 bit integer is laid out like this (ignoring methods)\r\n\r\n```Java\n\r\nclass Decimal128 {\r\n    int64_t upper;\r\n    uint64_t lower;\r\n};\r\n```\r\n\r\nWhen we convert this to a C array of bytes we do the following (paraphrasing):\r\n\r\n```Java\n\r\nconst uint64_t big_bytes[] = {upper, lower};\r\nconst uint8_t* raw_bytes = reinterpret_cast<const uint8_t*>(big_bytes);\r\n```\r\n\r\nWhat this means is that groups of 8 bytes are in big-endian order, and within each group of 8 bytes they are platform native.\r\n\r\nThis was an oversight on my part when writing `ToBytes()`, that I will rectify. My apologies for not clarifying this earlier.\r\n\r\nThe good news is that:\r\n\r\n1. This won't require much effort to fix.\n1. The work I've already done to make parquet read/write work will only require a one or two line change to make this work regardless of whether we choose big or little endian.\n   \n   We still need to make a choice about which byte order to use.\n   \n   Something to note:\n   \n   When operating on arrow `DecimalArray` bytes, we have to convert each group of 16 bytes to `Decimal128` before doing any operations like addition, multiplication, etc. To keep performance snappy we need to spend as little time as possible converting bytes to `int64_t`/`uint64_t`. If bytes are passed to `Decimal128` as little endian then we elide a byteswap operation and simply convert each 8 byte chunk to the respective types of the upper and lower bits. If they're passed as big endian (as in the case of parquet) then we have to do some work to convert them to little endian. For this reason, I think we should choose little endian byte order. Of course, systems that are big endian take a small hit reading arrow decimal arrays.\n   \n   Is there someone from the Java side that can clarify what the current in-memory layout for the Java equivalent of C++'s `DecimalArray`? Are bytes in little endian order?\n   \n   cc `[~wesmckinn]` `[~jnadeau]`"
+        },
+        {
+            "created_at": "2017-10-18T20:05:07.106Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1588?focusedCommentId=16209934) by Jacques Nadeau (jnadeau):*\nJava is currently big-endian. See [1] and [2]\r\n[1] https://github.com/apache/arrow/blob/master/java/vector/src/main/java/org/apache/arrow/vector/util/DecimalUtility.java#L144\r\n[2] https://docs.oracle.com/javase/7/docs/api/java/math/BigInteger.html#BigInteger(byte[])\r\n\r\nI agree that we should switch to little endian. Arrow should prioritize the cpu friendly format. "
+        },
+        {
+            "created_at": "2017-10-18T20:50:17.378Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1588?focusedCommentId=16210005) by Wes McKinney (wesm):*\n+1. What do we need to do to effect this change?"
+        },
+        {
+            "created_at": "2017-10-18T20:59:37.705Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1588?focusedCommentId=16210022) by Phillip Cloud (cpcloud):*\nI have a patch ready to go on the C++ side, modulo integration tests. I'm in the process of running them now. Is there anything that needs to be done on the Java side?"
+        },
+        {
+            "created_at": "2017-10-18T21:05:17.847Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1588?focusedCommentId=16210038) by Wes McKinney (wesm):*\nIf Java is assuming big-endian representation then byte-swapping from little-endian, I guess. We also need to document the memory format in the format/ documents. See the TBD section for Decimals in http://arrow.apache.org/docs/metadata.html"
+        },
+        {
+            "created_at": "2017-10-25T13:10:46.940Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1588?focusedCommentId=16218590) by Wes McKinney (wesm):*\nIssue resolved by pull request 1211\n<https://github.com/apache/arrow/pull/1211>"
+        }
+    ]
+}

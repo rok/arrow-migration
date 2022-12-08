@@ -1,0 +1,36 @@
+{
+    "issue": {
+        "title": "[C++][Dataset] Allow setting FragmentReadahead to 0 in ScannerBuilder",
+        "body": "***Note**: This issue was originally created as [ARROW-13161](https://issues.apache.org/jira/browse/ARROW-13161). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI have an application where I need to set fragment readahead to 0. But, looks like for some reason the ScannerBuilder does not allow setting the fragment readahead to 0 [1]. It would be very helpful to know why it is that way and if a PR lifting that restriction would be accepted because a docstring mentions that users can set fragment readahead to 0 if they want [2].\r\n\r\n[1]https://github.com/apache/arrow/blob/master/cpp/src/arrow/dataset/scanner.cc#L864\r\n[2]https://github.com/apache/arrow/blob/998a2a1668ea57a49d85fbb38f7f0e7eb94c29db/cpp/src/arrow/dataset/scanner.h#L93",
+        "created_at": "2021-06-24T11:51:46.000Z",
+        "updated_at": "2022-01-22T01:45:56.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-24T12:34:46.959Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13161?focusedCommentId=17368817) by David Li (lidavidm):*\n`[~westonpace]` can confirm but it's because places of the code use it as the number of files to read, total, i.e. readahead == 0 would read _no_ fragments. So that docstring is a little misleading.\r\n\r\nHowever: what is your use case, so we can better understand it/why does fragment_readahead = 1 not suffice?"
+        },
+        {
+            "created_at": "2021-06-24T12:50:00.576Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13161?focusedCommentId=17368826) by Jayjeet Chakraborty (Jayjeet):*\nThanks a lot for the quick response. We are using the [DisposableScannerAdaptor](https://github.com/apache/arrow/blob/master/cpp/src/jni/dataset/jni_wrapper.cc#L140) in the JNI bridge for integrating Arrow with Spark. We use the Dataset API call to read a single file (not a collection of files). We want to map Sparks iterator with an iterator that the Dataset API provides via JNI. In the Arrow layer, the [DisposalbleScannerAdaptor::Create](https://github.com/apache/arrow/blob/master/cpp/src/jni/dataset/jni_wrapper.cc#L146) calls the [ScanBatches](https://github.com/apache/arrow/blob/master/cpp/src/jni/dataset/jni_wrapper.cc#L148) method from SyncScanner. AFAIK, the ScanBatches method is supposed to be lazy and return an iterator and batches will be read out only when Next() is called on the iterator. But currently, since the fragment readahead is > 0, our only fragment (note we have a single file per dataset API call) is read out in the initialization phase and we don't want that since that breaks the iterator mapping to Spark. We just want ScanBatches to return a [TaggedRecordBatchIterator](https://github.com/apache/arrow/blob/master/cpp/src/arrow/dataset/scanner.h#L172). I hope that clears our requirement a little bit."
+        },
+        {
+            "created_at": "2021-06-24T12:56:11.624Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13161?focusedCommentId=17368831) by David Li (lidavidm):*\nThanks for clarifying. The sync scanner will be going away at some point, but both the sync and async scanner have this issue. The sync scanner especially would need refactoring in order to fix this issue, from what I see.\r\n\r\nThere's a `batch_readahead` parameter that would probably control this better, but it's not actually hooked up to anything."
+        },
+        {
+            "created_at": "2021-06-24T13:57:56.298Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13161?focusedCommentId=17368872) by Jayjeet Chakraborty (Jayjeet):*\nI see. Looks like fragment readahead has to be min. 1 for scanning to start. Also, I looked into the batch readahead parameter. Our fragments (files) have single record batches. So, it is not of much use to us at this point.\u00a0"
+        },
+        {
+            "created_at": "2021-06-24T17:49:45.298Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13161?focusedCommentId=17369016) by Weston Pace (westonpace):*\nDavid is right, batch readahead is largely ignored as most formats don't actually do readahead at the file level.\u00a0 I think the exception is parquet and it does prebuffering so it is difficult to limit it and batch readahead is not hooked up.\u00a0 It is primarily there as a limit to how much RAM you use.\u00a0 As for fragment readahead I agree it sounds like what you are describing is a fragment readahead of 0.\r\n\r\n> AFAIK, the ScanBatches method is supposed to be lazy and return an iterator and batches will be read out only when Next() is called on the iterator.\r\n\r\nNo, that is not how it was designed, as you have observed.\u00a0 The scanner is designed to keep scanning in the background.\u00a0 Can you explain a bit more how this breaks the iterator mapping with Spark?\r\n\r\n\u00a0\r\n\r\nWhat happens if you use the async scanner but set use_threads to false?\r\n\r\n\u00a0\r\n\r\nI think it would not be a far reach to get \"don't read any batches until ScanBatches is called at least once\" but it would be harder to get \"don't do any readahead at all\".\u00a0 Also, the scanner is currently being migrated to use an ExecPlan for filtering/projection and that will create its own pressure.\u00a0 `[~bkietz]`"
+        }
+    ]
+}

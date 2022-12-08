@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "[C++][Python] Custom streaming data providers in {{run_query}}",
+        "body": "***Note**: This issue was originally created as [ARROW-18063](https://issues.apache.org/jira/browse/ARROW-18063). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n[Mailing list thread](https://lists.apache.org/thread/r484sqrd6xjdd058prbrcwh3t5vg91so)\r\n\r\nThe goal is to:\r\n- generate a substrait plan in Python using Ibis\n- ... wherein tables are specified using custom URLs\n- use the python API `run_query` to execute the plan\n- ... against source data which is **streamed** from those URLs rather than pulled fully into local memory\n  \n  The obstacles include:\n- The API for constructing a data stream from the custom URLs is only available in c++\n- The python `run_query` function requires tables as input and cannot accept a RecordBatchReader even if one could be constructed from a custom URL\n- Writing custom cython is not preferred\n  \n  Some potential solutions:\n- Use ExecuteSerializedPlan() directly usable from c++ so that construction of data sources need not be handled in python. Passing a buffer from python/ibis down to C++ is much simpler and can be navigated without writing cython\n- Refactor NamedTableProvider from a lambda mapping `names -> data source` into a registry so that data source factories can be added from c++ then referenced by name from python\n- Extend `run_query` to support non-Table sources and require the user to write a python mapping from URLs to `pa.RecordBatchReader`",
+        "created_at": "2022-10-14T17:20:37.000Z",
+        "updated_at": "2022-10-17T15:11:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-14T17:57:33.162Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18063?focusedCommentId=17617896) by Weston Pace (westonpace):*\n> Refactor NamedTableProvider from a lambda mapping names -> data source into a registry so that data source factories can be added from c++ then referenced by name from python\r\n\r\nI'm not sure this is exactly what has been proposed.  Instead I think the idea is that default named table provider is either a property of the ExecFactoryRegistry or part of some larger \"AceroContext\".  A user can then configure which named table provider to use by grabbing the default context and setting the named table provider at the same time they grab the default context and add exec factories.\r\n\r\nThere is then no python reference or bindings needed at all.\r\n\r\nI think this is a reasonable solution (I prefer AceroContext over MetaRegistry which was mentioned in the ML threads).\r\n\r\nOne does then have to consider what happens if two processes or calls are made to configure the default named table provider.  I think the simplest option would be to just overwrite it.  It might be slightly nicer to throw an error when setting the default named table provider if it has already been set.  There are more complex alternatives such as a named table provider registry or a chain of named table providers but I'm not sure they are needed in this case.\r\n\r\nCC `[~icexelloss]` to confirm."
+        },
+        {
+            "created_at": "2022-10-14T18:01:16.925Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18063?focusedCommentId=17617900) by Weston Pace (westonpace):*\nAnother alternative, which might be a more long term solution, is to create a new Substrait extension which defines a new `read_type` (e.g. `ExtensionTable`) which contains the needed information (e.g. URL).\r\n\r\nWe would then need to make it possible to construct custom sources from `ExtensionTable` though which probably puts us in roughly the same boat :).  We would need an `ExtensionTableProvider` and we would probably want the default to be configurable.\r\n\r\nHowever, this will probably be needed as soon as the custom source node needs more than  URI (e.g. credentials, timeout configuration, etc.)"
+        },
+        {
+            "created_at": "2022-10-17T15:08:32.375Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18063?focusedCommentId=17618950) by Li Jin (icexelloss):*\n> It might be slightly nicer to throw an error when setting the default named table provider if it has already been set. There are more complex alternatives such as a named table provider registry or a chain of named table providers but I'm not sure they are needed in this case.\r\nI think either override or raise error is fine. In practice I don't see our application would need to invoke the initialization of custom registration more than once.\r\n\r\n\u00a0\r\n> Another alternative, which might be a more long term solution, is to create a new Substrait extension which defines a new `read_type` (e.g. `{}ExtensionTable{`}) which contains the needed information (e.g. URL).\n> \n> We would then need to make it possible to construct custom sources from `ExtensionTable` though which probably puts us in roughly the same boat :). We would need an `ExtensionTableProvider` and we would probably want the default to be configurable.\r\nI have the same thinking as well. Long term we should allow user to register custom ExtensionTableProvider as well and ideally with the similar way of how to extend ExecFactoryRegistry and NamedTableProvider."
+        }
+    ]
+}

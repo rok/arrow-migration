@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[Python] Segmentation fault when loading total 2GB of parquet files",
+        "body": "***Note**: This issue was originally created as [ARROW-1873](https://issues.apache.org/jira/browse/ARROW-1873). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe are trying to load 100 parquet files, and each of them is around 20MB. Before we port [ARROW-1830] into our pyarrow distribution, we use `glob` to list all the files, and then load them as pandas dataframe through pyarrow. \r\n\r\nThe schema of the parquet files is like \r\n```java\n\r\nroot\r\n |-- dateint: integer (nullable = true)\r\n |-- profileid: long (nullable = true)\r\n |-- time: long (nullable = true)\r\n |-- label: double (nullable = true)\r\n |-- weight: double (nullable = true)\r\n |-- features: array (nullable = true)\r\n |    |-- element: double (containsNull = true)\r\n```\r\n\r\nIf we only load couple of them, it works without any issue. However, when loading 100 of them, we got segmentation fault as the following. FYI, if we flatten `features: array[double]` into top level, the file sizes are around the same, and work fine too. \r\n\r\nIs there anything we can try to eliminate this issue? Thanks.\r\n\r\n```Java\n\r\n>>> import glob\r\n>>> files = glob.glob(\"/home/dbt/data/*\")\r\n>>> data = pq.ParquetDataset(files).read().to_pandas()\r\n[New Thread 0x7fffe8f84700 (LWP 23769)]\r\n[New Thread 0x7fffe3b93700 (LWP 23770)]\r\n[New Thread 0x7fffe3392700 (LWP 23771)]\r\n[New Thread 0x7fffe2b91700 (LWP 23772)]\r\n[Thread 0x7fffe2b91700 (LWP 23772) exited]\r\n[Thread 0x7fffe3b93700 (LWP 23770) exited]\r\n\r\nThread 4 \"python\" received signal SIGSEGV, Segmentation fault.\r\n[Switching to Thread 0x7fffe3392700 (LWP 23771)]\r\n0x00007ffff270fc94 in arrow::Status arrow::VisitTypeInline<arrow::py::ArrowDeserializer>(arrow::DataType const&, arrow::py::ArrowDeserializer*) ()\r\n   from /home/dbt/miniconda3/lib/python3.6/site-packages/pyarrow/../../../libarrow_python.so.0\r\n(gdb) backtrace\r\n#0  0x00007ffff270fc94 in arrow::Status arrow::VisitTypeInline<arrow::py::ArrowDeserializer>(arrow::DataType const&, arrow::py::ArrowDeserializer*) ()\r\n   from /home/dbt/miniconda3/lib/python3.6/site-packages/pyarrow/../../../libarrow_python.so.0\r\n#1  0x00007ffff2700b5a in arrow::py::ConvertColumnToPandas(arrow::py::PandasOptions, std::shared_ptr<arrow::Column> const&, _object*, _object**) ()\r\n   from /home/dbt/miniconda3/lib/python3.6/site-packages/pyarrow/../../../libarrow_python.so.0\r\n#2  0x00007ffff2714985 in arrow::Status arrow::py::ConvertListsLike<arrow::DoubleType>(arrow::py::PandasOptions, std::shared_ptr<arrow::Column> const&, _object**) () from /home/dbt/miniconda3/lib/python3.6/site-packages/pyarrow/../../../libarrow_python.so.0\r\n#3  0x00007ffff2716b92 in arrow::py::ObjectBlock::Write(std::shared_ptr<arrow::Column> const&, long, long) ()\r\n   from /home/dbt/miniconda3/lib/python3.6/site-packages/pyarrow/../../../libarrow_python.so.0\r\n#4  0x00007ffff270a489 in arrow::py::DataFrameBlockCreator::WriteTableToBlocks(int)::{lambda(int)#1}::operator()(int) const ()\r\n   from /home/dbt/miniconda3/lib/python3.6/site-packages/pyarrow/../../../libarrow_python.so.0\r\n#5  0x00007ffff270a67c in std::thread::_Impl<std::_Bind_simple<arrow::Status arrow::ParallelFor<arrow::py::DataFrameBlockCreator::WriteTableToBlocks(int)::{lambda(int)#1}&>(int, int, arrow::py::DataFrameBlockCreator::WriteTableToBlocks(int)::{lambda(int)#1}&)::{lambda()#1} ()> >::_M_run() ()\r\n   from /home/dbt/miniconda3/lib/python3.6/site-packages/pyarrow/../../../libarrow_python.so.0\r\n#6  0x00007ffff1e30c5c in std::execute_native_thread_routine_compat (__p=<optimized out>)\r\n    at /opt/conda/conda-bld/compilers_linux-64_1505664199673/work/.build/src/gcc-7.2.0/libstdc++-v3/src/c++11/thread.cc:110\r\n#7  0x00007ffff7bc16ba in start_thread (arg=0x7fffe3392700) at pthread_create.c:333\r\n#8  0x00007ffff78f73dd in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:109\r\n```\r\n",
+        "created_at": "2017-11-30T01:51:31.000Z",
+        "updated_at": "2019-06-03T12:43:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-12-08T01:06:54.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-12-01T17:06:49.071Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1873?focusedCommentId=16274642) by Wes McKinney (wesm):*\nIf I had to guess, the features inner array is overflowing 2 billion elements. I marked this for 0.8.0 to take a look"
+        },
+        {
+            "created_at": "2017-12-01T22:24:47.166Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1873?focusedCommentId=16275093) by DB Tsai (dbtsai):*\nThere are only 14 elements in the feature inner array, but there are 100M records in total. Anyway I can debug it or provide more information for you? Thanks. "
+        },
+        {
+            "created_at": "2017-12-02T02:08:26.748Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1873?focusedCommentId=16275374) by DB Tsai (dbtsai):*\nDoing some digging in a beefy machine, and it runs in big machine! \r\n\r\nWe have two variances of the same data in different schema. One is \r\n```java\n\r\nroot\r\n |-- dateint: integer (nullable = true)\r\n |-- profileid: long (nullable = true)\r\n |-- time: long (nullable = true)\r\n |-- label: double (nullable = true)\r\n |-- weight: double (nullable = true)\r\n |-- features: array (nullable = true)\r\n |    |-- element: double (containsNull = true)\r\n```\r\nas previously shown, and it's 2.7G. \r\n\r\nThe other one is in struct, and the schema is like\r\n```java\n\r\nroot\r\n |-- dateint: integer (nullable = true)\r\n |-- profileid: long (nullable = true)\r\n |-- time: long (nullable = true)\r\n |-- label: double (nullable = true)\r\n |-- weight: double (nullable = true)\r\n |-- features: struct (nullable = true)\r\n |    |-- f1: double (nullable = true)\r\n |    |-- f2: double (nullable = true)\r\n ...........\r\n |    |-- f14: double (nullable = true)\r\n```\r\nand the total size is 1.9G.\r\n\r\nIt does make sense that the files in struct are smaller due to better compression in columnar format. \r\n\r\nHowever, when the first one is loaded into memory, it takes 22.32GB, while the second one takes 127.97GB. In theory, for uncompressed data, it should at most take `93993056 * (5 + 14) * 8 bytes = 14GB`. Where is the overhead coming from? In particularly, the second one in struct is resulting almost 10x overhead. Is it possible to load those data in memory with compression like Spark's dataframe cache? Is it possible to lazily load the data, and only deserialize the data when in need?\r\n\r\nRegardless of the overhead issue, we should figure out how to return OOM instead of segmentation fault for easier debugging. \r\n\r\nThey are long questions, and thank you for helping out."
+        },
+        {
+            "created_at": "2017-12-04T14:48:22.485Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1873?focusedCommentId=16276882) by Wes McKinney (wesm):*\nI'll take a look to see where the OOM might not be bubbling up. There are a number of places where we are not checking for Python errors as rigorously as we could, so at high memory pressure the OOM could happen in any number of places"
+        },
+        {
+            "created_at": "2017-12-04T18:16:34.952Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1873?focusedCommentId=16277181) by DB Tsai (dbtsai):*\n`[~wesmckinn]` thanks. I wonder why the overhead of loading parquet files into memory is so huge. Is it technically addressable in pyarrow or in pandas? "
+        },
+        {
+            "created_at": "2017-12-04T19:16:47.753Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1873?focusedCommentId=16277299) by Wes McKinney (wesm):*\nI think the overhead is coming from the Python objects that are being created by `to_pandas`. Try removing the `to_pandas()` call and then look at `pyarrow.total_allocated_bytes()`. All memory allocations in Arrow are precisely accounted for, so it should give you an exact accounting of how much data has been loaded into memory. "
+        },
+        {
+            "created_at": "2017-12-04T19:20:27.221Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1873?focusedCommentId=16277307) by Wes McKinney (wesm):*\nNote also\r\n\r\n```Java\n\r\nIn [8]: import sys\r\n\r\nIn [9]: d = 3.5\r\n\r\nIn [10]: sys.getsizeof(d)\r\nOut[10]: 24\r\n\r\nIn [11]: dct = {}\r\n\r\nIn [12]: sys.getsizeof(dct)\r\nOut[12]: 288\r\n```\r\n\r\nSo the \"features\" struct in the other table takes up a minimum of 624 bytes per record, probably more than that when you account for internal `PyObject*` which are created inside the hash table "
+        },
+        {
+            "created_at": "2017-12-04T19:22:44.358Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1873?focusedCommentId=16277314) by Wes McKinney (wesm):*\nI just created https://issues.apache.org/jira/browse/ARROW-1886 as a possible way to help with this"
+        },
+        {
+            "created_at": "2017-12-07T18:53:09.724Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1873?focusedCommentId=16282316) by Wes McKinney (wesm):*\nI'm going to add a few missing null checks to help catch the OOM, will put up patch soon. I'm not sure how else to help with this"
+        },
+        {
+            "created_at": "2017-12-08T01:06:54.344Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1873?focusedCommentId=16282856) by Wes McKinney (wesm):*\nIssue resolved by pull request 1404\n<https://github.com/apache/arrow/pull/1404>"
+        }
+    ]
+}

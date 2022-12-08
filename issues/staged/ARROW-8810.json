@@ -1,0 +1,38 @@
+{
+    "issue": {
+        "title": "[R] Add documentation about Parquet format, appending to stream format",
+        "body": "***Note**: This issue was originally created as [ARROW-8810](https://issues.apache.org/jira/browse/ARROW-8810). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIs it possible to append new rows to an existing .parquet file using the R client's arrow::write_parquet(), in a manner similar to the `append=TRUE` argument in text-based output formats like write.table()?\u00a0\r\n\r\n\u00a0\r\n\r\nApologies as this is perhaps more a question of documentation or user interface, or maybe just my ignorance.\u00a0",
+        "created_at": "2020-05-15T03:59:37.000Z",
+        "updated_at": "2020-10-10T02:30:28.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Documentation",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-10-10T02:30:28.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-05-15T08:45:14.488Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8810?focusedCommentId=17108087) by Uwe Korn (uwe):*\nGenerally, you should see Parquet files as immutable. If you want to change its contents, it is almost always simpler and faster to just rewrite them completely or (much better) just write a second file and treat a directory of Parquet files as a single dataset. This comes down to two major properties:\r\n \\* Values in a Parquet file are encoded and compressed. Thus they don't adhere to a fixed size per row/value but in some cases a column chunk of a million values may be stored in just 64 bytes.\r\n \\* The metadata that contains all essential information, e.g. where row groups start, what schema the data is, is stored at the end of the file (i.e. the footer). Especially the last four bytes are needed as they indicate the start position of the footer.\r\n\r\nTechnically, you could still write code that appends to an existing Parquet file but this has the drawbacks that:\r\n \\* Writing wouldn't be faster than writing to a second, separate file. It would probably be even slower as we need to deserialize the existing metadata and serialize it again only with slight modifications.\r\n \\* Reading wouldn't be faster than reading from a second file, even when doing it sequentially.\r\n \\* While append to a Parquet file, the file would be unreadable.\r\n \\* If your process crashes during write, all existing data in the Parquet file will be lost.\r\n \\* It will give the users the impression that you could efficiently insert row-by-row to a file. With a columnar data format that can only leverage its techniques on large chunks of rows, this would generate a massive overhead.\r\n\r\nStill if one would try to implement this, it would work as follows:\r\n1. Read in the footer/metadata of the existing file.\n1. Seek to the start position of the existing footer and overwrite it with the new data.\n1. Merge (or rather concat) the existing metadata with the newly computed metadata and write it at the end of the file.\n   \n   If you would take a look at how a\u00a0completely fresh Parquet file would be written, this is identical except that we wouldn't need to read in and overwrite any existing metadata.\n   \n   With newer Arrow releases, there will be better support for Parquet datasets in R, I'll leave this to `[~npr]` or `[~jorisvandenbossche]` \u00a0to link to the right docs."
+        },
+        {
+            "created_at": "2020-05-15T14:42:34.273Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8810?focusedCommentId=17108356) by Neal Richardson (npr):*\nMulti-file (Parquet and other format) datasets in R: http://arrow.apache.org/docs/r/articles/dataset.html\r\n\r\nIf appending to a single file is important for your use case, you could use the Arrow stream format. See discussion on ARROW-8748 for what that would look like."
+        },
+        {
+            "created_at": "2020-05-15T15:07:08.439Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8810?focusedCommentId=17108381) by Wes McKinney (wesm):*\nSince it's not possible to append data to an existing file (without a great deal of effort in the C++ library) I would suggest closing this. Might be some documentation we could add to clarify that Parquet datasets are intended to constitute many files with appending by writing additional files"
+        },
+        {
+            "created_at": "2020-05-15T16:08:23.297Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8810?focusedCommentId=17108424) by Carl Boettiger (cboettig):*\nThanks all, this is a great answer.\u00a0 Would love to see some of these details mentioned in the R vignettes, as no doubt other R users might also be unclear how this differs from other compressed/encoded filetypes (e.g. the issue of metadata in the file footer).\u00a0\r\n\r\n\u00a0\r\n\r\nWriting multiple files makes sense for larger chunks. My current use case is effectively streaming (currently just to .tsv.gz compressed table), so I'm definitely following the discussion in ARROW-8784. \r\n\r\n\u00a0\r\n\r\nPlease feel free to close, and thanks again for this fantastic library and the R bindings.\u00a0"
+        },
+        {
+            "created_at": "2020-10-09T23:29:42.608Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8810?focusedCommentId=17211468) by Neal Richardson (npr):*\nDoing in ARROW-10257"
+        }
+    ]
+}

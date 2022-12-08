@@ -1,0 +1,20 @@
+{
+    "issue": {
+        "title": "[C++] Thread pool leaks memory when forking (and could maybe deadlock) if threads exist at the time of fork",
+        "body": "***Note**: This issue was originally created as [ARROW-12879](https://issues.apache.org/jira/browse/ARROW-12879). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhile working on ARROW-12878 I have made the leak more obvious.\u00a0 When we fork we cannot delete any remaining std::thread.\u00a0 In addition, we cannot safely use any mutexes that might have been claimed by child threads.\r\n\r\n\u00a0\r\n\r\nThe existing implementation works around this by creating a new ThreadPool::State instance.\u00a0 However, shared_ptr's to the old instance are still held by (now defunct) std::thread instances and so the state object will never be deleted (valgrind confirms this).\r\n\r\n\u00a0\r\n\r\nFurthermore, if the fork were to happen while a thread task was running and had captured some mutex (e.g. any of the ones used in the datasets API) then that mutex will never be released.\r\n\r\n\u00a0\r\n\r\nA more correct workaround would be to hook into pthread_atfork and shut down all threads (don't have to wait for all jobs to complete), forking, then restarting all the threads on BOTH the child and the parent (today we restart on just the child and we leave the parent running).",
+        "created_at": "2021-05-25T23:12:51.000Z",
+        "updated_at": "2021-05-26T07:57:18.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-05-26T07:57:18.248Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12879?focusedCommentId=17351610) by Antoine Pitrou (apitrou):*\nLeaking memory when forking a process with threads is an unavoidable fact of life (the dead threads will still hold to unreleased memory, for example through shared_ptrs held in local frames of execution). I'm not sure there's any point in trying to solve this. If you fork a process with threads, the only reasonable thing you can do in the child is spawn another executable (using e.g. exec())."
+        }
+    ]
+}

@@ -1,0 +1,62 @@
+{
+    "issue": {
+        "title": "Java<->C++ Integration tests for dictionary-encoded vectors",
+        "body": "***Note**: This issue was originally created as [ARROW-692](https://issues.apache.org/jira/browse/ARROW-692). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n",
+        "created_at": "2017-03-22T16:24:42.000Z",
+        "updated_at": "2017-07-03T16:35:18.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Java",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2017-07-03T16:35:18.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-06-05T17:56:23.550Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-692?focusedCommentId=16037284) by Bryan Cutler (bryanc):*\nhere is an example of JSON data with a dictionary I'll be working towards, let me know if there was something else in mind `[~wesmckinn]` `[~julienledem]`\n\n```\n{\n  \"schema\": {\n    \"fields\": [\n      {\n        \"name\": \"foo\",\n        \"type\": {\"name\": \"utf8\"},\n        \"nullable\": true, \"children\": [],\n        \"typeLayout\": {\n          \"vectors\": [\n            {\"type\": \"VALIDITY\", \"typeBitWidth\": 1},\n            {\"type\": \"OFFSET\", \"typeBitWidth\": 32}\n            {\"type\": \"DATA\", \"typeBitWidth\": 8}\n          ]\n        },\n        \"dictionary\": {\n          \"id\": 0, \n          \"indexType\": {\"name\": \"int\", \"bitWidth\": 8, \"isSigned\": false}, \n          \"isOrdered\": false\n        }\n      }\n    ]\n  },\n  \"dictionaries\": [\n    {\n      \"id\": 0,\n      \"data\": {\n        \"count\": 3,\n        \"columns\": [\n          {\n            \"name\": \"foo\",\n            \"count\": 3,\n            \"VALIDITY\": [1, 1, 1],\n            \"OFFSET\": [0, 3, 6, 9], \n            \"DATA\": [\"foo\", \"bar\", \"baz\"]\n          }\n        ]\n      }\n    }\n  ],\n  \"batches\": [\n    {\n      \"count\": 6,\n      \"columns\": [\n        {\n          \"name\": \"foo\",\n          \"count\": 6,\n          \"VALIDITY\": [1, 1, 0, 1, 1, 1],\n          \"DATA\": [0, 1, 0, 1, 2]\n        }\n      ]\n    }\n  ]\n}\n```"
+        },
+        {
+            "created_at": "2017-06-07T01:47:25.078Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-692?focusedCommentId=16039992) by Wes McKinney (wesm):*\nSounds good. Keep in mind that dictionaries may be used more than once. I will try to include some data generation as part of writing the C++ portion of this"
+        },
+        {
+            "created_at": "2017-06-09T23:16:27.184Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-692?focusedCommentId=16045207) by Bryan Cutler (bryanc):*\nUpdated the sample JSON - the Field schema should be the dictionary type (utf8 here), and not the index type\n\n`[~wesmckinn]` and `[~julienledem]` I have a couple questions:\n\n1)  The \"name\" field in the dictionary is meaningless right?  It's not part of the RecordBatch message.  In Arrow Java, when writing it will be whatever name the user initializes the dictionary vector as.  When reading, the dictionary vector will be the first Field name that has a dictionary encoding.  Would it be better to overwrite any name to something standard like \"DICT#\" where # is the dictionary id?\n\n2)  Does it make sense for the dictionary field to be nullable?  In Java the dictionary field nullable flag will be whatever the first field using that encoding is.  Should nullable only be allowed to be false and enforce this when setting the dictionary field? Of course the encoded index field can be nullable.\n\n"
+        },
+        {
+            "created_at": "2017-06-10T00:18:05.881Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-692?focusedCommentId=16045259) by Julien Le Dem (julienledem):*\n`[~bryanc]`\n1) yes, the name is not important here. another option is to name it after the field it is used for but it is true that a dictionary can be used for multiple fields. I don't have a strong opinion there. The id field is already there so forcing it in the name is not that useful. The name field is optional in the schema so we can also say it is omitted for dictionaries.\n2) i'd say a dictionary is always not nullable. nulls are stored in the validity vector of the index field."
+        },
+        {
+            "created_at": "2017-06-11T22:10:10.883Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-692?focusedCommentId=16046141) by Wes McKinney (wesm):*\n`[~bryanc]` I'm working on this on the C++ side. I'm wishing I had put more thought into sharing abstractions between the JSON reader/writer and the binary IPC reader/writer, as it probably would have saved me a lot of time, but it's too late now. \n\nAs a small detail, do you have any objection to nesting the dictionaries in the `\"schema\"` object? That turned out to make things simpler for me, but if it makes things harder on the Java side I can change the code. \n\nOtherwise I think we are aligned; I will add the integration test fixtures in a follow up patch and I reckon there could be a small round of format reconciliation over small issues (but maybe we'll get lucky!)"
+        },
+        {
+            "created_at": "2017-06-12T17:46:00.886Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-692?focusedCommentId=16046830) by Bryan Cutler (bryanc):*\n`[~wesmckinn]` By dictionaries, you are asking about the dictionary record batches right?  Adding the dictionaries to the `schema` object would make things more difficult on the Java side.  Right now the `Schema` is written and read back as a single object (`generator.writeObjectField(\"schema\", schema);`) with the class members that go into JSON having an annotation that lets the generator/parser know.  So to put the dictionaries into the Schema, I would need to either re-write the JSON parts to not use annotations or add another member in the `Schema` class to hold the dictionaries - but that doesn't seem right.  There might be someway to manipulate the built-in parser to do this, but I'm not sure.  Would it be too difficult to keep the format above with dictionaries on the same level as the schema?"
+        },
+        {
+            "created_at": "2017-06-12T19:00:16.349Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-692?focusedCommentId=16046946) by Wes McKinney (wesm):*\nSo the way that schemas are being reconstructed in Java, at least last time I checked, doesn't seem quite right to me (the schema being modified post-facto). In C++, the dictionaries are held in the schema, and the schema is immutable \u2013 it proceeds in a first pass to find the dictionary types, then reads the dictionaries and stores them in a \"DictionaryMemo\" object, and then does a second pass of the schema metadata to reconstruct the schema. We were discussing this in `[~elahrvivaz]`'s original patches. Seeing if `[~julienledem]` has any thoughts on this\n\nOne of the artifacts of the way that Java is set up right now is that dictionary-encoding in nested subfields is not supported, but we need to support that (e.g. List of Dictionary-encoded String). That's probably a more invasive refactoring \n\nI will change my patch https://github.com/apache/arrow/pull/750 to put the dictionaries at the top level of the JSON object; that's not such a big deal."
+        },
+        {
+            "created_at": "2017-06-13T17:36:38.628Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-692?focusedCommentId=16048150) by Bryan Cutler (bryanc):*\nThanks Wes, that will help things on the Java side.  Currently, Java also stores the dictionaries in a similar DictionaryMemo called \"DictionaryProvider\".  This is an interface that is implemented by the ArrowFileReader and ArrowJsonReader, so these end up storing the dictionaries and allow to lookup one from a given id.  The Schema is modified post-facto to change the type of the fields between the index type and dictionary type.  So there is a little difference, but I don't know if there would be any impact to usage.  I'll have to look into it more to see about support for nested subfields."
+        },
+        {
+            "created_at": "2017-06-13T18:44:32.671Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-692?focusedCommentId=16048232) by Wes McKinney (wesm):*\nIt would be simpler for the schema to be immutable, and therefore constructed in a single pass. That makes it easier to support nested subfields.\n\nAs an example, see the \"list of encoded string\" field in https://gist.github.com/wesm/5100e41173a3b5e53437b7a887e4383a#file-gistfile1-json, we have\n\n```Java\n{\n        \"name\": \"list of encoded string\",\n        \"nullable\": true,\n        \"type\": {\n          \"name\": \"list\"\n        },\n        \"children\": [\n          {\n            \"name\": \"item\",\n            \"nullable\": true,\n            \"type\": {\n              \"name\": \"utf8\"\n            },\n            \"dictionary\": {\n              \"id\": 1,\n              \"indexType\": {\n                \"name\": \"int\",\n                \"bitWidth\": 8,\n                \"isSigned\": true\n              },\n              \"isOrdered\": false\n            },\n            \"children\": [],\n            \"typeLayout\": {\n              \"vectors\": [\n                {\n                  \"type\": \"VALIDITY\",\n                  \"typeBitWidth\": 1\n                },\n                {\n                  \"type\": \"DATA\",\n                  \"typeBitWidth\": 8\n                }\n              ]\n            }\n          }\n        ],\n        \"typeLayout\": {\n          \"vectors\": [\n            {\n              \"type\": \"VALIDITY\",\n              \"typeBitWidth\": 1\n            },\n            {\n              \"type\": \"OFFSET\",\n              \"typeBitWidth\": 32\n            }\n          ]\n        }\n      }\n```"
+        },
+        {
+            "created_at": "2017-07-01T01:50:46.304Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-692?focusedCommentId=16070943) by Wes McKinney (wesm):*\nPR: https://github.com/apache/arrow/pull/800"
+        },
+        {
+            "created_at": "2017-07-03T16:35:18.088Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-692?focusedCommentId=16072683) by Wes McKinney (wesm):*\nIssue resolved by pull request 800\n<https://github.com/apache/arrow/pull/800>"
+        }
+    ]
+}

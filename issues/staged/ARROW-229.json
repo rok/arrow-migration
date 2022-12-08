@@ -1,0 +1,65 @@
+{
+    "issue": {
+        "title": "[C++] Implement safe casts for primitive types",
+        "body": "***Note**: This issue was originally created as [ARROW-229](https://issues.apache.org/jira/browse/ARROW-229). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn some situations, you want to cast the data in a PrimitiveArray to a different (but similar) data type, e.g. from `uint32_t`\u00a0to `int32_t` or `uint32_t` to `uint8_t`. This can either be done by reinterpreting the data or needs to involve a copy if the size of the underlying type changes. There is already an implementation for this in `parquet-cpp` that could be pulled out into Arrow: https://github.com/apache/parquet-cpp/blob/9a0407e684c0a6299d0e6ab98c11c1162915c0ee/src/parquet/arrow/writer.cc#L71",
+        "created_at": "2016-06-26T09:49:45.000Z",
+        "updated_at": "2017-09-08T02:33:00.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2017-09-07T17:00:45.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-08-20T16:51:56.561Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-229?focusedCommentId=16134502) by Wes McKinney (wesm):*\nRepurposed this JIRA and expanded scope somewhat. We need to create a module of safe casts (i.e. between integer types, or integers and floats). We can also add an option to perform unsafe cast without warnings / errors (the equivalent of using `static_cast<T>`). We need this for some other features in the queue"
+        },
+        {
+            "created_at": "2017-08-23T13:59:40.028Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-229?focusedCommentId=16138387) by Ankit Aggarwal (ankit5012):*\nCreated the pull request\nPR : https://github.com/apache/arrow/pull/986\n\n\n"
+        },
+        {
+            "created_at": "2017-08-23T14:13:47.972Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-229?focusedCommentId=16138406) by Wes McKinney (wesm):*\nThank you for your patch. The scope of what I am intending here is fairly large. I am expecting to add a new public API:\n\n```Java\nStatus SafeCast(const Array& input, const std::shared_ptr<DataType>& target_type,\n                MemoryPool* pool,\n                std::shared_ptr<Array>* out);\n```\n\nThis will mean some dynamic dispatch work and significantly more testing to check casts that would cause data loss."
+        },
+        {
+            "created_at": "2017-08-23T16:55:22.492Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-229?focusedCommentId=16138635) by Ankit Aggarwal (ankit5012):*\nScope: To define safe casts functions for the each type (arrow::Type). For example - TIME32 to TIME64, Union Array to Dictionary Array\n \nA possible implementation of how it can be done:\nTag dispatching and calling the SetData function for the required type (arrow::Array) if it is array type or reinterpret_cast for the numerical type  and assigning it to the output pointer.\n\n```java\nStatus SafeCast(const Array& input, const std::shared_ptr<DataType>& target_type,\n                MemoryPool* pool,\n                std::shared_ptr<Array>* out);\n```\nIn the API suggested why do we need the MemoryPool pointer?\nDo we need to check whether the SafeCast is possible or not?\n"
+        },
+        {
+            "created_at": "2017-08-23T16:59:09.189Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-229?focusedCommentId=16138641) by Wes McKinney (wesm):*\nAny function that is capable of allocating memory must be passed a MemoryPool so that allocations can be accounted for. If the input type and the target type are the same, then no memory is allocated, otherwise new memory is allocated. \n\nIt would most consistent to use the visitor pattern for this dynamic dispatch as we have done elsewhere in the library."
+        },
+        {
+            "created_at": "2017-08-29T20:26:41.501Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-229?focusedCommentId=16146058) by Ankit Aggarwal (ankit5012):*\nHi Wes\n\nI have created a gist for this\n\"https://gist.github.com/AnkitAggarwalPEC/7b13e51952f89ac826ea240d0e44b610\"\n\nThere is a couple of design issue that I'm facing:\n\n1) When the data type is same. I thought it would be better to use directly \"SetData\" function but it is declared as protected, so It cannot be called. By making it public it solves the issue.\n2) When the data type is not same, I'm trying to use the MakeBuilder function to get the required data type builder and use the Append function accordingly but Append is not declared in the base class of Array Builder. Should we change that or try an another way?\n\nAnkit"
+        },
+        {
+            "created_at": "2017-08-29T21:06:06.239Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-229?focusedCommentId=16146125) by Wes McKinney (wesm):*\nhi `[~ankit5012]`, would it be OK if I took an initial pass at writing an implementation of this, and we can discuss further in code review on GitHub? \n\nThis is one of the most complex issues currently in the Arrow JIRA as it touches most aspects of C++ library: memory management, array containers, array builders, multiple dispatch, etc. Because Arrow is not a compile-time C++ library, we must compile cast functions for each pair of supported input and output type so that the specific implementations are available in the shared library.\n\nTensorFlow's implementation of cast might give us some ideas, see all of the files starting with cast_op_impl\\* in\n\nhttps://github.com/tensorflow/tensorflow/tree/master/tensorflow/core/kernels\n\nAnd the dynamic dispatch here:\n\nhttps://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/kernels/cast_op.cc#L99\n\nArrow is actually more complicated since we have non-numeric and nested types to think about. I'd like to do something for this JIRA for numeric, non-nested types, while leaving the door open for extending to more complicated types (e.g. you could imagine casting `List<Int64>` to `List<Int32>`). "
+        },
+        {
+            "created_at": "2017-08-29T21:40:47.003Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-229?focusedCommentId=16146186) by Ankit Aggarwal (ankit5012):*\nOkay. There will be a no issue if you took an initial pass"
+        },
+        {
+            "created_at": "2017-08-30T07:48:20.387Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-229?focusedCommentId=16146829) by Uwe Korn (uwe):*\nI'm happy with the proposed interface but I would also like to see \n\n```Java\nStatus SafeCast(const Array& input, const std::shared_ptr<DataType>& target_type,\n                MemoryPool* pool,\n                std::shared_ptr<Array>* out);\n\ntemplate <typename SourceType, typename TargetType>\nStatus TypedSafeCast(const TypedArray<ArrowType>& input, MemoryPool* pool,\n                std::shared_ptr<Array>* out);\n```\n\nWhere we have e.g. `TypedArray<Int64Type> = NumericArray<Int64Type>`. This would enable typed C++ code to directly pass along its type information. I would expect an implementation of `SafeCast` to actually just call `TypedSafeCast`."
+        },
+        {
+            "created_at": "2017-08-30T13:16:54.421Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-229?focusedCommentId=16147227) by Wes McKinney (wesm):*\nThe latter is tricky because it means that the `TypedSafeCast` symbols must be exported in the shared library, which places some constraints on the shape of the implementation. I will see how much progress I can make and we can discuss further in the PR"
+        },
+        {
+            "created_at": "2017-09-01T23:10:18.994Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-229?focusedCommentId=16151274) by Wes McKinney (wesm):*\nStarted on this in: https://github.com/apache/arrow/pull/1027. We can iterate on the implementation details; I'll write enough unit tests to feel good about numeric casts and then we can add Python bindings in a subsequent patch. "
+        },
+        {
+            "created_at": "2017-09-07T17:00:45.984Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-229?focusedCommentId=16157237) by Wes McKinney (wesm):*\nIssue resolved by pull request 1027\n<https://github.com/apache/arrow/pull/1027>"
+        }
+    ]
+}

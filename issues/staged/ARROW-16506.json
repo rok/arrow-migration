@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "Pyarrow 8.0.0 write_dataset writes data in different order with use_threads=True",
+        "body": "***Note**: This issue was originally created as [ARROW-16506](https://issues.apache.org/jira/browse/ARROW-16506). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn the latest (8.0.0) release the following code snippet seems to write out data in a different order for each of the partitions when `use_threads=True` vs when `{}use_threads=False{`}.\r\n\r\nTesting the same snippet with pyarrow 7.0.0 gives the same order regardless of whether `use_threads` is set to True when the data is written.\r\n\r\n\u00a0\r\n```java\n\r\nimport itertools\r\n\r\nimport numpy as np\r\nimport pyarrow.dataset as ds\r\nimport pyarrow as pa\r\n\r\nn_rows, n_cols = 100_000, 20\r\n\r\ndef create_dataframe(color, year):\r\n    arr = np.random.randn(n_rows, n_cols)\r\n    df = pd.DataFrame(data=arr, columns=[f\"column_{i}\" for i in range(n_cols)])\r\n    df[\"color\"] = color\r\n    df[\"year\"] = year\r\n    df[\"id\"] = np.arange(len(df))\r\n    return df\r\n\r\n\r\npartitions = [\"red\", \"green\", \"blue\"]\r\nyears = [2011, 2012, 2013]\r\ndataframes = [create_dataframe(p, y) for p, y in itertools.product(partitions, years)]\r\ndf = pd.concat(dataframes)\r\n\r\ntable = pa.Table.from_pandas(df=df)\r\n\r\nds.write_dataset(\r\n    table,\r\n    \"./test\",\r\n    format=\"parquet\",\r\n    max_rows_per_group=1_000_000,\r\n    min_rows_per_group=1_000_000,\r\n    existing_data_behavior=\"overwrite_or_ignore\",\r\n    partitioning=ds.partitioning(pa.schema([\r\n        (\"color\", pa.string()),\r\n        (\"year\", pa.int64())\r\n    ]), flavor=\"hive\"),\r\n    use_threads=True,\r\n)\r\n\r\ndf_read = pd.read_parquet(\"./test/color=blue/year=2012\")\r\ndf_read.head()[[\"id\"]]\r\n\r\n```\r\n\u00a0\r\n\r\nTested on Ubuntu 20.04 with Python 3.8 and arrow versions 8.0.0 and 7.0.0.",
+        "created_at": "2022-05-09T13:49:13.000Z",
+        "updated_at": "2022-05-10T17:19:13.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-05-10T17:19:13.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-05-09T19:52:49.827Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16506?focusedCommentId=17533996) by Weston Pace (westonpace):*\nThis is expected behavior at the moment.  I'm guessing at some point between 7.0.0 and 8.0.0 we switched to reading from a table in a multi-threaded fashion.\r\n\r\nIs an ordered write important?  There has been some discussion of adding sequencing on the mailing list.  If we have sequencing information on batches then we could use that to do an ordered write."
+        },
+        {
+            "created_at": "2022-05-10T09:26:26.297Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16506?focusedCommentId=17534261) by Daniel Friar (dannyfri22):*\nThanks `[~westonpace]`, that makes sense. I wonder if it's worth adding to the docs just to make it clear that this is the case and ordered writes should not be expected/relied upon?\r\n\r\nI do think there are cases where an ordered write is important, particularly for e.g. time series data where a particular ordering is necessary for downstream tasks and additional in-memory sorts once the data is loaded may be expensive.\r\n\r\nMore of an opinion but generally I think it can be a little surprising to write from a table/dataframe and read back to discover the order has changed. Adding sequencing to achieve an ordered write would be an improvement IMO!"
+        },
+        {
+            "created_at": "2022-05-10T17:18:52.517Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16506?focusedCommentId=17534486) by Weston Pace (westonpace):*\nFYI ARROW-16518 was recently filed and I was reminded of ARROW-10883.  I am going to mark this as a duplicate of ARROW-10883.\r\n\r\nAdding a section on ordering to the docs is a good idea.  Yes, there was a recent discussion on the ML regarding an as-of join (i.e. something you commonly fined in a time series database) and sequencing was a part of that discussion."
+        }
+    ]
+}

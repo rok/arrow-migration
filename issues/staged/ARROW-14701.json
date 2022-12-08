@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Python] parquet.write_table has an undocumented and silent cap on row_group_size",
+        "body": "***Note**: This issue was originally created as [ARROW-14701](https://issues.apache.org/jira/browse/ARROW-14701). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n```java\n\r\nfrom io import BytesIO\r\nimport pandas as pd\r\nimport pyarrow\r\nfrom pyarrow import parquet\r\nfrom pyarrow import fs\r\n\r\nprint(pyarrow._version_)\r\n\r\ndef check_row_groups_created(size: int):\r\n\u00a0 \u00a0 df = pd.DataFrame({\"a\": range(size)})\r\n\u00a0 \u00a0 t = pyarrow.Table.from_pandas(df)\r\n\u00a0 \u00a0 buffer = BytesIO()\r\n\u00a0 \u00a0 parquet.write_table(t, buffer, row_group_size=size)\r\n\u00a0 \u00a0 buffer.seek(0)\r\n\u00a0 \u00a0 print(parquet.read_metadata(buffer))\r\n\u00a0 \u00a0\u00a0\r\ncheck_row_groups_created(50_000_000)\r\ncheck_row_groups_created(100_000_000) \n```\r\noutputs:\r\n```java\n\r\n6.0.0\r\n\r\n<pyarrow._parquet.FileMetaData object at 0x7f838584ab80>\r\ncreated_by: parquet-cpp-arrow version 6.0.0\r\nnum_columns: 1\r\nnum_rows: 50000000\r\nnum_row_groups: 1\r\nformat_version: 1.0\r\nserialized_size: 1493\r\n\r\n<pyarrow._parquet.FileMetaData object at 0x7f838584ab80>\r\ncreated_by: parquet-cpp-arrow version 6.0.0\r\nnum_columns: 1\r\nnum_rows: 100000000\r\nnum_row_groups: 2\r\nformat_version: 1.0 \r\nserialized_size: 1640 \n```",
+        "created_at": "2021-11-12T17:03:41.000Z",
+        "updated_at": "2022-10-22T21:39:23.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-12-10T21:57:09.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-12T17:13:59.188Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14701?focusedCommentId=17442861) by Adrien Hoarau (Adrien_):*\nThe cap does not seem to be based on the number of rows, I would guess it's based on the memory size of the `pyarrow.Table` but I haven't investigated further."
+        },
+        {
+            "created_at": "2021-11-30T21:46:56.320Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14701?focusedCommentId=17451371) by Will Jones (willjones127):*\n> The cap does not seem to be based on the number of rows, I would guess it's based on the memory size of the `pyarrow.Table` but I haven't investigated further.\r\nIt does seem to me to be based on rows; what makes you say otherwise?\r\n\r\nThe Python write table dispatches to the parquet::arrow::FileWriterImp::WriteTable() C++ function.\r\nThere are writer properties that specify a maximum row group length here, and this will override the row_group_size you provided in these lines:\r\n\r\n[writer.cc](https://github.com/apache/arrow/blob/00d55bb84982cd8ea8f3968b4fab68af595e79fe/cpp/src/parquet/arrow/writer.cc#L331-L333)\r\n\r\nThe default (64 \\* 1024 \\* 1024 rows) is set here:\r\n\r\n[properties.h](https://github.com/apache/arrow/blob/00d55bb84982cd8ea8f3968b4fab68af595e79fe/cpp/src/parquet/properties.h#L97)\r\n\r\nAs far I as I can tell, that option isn't currently exposed in the Python bindings and can't be changed.\r\n\r\nYou're correct it's not well documented by the write_table function, but is documented in the ParquetWriter.write_table method that function wraps."
+        },
+        {
+            "created_at": "2021-12-10T12:30:51.834Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14701?focusedCommentId=17457117) by Adrien Hoarau (Adrien_):*\n> It does seem to me to be based on rows; what makes you say otherwise?\r\n\r\nI had this impression, but checking again, it does seem to be based on the number or rows with the threshold you suggested, so my mistake."
+        },
+        {
+            "created_at": "2021-12-10T12:35:24.550Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14701?focusedCommentId=17457119) by Adrien Hoarau (Adrien_):*\n> You're correct it's not well documented by the write_table function, but is documented in the ParquetWriter.write_table method that function wraps.\r\n\r\nI couldn't find it in <https://arrow.apache.org/docs/python/generated/pyarrow.parquet.ParquetWriter.html#pyarrow.parquet.ParquetWriter.write_table> where should I be looking?"
+        },
+        {
+            "created_at": "2021-12-10T16:53:58.170Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14701?focusedCommentId=17457265) by Will Jones (willjones127):*\nApologies Adrien. I was looking in the development version of Arrow. You are right this wasn't documented in Arrow 6.0.0. New docstrings were added recently in ARROW-13668, and will be available in Arrow 7.0.0. Here is one of them:\r\n\r\n\r\n\r\n<https://github.com/apache/arrow/blob/b1f009ca80ef6f12fbdf56a1b53ed8d0e0571a5a/python/pyarrow/parquet.py#L697-L700>\r\n\r\n\u00a0\r\n\r\nI can make a minor PR to add this to the [write_table function](https://github.com/apache/arrow/blob/b1f009ca80ef6f12fbdf56a1b53ed8d0e0571a5a/python/pyarrow/parquet.py#L2096-L2097) as well.\u00a0"
+        },
+        {
+            "created_at": "2021-12-10T21:57:09.510Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14701?focusedCommentId=17457383) by David Li (lidavidm):*\nIssue resolved by pull request 11928\n<https://github.com/apache/arrow/pull/11928>"
+        },
+        {
+            "created_at": "2022-10-22T21:39:23.140Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14701?focusedCommentId=17622697) by Tim Loderhose (timlod):*\nAre there any plans to remove this cap?\r\nFor big tables written on systems with lots of memory, this can incur a big performance hit, as the zero-copy logic in `to_pandas()` isn't accessible when the file is chunked.\r\nI'd also be interested in why the cap is there in the first place, I'm assuming there is some good reason for it."
+        }
+    ]
+}

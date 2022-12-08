@@ -1,0 +1,65 @@
+{
+    "issue": {
+        "title": "[C++] Change dataset readahead to be based on available RAM/CPU instead of fixed constants/options",
+        "body": "***Note**: This issue was originally created as [ARROW-12030](https://issues.apache.org/jira/browse/ARROW-12030). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nRight now in the dataset scanning there are a few places where we add readahead.\u00a0 At each spot we have to pick some max for how much we read ahead.\u00a0 Instead of trying to figure out some max it might be nicer to base it on the available RAM.\r\n\r\nOn the other hand, it may be the case that there is some set of nice constants that just always works so this can probably wait until we understand more the memory usage of dataset scanning.",
+        "created_at": "2021-03-20T02:01:43.000Z",
+        "updated_at": "2021-11-09T21:31:59.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-11-09T21:31:59.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-03-20T11:52:42.393Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12030?focusedCommentId=17305409) by Antoine Pitrou (apitrou):*\nI don't think we should do any elaborate guesswork, **especially** based on available RAM (how do you evaluate that?). Instead, we can simply expose the readahead parameter to the user."
+        },
+        {
+            "created_at": "2021-03-20T16:26:22.253Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12030?focusedCommentId=17305497) by Weston Pace (westonpace):*\nI just don't see how useful the readahead parameter will be to the user.\u00a0 For example, there is a readahead at the reader level (how far ahead can each reader go in its file) and another one at the file level (how many files should we start reading at once) and then another readahead at the scanning level (how many scan tasks do we allow ourselves to store while waiting for the \"next\" scan task to be available).\u00a0 There is a readahead at the fragment level (how many fragments do we store waiting for the \"next\" fragment) but that one is pretty trivial because fragments don't take up much space.\r\n\r\nThe max RAM used will be something like (reader-readahead \\* file-readahead\\*block-size).\u00a0 Perhaps we just come up with some constant multipliers based on executor parallelism and filesystem parallelism.\u00a0 However, the option to allow a \"RAM limit\" to a workload is there.\u00a0 Given decompression & various encodings it can't ever be a perfect limit but it could be something like \"whenever this workflow allocates more than 1GB pause and wait for the consumer to catch up\" with the knowledge that it might be more like 1.1GB before we manage to stop."
+        },
+        {
+            "created_at": "2021-03-20T17:01:29.120Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12030?focusedCommentId=17305506) by Antoine Pitrou (apitrou):*\nLetting the user specify a RAM limit would be reasonable IMHO.\r\n\r\nBut I also wonder if it makes sense to have readahead at that many levels.\r\n"
+        },
+        {
+            "created_at": "2021-03-21T21:16:12.434Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12030?focusedCommentId=17305769) by Weston Pace (westonpace):*\nI think there are two readahead parameters and they can be options.\u00a0 They are \"how many files\" to read at once and \"how many blocks within a file\" (fileReadahead and blockReadahead).\r\n\r\n\u00a0\r\n\r\nThe other \"readaheads\" I was thinking about are less readahead and more queuing points.\u00a0 For example, if you hit a slow file (maybe it's S3 or maybe some files are in the page cache and some aren't) then you can't proceed if you want to maintain order.\u00a0 You can put backpressure on and halt the whole chain or you can queue up results and allow the earlier stages to keep running.\u00a0 The size of this queue is difficult to predict.\u00a0 It is based on how much slower the slow file is and how much faster the downstream (decoding & concatenating) is.\u00a0 For example, let's assume reading a file from page cache is 100ns and from disk is 1000ns and you can do all your downstream operations in 10ns.\u00a0 If one out of every 100 files is on disk then you need to buffer 9 or 10 blocks and you'll need to keep them in the buffer for about 100ns.\r\n\r\n\u00a0\r\n\r\nOn the other hand, we could take the other extreme and let our queues be unlimited but then if we have a dataset where our downstream is slower than our upstream that queue will grow without bound and it won't really be \"streaming\" anymore.\r\n\r\n\u00a0\r\n\r\nThis is where a RAM limit is less guesswork than trying to figure out the ideal limits to all of the potential queuing points.\r\n\r\n\u00a0\r\n\r\nThis concern is not limited to just file ordering and it isn't limited to just the scan portion of the execution graph.\u00a0 Maybe one column has a complex filter on it (a string column with a regex filter) or takes more time encoding/decoding (a dictionary column where we have to hash inputs).\u00a0 Anywhere the processing time is variable I think we may eventually want some buffering capability.\u00a0 For example, in quickstep, there is buffering between every single node in the graph."
+        },
+        {
+            "created_at": "2021-03-22T12:07:29.041Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12030?focusedCommentId=17306150) by David Li (lidavidm):*\nAlso, a RAM limit handles both cases where you have very large files and very small files; you won't queue up a lot of large files and you won't unnecessarily limit yourself on small ones."
+        },
+        {
+            "created_at": "2021-03-22T13:11:48.154Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12030?focusedCommentId=17306188) by Antoine Pitrou (apitrou):*\n> Maybe one column has a complex filter on it (a string column with a regex filter) or takes more time encoding/decoding (a dictionary column where we have to hash inputs).  Anywhere the processing time is variable I think we may eventually want some buffering capability. \r\n> \r\nI'm not sure why we would want that. If we're talking about CPU-bound operations then the important thing is that the CPU remains busy. A thread pool should ensure that naturally.\r\n"
+        },
+        {
+            "created_at": "2021-03-23T03:58:17.183Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12030?focusedCommentId=17306729) by Weston Pace (westonpace):*\n> I'm not sure why we would want that. If we're talking about CPU-bound operations then the important thing is that the CPU remains busy. A thread pool should ensure that naturally.\r\n\r\nI may not be describing this well.\u00a0 The back-pressure is going to halt the I/O (and potentially other CPU operations).\u00a0 It won't stop the bottleneck.\u00a0 For example, assume you are reading a feather file that is 30GB from an SSD on a 2 core 8GB AWS instance.\u00a0 Your goal is to filter on a string column using a regex or do some other CPU intensive computation (unique or an expensive cast / decoding or maybe many such operations).\r\n\r\nNow let's pretend we can read at 1000MB/s but the two cores working together can only process this operation at 400MB/s.\u00a0 Every second you are growing RAM by 600MB and in ~15 seconds you will have only processed part of the file but you will have run out of RAM.\r\n\r\nOn the other hand, since your I/O is so much faster than your CPU, you don't really need to readahead all that much.\u00a0 You can probably keep a 10MB buffer.\u00a0 The entire operation will still take 75 seconds but instead of taking over 8GB of RAM you only use 10MB.\r\n\r\nNow, you could argue that the I/O readahead in the scan node should be sufficient.\u00a0 However, imagine the graph is Scan->Filter->HashAgg->Output and the slow node is HashAgg.\u00a0 The filtering node will consume the I/O quickly so the I/O readahead buffer won't fill up.\u00a0 However, the Filter node will keep delivering batches to the HashAgg node and they will start to stockpile and build up."
+        },
+        {
+            "created_at": "2021-03-23T09:50:47.206Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12030?focusedCommentId=17306935) by Antoine Pitrou (apitrou):*\nWhat this seems to be implying is that the push model isn't the right model, is it?\r\n\r\nAdding backpressure-aware buffers between all computation nodes will be tedious and add overhead. Also, it's not obvious what will be the effect of having several of them along the processing graph.\r\n"
+        },
+        {
+            "created_at": "2021-03-23T19:10:19.750Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12030?focusedCommentId=17307360) by Weston Pace (westonpace):*\nI think it's a problem either way (push vs pull).\u00a0 The problem is just expressed in different ways and the failure condition is different.\u00a0 If you have push then you have to explicitly add buffering or else you won't have back pressure.\u00a0 If you have pull then you have to explicitly add buffering (readahead) or else you won't have pipeline parallelism."
+        },
+        {
+            "created_at": "2021-03-23T19:12:43.401Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12030?focusedCommentId=17307362) by Antoine Pitrou (apitrou):*\nIn the pull model it seems you only need readahead at the junction between IO and CPU tasks, right?\r\n\r\nIn the push model, it seems you would need to add buffering **and** blocking at every level."
+        },
+        {
+            "created_at": "2021-03-23T19:47:29.591Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12030?focusedCommentId=17307378) by Weston Pace (westonpace):*\nLet's assume there is a pipeline, A-B-C-D.\u00a0 A is async I/O and B, C, and D are all sync compute operations.\u00a0 By default, in the pull model, if you only add readahead between A and B then you will never have parallelism on B-C-D (fan-out or pipeline).\u00a0 Your main thread will simply be calling Collect(D) which looks like...\r\n```java\n\r\nwhile True:\r\n  results.append(await D())\r\n```\r\nD(N) will always follow C(N) and D(N+1) will always follow D(N).\u00a0 You will have a serial sequence of B(1),C(1),D(1),B(2)...,D(N)\r\n\r\nThis may be ok or it may not be ok.\u00a0 Maybe C is task that supports natural fan-out.\u00a0 Whether you do a map-reduce style fork-join or an async generator style parallel readahead (both achieve the same result) you are adding a buffer.\r\n\r\n\u00a0\r\n\r\nA push model doesn't actually need buffering or blocking.\u00a0 ReactiveX works this way out of the box.\u00a0 When an upstream task finishes it synchronously triggers a downstream task.\u00a0 Some operators (e.g. combine) implicitly require buffering in the same way some async generator operators (e.g. merge or sequence).\u00a0 I don't know that I've mentally mapped all these thoughts.\u00a0 However, a basic chain of mapped tasks wouldn't require it.\u00a0 Then, just like in the push model, you get to pick where to put the buffering/blocking."
+        },
+        {
+            "created_at": "2021-11-09T21:31:10.899Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12030?focusedCommentId=17441374) by Weston Pace (westonpace):*\nThis is superseded by ARROW-14648 which I just wrote now that I have more run time / experience with backpressure and readahead.\r\n\r\nPer `[~apitrou]` 's comment earlier, it is better to have a limit specified by the user than to automatically base it on available RAM.\r\n\r\nThere will still likely be a need for a single \"plan-level\" limit at some point but that can come later."
+        }
+    ]
+}

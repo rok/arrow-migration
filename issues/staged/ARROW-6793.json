@@ -1,0 +1,101 @@
+{
+    "issue": {
+        "title": "[R] Arrow C++ binary packaging for Linux",
+        "body": "***Note**: This issue was originally created as [ARROW-6793](https://issues.apache.org/jira/browse/ARROW-6793). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nOur current installation experience on Linux isn't ideal. Unless you've already installed the Arrow C++ library, when you install the R package, you get a shell that tells you to install the C++ library. That was a useful approach to allow us to get the package on CRAN, which makes it easy for macOS and Windows users to install, but it doesn't improve the installation experience for Linux users. This is an impediment to adoption of arrow not only by users but also by package maintainers who might want to depend on arrow.\u00a0\r\n\r\nmacOS and Windows have a better experience because at installation time, the configure scripts download and statically link a prebuilt C++ library. CRAN bundles the whole thing up and delivers that as a binary R package.\u00a0\r\n\r\nPython wheels do a similar thing: they're binaries that contain all external dependencies. And there are pyarrow wheels for Linux. This suggests that we could do something similar for R: build a generic Linux binary of the C++ library and download it in the R package configure script at install time.\r\n\r\nI experimented with using the Arrow C++ binaries included in the Python wheels in R. See discussion at the end of ARROW-5956. This worked on macOS (not useful for R, but it proved the concept) and almost worked on Linux, but it turned out that the \"manylinux2010\" standard is too archaic to work with contemporary Rcpp.\u00a0\r\n\r\nProposal: do a similar workflow to what the manylinux2010 pyarrow build does, just with slightly more modern compiler/settings. Publish that C++ binary package to bintray. Then download it in the R configure script\u00a0if a local/system package isn't found.\r\n\r\nOnce we have a basic version working, test against various distros on [R-hub](https://builder.r-hub.io/advanced)\u00a0to make sure we're solid everywhere and/or ensure the current fallback behavior when we encounter a distro that this doesn't work for. If necessary, we can make multiple flavors of this C++ binary for debian, centos, etc.",
+        "created_at": "2019-10-04T18:06:52.000Z",
+        "updated_at": "2020-01-12T16:54:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-01-12T16:53:30.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-04T19:38:45.329Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16944786) by Wes McKinney (wesm):*\n+1. We should be able to take the manylinux2010 base image and tweak the CXXFLAGS to suit R's requirements. \r\n\r\nNote that we may have to generate two different libraries, one for pre-gcc5 ABI and one for post. I think manylinux2010 uses the pre-gcc5 ABI in the interest of broad spectrum compatibility. The R build may need to detect which ABI the active configuration needs. Not sure how easy that will be"
+        },
+        {
+            "created_at": "2019-10-06T19:39:31.670Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16945433) by Thomas Schm (tschm):*\nVery recently i had the pleasure to install arrow on Linux. At this stage let me first remark that without the help of @xhochy and @kou I certainly would have failed. I have now managed to install(? still quite a lot of warning messages) in a rocker container. I have published the docker-image here:\r\n\r\nhttps://hub.docker.com/r/tschm/rocker-arrow\r\n\r\nMaybe one of the experts could fix and/or improve it? Many thanks\r\n\r\nThomas"
+        },
+        {
+            "created_at": "2019-10-10T16:02:03.662Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16948725) by Thomas Schm (tschm):*\nThe new version is breaking my Dockerfile.  Here's some output:\r\n\r\nStep 6/6 : RUN install2.r --error -~~deps TRUE arrow\r\n -~~-> Running in 16553854c478\r\ntrying URL 'https://mran.microsoft.com/snapshot/2019-09-19/src/contrib/arrow_0.14.1.1.tar.gz'\r\nContent type 'application/octet-stream' length 105910 bytes (103 KB)\r\n==================================================\r\ndownloaded 103 KB\r\n\r\n- installing **source** package \u2018arrow\u2019 ...\n  - package \u2018arrow\u2019 successfully unpacked and MD5 sums checked\n  - using staged installation\n    Arrow C++ libraries found via pkg-config\n    PKG_CFLAGS=-DNDEBUG -DARROW_R_WITH_ARROW\n    PKG_LIBS=-larrow -lparquet\n  - libs\n    g++ -std=gnu++11 -I\"/usr/local/lib/R/include\" -DNDEBUG -DNDEBUG -DARROW_R_WITH_ARROW -I\"/usr/local/lib/R/site-library/Rcpp/include\" -I/usr/local/include -fvisibility=hidden -fpic  -g -O2 -fstack-protector-strong -Wformat -Werror=format-security -Wdate-time -D_FORTIFY_SOURCE=2 -g  -c array.cpp -o array.o\n    g++ -std=gnu++11 -I\"/usr/local/lib/R/include\" -DNDEBUG -DNDEBUG -DARROW_R_WITH_ARROW -I\"/usr/local/lib/R/site-library/Rcpp/include\" -I/usr/local/include -fvisibility=hidden -fpic  -g -O2 -fstack-protector-strong -Wformat -Werror=format-security -Wdate-time -D_FORTIFY_SOURCE=2 -g  -c array__to_vector.cpp -o array__to_vector.o\n    array__to_vector.cpp:22:35: fatal error: arrow/util/task-group.h: No such file or directory\n     #include <arrow/util/task-group.h>\n                                       ^\n    compilation terminated.\n    make: \\*\\*\\* [array__to_vector.o] Error 1\n    /usr/local/lib/R/etc/Makeconf:176: recipe for target 'array__to_vector.o' failed\n    ERROR: compilation failed for package \u2018arrow\u2019\n- removing \u2018/usr/local/lib/R/site-library/arrow\u2019\n  \n  The downloaded source packages are in\n  \t\u2018/tmp/downloaded_packages\u2019\n  Error: installation of package \u2018arrow\u2019 had non-zero exit status\n  In addition: Warning message:\n  In install.packages(pkgs, ...) :\n    installation of package \u2018arrow\u2019 had non-zero exit status\n  ERROR: Service 'r' failed to build: The command '/bin/sh -c install2.r --error --deps TRUE arrow' returned a non-zero code: 1\n  /home/thomas/github/antarctic/r/Makefile:23: recipe for target 'build' failed"
+        },
+        {
+            "created_at": "2019-10-10T16:08:54.496Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16948734) by Neal Richardson (npr):*\n> trying URL '<https://mran.microsoft.com/snapshot/2019-09-19/src/contrib/arrow_0.14.1.1.tar.gz'>\r\n\r\nThat's not the new version of arrow. For development purposes you should be installing from the git repository, not CRAN (and definitely not an old snapshot of CRAN)."
+        },
+        {
+            "created_at": "2019-10-10T16:14:43.073Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16948740) by Thomas Schm (tschm):*\nThe latest greatest version on cran is 0.15.0 from October 7. I really don't understand enough R. Nor the ways it tries to cope with dependency hell. Managed now via remotes::install_github(\"apache/arrow/r\"). Would be amazing if there could be a more official Dockerfile taking R users through the experience you call not ideal. "
+        },
+        {
+            "created_at": "2019-10-10T16:56:30.282Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16948774) by Neal Richardson (npr):*\nYou're welcome to use\u00a0<https://github.com/apache/arrow/blob/master/r/Dockerfile>. Though for the record, this ticket is about something different."
+        },
+        {
+            "created_at": "2019-10-11T07:46:35.738Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16949227) by Thomas Schm (tschm):*\nYes, I guess this ticket is addressing a subproblem of getting arrow into R on Linux. Solving this problem is unfortunately a huge task and the information is in fragments over Github, Jira and several articles. It's a very unfortunate situation. Trying to install apache/arrow/r from Github worked yesterday but fails today. The problem today relates to a commit you have done yesterday\r\n\r\ncompression.cpp: In function \u2018bool util___Codec__IsAvailable(arrow::Compression::type)\u2019:\r\ncompression.cpp:37:10: error: \u2018IsAvailable\u2019 is not a member of \u2018arrow::util::Codec\u2019\r\n   return arrow::util::Codec::IsAvailable(codec);\r\n          ^~~~~\r\n\r\nAre the libraries I link to outdated? I did a fresh pull just a few minutes ago. Is there way to specify a certain tag in the install via github route? "
+        },
+        {
+            "created_at": "2019-10-11T14:14:41.272Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16949489) by Wes McKinney (wesm):*\nIf you're building from master, you need to build both the C++ and R libraries from master. In general the git revision of both libraries should be the same"
+        },
+        {
+            "created_at": "2019-10-11T19:48:00.726Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16949763) by Thomas Schm (tschm):*\nGosh, that's a big can. Is there a chance to keep the precompiled libraries, see https://arrow.apache.org/install/ somewhat in sync with a tagged version from github? At the moment the libraries or all pointing to 0.15.0 etc. but CRAN is lagging and Github is somewhat ahead. Maybe it's a stupid idea in the first place to try to rely on this precomiled libraries? Or maybe one could install slightly outdated libraries to stay in sync with CRAN? "
+        },
+        {
+            "created_at": "2019-10-11T20:01:56.840Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16949770) by Neal Richardson (npr):*\nThe binaries available on the install page\u00a0_are_ in sync with tagged versions on GitHub, but you seem to be installing the head of the master branch (what you get if you do install_github without specifying a tag). If you want to use the built binary libraries for an official release version of the C++ library, you need to use the corresponding R package. You can get that from CRAN\u2013it isn't lagging. In the output you pasted above, you were installing from a CRAN snapshot \"https://mran.microsoft.com/snapshot/2019-09-19/\". That's your lag."
+        },
+        {
+            "created_at": "2019-10-11T20:40:33.821Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16949785) by Thomas Schm (tschm):*\nAwesome, that's good news. Everyone following this thread. To install a tagged version from Github run\r\nR -e 'remotes::install_github(\"apache/arrow/r@apache-arrow-0.15.0\")'\r\nor with CRAN\r\ndevtools::install_version(\"arrow\", version = \"0.15.0\", repos = \"http://cran.us.r-project.org\")\r\n\r\nThanks for all your help on that issue. The documentation on downloading the precompiled libraries is unfortunately slightly outdated. But @kou is already on the case.  If I understand the linking process correctly there is no need to specify any version number for the precompiled libraries as debian is given merely access to a software archive and the compiler/linker can pick any library in need. I couldn't agree more with the initial premise of this thread. The experience for people running arrow on Linux relying on this binary packages is not exactly ideal :-) Painful. Thanks again... Note that the documentation is too terse for people not familiar with deep knowledge of debian and the way it can access libraries and/or familiar with devtools."
+        },
+        {
+            "created_at": "2019-10-11T20:45:28.098Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16949791) by Neal Richardson (npr):*\nYou don't need devtools/remotes if you want to install the current version. Just install it from CRAN."
+        },
+        {
+            "created_at": "2019-12-06T22:54:46.828Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16990210) by Neal Richardson (npr):*\nI've picked this back up this week. Now that manylinux2014 is starting to happen (ARROW-7344), I've tried to use that as a source for libarrow et al., hoping that a less-ancient base image would solve the ABI issues I experienced with manylinux2010 wheels. Unfortunately, the behavior with\u00a0manylinux2014 is the same as with\u00a0manylinux2010. To recap, in my R build script, I'm first downloading a wheel, unzipping it, and pointing to it for the lib/include dirs (cf.\u00a0<https://github.com/nealrichardson/sandbox/blob/5ad43525e8d5a9fc25e33fde888408629c421d52/.travis.yml#L11-L20>), and:\r\n \\* Building the R package without `-D_GLIBCXX_USE_CXX11_ABI=0`, I get an undefined symbol (e.g. <https://travis-ci.org/nealrichardson/sandbox/builds/621785506#L1603>)\r\n \\* Adding `-D_GLIBCXX_USE_CXX11_ABI=0`, the package installs and works _except_ for when `Rcpp::stop` is called to raise an exception. This causes a core dump, typically `bad_alloc` trying to handle the exception message (backtrace here: <https://travis-ci.org/nealrichardson/sandbox/builds/621402417#L1892>). Symptoms are similar to <https://stackoverflow.com/questions/56494095/rcppstop-crashes-r-under-g>\r\n\r\nI'm struggling to figure out how to proceed. It looks like using the wheels themselves won't work for R, but maybe using the wheel base image (stripped down as it is) is a good starting point to build a generic library without having to create as much parallel infrastructure. But I'm not sure how exactly to tweak the cmake/flags to make this work\u2013this is not my area of expertise. Or maybe this is the wrong approach entirely.\r\n\r\nThoughts `[~kou]` `[~kszucs]`? (N.B. in reviewing this ticket you can disregard the previous comment thread, it's unrelated to this problem.)"
+        },
+        {
+            "created_at": "2019-12-07T05:27:50.432Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16990340) by Kouhei Sutou (kou):*\nGenerally, I don't like manylinux approach, one binary for multiple Linux environments. Because it requires static linking or bundling many shared libraries.\r\n\r\nStatic linking isn't good for security. If there is a static linked library in our dependency, we need to release a new version with fixed bundled library as soon as possible. It's difficult because we need to vote for official release.\r\n\r\nBundling many shared libraries has the same security problem. It also has conflict problem. If X library is bundled in A library and B library, X library in A and B must be the same version. If X in A and X in B are different version, it may be cause some errors.\r\n\r\nHow about installing our official deb/rpm packages automatically at install time? Ruby (Red Arrow) does so.\r\n\r\nWhich Linux distributions should we support? Here are supported distributions for now:\r\n\r\n  \\* Debian GNU/Linux 9\r\n  \\* Debian GNU/Linux 10\r\n  \\* Ubuntu 16.04\r\n  \\* Ubuntu 18.04\r\n  \\* Ubuntu 19.10\r\n  \\* CentOS/RHEL 6\r\n  \\* CentOS/RHEL 7\r\n  \\* CentOS/RHEL 8"
+        },
+        {
+            "created_at": "2019-12-07T23:06:43.645Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16990650) by Neal Richardson (npr):*\nUnfortunately, R packages are not allowed to install system dependencies, so that's why I was looking into the manylinux approach. Not ideal but seems like the second-best solution. I'm less worried about the security risks of static linking because I plan to host nightly packages (like I'm doing for macOS and Windows R packages) so we can handle patches there. (Also, that seems like the tradeoff we're stuck with.)\r\n\r\nGiven that, any suggestions?\r\n\r\nMy hope is to get a \"manylinux\"-ish binary and set up some CI to see how many distributions that covers. I'm hoping for a reasonable coverage of versions of debian/ubuntu/centos.\u00a0"
+        },
+        {
+            "created_at": "2019-12-09T03:10:15.413Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16991094) by Kouhei Sutou (kou):*\n> R packages are not allowed to install system dependencies\r\n\r\nWhy? Because root privilege isn't supplied?\r\n\r\nRuby packages uses `sudo` automatically if it's needed.\r\n\r\nAnother approach: How about extracting .deb/.rpm contents for each distribution instead of creating new \"manylinux\"-ish binary? We already have binaries for Debian/Ubuntu/CentOS. We can use them.\r\n\r\nWe can extract .deb by `dpkg -x`. It doesn't require root privilege. We can download a package by `apt download ${PACKAGE_NAME`. We can collect depended packages by `apt depends ${PACKAGE_NAME`}.\r\n\r\nWe can extract .rpm by `rpm2cpio` and `cpio`. It doesn't require root privilege. We can download a package by `dnf download ${PACKAGE_NAME`}/`yum download ${PACKAGE_NAME`} but we need to install additional packages by `dnf install 'dnf-command(download)'`.\r\n\r\n(We can provide pre-extracted binaries instead of extracting on user environment.)\r\n\r\nWe'll be able to use the extracted binaries by setting suitable `LD_LIBRARY_PATH`.\r\n\r\n"
+        },
+        {
+            "created_at": "2019-12-09T18:11:52.207Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16991824) by Neal Richardson (npr):*\nR can't install system dependencies mainly per CRAN policy. The actual [policy](https://cran.r-project.org/web/packages/policies.html) says: \"Packages should not write in the user\u2019s home filespace (including clipboards), nor anywhere else on the file system apart from the R session\u2019s temporary directory (or during installation in the location pointed to by\u00a0`TMPDIR`: and such usage should be cleaned up). Installing into the system\u2019s R installation (e.g., scripts to its\u00a0`bin`\u00a0directory) is not allowed.\"\r\n\r\nPrivileges would be the next reason why we couldn't do it.\r\n\r\nI'll try your suggestion about using the system packages in that way, but I fear that still won't work because of the same CRAN policy. I think we have to statically link.\u00a0\u00a0"
+        },
+        {
+            "created_at": "2019-12-09T22:03:53.798Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16991975) by Kouhei Sutou (kou):*\nThanks.\r\nI'll also look into R package installation process later."
+        },
+        {
+            "created_at": "2019-12-09T22:08:54.056Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16991985) by Neal Richardson (npr):*\nFor reference of how it works for macOS and Windows, see https://cwiki.apache.org/confluence/display/ARROW/Release+Management+Guide#ReleaseManagementGuide-UpdatingRpackages, which explains and links to various materials about the process."
+        },
+        {
+            "created_at": "2019-12-09T22:10:58.362Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=16991987) by Kouhei Sutou (kou):*\nThanks!"
+        },
+        {
+            "created_at": "2020-01-12T16:53:30.935Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6793?focusedCommentId=17013816) by Neal Richardson (npr):*\nIssue resolved by pull request 6068\n<https://github.com/apache/arrow/pull/6068>"
+        }
+    ]
+}

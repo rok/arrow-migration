@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[R] month() should allow integer inputs",
+        "body": "***Note**: This issue was originally created as [ARROW-15701](https://issues.apache.org/jira/browse/ARROW-15701). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n**Conclusion**: we will implement this in the R bindings - month will allow integer input: `month(int)` will return `int` as long as `int` is between 1 and 12.\r\n==================================\r\nIn R, more specifically in `{}lubridate{`}, `month()` can be used both to get and set the corresponding component of a date. This means `month()` accepts integer inputs.\r\n```r\n\r\nsuppressPackageStartupMessages(library(lubridate)) \r\nmonth(1:12)\r\n#>  [1]  1  2  3  4  5  6  7  8  9 10 11 12\r\nmonth(1:13)\r\n#> Error in month.numeric(1:13): Values are not in 1:12\r\n```\r\nSolving this would allow us to implement bindings such as `semester()` in a manner closer to `{}lubridate{`}.\r\n```r\n\r\nsuppressPackageStartupMessages(library(dplyr))\r\nsuppressPackageStartupMessages(library(lubridate))\r\n\r\ntest_df <- tibble(\r\n  month_as_int = c(1:12, NA),\r\n  month_as_char_pad = ifelse(month_as_int < 10, paste0(\"0\", month_as_int), month_as_int),\r\n  dates = as.Date(paste0(\"2021-\", month_as_char_pad, \"-15\"))\r\n)\r\n\r\ntest_df %>%\r\n  mutate(\r\n    sem_date = semester(dates),\r\n    sem_month_as_int = semester(month_as_int))\r\n#> # A tibble: 13 \u00d7 5\r\n#>    month_as_int month_as_char_pad dates      sem_date sem_month_as_int\r\n#>           <int> <chr>             <date>        <int>            <int>\r\n#>  1            1 01                2021-01-15        1                1\r\n#>  2            2 02                2021-02-15        1                1\r\n#>  3            3 03                2021-03-15        1                1\r\n#>  4            4 04                2021-04-15        1                1\r\n#>  5            5 05                2021-05-15        1                1\r\n#>  6            6 06                2021-06-15        1                1\r\n#>  7            7 07                2021-07-15        2                2\r\n#>  8            8 08                2021-08-15        2                2\r\n#>  9            9 09                2021-09-15        2                2\r\n#> 10           10 10                2021-10-15        2                2\r\n#> 11           11 11                2021-11-15        2                2\r\n#> 12           12 12                2021-12-15        2                2\r\n#> 13           NA <NA>              NA               NA               NA\r\n```\r\n\r\nCurrently attempts to use `month()` with integer inputs errors with:\r\n```r\n\r\nFunction 'month' has no kernel matching input types (array[int32])\r\n```",
+        "created_at": "2022-02-16T13:26:00.000Z",
+        "updated_at": "2022-03-09T20:42:15.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2022-03-09T15:24:02.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-16T13:41:10.487Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15701?focusedCommentId=17493242) by Joris Van den Bossche (jorisvandenbossche):*\nCan you clarify what the expected output would be for the months kernel with integer input (so eg for `month(1)`)? \r\n\r\nFor being able to _set_ the component (such as the month) of a timestamp, that could be useful I think (Python also has this concept as a \"replace\" method, eg `datetime.replace(month=12)`), but for Arrow I think that would be a separate kernel."
+        },
+        {
+            "created_at": "2022-02-16T14:01:59.040Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15701?focusedCommentId=17493249) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nI think `month(a)` should return `a` when `a` is between 1 and 12 and error otherwise.\u00a0"
+        },
+        {
+            "created_at": "2022-02-16T14:54:03.247Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15701?focusedCommentId=17493266) by Rok Mihevc (rokm):*\nMonth is currently just an extraction kernel for timestamps and dates, e.g.: month(timestamp[unit]) -> int32. Arrow does not have a \"month array\" concept so month(int) is expected to fail. Are you expecting to do month(int) -> duration?"
+        },
+        {
+            "created_at": "2022-02-16T15:14:41.922Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15701?focusedCommentId=17493283) by Jonathan Keane (jonkeane):*\nThis also should be accomplishable in the R bindings if we want to do it there quickly to unblock things before we decide/wait for the C++ implementation.\r\n\r\nBasically, somewhere in https://github.com/apache/arrow/blob/1b9e76c6b07d557249a949c7c98d00997513d5cc/r/R/dplyr-funcs-datetime.R#L108-L119 check the input type and do casting or follow a slightly different path and return an expression that creates the thing we need."
+        },
+        {
+            "created_at": "2022-02-16T15:14:53.096Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15701?focusedCommentId=17493284) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nNot necessarily `month(int) -> duration`, but in R, in general (and `lubridate` in particular), quite a bunch of functionality goes through something like month (which is a slot in the list returned by POSIXlt). In my case the implementation of semester extraction goes through `month()`, and also supports integer inputs (in addition to dates and date times). \r\nI haven't started looking into the `duration` type in lubridate - there lubridate has `dmonths` which could be used to create a `duration` object corresponding to a timespan of x months. "
+        },
+        {
+            "created_at": "2022-02-16T15:16:27.804Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15701?focusedCommentId=17493285) by Joris Van den Bossche (jorisvandenbossche):*\n> I think month(a) should return a when a is between 1 and 12 and error otherwise. \r\n\r\n\r\nIn that case I suppose that is also easily achievable on the R side? (without complicating the kernel in C++)"
+        },
+        {
+            "created_at": "2022-02-16T15:21:27.126Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15701?focusedCommentId=17493288) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nI think so too - that was the reason behind having the title of the ticket as a question. If this is relevant mostly for R, we could implement it in the binding for `month()`. Maybe I should have made it a bit clearer that it is a question rather than an affirmation."
+        },
+        {
+            "created_at": "2022-02-16T15:35:49.890Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15701?focusedCommentId=17493298) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nI will edit this issue to refer to R only and I'll look into solving it in the R bindings. Thanks all for your input."
+        },
+        {
+            "created_at": "2022-03-09T15:24:02.740Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15701?focusedCommentId=17503643) by Jonathan Keane (jonkeane):*\nIssue resolved by pull request 12482\n<https://github.com/apache/arrow/pull/12482>"
+        }
+    ]
+}

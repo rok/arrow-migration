@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[R] Ability for R to link to C++ libraries from pyarrow Wheel",
+        "body": "***Note**: This issue was originally created as [ARROW-5956](https://issues.apache.org/jira/browse/ARROW-5956). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI have installed pyarrow 0.14.0 and want to be able to also use R arrow. In my work I use rpy2 a lot to exchange python data structures with R data structures, so would like R arrow to link against the exact same .so files found in pyarrow\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\nWhen I pass in include_dir and lib_dir to R's configure, pointing to pyarrow's include and pyarrow's root directories, I am able to compile R's arrow.so file. However, I am unable to load it in an R session, getting the error:\r\n\r\n\r\n\r\n\r\n\u00a0\r\n```java\n\r\n> dyn.load('arrow.so')\r\nError in dyn.load(\"arrow.so\") :\r\n unable to load shared object '/tmp/arrow2/r/src/arrow.so':\r\n /tmp/arrow2/r/src/arrow.so: undefined symbol: _ZNK5arrow11StructArray14GetFieldByNameERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE\n```\r\n\u00a0\r\n\r\n\u00a0\r\n\r\nSteps to reproduce:\r\n\r\n\u00a0\r\n\r\nInstall pyarrow, which also ships libarrow.so and libparquet.so\r\n\r\n\u00a0\r\n```java\n\r\npip3 install pyarrow --upgrade --user\r\nPY_ARROW_PATH=$(python3 -c \"import pyarrow, os; print(os.path.dirname(pyarrow.__file__))\")\r\nPY_ARROW_VERSION=$(python3 -c \"import pyarrow; print(pyarrow.__version__)\")\r\nln -s $PY_ARROW_PATH/libarrow.so.14 $PY_ARROW_PATH/libarrow.so\r\nln -s $PY_ARROW_PATH/libparquet.so.14 $PY_ARROW_PATH/libparquet.so\r\n```\r\n\u00a0\r\n\r\n\u00a0\r\n\r\nAdd to LD_LIBRARY_PATH\r\n\r\n\u00a0\r\n```java\n\r\nsudo tee -a /usr/lib/R/etc/ldpaths <<LINES\r\nLD_LIBRARY_PATH=\"\\${LD_LIBRARY_PATH}:$PY_ARROW_PATH\"\r\nexport LD_LIBRARY_PATH\r\nLINES\r\nsudo tee -a /usr/lib/rstudio-server/bin/r-ldpath <<LINES\r\nLD_LIBRARY_PATH=\"\\${LD_LIBRARY_PATH}:$PY_ARROW_PATH\"\r\nexport LD_LIBRARY_PATH\r\nLINES\r\nexport LD_LIBRARY_PATH=\"${LD_LIBRARY_PATH}:$PY_ARROW_PATH\"\r\n```\r\n\u00a0\r\n\r\n\u00a0\r\n\r\nInstall r arrow from source\r\n```java\n\r\ngit clone https://github.com/apache/arrow.git /tmp/arrow2\r\ncd /tmp/arrow2/r\r\ngit checkout tags/apache-arrow-0.14.0\r\nR CMD INSTALL ./ --configure-vars=\"INCLUDE_DIR=$PY_ARROW_PATH/include LIB_DIR=$PY_ARROW_PATH\"\n```\r\n\u00a0\r\n\r\nI have noticed that the R package for arrow no longer has an RcppExports, but instead an arrowExports. Could it be that the lack of RcppExports has made it difficult to find GetFieldByName?",
+        "created_at": "2019-07-16T00:15:55.000Z",
+        "updated_at": "2019-09-19T16:57:06.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-09-19T16:57:06.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-07-16T15:23:43.746Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5956?focusedCommentId=16886203) by Neal Richardson (npr):*\n<https://twitter.com/xhochy/status/1140297912720744449>\u00a0describes a similar wish.\u00a0\r\n\r\nRcppExports --> arrowExports is a red herring; see\u00a0https://issues.apache.org/jira/browse/ARROW-5488"
+        },
+        {
+            "created_at": "2019-07-16T16:40:42.426Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5956?focusedCommentId=16886285) by Uwe Korn (uwe):*\n> <https://twitter.com/xhochy/status/1140297912720744449>\u00a0describes a similar wish.\r\n\u00a0\r\n\r\nIn that case I actually had R use the same lib as pyarrow. This is working fine in a conda-provided environment. I amended the title that this here is about using the libraries from the `pyarrow`\u00a0**wheel**."
+        },
+        {
+            "created_at": "2019-08-15T21:12:26.862Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5956?focusedCommentId=16908480) by Neal Richardson (npr):*\n`[~jeffreyw]` could you try setting `R_LD_LIBRARY_PATH` instead of `LD_LIBRARY_PATH?`\u00a0<https://github.com/apache/arrow/blob/master/r/README.Rmd#L132>\r\n\r\n(For context, see discussion starting here:\u00a0<https://github.com/apache/arrow/pull/5036#issuecomment-519703937>)"
+        },
+        {
+            "created_at": "2019-09-19T16:56:35.611Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5956?focusedCommentId=16933587) by Neal Richardson (npr):*\nIt turns out that you can't (safely) use the pyarrow wheel in R on Linux, though you can on macOS. See discussion starting around here: https://github.com/apache/arrow/pull/5408#issuecomment-532438681)  \r\n\r\nYou can fix the dyn.load error you originally reported by setting `ARROW_USE_OLD_CXXABI=1` (https://github.com/apache/arrow/blob/master/r/configure#L99-L102). That lets the package install and load. But then any C++ error status that leads to `Rcpp::stop()` being called will cause a core dump. Our analysis led us to conclude that the problem is a mismatch between the standard library versions in the (dated) manylinux2010 wheel build and the more contemporary one used on the host OS and by Rcpp there. Apparently Rcpp relies on more modern C++ conventions than are used in Python. \r\n\r\nSo, it seems that right now, if you want to use the same .so for Python and R on Linux, your options are:\r\n\r\n1. Install the C++ library system packages and install pyarrow and the R package from source locally, linking to that;\r\n2. Build everything locally;\r\n3. Use conda\r\n\r\nOnce manylinux2014 happens, maybe the wheels will be more suitable and we can try again."
+        }
+    ]
+}

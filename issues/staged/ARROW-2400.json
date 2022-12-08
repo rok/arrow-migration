@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[C++] Status destructor is expensive",
+        "body": "***Note**: This issue was originally created as [ARROW-2400](https://issues.apache.org/jira/browse/ARROW-2400). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nLet's take the following micro-benchmark (in Python):\r\n\r\n```bash\n\r\n$ python -m timeit -s \"import pyarrow as pa; data = [b'xx' for i in range(10000)]\" \"pa.array(data, type=pa.binary())\"\r\n1000 loops, best of 3: 784 usec per loop\r\n```\r\n\r\nIf I replace the Status destructor with a no-op:\r\n```c++\n\r\n  ~Status() { }\r\n```\r\n\r\nthen the benchmark result becomes:\r\n```bash\n\r\n$ python -m timeit -s \"import pyarrow as pa; data = [b'xx' for i in range(10000)]\" \"pa.array(data, type=pa.binary())\"\r\n1000 loops, best of 3: 561 usec per loop\r\n```\r\n\r\nThis is almost a 30% win. I get similar results on the conversion benchmarks in the benchmark suite.\r\n\r\nI'm unsure about the explanation. In the common case, `delete _state` should be extremely fast, since the state is NULL. Yet, it seems it adds significant overhead. Perhaps because of exception handling?",
+        "created_at": "2018-04-05T10:45:03.000Z",
+        "updated_at": "2018-07-27T15:27:18.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2018-06-23T07:46:56.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-04-05T10:57:11.826Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2400?focusedCommentId=16426749) by Antoine Pitrou (apitrou):*\nThe figures above were with gcc 4.9. If I switch to clang 5.0 the slowdown is much smaller, but still exists:\r\n\r\n- with the normal destructor:\n  ```bash\n  \n  $ python -m timeit -s \"import pyarrow as pa; data = [b'xx' for i in range(10000)]\" \"pa.array(data, type=pa.binary())\"\n  1000 loops, best of 3: 546 usec per loop\n  ```\n  \n- with an empty destructor:\n  ```bash\n  \n  $ python -m timeit -s \"import pyarrow as pa; data = [b'xx' for i in range(10000)]\" \"pa.array(data, type=pa.binary())\"\n  1000 loops, best of 3: 520 usec per loop\n  ```\n"
+        },
+        {
+            "created_at": "2018-04-05T11:35:47.262Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2400?focusedCommentId=16426774) by Dimitri Vorona (alendit):*\nHi Antoine,\r\n\r\nthis is something I've noticed before, but didn't find any time to investigate.\u00a0\r\n\r\nTo localize the problem I've created a gist: <https://gist.github.com/alendit/73ec62887d00fb44ef32e8f8eec41af3>\r\n\r\nI get similar numbers to yours (both with -O3):\r\n\r\nclang++ version 6.0.0\r\n```\n\r\nRun on (4 X 3200 MHz CPU s)\r\n 2018-04-05 13:29:13\r\n --------------------------------------------------------\r\n Benchmark Time CPU Iterations\r\n --------------------------------------------------------\r\n BM_ArrowStatus\u00a0 \u00a0885 ns 878 ns 735896\r\n BM_OwnCopyStatus 897 ns 893 ns 780257\r\n BM_NoOpStatus\u00a0 \u00a0 884 ns 879 ns 785719\n```\r\ng++ 7.3.1\r\n```\n\r\nRun on (4 X 3200 MHz CPU s)\r\n 2018-04-05 13:29:28\r\n --------------------------------------------------------\r\n Benchmark Time CPU Iterations\r\n --------------------------------------------------------\r\n BM_ArrowStatus\u00a0 \u00a0818 ns 813 ns 799285\r\n BM_OwnCopyStatus 865 ns 855 ns 785573\r\n BM_NoOpStatus\u00a0 \u00a0 423 ns 421 ns 1734452\n```\r\nSo apparently there is an optimization which GCC can perform if the destructor is strictly noop. I'd have to test further to localize the problem. A look into the generated code might be worth it.\r\n\r\nCheers!"
+        },
+        {
+            "created_at": "2018-04-05T12:40:33.306Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2400?focusedCommentId=16426845) by Dimitri Vorona (alendit):*\nCompilerExplorer for clang:\r\n\r\nhttps://godbolt.org/g/gcVJpq\r\n\r\nand GCC:\r\n\r\nhttps://godbolt.org/g/Lcjx1e"
+        },
+        {
+            "created_at": "2018-04-05T12:41:38.083Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2400?focusedCommentId=16426848) by Antoine Pitrou (apitrou):*\nThis patch seems to improve things by ~15% here on gcc 4.9:\r\n\r\n```c++\n\r\ndiff --git a/cpp/src/arrow/status.h b/cpp/src/arrow/status.h\r\nindex 84f55e4..a2cf438 100644\r\n--- a/cpp/src/arrow/status.h\r\n+++ b/cpp/src/arrow/status.h\r\n@@ -107,7 +107,11 @@ class ARROW_EXPORT Status {\r\n  public:\r\n   // Create a success status.\r\n   Status() : state_(NULL) {}\r\n-  ~Status() { delete state_; }\r\n+  ~Status() {\r\n+    if (ARROW_PREDICT_FALSE(state_ != NULL)) {\r\n+      DeleteState();\r\n+    }\r\n+  }\r\n \r\n   Status(StatusCode code, const std::string& msg);\r\n \r\n@@ -207,6 +211,10 @@ class ARROW_EXPORT Status {\r\n   // a `State` structure containing the error code and message(s)\r\n   State* state_;\r\n \r\n+  void DeleteState() {\r\n+    delete state_;\r\n+    state_ = NULL;\r\n+  }\r\n   void CopyFrom(const State* s);\r\n };\r\n \n```"
+        },
+        {
+            "created_at": "2018-04-05T13:18:14.635Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2400?focusedCommentId=16426908) by Dimitri Vorona (alendit):*\nWith the predict patch (<https://gist.github.com/alendit/73ec62887d00fb44ef32e8f8eec41af3>)\r\n\r\n\u00a0\r\n```\n\r\nRun on (4 X 3200 MHz CPU s)\r\n2018-04-05 15:16:29\r\n--------------------------------------------------------\r\nBenchmark Time CPU Iterations\r\n--------------------------------------------------------\r\nBM_ArrowStatus   657 ns 654 ns 1037970\r\nBM_OwnCopyStatus 657 ns 655 ns 1080042\r\nBM_NoOpStatus    330 ns 329 ns 2131999\r\nBM_PredictStatus 448 ns 446 ns 1642423\n```\r\n\u00a0No changes on clang."
+        },
+        {
+            "created_at": "2018-04-09T11:48:23.358Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2400?focusedCommentId=16430414) by Antoine Pitrou (apitrou):*\nThe change doesn't seem to make any difference with MSVC 19.13 (VS 2017 Community Edition)."
+        },
+        {
+            "created_at": "2018-06-22T11:31:54.527Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2400?focusedCommentId=16520268) by Dimitri Vorona (alendit):*\nWhat did actually happen of it? 200ns per command saved by a 3 lines change would seem like a win to me."
+        },
+        {
+            "created_at": "2018-06-22T11:34:24.682Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2400?focusedCommentId=16520272) by Antoine Pitrou (apitrou):*\nNothing yet :) I think we should also experiment with `noexcept` here (apparently it can have non-trivial performance implications)."
+        },
+        {
+            "created_at": "2018-06-23T07:41:25.449Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2400?focusedCommentId=16520991) by Wes McKinney (wesm):*\nApache Kudu has a modified version of Status with various interesting tidbits, if interested you may have a look to tinker https://github.com/apache/kudu/blob/master/src/kudu/util/status.h"
+        },
+        {
+            "created_at": "2018-06-23T07:46:56.214Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2400?focusedCommentId=16520993) by Wes McKinney (wesm):*\nIssue resolved by pull request 2154\n<https://github.com/apache/arrow/pull/2154>"
+        },
+        {
+            "created_at": "2018-06-25T14:30:50.090Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2400?focusedCommentId=16522344) by Antoine Pitrou (apitrou):*\n> Apache Kudu has a modified version of Status with various interesting tidbits, if interested you may have a look to tinker <https://github.com/apache/kudu/blob/master/src/kudu/util/status.h>\r\n\r\nInteresting. It doesn't seem conceptually different, except that they have micro-optimized the state encoding, even though it's only used on error. I don't think it's worth the effort."
+        }
+    ]
+}

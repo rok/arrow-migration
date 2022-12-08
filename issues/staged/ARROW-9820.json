@@ -1,0 +1,48 @@
+{
+    "issue": {
+        "title": "[C++] Plugin Architecture for Filesystem and File IO",
+        "body": "***Note**: This issue was originally created as [ARROW-9820](https://issues.apache.org/jira/browse/ARROW-9820). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAdding a new custom filesystem with corresponding file i/o streams is quite a process at the moment.  Looks like HDFS and S3FS are basically hardcoded in many places.  It would be useful to develop a plugin system to allow users to interface with other data stores without maintaining a permanent fork with hardcoded changes.\r\n\r\nWe can either do runtime plugins or compile-time plugins.  Runtime is more user-friendly, but with C++, ABI compatibility is fairly delicate.  So we would either want to use a C ABI or accept a youre-on-your-own situation where the user is expected to be very careful with versioning and compiler flags.\r\n\r\nWith compile-time plugins, maybe there's a way to have the cmake machinery build third party code and also register those new URI schemes automatically.",
+        "created_at": "2020-08-21T18:10:37.000Z",
+        "updated_at": "2020-08-26T15:19:57.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-08-21T20:09:59.959Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9820?focusedCommentId=17182120) by Lawrence Chan (llchan):*\nIf I want to experiment with this, how much of the filesystem-related stuff is still experimental and we can adjust the API, and how much is stable and untouchable?  For example, things like switching from out-params to returning Result objects, which seems inconsistent with the rest of the arrow API."
+        },
+        {
+            "created_at": "2020-08-21T20:45:35.354Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9820?focusedCommentId=17182140) by Lawrence Chan (llchan):*\nThinking about this more, I should also ask: are the other language libraries implemented as bindings to the C++ library, or do they re-implement natively?  If they re-implement, then there's perhaps more reason to do a language-agnostic runtime plugin system with a C API, so that the filesystem stuff is implemented once for all languages.  Most languages should have a way to dlopen a library, so we just need to spec out an ABI, and then the user can load additional filesystem plugins at runtime."
+        },
+        {
+            "created_at": "2020-08-25T12:20:12.194Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9820?focusedCommentId=17183975) by Antoine Pitrou (apitrou):*\nThanks for posting this. I agree it would be a good idea to allow adding custom filesystem implementations.\r\n\r\nSome more comments:\r\n 1) Arrow C++ is one specific library implementing the Arrow format. Other Arrow implementations don't necessarily provide the same facilities. That said, the ones that bind around Arrow C++ (e.g. PyArrow) generally expose the facilities that in Arrow C++.\r\n 2) If using C rather than C++ , how would we handle lifetime and ownership issues? That sounds like a can of worms. Arrow C++ is using C++ for a reason... (if someone OTOH wants to write a C Arrow implementation, nobody will object :))\r\n 3) runtime vs. compile-time: people shouldn't have to recompile Arrow C++ to add a new filesystem type. If that's what you mean by \"runtime\", then let's do that. OTOH, it doesn't have to be a \"zero configuration\" thing (i.e. it's ok to have to call a registration function).\r\n 4) filesystem API stability: we can change the API assuming there are **good** reasons to change it. But that's orthogonal to this issue, and you should open separate JIRAs for that.\r\n\r\nGiven all this, perhaps you could tell us a bit more about what kind of plugin API you're expecting or able to work with."
+        },
+        {
+            "created_at": "2020-08-25T18:58:59.044Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9820?focusedCommentId=17184682) by Lawrence Chan (llchan):*\nI agree lifetimes with C-based plugins require some care to get correct, but I think it is something we can design to be relatively safe for the end user.  I have some work in progress that I can push up to a PR draft and it may be easier to discuss with some code in hand.  The general gist of it is that anything allocated by the plugin will be immediately wrapped in safer C++ owning objects that will handle destruction.  There will also be ABI versioning so that we have an upgrade path for future backwards-incompatible changes that are safe from dangerous ABI mismatches.  I think some of this will be more clear once I get that PR pushed up.\r\n\r\nFor context about our use case: we have an in-house data storage system that can read/write files via a userspace library, and it has a fair amount of overlap with arrow::fs stuff in spirit.  I wrote OutputStream + RandomAccessFile subclasses and got the I/O working fine, but once I started looking at the pyarrow bindings and the dataset stuff I realized the other required changes would need to be hardcoded in a way that will be very difficult for me to maintain down the road, so I started thinking about pluggable storage drivers."
+        },
+        {
+            "created_at": "2020-08-25T21:06:32.747Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9820?focusedCommentId=17184736) by Wes McKinney (wesm):*\nWhat would not be solved by creating an implementation of `arrow::fs::FileSystem`?"
+        },
+        {
+            "created_at": "2020-08-25T22:09:59.982Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9820?focusedCommentId=17184756) by Lawrence Chan (llchan):*\n- Language-agnostic - once a storage driver is written/built, _any_ arrow library can load it (assuming we've finished implementing the plugin API). So rather than needing to add support to each language, I just need to write the wrapper once, and then users can use that filesystem in C++, python, go, rust, whatever.\n- Application-agnostic - if users want to use my storage driver in a downstream application, I can distribute a plugin and arrow can load the plugin at runtime without needing to do a special build of that application with my filesystem code.  This greatly simplifies the ability for users to add storage functionality without recompiling the entire world that uses arrow.  You might argue that this could be achieved by linking arrow as a shared library, but there are use cases where static linking is desirable, or use cases where I don't control the arrow shared library but the users can obtain my plugin.\n- Maintainer-friendly  and Sysadmin-friendly - if I maintain a storage driver plugin, I can version control it entirely independently, distribute it separately from the arrow library, and have a simpler build system that doesnt necessarily need to integrate with the arrow cmake machinery.  Otherwise somehow cmake needs to know about the extra filesystem implementation and needs to do something to embed it at compile-time.\n- There are also some functions in the C++ library that have hardcoded string comparisions to e.g. \"hdfs\".  These are not the hardest ones to solve, because we could switch it to a lookup from a global mapping that the user can register factory function to, but I figured I would mention them anyways.\n  \n  If you are wondering about the concrete hurdle that prompted this, it's that the pyarrow bits are seemingly half wrappers to the C++ lib and and half implemented in python, with what I _think_ are manually-written Cython wrappers around the pieces that need to be visible in python.  For my storage library, I don't really want to mess with forking pyarrow and writing Cython wrappers and rebuilding pyarrow, and I'd like to just do it once in C/C++ and have it work in pyarrow automatically.\n  \n  I understand the hesitation here, but I think the scary bits can be done safely, and I think this will open the doors to a more organized and community-driven collection of storage drivers without cluttering the arrow codebase.  For some related prior art, this feels to me like a tiny lower-level version of CSI plugins.  If we wanted to support the whole universe of drivers from within the arrow codebase, it would get pretty bloated."
+        },
+        {
+            "created_at": "2020-08-26T13:27:46.812Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9820?focusedCommentId=17185189) by Antoine Pitrou (apitrou):*\nTo reply on \"language-agnostic\": the filesystem API is C++-specific (and exported to Python, R). If we want to design a filesystem vocabulary that allows talking with Rust and Go, this should be a separate issue rather than be amalgamated with the issue of runtime filesystem \"plugins\"."
+        },
+        {
+            "created_at": "2020-08-26T15:19:57.611Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9820?focusedCommentId=17185270) by Lawrence Chan (llchan):*\nI see.  I imagine in the longer-term roadmap we would ideally have analogs in each language's library, so there would still be a future-proofing advantage even if it can't be utilized on day 1."
+        }
+    ]
+}

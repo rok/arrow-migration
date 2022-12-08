@@ -1,0 +1,38 @@
+{
+    "issue": {
+        "title": "[Rust] [DataFusion] logical schema = physical schema is not true",
+        "body": "***Note**: This issue was originally created as [ARROW-9809](https://issues.apache.org/jira/browse/ARROW-9809). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn tests/sql.rs, we test that the physical and the optimized schema must match. However, this is not necessarily true for all our queries. An example:\r\n```java\n\r\n#[test]\r\nfn csv_query_sum_cast() {\r\n    let mut ctx = ExecutionContext::new();\r\n    register_aggregate_csv_by_sql(&mut ctx);\r\n    // c8 = i32; c9 = i64\r\n    let sql = \"SELECT c8 + c9 FROM aggregate_test_100\";\r\n    // check that the physical and logical schemas are equal\r\n    execute(&mut ctx, sql);\r\n}\r\n```\r\nThe physical expression (and schema) of this operation, after optimization, is `CAST(c8 as Int64) Plus c9` (this test fails).\r\n\r\nAFAIK, the invariant of the optimizer is that the output types and nullability are the same.\r\n\r\nAlso, note that the reason the optimized logical schema equals the logical schema is that our type coercer does not change the output names of the schema, even though it re-writes logical expressions. I.e. after the optimization, `.to_field()` of an expression may no longer match the field name nor type in the Plan's schema. IMO this is currently by (implicit?) design, as we do not want our logical schema's column names to change during optimizations, or all column references may point to non-existent columns. This is something that brought up on the mailing list about polymorphism.",
+        "created_at": "2020-08-20T06:20:20.000Z",
+        "updated_at": "2020-09-12T09:44:52.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Component: Rust - DataFusion",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-08-23T14:07:51.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-08-20T15:24:26.447Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9809?focusedCommentId=17181269) by Andy Grove (andygrove):*\nThis is a good point. I can now see that we should not expect the schema to match after optimization, since we are adding type coercion.\r\n\r\nI would think that the schema should match between the optimized logical plan and the physical plan though?"
+        },
+        {
+            "created_at": "2020-08-20T15:25:32.634Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9809?focusedCommentId=17181273) by Andy Grove (andygrove):*\nIt seems that we should determine data types and nullability only in the logical plan and then pass that information to the physical plan rather than re-compute them there. I think this is what you have been suggesting already `[~jorgecarleitao]` ?"
+        },
+        {
+            "created_at": "2020-08-21T05:15:07.264Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9809?focusedCommentId=17181616) by Jorge Leit\u00e3o (jorgecarleitao):*\nIn general, I think that we could consider the following:\r\n\r\n- Expressions in the logical plan have a type and nullability (function that maps inputs's meta to output's meta such as `Expr::get_type`)\n- Expressions in the physical plan have a type and nullability (functions that map inputs's meta to output's meta, currently `PhysicalExpr::data_type`)\n- `PhysicalExpr::data_type` must match the actual calculation return type (i.e. the builder that it is actually used depending on the input type)\n- The physical planner must `assert` that both type and nullability are preserved during conversion from logical to physical.\n  \n  It is our responsibility to ensure that, within datafusion, the schema from our logical plan matches the schema from the physical plan (or the planner errors). If anyone decides to use different physical plans (e.g. GPU), it is their responsibility ensure that:\n  \n- `PhysicalExpr::data_type` must match the actual calculation return type (i.e. the builder that it is used)\n- The physical planner must `assert` that both type and nullability are preserved during conversion from logical to physical.\n  \n  From this perspective, our logical plan is the user's expectation of the output schema, while the physical plan is the developer's representation of the computation, and users can switch planners to derive different physical plans from logical plans, both at the compute level (e.g. CPU vs GPU, the `create_physical_expr`) and at the distribution level (local vs distributed, the `create_physical_plan` and `create_aggregate_expr`).\n  \n  IMO the type coercer should not be a logical optimizer, but a physical one: before type coercion, all logical types are all already set by the scanned types, and thus the whole logical plan can be derived. We use a type coercer because our physical expressions only support a subset of all operations (e.g. we support u32 \\* u32, but not u32 \\* u16). The output type is still the same (u32) and the logical plan does not care. IMO this is a physical (compute) \u2013 not logical (types and nullability) \u2013 issue. If someone else had a way to compute u32 \\* u16 -> u32, IMO our logical plan should not have to know about it and our coercion rule would not need to be applied.\n  \n  With this said:\n  \n  > I would think that the schema should match between the optimized logical plan and the physical plan though?\n  \n  If we want to enforce that physical expressions are always named as logical expressions, then yes, we should enforce the same schema. Strictly speaking, we only need to enforce type and nullability.\n  \n  > It seems that we should determine data types and nullability only in the logical plan and then pass that information to the physical plan rather than re-compute them there.\n  \n  We can do that, but it will make it more difficult to find errors when someone else writes a new physical expression: they do not have to write a `data_type` for it, but will have to match the `data_type` (via which builder they use) that the logical plan passes to them.\n  \n  Since all operations are dynamically typed, I think that we should continue to have both `PhysicalExpr::data_type` and `Expr::get_type` and make the assert at the planner level and not only in tests.\n  \n  Currently, we do not do this, as we use statements of the form \n  \n  ```Java\n  \n  match ...\n      LogicalPlan::Projection { input, expr, .. }\n  ```\n  \n   in the planner, that make no use of the logical schema and derive a new physical schema that may or may not match the logical schema."
+        },
+        {
+            "created_at": "2020-08-21T19:19:44.554Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9809?focusedCommentId=17182092) by Jorge Leit\u00e3o (jorgecarleitao):*\nI gathered my thoughts about this in this document: https://docs.google.com/document/d/1Asnz29uUS1t60QNbNBU9SiME274rja-hcDvX_RDraFU/edit?usp=sharing"
+        },
+        {
+            "created_at": "2020-08-23T14:07:51.126Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9809?focusedCommentId=17182699) by Andy Grove (andygrove):*\nIssue resolved by pull request 8024\n<https://github.com/apache/arrow/pull/8024>"
+        }
+    ]
+}

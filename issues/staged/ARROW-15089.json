@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[C++] Add compute kernel to get MapArray value for given key",
+        "body": "***Note**: This issue was originally created as [ARROW-15089](https://issues.apache.org/jira/browse/ARROW-15089). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nGiven a \"map\", an obvious operation is to get an item corresponding to a key. The idea here is to create a kernel that does this for each map in the array.\r\n\r\nIIRC MapArray isn't guaranteed to have unique keys. So one version would return an array of ItemType by returning the first of last item for a given key. Yet another version could return a ListType containing all matching items.\u00a0",
+        "created_at": "2021-12-13T22:46:53.000Z",
+        "updated_at": "2022-02-04T15:11:36.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-02-03T13:39:13.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-12-13T23:04:46.538Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15089?focusedCommentId=17458784) by David Li (lidavidm):*\nThis also would be useful to implement [one type of field references in Substrait](https://substrait.io/expressions/field_references/); also see ARROW-14658 et. al."
+        },
+        {
+            "created_at": "2022-01-13T07:00:00.280Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15089?focusedCommentId=17475134) by Weston Pace (westonpace):*\nTo solve the \"maps don't have unique keys\" problem I think this kernel should take an integer index instead of a string key.  We generally assume plan construction happens when the schema is fully known so the plan constructor should be able to figure out the correct index based on whether they want \"first matching\" or \"last matching\".\r\n\r\nFor nested structs (e.g. { \"location\": { \"x\": 0, \"y\": 3 }, \"magnitude\": 7.3 }) it seems the easiest thing to do would be to require two function calls.  So to get the field `\"y\"` in that example you would do something like `extract_field(extract_field(arr, 0), 1)`.  I suppose it would be possible to treat the indices as DFS indices (e.g. `\"x\"=0, \"y\"=1, \"magnitude\"=2` ) but that gets rather confusing rather quickly."
+        },
+        {
+            "created_at": "2022-01-13T13:23:28.954Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15089?focusedCommentId=17475351) by David Li (lidavidm):*\n`[~westonpace]` I think a \"map\" here is MapType which doesn't have a consistent ordering right? For structs, we would use struct_field which does indeed take (an array of) indices."
+        },
+        {
+            "created_at": "2022-01-13T15:59:08.935Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15089?focusedCommentId=17475478) by Will Jones (willjones127):*\nYes this is for MapArray, whose type is alias for `list(struct(<key>, <value>))`. So I imagine the kernel is essentially a filter on each list entry for `struct.key = query_key`, and then some logic to decide which results (if any) to keep."
+        },
+        {
+            "created_at": "2022-01-13T16:48:25.034Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15089?focusedCommentId=17475531) by Weston Pace (westonpace):*\nOk, I understand what you are saying now.  I was indeed thinking of a struct array.  My mistake."
+        },
+        {
+            "created_at": "2022-01-14T10:45:20.735Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15089?focusedCommentId=17476066) by Dhruv Vats (dhruv9vats):*\nI thought to ask this before I got too confused. Some (possibly very naive) questions:\r\n \\* Is `{}MapArray{`}, which inherits from `{}ListArray{`}, a collection of individual `{}MapTypes{`}, each of which in turn are like a `{}List [ Struct1 \\{key, value}, Struct2 \\{key, value}, ... ]{`}?\r\n \\* Arrow doesn't restrict the DataType `key` takes on (or does it?), so what is the correct way to take it as a parameter to a `{}kernel{`}.\r\n \\* Some kernels use `Call` while others use `{}ExecSomething{`}, what are the prerequisites/strategies/reasonings behind these?\r\n \\* If the `MapArray` definition in the first point is correct, how do the `MapArray.keys/items` work? Do they return a _combined_ Array of keys/items? If so, then iterating and checking for matches in this `keys` Array is what we are looking for here?\r\n\r\nI'm pretty sure I'm getting a lot of things mixed up. Still finding my way through the expansive Arrow type system, where each subdirectory is like a codebase in itself it seems."
+        },
+        {
+            "created_at": "2022-01-14T13:01:20.525Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15089?focusedCommentId=17476125) by David Li (lidavidm):*\n- MapArray is of type MapType. Types are not values in our type system :) MapType[K, V] is equivalent to List[Struct[key: K, value: V]]. Hence it looks something like this: `[[\\{\"key\": \"k\", \"value\": 0}, \\{\"key\": \"foo\", \"value\": 42}], [\\{\"key\": \"bar\", \"value\": 32}]]` for `{}MapType[Utf8, Int64]{`}.\n   \\* The parameters should be passed via an options class (e.g. see StructFieldOptions) containing a Scalar: <https://github.com/apache/arrow/blob/master/cpp/src/arrow/scalar.h>\n   \\* There's not really a difference, there's no uniform structure for kernels other than ultimately a kernel is a function call with a specific signature. Different kernels are implemented differently. CC `[~edponce]` who was categorizing/trying to make consistent these things.\n   \\* They return a combined array, yes. This is due to the layout of ListArray and StructArray. A ListArray doesn't have one child array per list, but rather stores one child array and a list of offsets that mark the lists. A StructArray stores one child array per struct field (i.e. it's columnar, not row-wise). Iterating through the keys in that array would work, but you also need to keep track of which list you are looking at, and decide what to do about duplicate keys (since this will affect the return type)."
+        },
+        {
+            "created_at": "2022-02-03T13:39:13.587Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15089?focusedCommentId=17486484) by David Li (lidavidm):*\nIssue resolved by pull request 12162\n<https://github.com/apache/arrow/pull/12162>"
+        }
+    ]
+}

@@ -1,0 +1,30 @@
+{
+    "issue": {
+        "title": "[C++] Crash in cuda-test shutdown with coverage enabled",
+        "body": "***Note**: This issue was originally created as [ARROW-2561](https://issues.apache.org/jira/browse/ARROW-2561). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIf I enable both CUDA and code coverage (using `-DARROW_GENERATE_COVERAGE=on`), `cuda-test` sometimes crashes at shutdown with the following message:\r\n\r\n```Java\n\r\n*** Error in `./build-test/debug/cuda-test': corrupted size vs. prev_size: 0x0000000001612bb0 ***\r\n======= Backtrace: =========\r\n/lib/x86_64-linux-gnu/libc.so.6(+0x777e5)[0x7fc3d61e47e5]\r\n/lib/x86_64-linux-gnu/libc.so.6(+0x7e9dc)[0x7fc3d61eb9dc]\r\n/lib/x86_64-linux-gnu/libc.so.6(+0x81cde)[0x7fc3d61eecde]\r\n/lib/x86_64-linux-gnu/libc.so.6(__libc_malloc+0x54)[0x7fc3d61f1184]\r\n/home/antoine/arrow/cpp/build-test/debug/libarrow.so.10(+0x9350f3)[0x7fc3d5a510f3]\r\n/lib/x86_64-linux-gnu/libc.so.6(__cxa_finalize+0x9a)[0x7fc3d61a736a]\r\n/home/antoine/arrow/cpp/build-test/debug/libarrow.so.10(+0x3415e3)[0x7fc3d545d5e3]\r\n```\r\n\r\n(the CUDA tests themselves pass)",
+        "created_at": "2018-05-09T12:13:59.000Z",
+        "updated_at": "2018-05-16T20:30:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: GPU",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-05-16T20:30:29.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-05-13T17:47:36.317Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2561?focusedCommentId=16473585) by Uwe Korn (uwe):*\nAre you able to get `valgrind` or `AddressSanitizer` output for this crash?\u00a0\r\n\r\nProblems with `__cxa_finalize` could also indicate that we a library linked once statically and once dynamically but we would need `valgrind`/\u2026 to discover that.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-05-15T13:28:05.097Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2561?focusedCommentId=16475826) by Antoine Pitrou (apitrou):*\nHere is the `valgrind` output for `cuda-test`:\r\nhttps://gist.github.com/pitrou/bb4fee35c55f58818225bdfdace916f2\r\n\r\nIn short, it looks like some double-free in a static `std::string` in `libarrow.so`. Most probably some C++ shared / static library issue. The following patch seems to fix things here, but I'm not sure how correct is. What do you think?\r\n\r\n```Java\n\r\ndiff --git a/cpp/src/arrow/gpu/CMakeLists.txt b/cpp/src/arrow/gpu/CMakeLists.txt\r\nindex be47413..7a019db 100644\r\n--- a/cpp/src/arrow/gpu/CMakeLists.txt\r\n+++ b/cpp/src/arrow/gpu/CMakeLists.txt\r\n@@ -43,7 +43,7 @@ ADD_ARROW_LIB(arrow_gpu\r\n   DEPENDENCIES metadata_fbs\r\n   SHARED_LINK_FLAGS \"\"\r\n   SHARED_LINK_LIBS ${ARROW_GPU_SHARED_LINK_LIBS}\r\n-  STATIC_LINK_LIBS \"\"\r\n+  STATIC_LINK_LIBS ${ARROW_GPU_SHARED_LINK_LIBS}\r\n )\r\n \r\n# CUDA build version\r\n@@ -72,7 +72,7 @@ install(\r\n   DESTINATION \"${CMAKE_INSTALL_LIBDIR}/pkgconfig/\")\r\n \r\n set(ARROW_GPU_TEST_LINK_LIBS\r\n-  arrow_gpu_shared\r\n+  arrow_gpu_static\r\n   ${ARROW_TEST_LINK_LIBS})\r\n \r\n if (ARROW_BUILD_TESTS)\r\n```"
+        },
+        {
+            "created_at": "2018-05-16T20:30:29.665Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2561?focusedCommentId=16478063) by Uwe Korn (uwe):*\nIssue resolved by pull request 2048\n<https://github.com/apache/arrow/pull/2048>"
+        }
+    ]
+}

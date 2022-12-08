@@ -1,0 +1,79 @@
+{
+    "issue": {
+        "title": "[GLib] Memory leak on creating GArrowData",
+        "body": "***Note**: This issue was originally created as [ARROW-14790](https://issues.apache.org/jira/browse/ARROW-14790). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe're having problem with a memory leak in a Ruby script that processes many CSV files. I have written some short scripts do demonstrate the problem: <https://gist.github.com/stenlarsson/60b1e4e99416738b41ee30e7ba294214>\r\n\r\nThe first script, [arrow_test_csv.rb](https://gist.github.com/stenlarsson/60b1e4e99416738b41ee30e7ba294214#file-arrow_test_csv-rb), creates a 184 MB CSV file for testing.\r\n\r\nThe second script, [arrow_memory_leak.rb](https://gist.github.com/stenlarsson/60b1e4e99416738b41ee30e7ba294214#file-arrow_memory_leak-rb), then loads the CSV file 10 times using Arrow. It uses the [get_process_mem](https://rubygems.org/gems/get_process_mem) gem to print the memory usage both before and after each iteration. It also invokes the garbage collector on each iteration to ensure the problem is not that Ruby holds on to any objects. This is what it prints on my MacBook Pro using Arrow 6.0.0:\r\n```\n\r\n127577 objects, 34.234375 MB\r\n127577 objects, 347.625 MB\r\n127577 objects, 438.7890625 MB\r\n127577 objects, 457.6953125 MB\r\n127577 objects, 469.8046875 MB\r\n127577 objects, 480.88671875 MB\r\n127577 objects, 487.96484375 MB\r\n127577 objects, 493.8359375 MB\r\n127577 objects, 497.671875 MB\r\n127577 objects, 498.55859375 MB\r\n127577 objects, 501.42578125 MB\r\n```\r\nThe third script, [arrow_memory_leak.py ](https://gist.github.com/stenlarsson/60b1e4e99416738b41ee30e7ba294214#file-arrow_memory_leak-py) is a Python implementation of the same script. This shows that the problem is not in the Ruby bindings:\r\n```\n\r\n2106 objects, 31.75390625 MB\r\n2106 objects, 382.28515625 MB\r\n2106 objects, 549.41796875 MB\r\n2106 objects, 656.78125 MB\r\n2106 objects, 679.6875 MB\r\n2106 objects, 691.9921875 MB\r\n2106 objects, 708.73828125 MB\r\n2106 objects, 717.296875 MB\r\n2106 objects, 724.390625 MB\r\n2106 objects, 729.19921875 MB\r\n2106 objects, 734.47265625 MB\r\n```\r\nI have also tested Arrow 5.0.0 and it has the same problem.",
+        "created_at": "2021-11-22T12:14:43.000Z",
+        "updated_at": "2022-05-25T21:11:02.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Component: Ruby",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-05-25T21:11:02.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-22T12:24:06.826Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14790?focusedCommentId=17447365) by Antoine Pitrou (apitrou):*\nTwo things:\r\n\r\n1) `sys.getrefcount(object)` in Python will not tell you anything actually useful\r\n\r\n2) this does not look like a memory leak since memory consumption seems to reach a fixed point. Modern memory allocators are complex and they don't necessarily return memory _to the system_ when the memory is freed, because it can be costly. Instead, they use heuristics and keep some freed memory as a cache for future allocations.\r\n\r\nPyArrow exposes an API to try and return released memory to the system. It is best-effort since it relies on how the underlying allocator (e.g. jemalloc) works:\r\n```python\n\r\n>>> pool = pa.default_memory_pool()\r\n>>> pool.release_unused()\r\n```\r\n\r\nYou may try that in your script. I don't know if we expose the same API in Ruby. `[~kou]`"
+        },
+        {
+            "created_at": "2021-11-22T13:05:57.212Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14790?focusedCommentId=17447381) by Sten Larsson (stenlarsson):*\nThanks for the quick reply!\u00a0The release_unused method sounds promising, but I don't think it is available in Ruby.\r\n\r\nI agree that it seems to reach a fixed point, so you are probably right that this is not a bug in Arrow.\r\n\r\nThe problem for us is that this fixed point seems to be higher than the available memory. In production we're running with `{}docker --memory xxx{`}, and I guess the memory allocator sees the whole available memory on the node, and is not aware of the limit. We use this limit to protect other process on the node the OOM killer.\r\n\r\nIs there a way to tell the memory allocator what the actual limit is?"
+        },
+        {
+            "created_at": "2021-11-22T13:51:50.343Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14790?focusedCommentId=17447417) by Antoine Pitrou (apitrou):*\nHmm, do you get actual OOMs or are you just afraid of them?\r\n\r\nAlso, is any swap is enabled on your docker containers? If not, then I think the allocator won't be allowed to go past the limit (though I'm a bit out of my depth here)."
+        },
+        {
+            "created_at": "2021-11-22T13:57:33.328Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14790?focusedCommentId=17447423) by Antoine Pitrou (apitrou):*\nBy the way, you can also try using a different memory pool for allocations (for example the system allocator or mimalloc instead of jemalloc) : https://arrow.apache.org/docs/python/api/memory.html#memory-pools"
+        },
+        {
+            "created_at": "2021-11-22T14:41:56.231Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14790?focusedCommentId=17447448) by Sten Larsson (stenlarsson):*\n> Hmm, do you get actual OOMs or are you just afraid of them?\r\n\r\nYes I get real OOMs. In the real production environment the CSV files are up to 1 GB in size. The node has 32 GB memory, and the memory limit in the docker container is set to 31 GB, but eventually the limit is reached and the process gets killed.\r\n\r\n> Also, is any swap is enabled on your docker containers?\r\n\r\nNo\r\n\r\n> By the way, you can also try using a different memory pool for allocations\r\n\r\nThanks for the tip. I tried it in my Python script, and it appears that mimalloc is the default. Switching to jemalloc it uses a lot less memory (but is slower). Would be great if these methods could be added to the Ruby bindings."
+        },
+        {
+            "created_at": "2021-11-22T20:19:43.956Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14790?focusedCommentId=17447605) by Kouhei Sutou (kou):*\nWe don't want to export memory pool related API into Ruby yet.\r\nCould you use the `ARROW_DEFAULT_MEMORY_POOL` environment variable such as `ARROW_DEFAULT_MEMORY_POOL=system`?\r\n\r\nBTW, does `pa.default_memory_pool().release_unused()` decrease memory usage on your environment? It doesn't change anything on my environment."
+        },
+        {
+            "created_at": "2021-11-22T20:39:08.342Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14790?focusedCommentId=17447620) by Sten Larsson (stenlarsson):*\n> We don't want to export memory pool related API into Ruby yet.\r\nCould you use the\u00a0`ARROW_DEFAULT_MEMORY_POOL`\u00a0environment variable such as\u00a0`{}ARROW_DEFAULT_MEMORY_POOL=system{`}?\r\n\r\nThanks, this seems to work on my computer! I will try it in our staging environment.\r\n\r\n> BTW, does\u00a0`pa.default_memory_pool().release_unused()`\u00a0decrease memory usage on your environment? It doesn't change anything on my environment.\r\n\r\nNo it does not seem to have any effect."
+        },
+        {
+            "created_at": "2021-12-01T00:48:31.376Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14790?focusedCommentId=17451456) by Weston Pace (westonpace):*\n> Yes I get real OOMs. In the real production environment the CSV files are up to 1 GB in size. The node has 32 GB memory, and the memory limit in the docker container is set to 31 GB, but eventually the limit is reached and the process gets killed.\r\n\r\nThis is surprising.  The dynamic allocators, in my experience, will not overallocate all that much (e.g. not more than 30% in many cases and I'd be really surprised at 2x overallocation).  A 1GB file might require ~3-4GB of RAM to read and store.  So using up to 31GB seems off.\r\n\r\nI have a 32GB system and I tried your python script with a 1.4GB CSV file and the process plateaued at ~3.5GB of usage which is pretty much what I'd expect.\r\n\r\nAnother choice, if RAM usage is a concern, is to use the streaming CSV reader (I'm not sure if this is available via ruby yet).  The whole-file reader will cache the entire file in RAM in addition to the table that is constructed (this is why 3-4GB is not unexpected for a 1GB file)."
+        },
+        {
+            "created_at": "2021-12-01T08:33:24.968Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14790?focusedCommentId=17451614) by Sten Larsson (stenlarsson):*\nThanks for looking into it.\u00a0\r\n\r\n> Another choice, if RAM usage is a concern, is to use the streaming CSV reader (I'm not sure if this is available via ruby yet). The whole-file reader will cache the entire file in RAM in addition to the table that is constructed (this is why 3-4GB is not unexpected for a 1GB file).\r\n\r\nEven if it was available I don't think it would solve my problem. There is enough RAM to process one file, but eventually it runs out of memory after processing a number of files. As it is now I need to restart the processing after a number of files.\r\n\r\nI thought I had reproduced the problem locally on my Mac, but apparently I hadn't. It tried using ARROW_DEFAULT_MEMORY_POOL with different values but it doesn't seem to fix the real problem. Maybe this has nothing to do with Arrow at all, but we didn't have this memory leak before when everything was implemented in pure Ruby. Of course, the performance was much worse, both in terms of CPU and memory usage for a single file.\r\n\r\nShould I close this issue?"
+        },
+        {
+            "created_at": "2021-12-02T02:36:42.102Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14790?focusedCommentId=17452131) by Weston Pace (westonpace):*\nHmm, one of the better tools for diagnosing memory leaks is the arrow::MemoryPool::bytes_allocated function.  This should help determine if there is a leak in Ruby/Arrow somewhere (this value would be very large) or if it is in the dynamic allocators (bytes_allocated would be 0).  I don't know if there's anyway you can temporarily make a build with that function exposed to try it out.\r\n\r\nFeel free to close the issue if you are stopping or pausing the investigation but if you plan to get back to this at some point I don't think there is any harm in leaving it open for a while."
+        },
+        {
+            "created_at": "2022-05-24T12:24:01.381Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14790?focusedCommentId=17541442) by Sten Larsson (stenlarsson):*\nI finally found some time to further investigate the, and as suggested I added the arrow::MemoryPool::bytes_allocated function to the GLib wrapper. I created a PR, but should I create separate Jira issue for that? <https://github.com/apache/arrow/pull/13224>\r\n\r\nThe bytes_allocated returns zero in my original script, so I guess there is no memory leak. However I've created another script [arrow_memory_leak_2.rb](https://gist.github.com/stenlarsson/60b1e4e99416738b41ee30e7ba294214#file-arrow_memory_leak_2-rb) which appear to leak when using a compute function. Here is what the output looks like on Arrow 8.0.0 on my computer with my patch applied:\r\n```\n\r\nbackend_name: mimalloc\r\n0 MB allocated, 110459 Ruby objects\r\n77 MB allocated, 110459 Ruby objects\r\n154 MB allocated, 110459 Ruby objects\r\n232 MB allocated, 110459 Ruby objects\r\n309 MB allocated, 110459 Ruby objects\r\n387 MB allocated, 110459 Ruby objects\r\n464 MB allocated, 110459 Ruby objects\r\n542 MB allocated, 110459 Ruby objects\r\n619 MB allocated, 110459 Ruby objects\r\n697 MB allocated, 110459 Ruby objects\r\n774 MB allocated, 110459 Ruby objects\n```"
+        },
+        {
+            "created_at": "2022-05-24T12:25:07.743Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14790?focusedCommentId=17541445) by Sten Larsson (stenlarsson):*\nI can also add that I could not reproduce this in Python, which suggests the problem is somewhere in the GLib wrapper."
+        },
+        {
+            "created_at": "2022-05-24T23:35:46.216Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14790?focusedCommentId=17541753) by Kouhei Sutou (kou):*\n> I created a PR, but should I create separate Jira issue for that? https://github.com/apache/arrow/pull/13224\r\n\r\nThanks! Yes, please.\r\n\r\n> However I've created another script arrow_memory_leak_2.rb which appear to leak when using a compute function. \r\n\r\nThanks! This is very helpful. I found a memory leak bug by this. I'll open a pull request for this."
+        },
+        {
+            "created_at": "2022-05-25T07:26:28.312Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14790?focusedCommentId=17541868) by Sten Larsson (stenlarsson):*\nThanks for fixing. (y)\r\n\r\nI created https://issues.apache.org/jira/browse/ARROW-16648 for adding the memory pool."
+        },
+        {
+            "created_at": "2022-05-25T21:11:02.583Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14790?focusedCommentId=17542238) by Kouhei Sutou (kou):*\nIssue resolved by pull request 13228\n<https://github.com/apache/arrow/pull/13228>"
+        }
+    ]
+}

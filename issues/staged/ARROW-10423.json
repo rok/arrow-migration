@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[C++] Filter compute function seems slow compared to numpy nonzero + take",
+        "body": "***Note**: This issue was originally created as [ARROW-10423](https://issues.apache.org/jira/browse/ARROW-10423). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFrom https://stackoverflow.com/questions/64581590/is-there-a-more-efficient-way-to-select-rows-from-a-pyarrow-table-based-on-conte\r\n\r\nI made a smaller, simplified example:\r\n\r\n```python\n\r\narr = pa.array(np.random.randn(1_000_000))\r\n\r\n# mask with only few True values\r\nmask1 = np.zeros(len(arr), dtype=bool)\r\nmask1[np.random.randint(len(arr), size=100)] = True\r\nmask1_pa = pa.array(mask1)\r\n\r\n# mask with larger proportion of True values\r\nmask2 = np.zeros(len(arr), dtype=bool)\r\nmask2[np.random.randint(len(arr), size=10_000)] = True\r\nmask2_pa = pa.array(mask2)\r\n```\r\n\r\nDoing timings of doing a Arrow `Filter` kernel vs using numpy to convert the mask into indices and then using a `Take` kernel:\r\n\r\n```Java\n\r\n# mask 1\r\nIn [3]: %timeit arr.filter(mask1_pa)\r\n132 \u00b5s \u00b1 4.44 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 10000 loops each)\r\n\r\nIn [4]: %%timeit\r\n   ...: indices = np.nonzero(mask1)[0]\r\n   ...: arr.take(indices)\r\n114 \u00b5s \u00b1 2.62 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 10000 loops each)\r\n\r\n# mask 2\r\nIn [8]: %timeit arr.filter(mask2_pa)\r\n711 \u00b5s \u00b1 63.4 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 1000 loops each)\r\n\r\nIn [9]: %%timeit\r\n   ...: indices = np.nonzero(mask2)[0]\r\n   ...: arr.take(indices)\r\n333 \u00b5s \u00b1 6.32 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 1000 loops each)\r\n```\r\n\r\nSo in the first case, both are quite similar in timing. But in the second case, the numpy+take version is faster. \r\n\r\nI know this might depend on a lot on the actual proportion of True values and how they are positioned in the array (random vs concentrated) etc, so there is probably not a general rule of what should be faster. \r\nBut, it still seems a potential indication that things can be optimized in the Filter kernel.",
+        "created_at": "2020-10-29T20:09:41.000Z",
+        "updated_at": "2021-06-10T14:38:12.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-06-10T14:38:11.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-10-29T20:14:59.814Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10423?focusedCommentId=17223186) by Joris Van den Bossche (jorisvandenbossche):*\nAnd note I timed it with released versions from conda-forge (so not an issue of forgetting that I am using a debug build ;-))"
+        },
+        {
+            "created_at": "2020-10-29T20:41:03.481Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10423?focusedCommentId=17223193) by Antoine Pitrou (apitrou):*\nSounds like Arrow might not preallocate the result array? It should be easy to compute its size based on a popcount of the filter."
+        },
+        {
+            "created_at": "2020-11-02T14:16:27.091Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10423?focusedCommentId=17224681) by Wes McKinney (wesm):*\nWe should also expose the equivalent of `numpy.nonzero` as a kernel (the code to do this already exists, it just hasn't been \"kernelized\")"
+        },
+        {
+            "created_at": "2020-11-02T21:49:34.492Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10423?focusedCommentId=17224977) by Jason Sachs (jason_s):*\n> We should also expose the equivalent of\u00a0`numpy.nonzero`\u00a0as a kernel (the code to do this already exists, it just hasn't been \"kernelized\")\r\n\r\nyes please =)"
+        },
+        {
+            "created_at": "2021-06-10T14:29:43.663Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10423?focusedCommentId=17360969) by Antoine Pitrou (apitrou):*\nHere is the current status here. It seems Arrow is now much faster than Numpy at filtering:\r\n```python\n\r\n>>> %timeit arr.filter(mask1_pa)\r\n20.4 \u00b5s \u00b1 11.4 ns per loop (mean \u00b1 std. dev. of 7 runs, 10000 loops each)\r\n>>> %timeit arr.to_numpy()[mask1]\r\n96.8 \u00b5s \u00b1 605 ns per loop (mean \u00b1 std. dev. of 7 runs, 10000 loops each)\r\n\r\n>>> %timeit arr.filter(mask2_pa)\r\n134 \u00b5s \u00b1 334 ns per loop (mean \u00b1 std. dev. of 7 runs, 10000 loops each)\r\n>>> %timeit arr.to_numpy()[mask2]\r\n284 \u00b5s \u00b1 545 ns per loop (mean \u00b1 std. dev. of 7 runs, 1000 loops each)\r\n```\r\n\r\nAnd it's roughly as fast in taking:\r\n```python\n\r\n>>> %timeit indices = np.nonzero(mask1)[0]; arr.take(indices)\r\n159 \u00b5s \u00b1 308 ns per loop (mean \u00b1 std. dev. of 7 runs, 10000 loops each)\r\n>>> %timeit indices = np.nonzero(mask1)[0]; arr.to_numpy()[indices]\r\n142 \u00b5s \u00b1 168 ns per loop (mean \u00b1 std. dev. of 7 runs, 10000 loops each)\r\n\r\n>>> %timeit indices = np.nonzero(mask2)[0]; arr.take(indices)\r\n274 \u00b5s \u00b1 1.83 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 1000 loops each)\r\n>>> %timeit indices = np.nonzero(mask2)[0]; arr.to_numpy()[indices]\r\n285 \u00b5s \u00b1 3.24 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 1000 loops each)\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-06-10T14:38:12.048Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10423?focusedCommentId=17360974) by Antoine Pitrou (apitrou):*\nIt appears the performance gap was fixed in ARROW-10696."
+        }
+    ]
+}

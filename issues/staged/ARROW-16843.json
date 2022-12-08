@@ -1,0 +1,60 @@
+{
+    "issue": {
+        "title": "[Python][CSV] CSV reader performs unsafe type conversion",
+        "body": "***Note**: This issue was originally created as [ARROW-16843](https://issues.apache.org/jira/browse/ARROW-16843). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi, I've noticed that although pa.scalar and pa.array behave correctly when given the largest possible (uint64) value (i.e. they fail correctly when trying to cast to float e.g.), the CSV reader happily converts strings representing uint64 values to float (see example below). Is this intended? Would it be possible to have a safe-conversion-only option?\r\n\r\nThe problem is that at the moment the only safe option to read a CSV whose types are not known in advance is to read without any conversion (string only) and perform the type inference oneself.\r\n\r\nIt would be ok if Uint64 types couldn't be inferred, as long as the corresponding columns aren't coerced in a destructive manner to float. I.e., if they were left as string columns, one could then implement a custom conversion, while still benefiting from the correct and automatic conversion of the remaining columns.\r\n\r\n\u00a0\r\n\r\nThe following correctly rejects the float type for uint64 values:\r\n```java\n\r\nimport pyarrow as pa\r\n\r\nuint64_max = 18_446_744_073_709_551_615\r\n\r\ntype_ = pa.uint64()\r\nuint64_scalar = pa.scalar(uint64_max, type=type_)\r\nuint64_array = pa.array([uint64_max], type=type_)\r\n\r\ntry:\r\n\u00a0 \u00a0 f = pa.scalar(uint64_max, type=pa.float64())\r\nexcept Exception as exc:\r\n\u00a0 \u00a0 print(exc)\r\n\u00a0 \u00a0\u00a0\r\ntry:\r\n\u00a0 \u00a0 f = pa.scalar(uint64_max // 2, type=pa.float64())\r\nexcept Exception as exc:\r\n\u00a0 \u00a0 print(exc) \n```\r\n```java\n\r\n>> PyLong is too large to fit int64\r\n>> Integer value 9223372036854775807 is outside of the range exactly representable by a IEEE 754 double precision value\r\n```\r\nThe CSV reader, on the other hand, doesn't infer UInt64 types (which is fine, as documented here [https://arrow.apache.org/docs/cpp/csv.html#data-types),](https://arrow.apache.org/docs/cpp/csv.html#data-types))\u00a0 but does coerce values to float which shouldn't be coercable according to above examples:\r\n```java\n\r\nimport io\r\n\r\ncsv = \"int64,uint64\\n0,0\\n4294967295,18446744073709551615\"\r\ntbl = pa.csv.read_csv(io.BytesIO(csv.encode(\"utf-8\")))\r\n\r\nprint(tbl.schema)\r\nprint(tbl.column(\"uint64\")[1] == uint64_scalar)\r\nprint(tbl.column(\"uint64\")[1].cast(pa.uint64())) \n```\r\n```java\n\r\nint64: int64\r\nuint64: double\r\n\r\nFalse\r\n0\r\n```",
+        "created_at": "2022-06-16T15:38:02.000Z",
+        "updated_at": "2022-06-20T08:29:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-16T15:46:06.963Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16843?focusedCommentId=17555150) by Antoine Pitrou (apitrou):*\nNote that's not really the same situation: in the first case, you are converting between number types, where you presumably expect the conversion to be exact. In the second case, you are converting from string to number, where it's not unreasonable to accept some possible precision loss.\r\n\r\nIt's also likely that raising an error would break a non-tiny number of real-world CSV reading use cases.\r\n"
+        },
+        {
+            "created_at": "2022-06-16T16:10:14.850Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16843?focusedCommentId=17555172) by Thomas Buhrmann (buhrmann):*\nYou're right, this also performs destructive conversion:\r\n```java\n\r\npa.scalar(\"18446744073709551615\").cast(pa.float64()) \n```\r\n```\n\r\n >> <pyarrow.DoubleScalar: 1.8446744073709552e+19>\r\n\r\n```\r\nWhich is why I think it would be good to have an option to not perform certain conversions automatically if they have the potential to be destructive (in the sense that one cannot cast back to string or another type without loss of information), even if the default may be destructive. E.g. it is quite common to have ID columns in the uint64 range, which at the moment cannot be read using the CSV reader (without disabling all type inference). \r\n\r\nAnother possibility would be to pass a list of inferrable types (so one could exclude float64), in addition to the explicit [column_types parameter](https://arrow.apache.org/docs/cpp/api/formats.html#_CPPv4N5arrow3csv14ConvertOptions12column_typesE)."
+        },
+        {
+            "created_at": "2022-06-16T16:12:16.950Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16843?focusedCommentId=17555173) by Antoine Pitrou (apitrou):*\n> Another possibility would be to pass a list of inferrable types (so one could exclude float64), in addition to the explicit column_types parameter.\r\n\r\nYes, I think this would be the better solution and would address more use cases."
+        },
+        {
+            "created_at": "2022-06-16T16:16:51.957Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16843?focusedCommentId=17555175) by Antoine Pitrou (apitrou):*\nAn actual list of inferrable types wouldn't exactly work, by the way, because datatypes are not the inference granularity."
+        },
+        {
+            "created_at": "2022-06-16T16:23:13.989Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16843?focusedCommentId=17555180) by Thomas Buhrmann (buhrmann):*\nOr even expose the type inference itself in some way, so one could simply read all columns as strings and then use the underlying type inference on a column by column basis, using additional custom logic. I'm currently creating an additional inference layer, e.g., that also infers list types from string columns, timestamps with non-iso formats, downcasts ints to the smallest possible type etc. (the uint64 case is the only \"problem\" I had so far fwiw..)"
+        },
+        {
+            "created_at": "2022-06-16T16:26:05.760Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16843?focusedCommentId=17555182) by Antoine Pitrou (apitrou):*\nYes, making the inference abstract and overridable would be another possible way. Needs someone to look at the current inference internals and devise an API to make it overridable.\r\n"
+        },
+        {
+            "created_at": "2022-06-17T13:42:54.352Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16843?focusedCommentId=17555618) by Thomas Buhrmann (buhrmann):*\nIf the information about the types being tried in order [here](https://arrow.apache.org/docs/cpp/csv.html#data-types) is correct, wouldn't it make sense to simply introduce the UInt64 type either directly after Int64 or before Float64? Not sure at all about the underlying implementation, but it sounds kind of trivial, and would be a nice gain in \"correctness\" (e.g. being able to read Twitter datasets without mangling tweet or author IDs)."
+        },
+        {
+            "created_at": "2022-06-17T20:10:29.675Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16843?focusedCommentId=17555752) by Antoine Pitrou (apitrou):*\nThere are two reasons I think that is a bad idea:\r\n- you could get two different integer types based on the magnitude of the values, which would probably be confusing and error-prone (for example if you are working with a dataset of CSV files)\n- unsigned types are quite specialized and we should probably avoid to infer them by default; also it's quite rare to have data that doesn't fit in a 63-bit int but does fit in a 64-bit one (and that's never negative)\n"
+        },
+        {
+            "created_at": "2022-06-20T08:18:06.227Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16843?focusedCommentId=17556254) by Thomas Buhrmann (buhrmann):*\nYes, fair enough, datasets of multiple CSVs may be awkward. As to how common it is to have 64-bit numbers, I guess the most common use case would be IDs. But really those are often treated best as strings anyways, i.e., they're not usually used to calculate with. So as long as there's a way (configuration) for them not to be converted to floats that would probably be sufficient. (In fact, even in the use case I mentioned earlier, Twitter IDs, the official API recommends to treat them as strings: <https://developer.twitter.com/en/docs/twitter-ids).>"
+        },
+        {
+            "created_at": "2022-06-20T08:28:52.734Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16843?focusedCommentId=17556258) by Antoine Pitrou (apitrou):*\nYou can always disable inference for a particular column by setting a type in `ConvertOptions::column_types`"
+        },
+        {
+            "created_at": "2022-06-20T08:29:25.415Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16843?focusedCommentId=17556259) by Antoine Pitrou (apitrou):*\ncc `[~willjones127]` for possibly researching an API allowing to customize CSV type inference."
+        }
+    ]
+}

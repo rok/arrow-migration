@@ -1,0 +1,46 @@
+{
+    "issue": {
+        "title": "[Rust] [DataFusion] Refactor of HashAggregateExec to support custom merge",
+        "body": "***Note**: This issue was originally created as [ARROW-6659](https://issues.apache.org/jira/browse/ARROW-6659). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHashAggregateExec current creates one HashPartition per input partition for the initial aggregate per partition, and then explicitly calls MergeExec and then creates another HashPartition for the final reduce operation.\r\n\r\nThis is fine for in-memory queries in DataFusion but is not extensible. For example, it is not possible to provide a different MergeExec implementation that would distribute queries to a cluster.\r\n\r\nA better design would be to move the logic into the query planner so that the physical plan contains explicit steps such as:\r\n\r\n\u00a0\r\n```java\n\r\n- HashAggregate // final aggregate\r\n  - MergeExec\r\n    - HashAggregate // aggregate per partition\r\n \n```\r\nThis would then make it easier to customize the plan in other projects, to support distributed execution:\r\n```java\n\r\n - HashAggregate // final aggregate\r\n   - MergeExec\r\n      - DistributedExec\r\n         - HashAggregate // aggregate per partition\n```",
+        "created_at": "2019-09-22T17:39:00.000Z",
+        "updated_at": "2019-10-16T02:15:04.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Component: Rust - DataFusion",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2019-10-16T02:15:04.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-09T18:01:43.816Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6659?focusedCommentId=16947901) by Kyle McCarthy (kylemccarthy):*\nDo you have a specific solution in mind? I was thinking that this could be done by moving some of the logic out from the partitions method in the HashAggregateExec to the create_physical_plan on the ExecutionContext. I was also thinking that it it probably could work with generics."
+        },
+        {
+            "created_at": "2019-10-10T00:00:29.393Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6659?focusedCommentId=16948083) by Andy Grove (andygrove):*\nYes, basically what I am suggesting is that the HashAggregateExec never merges and just aggregates each partition.\r\n\r\nWhen we create the physical plan from the logical plan, we should have the logic there to know that if we are aggregating a partitioned data source then we need to merge and then aggregate again ... so yes, moving logic from HashAggregateExec to create_physical_plan, as you said.\r\n\r\nCurrently the logical plan doesn't know about partitioning though ... so we'd need to add that info."
+        },
+        {
+            "created_at": "2019-10-10T21:49:13.915Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6659?focusedCommentId=16948961) by Kyle McCarthy (kylemccarthy):*\nDoes the LogicalPlan need to know about partitioning? I was able to just move the logic into the physical query planner and it seems to work... I am not sure if this is what you had in mind though. [You can see what I mean here](https://github.com/kyle-mccarthy/arrow/blob/3596cf417b8420b51f265c980aace7292c6134d8/rust/datafusion/src/execution/context.rs#L275).\r\n\r\nOriginally I was thinking about adding a `LogicalPlan::Merge` variant and adding some boolean value onto the `LogicalPlan::Aggregate` to indicate if the input was partitioned. It seemed like it could just overcomplicate the process though. "
+        },
+        {
+            "created_at": "2019-10-11T02:47:45.674Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6659?focusedCommentId=16949075) by Andy Grove (andygrove):*\nYes, I was thinking that the LogicalPlan would have a new Merge variant and also would know about partitioning. Initially we can just add a partition_count attribute to each variant in the enum, Later we might want to add extra information about partitions such as size, because eventually we may want to explore cost-based optimizations.\r\n\r\nHowever, I like what you are doing here as well since it also meets my main goal of completely removing any merging from HashAggregateExec .... maybe we should do your approach first and then see if there is a need to move this to the logical plan in the future? Nice work :)\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-10-11T20:29:00.006Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6659?focusedCommentId=16949779) by Kyle McCarthy (kylemccarthy):*\nI am happy to help - and I would prefer to do it how you wanted/the right way! I am fairly unfamiliar with the codebase so I am really just learning it by working through the open tasks, so this may be a dumb question.\r\n\r\nHow does the LogicalPlan and partition count actually work together. From the tests it looks like the partition count is related to the batch size? If so that would mean that every LogicalPlan would have the same partition count right?\r\n\r\nAlso, if we do add the LogicalPlan::Merge - that would mean that when the SQL Planner is creating a Logical Aggregate it would create:\r\n```java\n\r\nAggregate { Merge { Aggregate ( aggregate_input ) } }\n```\r\n? If so that definitely makes sense to me, but I am still not totally sure how the partition count would work into this.\r\n\r\nThank you for your patience!"
+        },
+        {
+            "created_at": "2019-10-13T16:53:29.909Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6659?focusedCommentId=16950387) by Andy Grove (andygrove):*\nHi `[~kylemccarthy]` ... I think you should create a PR based on the change you already made first, to move the logic from HashAggregate into the physical query planner, then we can look at the next step of moving the logic to the logical plan which is a much larger change.\r\n\r\nTo answer your questions though, partition count is basically how many partitions the input data source has, which usually means how many files are there in the directory. Batch count is unrelated and is just how many rows are read at a time.\r\n\r\nThe example logical plan you provided is correct.\r\n\r\nSo the LogicalPlan for a CSV data source that is a directory containing 4 files would be 4.\r\n\r\nThe LogicalPlan that aggregates that would also have 4 partitions (same as the input).\r\n\r\nLogicalPlan::Merge always has partition count 1.\r\n\r\nHope that helps."
+        },
+        {
+            "created_at": "2019-10-16T02:15:04.326Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6659?focusedCommentId=16952441) by Andy Grove (andygrove):*\nIssue resolved by pull request 5648\n<https://github.com/apache/arrow/pull/5648>"
+        }
+    ]
+}

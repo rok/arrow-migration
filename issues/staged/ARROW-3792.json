@@ -1,0 +1,42 @@
+{
+    "issue": {
+        "title": "[Python] Segmentation fault when writing empty RecordBatches to Parquet",
+        "body": "***Note**: This issue was originally created as [ARROW-3792](https://issues.apache.org/jira/browse/ARROW-3792). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n## Background\r\n\r\nI am trying to convert a very sparse dataset to parquet (~3% rows in a range are populated). The file I am working with spans upto ~63M rows. I decided to iterate in batches of 500k rows, 127 batches in total. Each row batch is a `RecordBatch`. I create 4 batches at a time, and write to a parquet file incrementally. Something like this:\r\n\r\n```python\n\r\nbatches = [..]  # 4 batches\r\ntbl = pa.Table.from_batches(batches)\r\npqwriter.write_table(tbl, row_group_size=15000)\r\n# same issue with pq.write_table(..)\r\n```\r\n\r\nI was getting a segmentation fault at the final step, I narrowed it down to a specific iteration. I noticed that iteration had empty batches; specifically, [0, 0, 2876, 14423]. The number of rows for each `RecordBatch` for the whole dataset is below:\r\n\r\n```python\n\r\n[14050, 16398, 14080, 14920, 15527, 14288, 15040, 14733, 15345, 15799,\r\n15728, 15942, 14734, 15241, 15721, 15255, 14167, 14009, 13753, 14800,\r\n14554, 14287, 15393, 14766, 16600, 15675, 14072, 13263, 12906, 14167,\r\n14455, 15428, 15129, 16141, 15478, 16257, 14639, 14887, 14919, 15535,\r\n13973, 14334, 13286, 15038, 15951, 17252, 15883, 19903, 16967, 16878,\r\n15845, 12205, 8761, 0, 0, 0, 0, 0, 2876, 14423, 13557, 12723, 14330,\r\n15452, 13551, 12723, 12396, 13531, 13539, 11512, 13175, 13941, 14634,\r\n15515, 14239, 13856, 13873, 14154, 14822, 13543, 14653, 15328, 16171,\r\n15101, 150 55, 15194, 14058, 13706, 14747, 14650, 14694, 15397, 15122,\r\n16055, 16635, 14153, 14665, 14781, 15462, 15426, 16150, 14632, 14532,\r\n15139, 15324, 15279, 16075, 16394, 16834, 15391, 16320, 1650 4, 17248,\r\n15913, 15341, 14754, 16637, 15695, 16642, 18143, 19481, 19072, 15742,\r\n18807, 18789, 14258, 0, 0]\r\n```\r\n\r\nOn excluding the empty `RecordBatch`-es, the segfault goes away, but unfortunately I couldn't create a proper minimal example with synthetic data.\r\n\r\n## Not quite minimal example\r\n\r\nThe data I am using is from the 1000 Genome project, which has been public for many years, so we can be reasonably sure the data is good. The following steps should help you replicate the issue.\r\n\r\n1. Download the data file (and index), about 330MB:\n   ```bash\n   \n   $ wget ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/ALL.chr20.phase3_shapeit2_mvncall_integrated_v5a.20130502.genotypes.vcf.gz{,.tbi}\n   ```\n1. Install the Cython library `pysam`, a thin wrapper around the reference implementation of the VCF file spec. You will need `zlib` headers, but that's probably not a problem :)\n   ```bash\n   \n   $ pip3 install --user pysam\n   ```\n1. Now you can use the attached script to replicate the crash.\n   \n   ## Extra information\n   \n   I have tried attaching gdb, the backtrace when the segfault occurs is shown below (maybe it helps, this is how I realised empty batches could be the reason).\n   \n   {code}\n   (gdb) bt\n#0  0x00007f3e7676d670 in parquet::TypedColumnWriter<parquet::DataType<(parquet::Type::type)6> >::WriteMiniBatch(long, short const\\*, short const\\*, parquet::ByteArray const\\*) ()\r\n   from /home/user/miniconda3/lib/python3.6/site-packages/pyarrow/../../../libparquet.so.11\r\n#1  0x00007f3e76733d1e in arrow::Status parquet::arrow::(anonymous namespace)::ArrowColumnWriter::TypedWriteBatch<parquet::DataType<(parquet::Type::type)6>, arrow::BinaryType>(arrow::Array const&, long, short const\\*, short const\\*) ()\r\n   from /home/user/miniconda3/lib/python3.6/site-packages/pyarrow/../../../libparquet.so.11\r\n#2  0x00007f3e7673a3d4 in parquet::arrow::(anonymous namespace)::ArrowColumnWriter::Write(arrow::Array const&) ()\r\n   from /home/user/miniconda3/lib/python3.6/site-packages/pyarrow/../../../libparquet.so.11\r\n#3  0x00007f3e7673df09 in parquet::arrow::FileWriter::Impl::WriteColumnChunk(std::shared_ptr<arrow::ChunkedArray> const&, long, long) ()\r\n   from /home/user/miniconda3/lib/python3.6/site-packages/pyarrow/../../../libparquet.so.11\r\n#4  0x00007f3e7673c74d in parquet::arrow::FileWriter::WriteColumnChunk(std::shared_ptr<arrow::ChunkedArray> const&, long, long) ()\r\n   from /home/user/miniconda3/lib/python3.6/site-packages/pyarrow/../../../libparquet.so.11\r\n#5  0x00007f3e7673c8d2 in parquet::arrow::FileWriter::WriteTable(arrow::Table const&, long) ()\r\n   from /home/user/miniconda3/lib/python3.6/site-packages/pyarrow/../../../libparquet.so.11\r\n#6  0x00007f3e731e3a51 in __pyx_pw_7pyarrow_8_parquet_13ParquetWriter_5write_table(_object\\*, _object\\*, _object\\*) ()\r\n   from /home/user/miniconda3/lib/python3.6/site-packages/pyarrow/_parquet.cpython-36m-x86_64-linux-gnu.so\r\n{code}",
+        "created_at": "2018-11-14T18:08:03.000Z",
+        "updated_at": "2018-12-10T13:05:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-12-10T13:05:28.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-12-05T15:48:48.166Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3792?focusedCommentId=16710248) by Tanya Schlusser (tanya):*\nI have followed Suvayu's instructions and can successfully reproduce the segfault. I am going to try working on this, thanks!"
+        },
+        {
+            "created_at": "2018-12-06T02:41:04.828Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3792?focusedCommentId=16710914) by Tanya Schlusser (tanya):*\nI can now reproduce the bug with a more minimal code (see the attached file [minimal_bug_arrow3792.py](https://issues.apache.org/jira/secure/attachment/12950784/minimal_bug_arrow3792.py)) \u2013 it is a problem with the column that contains a list \u2013 I think the segfault occurs when dealing with the empty batch that is supposed to contain a column that contains a list. I'm still going to look at it more but in case I'm slow and someone else wants to do it faster you no longer need to download the genome dataset or `pysam`."
+        },
+        {
+            "created_at": "2018-12-06T02:54:51.011Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3792?focusedCommentId=16710917) by Wes McKinney (wesm):*\nThank you for creating the minimal reproduction! That's very helpful. I can take a look sometime in the next several days"
+        },
+        {
+            "created_at": "2018-12-06T03:03:25.426Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3792?focusedCommentId=16710926) by Tanya Schlusser (tanya):*\nSweet! I'll stop on this then :)"
+        },
+        {
+            "created_at": "2018-12-10T02:28:24.789Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3792?focusedCommentId=16714219) by Wes McKinney (wesm):*\nThe Parquet writer code behaves incorrectly when writing a length-0 array. There is another bug report about writing length-0 record batches so possible the same fix involved. "
+        },
+        {
+            "created_at": "2018-12-10T13:05:28.058Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3792?focusedCommentId=16714689) by Krisztian Szucs (kszucs):*\nIssue resolved by pull request 3141\n<https://github.com/apache/arrow/pull/3141>"
+        }
+    ]
+}

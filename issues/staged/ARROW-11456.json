@@ -1,0 +1,72 @@
+{
+    "issue": {
+        "title": "[Python] Parquet reader cannot read large strings",
+        "body": "***Note**: This issue was originally created as [ARROW-11456](https://issues.apache.org/jira/browse/ARROW-11456). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen reading or writing a large parquet file, I have this error:\r\n\r\n```\n\r\n    df: Final = pd.read_parquet(input_file_uri, engine=\"pyarrow\")\r\n  File \"/opt/conda/envs/condaenv/lib/python3.8/site-packages/pandas/io/parquet.py\", line 459, in read_parquet\r\n    return impl.read(\r\n  File \"/opt/conda/envs/condaenv/lib/python3.8/site-packages/pandas/io/parquet.py\", line 221, in read\r\n    return self.api.parquet.read_table(\r\n  File \"/opt/conda/envs/condaenv/lib/python3.8/site-packages/pyarrow/parquet.py\", line 1638, in read_table\r\n    return dataset.read(columns=columns, use_threads=use_threads,\r\n  File \"/opt/conda/envs/condaenv/lib/python3.8/site-packages/pyarrow/parquet.py\", line 327, in read\r\n    return self.reader.read_all(column_indices=column_indices,\r\n  File \"pyarrow/_parquet.pyx\", line 1126, in pyarrow._parquet.ParquetReader.read_all\r\n  File \"pyarrow/error.pxi\", line 99, in pyarrow.lib.check_status\r\nOSError: Capacity error: BinaryBuilder cannot reserve space for more than 2147483646 child elements, got 2147483648\r\n```\r\nIsn't pyarrow supposed to support large parquets? It let me write this parquet file, but now it doesn't let me read it back. I don't understand why arrow uses [31-bit computing.](https://arrow.apache.org/docs/format/Columnar.html#array-lengths) It's not even 32-bit as sizes are non-negative.\r\n\r\nThis problem started after I added a string column with 2.5 billion unique rows. Each value was effectively a unique base64 encoded length 24 string. Below is code to reproduce the issue:\r\n\r\n```python\n\r\nfrom base64 import urlsafe_b64encode\r\n\r\nimport numpy as np\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nimport smart_open\r\n\r\ndef num_to_b64(num: int) -> str:\r\n    return urlsafe_b64encode(num.to_bytes(16, \"little\")).decode()\r\n\r\ndf = pd.Series(np.arange(2_500_000_000)).apply(num_to_b64).astype(\"string\").to_frame(\"s\")\r\n\r\nwith smart_open.open(\"s3://mybucket/mydata.parquet\", \"wb\") as output_file:\r\n    df.to_parquet(output_file, engine=\"pyarrow\", compression=\"gzip\", index=False)\r\n```\r\n\r\nThe dataframe is created correctly. When attempting to write it as a parquet file, the last line of the above code leads to the error:\r\n```\n\r\npyarrow.lib.ArrowCapacityError: BinaryBuilder cannot reserve space for more than 2147483646 child elements, got 2500000000\r\n```",
+        "created_at": "2021-02-01T16:48:19.000Z",
+        "updated_at": "2021-02-12T13:44:09.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-02-01T16:53:45.502Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11456?focusedCommentId=17276462) by Antoine Pitrou (apitrou):*\ncc `[~jorisvandenbossche]`"
+        },
+        {
+            "created_at": "2021-02-01T17:08:03.248Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11456?focusedCommentId=17276480) by Joris Van den Bossche (jorisvandenbossche):*\n`[~apacman]` would you be able to provide a reproducible example? (eg some code that writes the parquet file)"
+        },
+        {
+            "created_at": "2021-02-01T17:19:51.871Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11456?focusedCommentId=17276501) by Pac A. He (apacman):*\n`[~jorisvandenbossche]` This is difficult in this case because the parquet is so large. What I can say is that this issue started **after I added a string column with 1.5 billion unique rows. Each value was effectively a unique base64 encoded length 22 string**. I hope this helps. If you still need code, I can write a function to generate it."
+        },
+        {
+            "created_at": "2021-02-01T17:34:09.723Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11456?focusedCommentId=17276517) by Antoine Pitrou (apitrou):*\nWas the Parquet file generated with Arrow?"
+        },
+        {
+            "created_at": "2021-02-01T17:50:03.375Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11456?focusedCommentId=17276536) by Pac A. He (apacman):*\n`[~apitrou]` Yes, absolutely. I had used pandas 1.2.1 with pyarrow 2.0.0 to write it as:\r\n\r\n`df.to_parquet(output_file, engine=\"pyarrow\", compression=\"gzip\", index=False)`"
+        },
+        {
+            "created_at": "2021-02-02T16:10:12.530Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11456?focusedCommentId=17277234) by Pac A. He (apacman):*\nFor what it's worth, `fastparquet` v0.5.0 had no trouble at all reading such files. That's a workaround for now, if only for Python, until this issue is resolved."
+        },
+        {
+            "created_at": "2021-02-02T16:14:16.071Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11456?focusedCommentId=17277239) by Joris Van den Bossche (jorisvandenbossche):*\n>  If you still need code, I can write a function to generate it.\r\n\r\nThat would help, yes."
+        },
+        {
+            "created_at": "2021-02-04T17:07:41.552Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11456?focusedCommentId=17278976) by Pac A. He (apacman):*\nUnfortunately I have not been able to produce a reproducible result in a simple example despite multiple attempts and experiments. I read a dataframe with 10 string columns and 2 billion rows without issue. The issue reproduces only over my actual real-world data. Nevertheless, obviously the exception traceback and the error message could still be indicative of what's causing it. Having  31-bit limit makes no sense to me."
+        },
+        {
+            "created_at": "2021-02-04T20:25:55.890Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11456?focusedCommentId=17279136) by Weston Pace (westonpace):*\nThe 31 bit limit you are referencing is not the 31 bit limit that is at play here and not really relevant.\u00a0 There is another 31 bit limit that has to do with how arrow stores strings.\u00a0 Parquet does not need to support random access of strings.\u00a0 The way it stores byte arrays & byte array lengths does not support random access.\u00a0 You could not fetch the ith string of a parquet encoded utf8 byte array.\r\n\r\nArrow does need to support this use case.\u00a0 It stores strings using two arrays.\u00a0 The first is an array of offsets.\u00a0 The second is an array of bytes.\u00a0 To fetch the ith string Arrow will look up offsets[i] and offsets[i+1] to determine the range that needs to be fetched from the array of bytes.\r\n\r\nThere are two string types in Arrow, \"string\" and \"large_string\".\u00a0 The \"string\" data type uses 4 byte signed integer offsets while the \"large_string\" data type uses 8 byte signed integer offsets.\u00a0 So it is not possible to create a \"string\" array with data containing more than 2 billion bytes.\r\n\r\nNow, this is not normally a problem.\u00a0 Arrow can fall back to a chunked array (which is why the 31 bit limit you reference isn't always such an issue).\r\n```java\n\r\n>>> import pyarrow as pa\r\n>>> x = '0' * 1024\r\n>>> y = [x] * (1024 * 1024 * 2)\r\n>>> len(y)\r\n2097152 // # of strings\r\n>>> len(y) * 1024\r\n2147483648 // # of bytes\r\n>>> a = pa.array(y)\r\n>>> len(a.chunks)\r\n2\r\n>>> len(a.chunks[0])\r\n2097151\r\n>>> len(a.chunks[1])\r\n1\r\n```\r\nHowever, it does seem that, if there are 2 billion strings (as opposed to just 2 billion bytes), the chunked array fallback is not applying.\r\n```java\n\r\n>>> x = '0' * 8\r\n>>> y = [x] * (1024 * 1024 * 1024 * 2)\r\n>>> len(y)\r\n2147483648\r\n>>> len(y) * 8\r\n17179869184\r\n>>> a = pa.array(y)\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"pyarrow\\array.pxi\", line 296, in pyarrow.lib.array\r\n  File \"pyarrow\\array.pxi\", line 39, in pyarrow.lib._sequence_to_array\r\n  File \"pyarrow\\error.pxi\", line 122, in pyarrow.lib.pyarrow_internal_check_status\r\n  File \"pyarrow\\error.pxi\", line 109, in pyarrow.lib.check_status\r\npyarrow.lib.ArrowCapacityError: BinaryBuilder cannot reserve space for more than 2147483646 child elements, got 2147483648\r\n```\r\nThis \"should\" be representable using a chunked array with two chunks.\u00a0 It is possible this is the source of your issue.\u00a0 Or maybe when reading from parquet the \"fallback to chunked array\" logic simply doesn't apply.\u00a0 I don't know the parquet code well enough.\u00a0 That is one of the reasons it would be helpful to have a reproducible test.\r\n\r\nIt also might be easier to just write your parquet out to multiple files or multiple row groups.\u00a0 Both of these approaches should not only avoid this issue but also reduce the memory pressure when you are converting to pandas."
+        },
+        {
+            "created_at": "2021-02-05T18:59:10.941Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11456?focusedCommentId=17279918) by Pac A. He (apacman):*\nI see. I have now added code to reproduce the issue. Basically, when I attempt to write a parquet file from a pandas dataframe having 2.5 billion unique string rows in a column, I have the error. Due to the large size of the dataframe, it will be memory and time intensive to test."
+        },
+        {
+            "created_at": "2021-02-09T15:53:05.359Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11456?focusedCommentId=17281854) by Antoine Pitrou (apitrou):*\nThanks for the reproducer `[~apacman]` . Unfortunately, even 48 GB RAM is not enough to run it.\r\n\r\nI tried to write another reproducer:\r\n```python\n\r\nimport numpy as np\r\nimport pandas as pd\r\n\r\nimport pyarrow as pa\r\n\r\ndf = pd.Series([\"x\" * 2_500_000_000]).astype(\"string\").to_frame(\"s\")\r\n\r\nout = pa.BufferOutputStream()\r\ndf.to_parquet(out, engine=\"pyarrow\", compression=\"lz4\", index=False)\r\n```\r\n\r\nHowever, it fails a bit differently, so I'm not sure it's the same issue:\r\n```Java\n\r\nTraceback (most recent call last):\r\n  File \"../bug_11456.py\", line 15, in <module>\r\n    df.to_parquet(out, engine=\"pyarrow\", compression=\"lz4\", index=False)\r\n[...]\r\n  File \"/home/antoine/miniconda3/envs/pyarrow/lib/python3.7/site-packages/pandas/core/arrays/string_.py\", line 250, in __arrow_array__\r\n    return pa.array(values, type=type, from_pandas=True)\r\n  File \"pyarrow/array.pxi\", line 301, in pyarrow.lib.array\r\n    return _ndarray_to_array(values, mask, type, c_from_pandas, safe,\r\n  File \"pyarrow/array.pxi\", line 83, in pyarrow.lib._ndarray_to_array\r\n    check_status(NdarrayToArrow(pool, values, mask, from_pandas,\r\n  File \"pyarrow/error.pxi\", line 109, in pyarrow.lib.check_status\r\n    raise ArrowCapacityError(message)\r\npyarrow.lib.ArrowCapacityError: array cannot contain more than 2147483646 bytes, have 2500000000\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-02-09T16:22:16.428Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11456?focusedCommentId=17281869) by Pac A. He (apacman):*\nWe have seen that there are one or more pyarrow limits at 2147483646 (about 2^31) bytes and rows for a column. As a user I request this limit be increased to be somewhat closer to 2^64, so the downstream packages, e.g. pandas, etc., work transparently. It is unreasonable to ask me to write partitioned parquets given that fastparquet has no trouble writing a large parquet, so it's definitely technically feasible."
+        },
+        {
+            "created_at": "2021-02-09T17:34:20.514Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11456?focusedCommentId=17281909) by Antoine Pitrou (apitrou):*\nYeah, well, the first question is at which layer the error occurs. According to my reproducer, it may be during Pandas->Arrow conversion. But your reproducer is different...\r\n\r\nNote that you may be able to do the conversion manually and force a Arrow `large_string` type, though I'm not sure Pandas allows that. I'll let `[~jorisvandenbossche]` comment on this."
+        },
+        {
+            "created_at": "2021-02-12T13:43:15.458Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11456?focusedCommentId=17283697) by Joris Van den Bossche (jorisvandenbossche):*\n> Note that you may be able to do the conversion manually and force a Arrow large_string type, though I'm not sure Pandas allows that. \r\n\r\nYes, pandas allows that by specifying a pyarrow schema manually (instead of letting pyarrow infer that from the dataframe).\r\n\r\nFor the example above, that would look like:\r\n\r\n```Java\n\r\ndf.to_parquet(out, engine=\"pyarrow\", compression=\"lz4\", index=False, schema=pa.schema([(\"s\", pa.large_string())]))\r\n```\r\n\r\n\r\n`[~apacman]` does that help as a work-around?"
+        }
+    ]
+}

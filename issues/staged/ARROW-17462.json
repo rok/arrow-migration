@@ -1,0 +1,21 @@
+{
+    "issue": {
+        "title": "[R] Cast scalars to type of field in Expression building",
+        "body": "***Note**: This issue was originally created as [ARROW-17462](https://issues.apache.org/jira/browse/ARROW-17462). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAfter looking at the ExecPlan output of some queries, it jumped out at me how we translate ` int_field == 5 ` in R as ` cast(int_field, float64) == 5 ` because 5 is a double in R. \r\n\r\nThis extra work has a noticeable performance impact. Here's a simple query on the taxi dataset, filtering down to 54 out of 1.5 billion rows and selecting a single column. My idea was to make a query that does not much other than evaluate the filter. \r\n\r\n```Java\n\r\n> system.time(ds |> select(passenger_count) |> filter(passenger_count > 10) |> compute())\r\n   user  system elapsed \r\n  0.391   0.024   0.362 \r\n\r\n> system.time(ds |> select(passenger_count) |> filter(passenger_count > Scalar$create(10, type = int8())) |> compute())\r\n   user  system elapsed \r\n  0.206   0.025   0.179 \r\n```\r\n\r\nYou can see the difference in the query plans too:\r\n\r\n```Java\n\r\n> ds |> select(passenger_count) |> filter(passenger_count > 10) |> explain()\r\nExecPlan with 4 nodes:\r\n3:SinkNode{}\r\n  2:ProjectNode{projection=[passenger_count]}\r\n    1:FilterNode{filter=(cast(passenger_count, {to_type=double, allow_int_overflow=false, allow_time_truncate=false, allow_time_overflow=false, allow_decimal_truncate=false, allow_float_truncate=false, allow_invalid_utf8=false}) > 10)}\r\n      0:SourceNode{}\r\n\r\n> ds |> select(passenger_count) |> filter(passenger_count > Scalar$create(10, type = int8())) |> explain()\r\nExecPlan with 4 nodes:\r\n3:SinkNode{}\r\n  2:ProjectNode{projection=[passenger_count]}\r\n    1:FilterNode{filter=(passenger_count > 10)}\r\n      0:SourceNode{}\r\n```\r\n\r\nIdeally Acero would do this more intelligently (cf. ARROW-11402), but we should also be able to do smarter things when assembling the Expression in R.",
+        "created_at": "2022-08-18T18:50:00.000Z",
+        "updated_at": "2022-11-04T11:54:39.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-31T15:24:58.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-31T15:24:58.873Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17462?focusedCommentId=17626646) by Neal Richardson (npr):*\nIssue resolved by pull request 13985\n<https://github.com/apache/arrow/pull/13985>"
+        }
+    ]
+}

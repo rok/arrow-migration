@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] Parquet file metadata min and max statistics not decoded from bytes for Decimal data types",
+        "body": "***Note**: This issue was originally created as [ARROW-7350](https://issues.apache.org/jira/browse/ARROW-7350). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nParquet file metadata for Decimal type columns contain min and max values that are not decoded from bytes into Decimals. This causes issues in dependent libraries like Dask (see <https://github.com/dask/dask/issues/5647>).\r\n\r\n\u00a0\r\n```python\n\r\nfrom decimal import Decimal\r\nimport random\r\n\r\nimport pandas as pd\r\nimport pyarrow.parquet as pq\r\nimport pyarrow as pa\r\n\r\nNUM_DATA_POINTS_PER_PARTITION = 25\r\n\r\nrandom.seed(0)\r\ndata1 = [{\"col1\": Decimal(f\"{random.randint(0, 999)}.{random.randint(0, 99)}\")} for i in range(NUM_DATA_POINTS_PER_PARTITION)]\r\n\r\ndf = pd.DataFrame(data1)\r\ntable = pa.Table.from_pandas(df)\r\npq.write_table(table, 'my_data.parquet')\r\n\r\nparquet_file = pq.ParquetFile('my_data.parquet')\r\n\r\nassert isinstance(parquet_file.metadata.row_group(0).column(0).statistics.min, Decimal) # <-- AssertionError here because min has type bytes rather than Decimal\r\nassert isinstance(parquet_file.metadata.row_group(0).column(0).statistics.max, Decimal)\r\n\r\n```\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2019-12-09T11:03:18.000Z",
+        "updated_at": "2022-04-21T09:26:37.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-04-18T21:41:22.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-12-10T14:26:55.082Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7350?focusedCommentId=16992597) by Joris Van den Bossche (jorisvandenbossche):*\n[~max.firman] Thanks for the report!\r\n\r\nSuch a conversion would fit in the `_box_logical_type_value` function (https://github.com/apache/arrow/blob/master/python/pyarrow/_parquet.pyx#L250-L294) that already handles conversion of raw value to python types for eg timestamps.\r\n\r\nI would only need to check if we have some conversion utility from bytes to Decimal already."
+        },
+        {
+            "created_at": "2019-12-12T11:23:44.476Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7350?focusedCommentId=16994546) by Max Firman (max.firman):*\n`[~jorisvandenbossche]` \u00a0thanks for the reply. I'm glad it seems like it will be a straightforward fix.\u00a0"
+        },
+        {
+            "created_at": "2022-03-09T15:31:42.317Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7350?focusedCommentId=17503658) by Will Jones (willjones127):*\nI just ran into this as well. Date32 columns are similarly not decoded from integer values, though that's not as challenging to work around. I might look into fixing this soon."
+        },
+        {
+            "created_at": "2022-04-05T13:05:36.325Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7350?focusedCommentId=17517427) by Joris Van den Bossche (jorisvandenbossche):*\n`[~willjones127]` at some point for the datasets code, we added a `parquet::arrow::StatisticsAsScalars` helper to convert to arrow scalar values (which I think should handle decimal as well), which is being used in the dataset code to create expressions based on the column chunk statistics. \r\nI have been thinking that we might be able to reuse this in the `_parquet.pyx` code as well to replace (part of) the `_cast_statistic_` code. Just an idea to keep in mind if you would look at it"
+        },
+        {
+            "created_at": "2022-04-18T21:41:22.148Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7350?focusedCommentId=17523906) by David Li (lidavidm):*\nIssue resolved by pull request 12902\n<https://github.com/apache/arrow/pull/12902>"
+        }
+    ]
+}

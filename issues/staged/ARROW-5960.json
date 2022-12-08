@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[C++] Boost dependencies are specified in wrong order",
+        "body": "***Note**: This issue was originally created as [ARROW-5960](https://issues.apache.org/jira/browse/ARROW-5960). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n\u00a0The boost dependencies in cpp/CMakeLists.txt are specified in the wrong order: the system library currently comes first, followed by the filesystem library. They should be specified in the opposite order, as filesystem depends on system.\r\n\r\nIt seems to depend on the version of boost or how it is compiled whether this problem becomes apparent. I am currently setting up the project like this:\r\n```java\n\r\nCXX=clang++-7.0 CC=clang-7.0 \\\r\n\u00a0\u00a0\u00a0 cmake \\\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 -DCMAKE_CXX_STANDARD=17 \\\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 -DCMAKE_INSTALL_PREFIX=/tmp/arrow4/dist \\\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 -DCMAKE_INSTALL_LIBDIR=lib \\\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 -DARROW_WITH_RAPIDJSON=ON \\\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 -DARROW_PARQUET=ON \\\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 -DARROW_PYTHON=ON \\\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 -DARROW_FLIGHT=OFF \\\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 -DARROW_GANDIVA=OFF \\\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 -DARROW_BUILD_UTILITIES=OFF \\\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 -DARROW_CUDA=OFF \\\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 -DARROW_ORC=OFF \\\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 -DARROW_JNI=OFF \\\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 -DARROW_TENSORFLOW=OFF \\\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 -DARROW_HDFS=OFF \\\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 -DARROW_BUILD_TESTS=OFF \\\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 -DARROW_RPATH_ORIGIN=ON \\\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 ..\n```\r\nAfter compiling, I libarrow.so is missing symbols:\r\n```java\n\r\nnm -C /dist/lib/libarrow.so | grep boost::system::system_c\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 U boost::system::system_category()\n```\r\nIt seems like this is related to whether or not boost has been compiled with `BOOST_SYSTEM_NO_DEPRECATED`. (according to [this post](https://stackoverflow.com/a/30877725/651937), anyway). I have to say that I don't understand why boost as BUNDLED should be compiled that way...\r\n\r\nIf I apply the following patch, everything works as expected:\r\n\r\n\u00a0\r\n```java\n\r\ndiff -pur a/cpp/CMakeLists.txt b/cpp/CMakeLists.txt\r\n--- a/cpp/CMakeLists.txt\u00a0\u00a0 2019-06-29 00:26:37.000000000 +0200\r\n+++ b/cpp/CMakeLists.txt\u00a0\u00a0\u00a0 2019-07-16 16:36:03.980153919 +0200\r\n@@ -642,8 +642,8 @@ if(ARROW_STATIC_LINK_LIBS)\r\n\u00a0\u00a0 add_dependencies(arrow_dependencies ${ARROW_STATIC_LINK_LIBS})\r\n endif()\r\n\r\n-set(ARROW_SHARED_PRIVATE_LINK_LIBS ${ARROW_STATIC_LINK_LIBS} ${BOOST_SYSTEM_LIBRARY}\r\n-\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 ${BOOST_FILESYSTEM_LIBRARY} ${BOOST_REGEX_LIBRARY})\r\n+set(ARROW_SHARED_PRIVATE_LINK_LIBS ${ARROW_STATIC_LINK_LIBS} ${BOOST_FILESYSTEM_LIBRARY}\r\n+\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 ${BOOST_SYSTEM_LIBRARY} ${BOOST_REGEX_LIBRARY})\r\n\r\n list(APPEND ARROW_STATIC_LINK_LIBS ${BOOST_SYSTEM_LIBRARY} ${BOOST_FILESYSTEM_LIBRARY}\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 ${BOOST_REGEX_LIBRARY})\n```",
+        "created_at": "2019-07-16T15:14:38.000Z",
+        "updated_at": "2019-08-28T08:05:06.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-27T19:30:48.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-08-19T19:40:14.919Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5960?focusedCommentId=16910693) by Wes McKinney (wesm):*\nCan you submit a pull request please?"
+        },
+        {
+            "created_at": "2019-08-27T13:21:16.189Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5960?focusedCommentId=16916711) by Ingo M\u00fcller (ingomueller.net):*\nOK, here it is: https://github.com/apache/arrow/pull/5205"
+        },
+        {
+            "created_at": "2019-08-27T19:30:48.642Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5960?focusedCommentId=16917063) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 5205\n<https://github.com/apache/arrow/pull/5205>"
+        },
+        {
+            "created_at": "2019-08-28T08:05:06.294Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5960?focusedCommentId=16917526) by Ingo M\u00fcller (ingomueller.net):*\nI confirm that my problem is solved in master."
+        }
+    ]
+}

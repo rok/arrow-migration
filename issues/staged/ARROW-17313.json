@@ -1,0 +1,125 @@
+{
+    "issue": {
+        "title": "[C++] Add Byte Range to CSV Reader ReadOptions",
+        "body": "***Note**: This issue was originally created as [ARROW-17313](https://issues.apache.org/jira/browse/ARROW-17313). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSometimes it's desirable to just read a portion of a CSV. The best way to do that is to pass in a list of byte ranges to CSV read options that specify where in the CSV you want to read. These byte ranges don't necessarily have to be aligned on line break boundaries, the CSV reader should just read until the end of the line, and skip anything before the first line break in a byte range.\u00a0\u00a0\r\n\r\nBased on discussion, the scope is going to be reduced here. The first implementation will support a single byte range that is already assumed to be aligned on byte boundaries. \r\n\r\nWill not handle quotes/returns and other edge cases.",
+        "created_at": "2022-08-04T21:13:20.000Z",
+        "updated_at": "2022-09-09T14:18:23.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-08-04T22:10:45.243Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17575465) by Weston Pace (westonpace):*\nFor additional motivation, this overlaps with the way Substrait expresses partitioning information.  Substrait allows any file type to include \"start byte\" and \"length\" to slice the file.  For file types like parquet & IPC this would involve grabbing all row groups whose first byte falls in that range (even though this may mean reading beyond the end of the specified range).  The advantage is that there is then a uniform API for partitioning files across formats.\r\n\r\nAnother advantage here is that this would allow us to potentially parallelize chunking at a minor cost of overreading a bit for each block.  This overreading could be avoided if we knew we were going to read multiple blocks.  For example, if we know we want to read blocks 20-30 then we issue reads for blocks 20-31.  As soon as any two consecutive blocks are loaded we can start parsing the lower block of the pair.\r\n\r\nSo the algorithm for each block boils down to:\r\n\r\nAlthough...now that I type this up...I remember a potential flaw in this logic.  Finding the \"first line delimiter\" in a block can be an impossible problem if newlines are allowed inside of delimiters.  Though maybe we don't need to support that case, I don't recall.\r\n\r\nCC `[~apitrou]` for additional thoughts"
+        },
+        {
+            "created_at": "2022-08-04T23:56:40.208Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17575489) by Ziheng Wang (marsupialtail):*\nMy proposal is that we will allow additional fields in ScanOptions that specifies the byte ranges to read for each fragment.\u00a0\r\n\r\nThose byte ranges will be updated when you are calling OpenReaderAsync to be aligned to line breaks, potentially in another async function that samples the file around the byte range boundaries and figure out where the line breaks are.\u00a0\r\n\r\nThen these aligned byte ranges will be used to create a MaskedRandomAccessFile object, which is a new object that resembles the RandomAcessFile object with all of its interface, except it will skip bytes that it's not supposed to read using seek. This will not read those skip-bytes on either disk or network based files.\u00a0\r\n\r\nWe pass this MaskedRandomAccessFile object to make a BufferedInputStream and a StreamingReader without any further change in code. The CSV StreamingReader has no idea that it is only reading partial chunks in the underlying file.\r\n\r\nThe alternative to deal with this in the CSV StreamingReaderImpl. However this is very complicated as it can only access a BufferedInputStream which is not seekable. Adding seek functionality to InputStream probably doesn't make sense when the underlying InputStream is not a file.\u00a0"
+        },
+        {
+            "created_at": "2022-08-05T02:56:27.203Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17575531) by Yibo Cai (yibocai):*\nI have same concern as Weston. CSV parsing is stateful. AFAIK, figuring out the line break has to be done in sequential, if we support \"quote\" or \"escape\" or custimized delimiter, etc.\r\nSome examples:\r\n- The sample block starts inside a \"quoted\" field\n- The first char of a block is \"\\n\" but the last char of previous block is an \"escape\"\n- Sample at middle of \"\\r\\n\" may also be confusing"
+        },
+        {
+            "created_at": "2022-08-05T03:35:21.300Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17575545) by Ziheng Wang (marsupialtail):*\nI think if you support things like this, then it's impossible to parallel read a CSV file."
+        },
+        {
+            "created_at": "2022-08-05T05:57:04.272Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17575593) by Antoine Pitrou (apitrou):*\nIt's not too late to change the Substrait spec, is it?\r\n\r\nOr we can raise NotImplemented if the offset is ever-non-zero."
+        },
+        {
+            "created_at": "2022-08-05T06:32:58.947Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17575600) by Antoine Pitrou (apitrou):*\nThat said, it can also be implemented in a \"dumb\" way: call `RandomAccessFile::GetStream` to get a subset of the input file, and let the CSV reader try to make sense of it."
+        },
+        {
+            "created_at": "2022-08-05T14:13:08.968Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17575862) by Ziheng Wang (marsupialtail):*\n`[~apitrou]` can you elaborate a bit on your way?"
+        },
+        {
+            "created_at": "2022-08-05T15:14:38.030Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17575902) by Antoine Pitrou (apitrou):*\nThere's not much to elaborate. `RandomAccessFile::GetStream` gives you a stream over a subrange of a file.  See API docs:\r\nhttps://arrow.apache.org/docs/cpp/api/io.html#_CPPv4N5arrow2io16RandomAccessFile9GetStreamENSt10shared_ptrI16RandomAccessFileEE7int64_t7int64_t"
+        },
+        {
+            "created_at": "2022-08-05T15:35:48.674Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17575916) by Ziheng Wang (marsupialtail):*\nAh I meant what we should do about the linbreaks and quotes etc."
+        },
+        {
+            "created_at": "2022-08-05T16:01:26.860Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17575928) by Antoine Pitrou (apitrou):*\nNothing. The Substrait producer should produce valid ranges. There is no reason to accept random invalid ranges."
+        },
+        {
+            "created_at": "2022-08-05T16:03:00.766Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17575930) by Weston Pace (westonpace):*\n> It's not too late to change the Substrait spec, is it?\r\n> Or we can raise NotImplemented if the offset is ever-non-zero.\r\n\r\nRaising \"not implemented\" in this case is fine I'm sure.  If it can't be done then it can't be done.  Perhaps we can avoid most of these cases by reading a little bit (e.g. 32 bytes) before the beginning of the block as well.\r\n\r\n> The sample block starts inside a \"quoted\" field\r\n\r\nI think this is only a problem if we allow newlines in values.  We should reject a partial read if `newlines_in_values` is false.\r\n\r\n> The first char of a block is \"\\n\" but the last char of previous block is an \"escape\"\r\n\r\nReading a bit early would help here as long as it isn't a really long chain of escapes which should be rare and detectable (we could error in this case).\r\n\r\n> Sample at middle of \"\\r\\n\" may also be confusing\r\n\r\nReading a bit early would help here too."
+        },
+        {
+            "created_at": "2022-08-05T16:07:11.473Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17575937) by Weston Pace (westonpace):*\n> We should reject a partial read if newlines_in_values is false.\r\n\r\nOops, I mean, if `newlines_in_values` is true :)"
+        },
+        {
+            "created_at": "2022-08-05T16:58:53.183Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17575967) by Ziheng Wang (marsupialtail):*\nAlso this will not support compressed formats, at least at the start"
+        },
+        {
+            "created_at": "2022-08-05T23:28:17.096Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17576079) by Ziheng Wang (marsupialtail):*\nIdeally we update the Dataset Scanner to be able to take in different byte ranges for different fragments. Or is this not required?\r\n\r\nA complication would be that fragments right now don't seem to have some sort of \"ID\", so it might be hard for a user to specify which fragments should read which byte ranges. The way to do this would be to let the user pass in a dict in the ScanOptions that's something like \\{file_path1: byte_range1, file_path2: byte_range2}. I think this would make sense.\r\n\r\nAlternatively if this is not going to be supported, then this option ideally should only make sense for a dataset with one fragment. Perhaps I'll just add a check in the FragmentsToBatches function or something."
+        },
+        {
+            "created_at": "2022-08-06T08:21:25.914Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17576154) by Antoine Pitrou (apitrou):*\nOk, so perhaps byte ranges should actually be provided by the partitioning scheme ? Most partitioning schemes would only emit trivial byte ranges (i.e. the entire file), but the Substrait partitioning would emit whatever is in the Substrait plan.\r\n\r\nOf course, it's up to the Substrait producer to ensure that these byte ranges actually make sense for the given data format. We shouldn't ask the file format implementations (for example CSV, Parquet or Orc) to accept innacurate byte ranges."
+        },
+        {
+            "created_at": "2022-08-08T15:23:44.547Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17576852) by Weston Pace (westonpace):*\nI think the `FileFragment` would be a good place for this.  For example, I could imagine something like...\r\n\r\n```Java\n\r\nimport pyarrow.dataset as ds\r\n# Discovery happens here.  After this line we will have a\r\n# FileSystemDataset and each FileFragment will be the\r\n# entire file\r\nmy_dataset = ds.dataset(\"/var/data/my_dataset\")\r\n# Splits the dataset into 32 partitions.  Each one is\r\n# still a FileSystemDataset with FileFragments but\r\n# now the FileFragments may have slicing information\r\nmy_datasets = my_dataset.partition(32)\r\n```\r\n\r\n> We shouldn't ask the file format implementations (for example CSV, Parquet or Orc) to accept innacurate byte ranges.\r\n\r\nI think there are (at least) two options here.  The partitioned ranges could be byte ranges without any knowledge of the format.  This is easy to create but means the file format would need to be able to map a byte range to some readable range.  For example, if a user has 10 parquet files, each 10GiB large, with 10 equal sized row groups and we want to divide it into 32 partitions then the partitions would look like:\r\n\r\nFile 0:  Bytes 0 to 33554432\r\nFile 0:  Bytes 33554432 to 67108864\r\n...\r\n\r\nHowever, the row group boundaries would be 0, 107374182, 214748365, 322122547, 429496730.  So, in the case, the parquet file format would adapt bytes 0 - 33554432 to row groups 0, 1, 2 (since the first byte falls in the requested range) even though this actually represents a slightly larger than requested partition (0 - 429496730).\r\n\r\nApproach 2.  As an alternative approach we could expect the producer to know the details of the file format.  In this case the partitions would probably be best expressed in terms that make sense for the format.  A \"parquet partitioner\" would specify a list of files with a list of row groups for each file.  An Orc partitioner would give a list of stripes.  A CSV partitioner would still need to use byte ranges.\r\n\r\nWith this approach I think you end up needing ParquetFileFragment, OrcFileFragment, etc. (although you could maybe get by with just RowGroupFileFragment, accepted by the grouped formats and ByteRangeFileFragment, accepted by the text formats)."
+        },
+        {
+            "created_at": "2022-08-08T15:31:53.100Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17576858) by Antoine Pitrou (apitrou):*\nThe intent of datasets has always been that each file format defines its own granularity for reading files. I don't understand why the consumer would specify byte ranges by hand.\r\n\r\n`[~bkietz]` What is your opinion on this?"
+        },
+        {
+            "created_at": "2022-08-08T16:15:15.279Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17576880) by Weston Pace (westonpace):*\nWould it help to think of these not as byte ranges but as percentages?  I'm pretty sure the goal is just to be able to split a scan specification into subtasks.  They could then be divided amongst processes, divided amongst servers, or simply run piecemeal so that partial success and retry is simpler (I think this might be `[~marsupialtail]`'s end goal).\r\n\r\n\"Repartition the data into smaller files\" should always work but I don't know that this is always an acceptable option."
+        },
+        {
+            "created_at": "2022-08-08T16:17:30.106Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17576881) by Antoine Pitrou (apitrou):*\nWhat I strive to understand is why the Substrait producer would be in a better position to choose the file fragment granularity rather than the query engine implementation (or, in the Arrow C++ case, the dataset subsystem)."
+        },
+        {
+            "created_at": "2022-08-08T16:29:46.431Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17576885) by Weston Pace (westonpace):*\nI don't think I've been explaining myself well.  Let's imagine a worst-case (though not unheard of) scenario where a user has a single 10GiB file, stored in S3, that they want to scan using 4 different EC2 containers.  Using the current datasets API this would be impossible to do unless that file happens to be parquet (since we do have ParquetFileFormat and split_row_groups).  I'd like a solution that I can use regardless of the format."
+        },
+        {
+            "created_at": "2022-08-08T16:35:59.926Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17576889) by Antoine Pitrou (apitrou):*\nHmm... so this is partitioning on the client side by sharding the queries to different compute servers?\r\n"
+        },
+        {
+            "created_at": "2022-08-08T17:00:42.232Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17576900) by Weston Pace (westonpace):*\nYes.  I think the original Substrait use case was based on Spark's implementation (linking to https://github.com/substrait-io/substrait/pull/102) but I didn't ask too many details.\r\n\r\nIceberg has something kind of similar.  In their manifest they have a list of data files.  Each data file has a list of split offsets.  These are byte indices where the file could be split.  That sort of approach could be interesting.  FileFragment isn't persistable today but we could easily add split offsets when discovering parquet, IPC, ORC today.  Plus, there could be a boolean to scan CSV files during discovery to discover line breaks (probably debounced by some block size) and record those as split offsets.  That would solve the \"need to know the right spot to split\" problem for CSV (at the cost of a more expensive discovery)."
+        },
+        {
+            "created_at": "2022-08-08T17:22:11.570Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17576914) by Antoine Pitrou (apitrou):*\nWell, if arbitrary byte ranges need to be supported, then some scanning will be required when starting to read the CSV file. And we need to error out if `allow_newlines_in_values` is true.\r\n\r\nAn additional complication: what happens with e.g. a `.csv.gz` file?"
+        },
+        {
+            "created_at": "2022-08-08T18:22:51.130Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17576926) by Ziheng Wang (marsupialtail):*\nThere is no physical way you can do this with a .csv.gz file \u2013 you can't decompress starting at a random byte, so the interface can be supported but the implementation won't skip scanning bytes and will be less efficient.\r\n\r\nI am in favor of adding a file format specific option in the FIleFragment class to denote how the byte range / row group range is specified. This option could take different values for different types of files and each file type reader can interpret accordingly. This might avoid the need for multiple file classes."
+        },
+        {
+            "created_at": "2022-08-08T18:56:58.602Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17576937) by Weston Pace (westonpace):*\nThat sounds good to me.  Even if we end up later unifying everything in a common \"byte ranges\" or \"percentages\" API I don't think there is any harm in also having format-specific APIs.  Plus, having the format-specific APIs should simplify adoption of a common API if we decide to go that route."
+        },
+        {
+            "created_at": "2022-08-10T12:43:46.344Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17577977) by David Li (lidavidm):*\nARROW-17159 is a very similar issue, except motivated by Parquet/Spark"
+        },
+        {
+            "created_at": "2022-08-10T17:20:58.743Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17313?focusedCommentId=17578080) by Weston Pace (westonpace):*\nThere is also ARROW-15589, which I had referenced above, also motivated from Spark (but via Substrait)."
+        }
+    ]
+}

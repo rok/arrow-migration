@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[C++][Dataset] Streaming CSV reader interface for memory-constrainted environments",
+        "body": "***Note**: This issue was originally created as [ARROW-3410](https://issues.apache.org/jira/browse/ARROW-3410). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCSV reads are currently all-or-nothing. If the results of parsing a CSV file do not fit into memory, this can be a problem. I propose to define a streaming `RecordBatchReader` interface so that the record batches produced by reading can be written out immediately to a stream on disk, to be memory mapped later",
+        "created_at": "2018-10-02T20:09:48.000Z",
+        "updated_at": "2020-04-14T15:44:30.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-04-14T15:44:29.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-10-23T16:17:58.604Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3410?focusedCommentId=16660908) by Antoine Pitrou (apitrou):*\nNote this can't work if type inference is enabled, as type inference needs to be able to change the type of a chunk after first parsing it."
+        },
+        {
+            "created_at": "2018-10-23T17:50:16.592Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3410?focusedCommentId=16661048) by Wes McKinney (wesm):*\nRight, we'll have to make the type inference more flexible than it is now. Some CSV libraries provide an option to use a certain portion of the file to infer the schema, then enforcing that beyond. So we could imagine using the first 100MB of a file (or a certain number of rows) to infer types, then forcing those types on further chunks"
+        },
+        {
+            "created_at": "2019-11-07T11:23:04.687Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3410?focusedCommentId=16969181) by Antoine Pitrou (apitrou):*\n`[~fsaintjacques]` What kind of API would Datasets need from a streaming CSV reader? A RecordBatch iterator? Something else?"
+        },
+        {
+            "created_at": "2019-11-07T13:22:37.567Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3410?focusedCommentId=16969243) by Francois Saint-Jacques (fsaintjacques):*\nIdeally not a RecordBatch iterator. Looking at `file_parquet.cc` is your best bet.\r\n\r\n1. CSV reader's options should be in an instance of CSVFileFormat.\n1. Implement `CSVFileFormat::Inspect()`, this is needed to \"peek\" the Schema of a file. It should be possible to limit the number of rows parsed (in the constructor of CSVFileFormat) for the inspect call.\n1. Implement `CSVFileFormat::ScanFile()`. This returns a ScanTaskIterator. A ScanTask is a closure that yields an Iterator<RecordBatch>.\n   \n   Some expected requirements by callers (Scanner::ToTable()) of ScanFile:\n- ScanFile should be fast-ish. It is used to enumerate all ScanTasks before dispatching to the thread pool. It is ran serially over all fragments in a DataSource (this could change).\n- Due to previous point, ScanTask should not hold memory until consumed (in parquet, it only holds the row_group_id). In the case of CSV, it might be that the Blocks are referenced by (offset, length) instead of a shared_ptr<Buffer>.\n- ScanTask are expected to be bound to a single thread and shouldn't have nested parallelism.\n- No inference should be done, the user _always_ pass an explicit schema at the DataSource construction time. \n- Ensure that column subset projection is properly done, (see InferColumnProjection in parquet). This is probably the only optimization we can make for now, there's nothing much we can do about predicate pushdown.\n  \n  The way I foresee how it is implement is the following:\n- The CSV parser divides the file in blocks in ScanFile(), each block is bound to a ScanTask. As noted, this needs to be done in a fashion that does not hold memory.\n- A ScanTask parses a block an yields one-or-more RecordBatch.\n  \n  This is very similar to the current ThreadedReader with some differences:\n- Inversion of control, it yields tasks instead of dispatching them directly.\n- The Block iterator must not be blocking and not hold buffers."
+        },
+        {
+            "created_at": "2019-11-07T13:44:27.349Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3410?focusedCommentId=16969260) by Antoine Pitrou (apitrou):*\n> Due to previous point, ScanTask should not hold memory until consumed\r\n\r\nHmm... to define the blocks in a CSV file, I have to read the CSV file entirely. So if memory isn't held, then each ScanTask will have to read the CSV file a second time. This may not be a big problem (but still suboptimal - memory copies) if the CSV file stays in the filesystem cache, but what about a huge CSV file?\r\n\r\nThe only reasonable way to ingest a CSV file in parallel is to do the chunking while reading the file, AFAIK.\r\n\r\n> ScanTask are expected to be bound to a single thread and shouldn't have nested parallelism.\r\n\r\nWhy that? It shouldn't be a problem if using the global thread pool.\r\n"
+        },
+        {
+            "created_at": "2020-04-14T15:44:29.634Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3410?focusedCommentId=17083360) by Francois Saint-Jacques (fsaintjacques):*\nIssue resolved by pull request 6764\n<https://github.com/apache/arrow/pull/6764>"
+        }
+    ]
+}

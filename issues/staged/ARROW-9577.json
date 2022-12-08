@@ -1,0 +1,93 @@
+{
+    "issue": {
+        "title": "[Python][C++] posix_madvise error on Debian in pyarrow 1.0.0",
+        "body": "***Note**: This issue was originally created as [ARROW-9577](https://issues.apache.org/jira/browse/ARROW-9577). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe following writes and reads back from a Parquet file in both pyarrow 0.17.0 and 1.0.0 on Ubuntu 18.04:\r\n\u00a0\r\n```java\n\r\n>>> import pyarrow.parquet\r\n>>> a = pyarrow.array([[1.1, 2.2, 3.3], [], [4.4, 5.5]])\r\n>>> t = pyarrow.Table.from_batches([pyarrow.RecordBatch.from_arrays([a], [\"stuff\"])])\r\n>>> pyarrow.parquet.write_table(t, \"stuff.parquet\")\r\n>>> t2 = pyarrow.parquet.read_table(\"stuff.parquet\") \n```\r\n\u00a0\r\nHowever, the same thing raises the following exception on Debian 9 (stretch) in pyarrow 1.0.0 but not in pyarrow 0.17.0:\r\n```java\n\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"/home/jpivarski/miniconda3/lib/python3.7/site-packages/pyarrow/parquet.py\", line 1564, in read_table\r\n    filters=filters,\r\n  File \"/home/jpivarski/miniconda3/lib/python3.7/site-packages/pyarrow/parquet.py\", line 1433, in __init__\r\n    partitioning=partitioning)\r\n  File \"/home/jpivarski/miniconda3/lib/python3.7/site-packages/pyarrow/dataset.py\", line 667, in dataset\r\n    return _filesystem_dataset(source, **kwargs)\r\n  File \"/home/jpivarski/miniconda3/lib/python3.7/site-packages/pyarrow/dataset.py\", line 434, in _filesystem_dataset\r\n    return factory.finish(schema)\r\n  File \"pyarrow/_dataset.pyx\", line 1451, in pyarrow._dataset.DatasetFactory.finish\r\n  File \"pyarrow/error.pxi\", line 122, in pyarrow.lib.pyarrow_internal_check_status\r\n  File \"pyarrow/error.pxi\", line 99, in pyarrow.lib.check_status\r\nOSError: posix_madvise failed. Detail: [errno 0] Success\n```\r\nIt's a little odd that the error says that it failed with \"detail: success\". That suggests to me that an \"if\" predicate is backward (missing \"not\"), which might only be triggered on some OS/distributions.",
+        "created_at": "2020-07-27T23:24:26.000Z",
+        "updated_at": "2020-08-12T13:16:41.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-08-12T13:16:33.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-07-28T22:08:55.387Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17166718) by Wes McKinney (wesm):*\n`[~jorisvandenbossche]` `[~bkietz]` why is the datasets API being used to read a single file? That seems wrong to me"
+        },
+        {
+            "created_at": "2020-08-03T07:37:10.283Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17169784) by Joris Van den Bossche (jorisvandenbossche):*\n`[~wesm]` I did this to enable `filter` on the rowgroup level for single files as well. We could also only use the datasets API when needed (so if the `filter` keyword is specified), and otherwise use the ParquetFile single-file reader."
+        },
+        {
+            "created_at": "2020-08-03T18:43:14.165Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17170347) by Wes McKinney (wesm):*\nI see, that makes more sense then. "
+        },
+        {
+            "created_at": "2020-08-05T12:15:56.395Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17171455) by Antoine Pitrou (apitrou):*\n`[~jpivarski]` Are you able to reproduce when building from source?"
+        },
+        {
+            "created_at": "2020-08-05T12:49:08.882Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17171474) by Jim Pivarski (jpivarski):*\nThe computer in question is a Chromebook\u2014I don't know I _can_ build from source. I'll see if I can create an equivalent test on AWS. It probably needs to be Debian (not Ububtu), but do you have any guesses about what is likely to trigger this \"posix_madvise\"? (Maybe I'm wrong in thinking it's the Linux distribution; if it's hardware, I'd be wasting my time trying to reproduce it on a VM.)"
+        },
+        {
+            "created_at": "2020-08-05T12:49:35.175Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17171475) by Antoine Pitrou (apitrou):*\nI couldn't reproduce in a Docker 9 container (when built from source). `[~jpivarski]` Can you upload the stuff.parquet file somewhere?"
+        },
+        {
+            "created_at": "2020-08-05T12:51:33.062Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17171478) by Antoine Pitrou (apitrou):*\n> do you have any guesses about what is likely to trigger this \"posix_madvise\"?\r\n\r\nI have no idea, which is why I am trying to reproduce to get some insight."
+        },
+        {
+            "created_at": "2020-08-05T12:52:07.200Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17171479) by Antoine Pitrou (apitrou):*\nI just know the error message is wrong, so I can fix that and we may gain a bit more insight."
+        },
+        {
+            "created_at": "2020-08-05T12:57:23.226Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17171482) by Antoine Pitrou (apitrou):*\nA Chromebook is which kind of CPU, by the way?"
+        },
+        {
+            "created_at": "2020-08-05T13:07:10.023Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17171490) by Antoine Pitrou (apitrou):*\nBy the way, perhaps by running under `strace`, you can find out what the arguments to madvise were and what the actual error return is?"
+        },
+        {
+            "created_at": "2020-08-05T13:52:28.426Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17171512) by Jim Pivarski (jpivarski):*\nI've reproduced the error, but again using the 1.0.0 version from pip. This Chromebook is an Intel, not ARM, and it has normal i386 Debian packages running in its Crostini VM\u2014the only limitations that I'm aware of are memory, disk, and CPU size, and this posix_madvaise error. (It's also what I'm stuck with while my real computer is being repaired, so I've been trying to do only Python tasks these few weeks. I probably wouldn't have found this error, though, which is likely to affect somebody, given how widely Arrow is used.)\r\n\r\nI've attached the stuff.parquet file that the Chromebook made (in case it's the writing step that's affected?) as well as an strace from just before I pressed <enter> on `read_table` to just after the exception.\r\n\r\n[stuff.parquet](stuff.parquet)\r\n\r\n[strace-parquet-read.log](strace-parquet-read.log)\r\n\r\n<sup>I don't know how to read an strace, but I see the posix_madvise in there after a lot of \"No such file or directory\" when trying to open files like _dataset.pyx and error.pxi. I've also attached the locations of all my .pxi files:\u00a0/home/jpivarski/miniconda3/lib/python3.8/site-packages/pyarrow/error.pxi is definitely there...</sup>\r\n\r\n<sup>[location-of-pxi-files.log](location-of-pxi-files.log)</sup>\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-08-05T15:15:52.888Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17171565) by Antoine Pitrou (apitrou):*\nThank you very much. `madvise` fails with EBADF, meaning the given memory address is legit but does not correspond to a file mapping. Reading the pointer value, it seems it was allocated using `brk` rather than `mmap`. However, on my system (x86-64 Ubuntu 18.04), both kinds of allocations work with `madvise`.\r\n\r\nCan I ask you to compile and run this small C file on your Chromebook?\r\nhttps://gist.github.com/pitrou/fa03cbc44bd93cefee727d7000942a64\r\n\r\n(also, if it fails, can you run strace on it?)"
+        },
+        {
+            "created_at": "2020-08-05T15:51:39.155Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17171581) by Jim Pivarski (jpivarski):*\nThank you: making a tiny C program helps a lot! It fails with\r\n\r\n`madvise of mmap-allocated data failed: Bad file descriptor`\r\n`madvise of sbrk-allocated data failed: Bad file descriptor`\r\n\r\nand the output of\u00a0`strace -ttT ./madvise-test` is\r\n\r\n`10:44:33.699121 execve(\"./madvise-test\", [\"./madvise-test\"], [/* 95 vars */]) = 0 <0.000980>`\r\n`10:44:33.701266 brk(NULL) = 0x58756f244000 <0.000170>`\r\n`10:44:33.701935 access(\"/etc/ld.so.nohwcap\", F_OK) = -1 ENOENT (No such file or directory) <0.000208>`\r\n`10:44:33.702494 access(\"/etc/ld.so.preload\", R_OK) = -1 ENOENT (No such file or directory) <0.000283>`\r\n`10:44:33.703142 open(\"/home/jpivarski/miniconda3/lib/tls/x86_64/libc.so.6\", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory) <0.001724>`\r\n`10:44:33.705203 stat(\"/home/jpivarski/miniconda3/lib/tls/x86_64\", 0x7ffc8a9e0370) = -1 ENOENT (No such file or directory) <0.011708>`\r\n`10:44:33.717319 open(\"/home/jpivarski/miniconda3/lib/tls/libc.so.6\", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory) <0.000266>`\r\n`10:44:33.718843 stat(\"/home/jpivarski/miniconda3/lib/tls\", 0x7ffc8a9e0370) = -1 ENOENT (No such file or directory) <0.000139>`\r\n`10:44:33.719183 open(\"/home/jpivarski/miniconda3/lib/x86_64/libc.so.6\", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory) <0.000128>`\r\n`10:44:33.719509 stat(\"/home/jpivarski/miniconda3/lib/x86_64\", 0x7ffc8a9e0370) = -1 ENOENT (No such file or directory) <0.000123>`\r\n`10:44:33.719860 open(\"/home/jpivarski/miniconda3/lib/libc.so.6\", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory) <0.000125>`\r\n`10:44:33.720179 stat(\"/home/jpivarski/miniconda3/lib\", \\{st_mode=S_IFDIR|0755, st_size=40452, ...}) = 0 <0.000142>`\r\n`10:44:33.720553 open(\"/etc/ld.so.cache\", O_RDONLY|O_CLOEXEC) = 3 <0.000147>`\r\n`10:44:33.720947 fstat(3, \\{st_mode=S_IFREG|0644, st_size=50626, ...}) = 0 <0.000145>`\r\n`10:44:33.721288 mmap(NULL, 50626, PROT_READ, MAP_PRIVATE, 3, 0) = 0x7bac294a0000 <0.000130>`\r\n`10:44:33.721610 close(3) = 0 <0.000138>`\r\n`10:44:33.721961 access(\"/etc/ld.so.nohwcap\", F_OK) = -1 ENOENT (No such file or directory) <0.000129>`\r\n`10:44:33.723986 open(\"/lib/x86_64-linux-gnu/libc.so.6\", O_RDONLY|O_CLOEXEC) = 3 <0.000116>`\r\n`10:44:33.724265 read(3, \"\\177ELF\\2\\1\\1\\3\\0\\0\\0\\0\\0\\0\\0\\0\\3\\0>\\0\\1\\0\\0\\0\\0\\4\\2\\0\\0\\0\\0\\0\"..., 832) = 832 <0.000091>`\r\n`10:44:33.724505 fstat(3, \\{st_mode=S_IFREG|0755, st_size=1689360, ...}) = 0 <0.000089>`\r\n`10:44:33.724758 mmap(NULL, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7bac2949e000 <0.000114>`\r\n`10:44:33.725060 mmap(NULL, 3795296, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_DENYWRITE, 3, 0) = 0x7bac28eeb000 <0.000106>`\r\n`10:44:33.725313 mprotect(0x7bac29080000, 2097152, PROT_NONE) = 0 <0.000111>`\r\n`10:44:33.725583 mmap(0x7bac29280000, 24576, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x195000) = 0x7bac29280000 <0.000114>`\r\n`10:44:33.725877 mmap(0x7bac29286000, 14688, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS, -1, 0) = 0x7bac29286000 <0.000099>`\r\n`10:44:33.726149 close(3) = 0 <0.000095>`\r\n`10:44:33.726417 arch_prctl(ARCH_SET_FS, 0x7bac2949f440) = 0 <0.000102>`\r\n`10:44:33.726793 mprotect(0x7bac29280000, 16384, PROT_READ) = 0 <0.000112>`\r\n`10:44:33.727051 mprotect(0x58756d933000, 4096, PROT_READ) = 0 <0.000104>`\r\n`10:44:33.727304 mprotect(0x7bac294ad000, 4096, PROT_READ) = 0 <0.000107>`\r\n`10:44:33.727565 munmap(0x7bac294a0000, 50626) = 0 <0.000121>`\r\n`10:44:33.727941 mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7bac294ac000 <0.000098>`\r\n`10:44:33.728184 madvise(0x7bac294ac000, 4096, MADV_WILLNEED) = -1 EBADF (Bad file descriptor) <0.000091>`\r\n`10:44:33.728432 dup(2) = 3 <0.000097>`\r\n`10:44:33.728679 fcntl(3, F_GETFL) = 0x8001 (flags O_WRONLY|O_LARGEFILE) <0.000110>`\r\n`10:44:33.728931 close(3) = 0 <0.000073>`\r\n`10:44:33.729151 write(2, \"madvise of mmap-allocated data f\"..., 59madvise of mmap-allocated data failed: Bad file descriptor`\r\n`) = 59 <0.000089>`\r\n`10:44:33.729386 brk(NULL) = 0x58756f244000 <0.000079>`\r\n`10:44:33.729593 brk(0x58756f245000) = 0x58756f245000 <0.000078>`\r\n`10:44:33.729822 madvise(0x58756f244000, 4096, MADV_WILLNEED) = -1 EBADF (Bad file descriptor) <0.000078>`\r\n`10:44:33.730048 write(2, \"madvise of sbrk-allocated data f\"..., 59madvise of sbrk-allocated data failed: Bad file descriptor`\r\n`) = 59 <0.000136>`\r\n`10:44:33.730354 exit_group(0) = ?`\r\n`10:44:33.731306 +++ exited with 0 +++`\r\n\r\nIt seems to be searching for libc.so.6; in case it's relevant, that's located here:\r\n\r\n`% /sbin/ldconfig -p | fgrep libc.so.6`\r\n` libc.so.6 (libc6,x86-64, OS ABI: Linux 2.6.32) => /lib/x86_64-linux-gnu/libc.so.6`\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-08-05T16:12:16.583Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17171590) by Antoine Pitrou (apitrou):*\nThank you. What is the Linux kernel version on the Chromebook?"
+        },
+        {
+            "created_at": "2020-08-05T16:43:58.125Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17171611) by Antoine Pitrou (apitrou):*\nFor the record, I've found two possible reasons for this error:\r\n\r\n- The Linux kernel version is older than 3.9.0\n- Swap was disabled when compiling the kernel (you can check this by looking for \"CONFIG_SWAP\" in either `/boot/config-<kernel version>`, if it exists, or `/proc/config.gz`)."
+        },
+        {
+            "created_at": "2020-08-05T16:54:49.393Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17171616) by Jim Pivarski (jpivarski):*\nI think it's the CONFIG_SWAP. This is what I find:\r\n\r\n`% cat /etc/os-release `\r\n`PRETTY_NAME=\"Debian GNU/Linux 9 (stretch)\"`\r\n`NAME=\"Debian GNU/Linux\"`\r\n`VERSION_ID=\"9\"`\r\n`VERSION=\"9 (stretch)\"`\r\n`VERSION_CODENAME=stretch`\r\n`ID=debian`\r\n`HOME_URL=\"https://www.debian.org/\"`\r\n`SUPPORT_URL=\"https://www.debian.org/support\"`\r\n`BUG_REPORT_URL=\"https://bugs.debian.org/\"`\r\n\r\n`% uname -a`\r\n`Linux penguin 5.4.40-04224-g891a6cce2d44 #1 SMP PREEMPT Tue Jun 23 20:21:29 PDT 2020 x86_64 GNU/Linux`\r\n\r\n`% fgrep -A5 -B5 CONFIG_SWAP config `\r\n`# CONFIG_KERNEL_LZMA is not set`\r\n`# CONFIG_KERNEL_XZ is not set`\r\n`# CONFIG_KERNEL_LZO is not set`\r\n`# CONFIG_KERNEL_LZ4 is not set`\r\n`CONFIG_DEFAULT_HOSTNAME=\"localhost\"`\r\n`{color:#FF0000}# CONFIG_SWAP is not set{color`}\r\n`CONFIG_SYSVIPC=y`\r\n`CONFIG_SYSVIPC_SYSCTL=y`\r\n`CONFIG_POSIX_MQUEUE=y`\r\n`CONFIG_POSIX_MQUEUE_SYSCTL=y`\r\n`CONFIG_CROSS_MEMORY_ATTACH=y`\r\n\r\n`% free`\r\n` total used free shared buff/cache available`\r\n`Mem: 6798788 246552 5176772 8808 1375464 6552236`\r\n`Swap: 0 0 0`\r\n\r\n(Maybe because the disk is so small?) Is it within scope for Parquet-reading to support operating systems compiled without swap? I don't know how unusual this situation is. I don't plan to use this computer for big data, but it did force me to turn off some tests in my testing suite."
+        },
+        {
+            "created_at": "2020-08-05T16:56:01.187Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17171617) by Antoine Pitrou (apitrou):*\nYes, this can be trivially worked around. I just wanted to know exactly why this happens :) Thank you for the quick reports!"
+        },
+        {
+            "created_at": "2020-08-05T17:09:20.818Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17171630) by Jim Pivarski (jpivarski):*\nSure! And thanks for the fix!"
+        },
+        {
+            "created_at": "2020-08-12T13:16:33.455Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9577?focusedCommentId=17176326) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 7904\n<https://github.com/apache/arrow/pull/7904>"
+        }
+    ]
+}

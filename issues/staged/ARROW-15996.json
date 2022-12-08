@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[C++] Support casting from time32 and time64 to duration",
+        "body": "***Note**: This issue was originally created as [ARROW-15996](https://issues.apache.org/jira/browse/ARROW-15996). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIt would be really helpful if we could convert `time32` and `time64` to `duration`. For example, it could simplify the implementation of some of the R bindings (e.g. `difftime`). \r\n\r\n```r\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\n\r\na <- Array$create(32000L)\r\na\r\n#> Array\r\n#> <int32>\r\n#> [\r\n#>   32000\r\n#> ]\r\na$cast(time32())\r\n#> Array\r\n#> <time32[ms]>\r\n#> [\r\n#>   00:00:32.000\r\n#> ]\r\na$cast(int64())$cast(time64())\r\n#> Array\r\n#> <time64[ns]>\r\n#> [\r\n#>   00:00:00.000032000\r\n#> ]\r\n\r\na$cast(time32())$cast(duration())\r\n#> Error: NotImplemented: Unsupported cast from time32[ms] to duration using function cast_duration\r\na$cast(int64())$cast(time64())$cast(duration())\r\n#> Error: NotImplemented: Unsupported cast from time64[ns] to duration using function cast_duration\r\n```",
+        "created_at": "2022-03-22T09:23:08.000Z",
+        "updated_at": "2022-06-29T16:42:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-06-29T16:42:55.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-22T12:26:26.501Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15996?focusedCommentId=17510461) by David Li (lidavidm):*\nDoes this really make sense? I'm curious how it would help implement other bindings."
+        },
+        {
+            "created_at": "2022-03-22T12:36:57.203Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15996?focusedCommentId=17510468) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nFor context: https://github.com/apache/arrow/pull/12506#discussion_r828017402"
+        },
+        {
+            "created_at": "2022-03-22T14:58:53.857Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15996?focusedCommentId=17510545) by Joris Van den Bossche (jorisvandenbossche):*\nBut you could cast the time32/time64 to integer, and then to duration with the appropriate unit?"
+        },
+        {
+            "created_at": "2022-03-22T19:56:45.158Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15996?focusedCommentId=17510865) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nYep, going via int works.\u00a0"
+        },
+        {
+            "created_at": "2022-03-23T11:17:06.931Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15996?focusedCommentId=17511183) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nMoreso, I discovered we are actually mapping Arrow's `time32()` and `time64()` to R's `hms::difftime` (a somewhat special flavour of `base::difftime`). Arrow's `duration` is mapped to `base::difftime`."
+        },
+        {
+            "created_at": "2022-03-23T12:41:16.999Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15996?focusedCommentId=17511228) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\n`[~jorisvandenbossche]` I think your proposed solution results in a chain of casting. We might need to throw in a division to account for the changes in units too. Which I think will end up a bit cumbersome to read.  "
+        },
+        {
+            "created_at": "2022-03-23T12:59:13.700Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15996?focusedCommentId=17511237) by Joris Van den Bossche (jorisvandenbossche):*\nI suppose a division might only be needed if you directly want a specific unit? If you take the unit that matches the resolution of the time32/time64, I don't think a division is needed:\r\n\r\n```Java\n\r\nIn [9]: pa.array([1, 2], pa.time32('s'))\r\nOut[9]: \r\n<pyarrow.lib.Time32Array object at 0x7fc37dd5de80>\r\n[\r\n  00:00:01,\r\n  00:00:02\r\n]\r\n\r\nIn [10]: pa.array([1, 2], pa.time32('s')).cast(pa.int32()).cast(pa.int64()).cast(pa.duration('s'))\r\nOut[10]: \r\n<pyarrow.lib.DurationArray object at 0x7fc37dd061c0>\r\n[\r\n  1,\r\n  2\r\n]\r\n\r\nIn [11]: pa.array([1, 2], pa.time64('us'))\r\nOut[11]: \r\n<pyarrow.lib.Time64Array object at 0x7fc37db8be80>\r\n[\r\n  00:00:00.000001,\r\n  00:00:00.000002\r\n]\r\n\r\nIn [12]: pa.array([1, 2], pa.time64('us')).cast(pa.int64()).cast(pa.duration('us'))\r\nOut[12]: \r\n<pyarrow.lib.DurationArray object at 0x7fc37dbe5880>\r\n[\r\n  1,\r\n  2\r\n]\r\n```\r\n\r\nIt's true that you get a chain of casting, but I think otherwise that would happen under the hood as well. And this is meant to be done internally in the R bindings, and not by the end user?\r\n\r\n(to be clear, I am not really opposed enabling such a cast on the C++ level, I can see it being useful for python as well, but just want to point out that it should be easy to already workaround this in the R bindings right now)"
+        },
+        {
+            "created_at": "2022-03-23T13:20:52.350Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15996?focusedCommentId=17511255) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nWell spotted. I do need a specific unit - I need to return seconds since that is the only unit that overlaps between arrow (supports seconds and lower units) and R (supports seconds and higher units: minutes, hours, days, weeks). \r\nCorrect, the chain of casting would not be visible to the end user. But even for the developer writing the bindings (or the one needing to correct a potential bug), the implementation will look a bit clunky.\r\n\r\n```r\n\r\nstrptime -> time64() -> int64() -> divide by 10^9 -> int64() -> duration(\"s\")\r\n```\r\n\r\nIt looks like, since we mapped Arrow's `duration` to R's `difftime` we no longer document `time32/time64` mapping to `{}hms::difftime{`}, which makes me reluctant to rely on it.\r\n\r\nThis whole issue appeared when I was converting an hms string to difftime. There is another option to implement it (besides the chain of casting and time32 -> hms::difftime) - the one I was using initially. Use `strptime` and then subtract `strptime(\"0:0:0\")` to get a `{}duration{`}."
+        },
+        {
+            "created_at": "2022-03-23T13:28:19.153Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15996?focusedCommentId=17511259) by Joris Van den Bossche (jorisvandenbossche):*\nYou don't necessarily have to do the division yourself, as we can casting durations from one unit to the other is supported (and will take care of rounding / erroring if data is lost):\r\n\r\n```Java\n\r\nIn [15]: pa.array([1000000, 2000000], pa.time64('us')).cast(pa.int64()).cast(pa.duration('us')).cast(pa.duration('s'))\r\nOut[15]: \r\n<pyarrow.lib.DurationArray object at 0x7fc37dca76a0>\r\n[\r\n  1,\r\n  2\r\n]\r\n```\r\n\r\nThe same will be true if you get the duration by subtracting two times, as that will also not necessarily result in a second resolution duration."
+        },
+        {
+            "created_at": "2022-03-24T09:47:08.685Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15996?focusedCommentId=17511737) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nThank you for your comments and insights. Happy to close this issue if y'all think a casting chain doesn't involve too much overhead and the C++ solution would likely involve a similar direction."
+        },
+        {
+            "created_at": "2022-06-29T16:42:48.007Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15996?focusedCommentId=17560367) by Antoine Pitrou (apitrou):*\nThe way to get a duration from a time is simply to subtract a base time value:\r\n```python\n\r\n>>> ty = pa.time64('ns')\r\n>>> pc.subtract(pa.array([4,5], type=ty), pa.scalar(0, type=ty))\r\n<pyarrow.lib.DurationArray object at 0x7f431605a220>\r\n[\r\n  4,\r\n  5\r\n]\r\n```\r\n"
+        }
+    ]
+}

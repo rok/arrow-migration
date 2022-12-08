@@ -1,0 +1,69 @@
+{
+    "issue": {
+        "title": "[Python][C++] Add test for map column of a parquet file created from pyarrow and pandas",
+        "body": "***Note**: This issue was originally created as [ARROW-10140](https://issues.apache.org/jira/browse/ARROW-10140). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi,\r\n\r\nI'm having problems reading parquet files with 'map' data type created by pyarrow.\r\n\r\nI followed <https://stackoverflow.com/questions/63553715/pyarrow-data-types-for-columns-that-have-lists-of-dictionaries>\u00a0to convert a pandas DF to an arrow table, then call write_table to output a parquet file:\r\n\r\n(We also referred to https://issues.apache.org/jira/browse/ARROW-9812)\r\n```java\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\nprint(f'PyArrow Version = {pa.__version__}')\r\nprint(f'Pandas Version = {pd.__version__}')\r\n\r\ndf = pd.DataFrame({\r\n         'col1': pd.Series([\r\n             [('id', 'something'), ('value2', 'else')],\r\n             [('id', 'something2'), ('value','else2')],\r\n         ]),\r\n         'col2': pd.Series(['foo', 'bar'])\r\n     })\r\n\r\nudt = pa.map_(pa.string(), pa.string())\r\nschema = pa.schema([pa.field('col1', udt), pa.field('col2', pa.string())])\r\ntable = pa.Table.from_pandas(df, schema)\r\npq.write_table(table, './test_map.parquet')\r\n```\r\nThe above code (attached as test_map.py) runs smoothly on my developing computer:\r\n```java\n\r\nPyArrow Version = 1.0.1\r\nPandas Version = 1.1.2\r\n```\r\nAnd generated the test_map.parquet file (attached as test_map.parquet) successfully.\r\n\r\nThen I use parquet-tools (1.11.1) to read the file, but get the following output:\r\n```java\n\r\n$ java -jar parquet-tools-1.11.1.jar head test_map.parquet\r\ncol1:\r\n.key_value:\r\n.key_value:\r\ncol2 = foo\r\n\r\ncol1:\r\n.key_value:\r\n.key_value:\r\ncol2 = bar\r\n```\r\nI also checked the schema of the parquet file:\r\n```java\n\r\njava -jar parquet-tools-1.11.1.jar schema test_map.parquet\r\nmessage schema {\r\n  optional group col1 (MAP) {\r\n    repeated group key_value {\r\n      required binary key (STRING);\r\n      optional binary value (STRING);\r\n    }\r\n  }\r\n  optional binary col2 (STRING);\r\n}\n```\r\nAm I doing something wrong?\u00a0\r\n\r\nWe need to output the data to parquet files, and query them later.",
+        "created_at": "2020-09-30T08:20:34.000Z",
+        "updated_at": "2022-01-18T22:41:53.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-01-18T15:33:21.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-30T14:59:04.806Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10140?focusedCommentId=17204792) by Wes McKinney (wesm):*\ncc `[~emkornfield]`"
+        },
+        {
+            "created_at": "2020-09-30T15:22:33.391Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10140?focusedCommentId=17204805) by Micah Kornfield (emkornfield@gmail.com):*\ni'll take a look."
+        },
+        {
+            "created_at": "2020-09-30T15:50:55.406Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10140?focusedCommentId=17204830) by Joris Van den Bossche (jorisvandenbossche):*\n`[~acan]` if I use your code above to write the file, and then read the parquet file again, I see:\r\n\r\n```Java\n\r\nIn [29]: pq.read_table('./test_map.parquet').to_pandas()\r\nOut[29]: \r\n                                                col1 col2\r\n0  {'key_value': [{'key': 'id', 'value': 'somethi...  foo\r\n1  {'key_value': [{'key': 'id', 'value': 'somethi...  bar\r\n```\r\n\r\nso the data seems to be actually present in the parquet file. So it might be the output of `java -jar parquet-tools-1.11.1.jar head test_map.parquet` that is wrong / does not support the map/struct type?\r\n\r\nThe inspected schema of the parquet file also looks correct? (or can you be more specific about what is wrong?)"
+        },
+        {
+            "created_at": "2020-09-30T15:56:55.635Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10140?focusedCommentId=17204835) by Micah Kornfield (emkornfield@gmail.com):*\n`[~jorisvandenbossche]` \u00a0how are you reading data back? (is this through latest master pyarrow?)"
+        },
+        {
+            "created_at": "2020-09-30T16:06:51.694Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10140?focusedCommentId=17204840) by Joris Van den Bossche (jorisvandenbossche):*\nYes, that was with latest master. \r\n\r\nOn 1.0, I get the expected notimplemented error:\r\n\r\n```Java\n\r\nIn [2]: pq.read_table(\"notebooks-arrow/test_map.parquet\")\r\n...\r\nArrowNotImplementedError: Reading lists of structs from Parquet files not yet supported: key_value: list<key_value: struct<key: string not null, value: string> not null> not null\r\n```\r\n\r\nNow, writing with pyarrow 1.0 still works without error (and reading with pyarrow 1.0 als gives the notimplemented error).  \r\nBut reading that file in arrow master gives a different error message:\r\n\r\n```Java\n\r\nIn [45]: pq.read_table(\"test_map.parquet\")\r\n...\r\nArrowInvalid: Struct child array #0 invalid: Invalid: Length spanned by list offsets (2) larger than values array (length 0)\r\nIn ../src/parquet/arrow/reader.cc, line 106, code: (*out)->chunk(x)->Validate()\r\nIn ../src/parquet/arrow/reader.cc, line 881, code: ::arrow::internal::OptionalParallelFor( reader_properties_.use_threads(), static_cast<int>(readers.size()), [&](int i) { return readers[i]->NextBatch(batch_size, &columns[i]); })\r\nIn ../src/arrow/util/iterator.h, line 385, code: (_error_or_value7).status()\r\nIn ../src/arrow/record_batch.h, line 208, code: ReadNext(&batch)\r\nIn ../src/arrow/util/iterator.h, line 283, code: (_error_or_value5).status()\r\nIn ../src/arrow/util/iterator.h, line 283, code: (_error_or_value5).status()\r\nIn ../src/arrow/util/iterator.h, line 129, code: value_.status()\r\nIn ../src/arrow/util/iterator.h, line 157, code: (_error_or_value4).status()\r\nIn ../src/arrow/dataset/scanner.cc, line 210, code: (_error_or_value18).status()\r\nIn ../src/arrow/dataset/scanner.cc, line 217, code: task_group->Finish()\r\n```\r\n\r\nindicating that indeed the file written by pyarrow 1.0 might be incorrect / corrupt (the original report). But, it also seems working now on pyarrow master (at least _we_ can read it in again, but it would also be nice to check that the java parquet-tools can read it correctly now)"
+        },
+        {
+            "created_at": "2020-10-01T15:19:05.601Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10140?focusedCommentId=17205599) by Chen Ming (acan):*\n`[~emkornfield]` `[~jorisvandenbossche]` \u00a0Thank you for the quick follow-up. And sorry for not telling the problem clearly...\r\n\r\nAfter we get the parquet file(s), we would put to AWS S3, then use Amazon Athena to create a table and query on them.\r\n\r\nTake \"test_map.parquet' as an example:\r\n1. Upload the file to a S3 bucket (e.g. s3://test/test_map).\n1. Use below DDL to create a table:\n   ```java\n   \n   CREATE EXTERNAL TABLE `development.test_map`(\n     `col1` map<string,string>,\n     `col2` string)\n   ROW FORMAT SERDE \n     'org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe' \n   STORED AS PARQUET \n   LOCATION\n     's3://test/test_map'\n   TBLPROPERTIES (\n     'has_encrypted_data'='true')\n   ```\n1. Refresh the table then query all records:\n   ```java\n   \n   MSCK REPAIR TABLE development.test_map\n   select * from  development.test_map\n   ```\n   We got the following output:\n   \n   |col1|col2|\n   |\n   |-|-|-|\n   |{}\u200b|foo\u200b|\n   |\n   |{}|bar|\n   |\n1. Also try to get value for a single key:\n   ```java\n   \n   select col1['id'] as id from  development.test_map\n   ```\n   Got the following output:\n   \n   |id|\n   ||\n   |-|-|-|\n   |[NULL\u200b]|\n   |\n   |[NULL\u200b]|\n   <br>\n   <br>\u00a0\n   <br>\n   <br>We tested a parquet file (attached as\u00a0pyspark.snappy.parquet) created from PySpark, which can be queried successfully from Amazon Athena:\n   |\n   |sid|mp|\n   |\n   |1|\\{bar=2, foo=1, baz=aaa\\}|\n   |\n   |2|\\{bar=2, foo=1, baz=aaa\\}|\n   |\n   |3|\\{bar=2, foo=1, baz=aaa\\}|\n   <br>\n   <br>\u00a0(The content of the data is different in the Spark version.)\n   <br>\n   <br>\u00a0\n   <br>\n   <br>We are using AWS Lambda to parse raw data files to Parquet files. It seems that Spark is not recommended for AWS Lambda.\n   <br> We are really happy to find that Arrow added support to MapType with 0.17.0, and would like to use it in our project.|"
+        },
+        {
+            "created_at": "2020-10-01T15:23:50.406Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10140?focusedCommentId=17205608) by Chen Ming (acan):*\n`[~jorisvandenbossche]` \u00a0Also thanks for telling that the latest master can read the parquet file back into Arrow. (We got the \"Reading lists of structs from Parquet files not yet supported\" error with PyArrow 1.0.1.)"
+        },
+        {
+            "created_at": "2020-10-01T15:40:35.498Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10140?focusedCommentId=17205620) by Micah Kornfield (emkornfield@gmail.com):*\nUnfortunately, fro Arrow 1.0.1 this appears to be a data loss problem where values are not being written.\u00a0 I think this issue was likely resolved on master by:\u00a0https://issues.apache.org/jira/browse/ARROW-9603?filter=-2\r\n\r\n\u00a0\r\n\r\nAlthough the data described here isn't specifically what the fix was for, I think this must have fallen into a case where the levels are getting written correctly but the values are not.\r\n\r\n\u00a0\r\n\r\n`[~jorisvandenbossche]` \u00a0just to confirm when you mentioned 1.0 you really mean 1.0.1?\u00a0 1.0.1 also had a fix for writing nested data."
+        },
+        {
+            "created_at": "2020-10-01T22:39:00.572Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10140?focusedCommentId=17205864) by Wes McKinney (wesm):*\nSeems like we could resolve this then by adding a unit test"
+        },
+        {
+            "created_at": "2020-10-05T06:47:28.967Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10140?focusedCommentId=17207855) by Chen Ming (acan):*\nGood news, I build pyarrow latest master (by following <https://github.com/apache/arrow/blob/master/docs/source/developers/python.rst>), **the created parquet file(s) can be read by parquet-tools correctly. They can be queried through\u00a0Amazon Athena too.** (attached the new parquet file: test_map_2.0.0.parquet)\r\n```java\n\r\nPyArrow Version = 2.0.0.dev403+ga6b30de87\r\nPandas Version = 1.1.2\r\n```\r\n(And as\u00a0 `[~jorisvandenbossche]` told, pyarrow latest master can read the parquet file, with MapType data, back into Arrow correctly too.)\r\n\r\nThanks very much for all the helps. I will change the status to _Resolved_ (by 2.0.0).\r\n\r\nCan you kindly tell when would the next pyarrow release (2.0.0?) be available?"
+        },
+        {
+            "created_at": "2020-10-07T16:39:29.541Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10140?focusedCommentId=17209667) by Wes McKinney (wesm):*\nI'm reopening this until someone confirms that this case is adequately tested in out test suite"
+        },
+        {
+            "created_at": "2020-11-03T05:39:00.065Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10140?focusedCommentId=17225142) by Chen Ming (acan):*\nHi,\r\n\r\nWe noticed that PyArrow 2.0.0 released on Oct 20, 2020.\r\n And we verified that\u00a0the parquet files generated by PyArrow 2.0.0 can be read with parquet-tools correctly.\r\n(Attached test_map_200.parquet which is generated with the official PyArrow 2.0.0 release.)"
+        },
+        {
+            "created_at": "2022-01-18T15:33:21.275Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10140?focusedCommentId=17477979) by Joris Van den Bossche (jorisvandenbossche):*\nIssue resolved by pull request 12176\n<https://github.com/apache/arrow/pull/12176>"
+        }
+    ]
+}

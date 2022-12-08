@@ -1,0 +1,42 @@
+{
+    "issue": {
+        "title": "[Rust] [DataFusion] Add support for scalar UDFs",
+        "body": "***Note**: This issue was originally created as [ARROW-6947](https://issues.apache.org/jira/browse/ARROW-6947). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAs a user, I would like to be able to define my own functions and then use them in SQL statements.\r\n\r\n\u00a0",
+        "created_at": "2019-10-20T19:47:28.000Z",
+        "updated_at": "2020-04-06T18:03:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Component: Rust - DataFusion",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-04-06T18:03:02.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-11-11T00:24:59.354Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6947?focusedCommentId=16971263) by Kyle McCarthy (kylemccarthy):*\nI would like to provide some assistance with implementing UDFs. Is the idea to implement them similarly to\u00a0gandiva and generate LLVM IR or WebAssembly? Or to take a different approach and provide a trait for users to implement for their UDF and then register?"
+        },
+        {
+            "created_at": "2020-02-08T06:58:07.438Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6947?focusedCommentId=17032835) by Jorge Leit\u00e3o (jorgecarleitao):*\n`[~andygrove]`, can I take a shoot at this?\r\n\r\nMy strategy to tackle this:\r\n1. add support for unary udfs\n1. support binary udfs\n1. add macro to support arbitrary argument udfs (I do not see an easy way to implement variadic generics)\n   \n   From what I gathered, we need to\n1. Implement a new kernel (ala `arrow::compute::kernels::arithmetic`) to execute a closure\n1. Implement a generic expression that implements `PhysicalExpr`\n1. Implement a `FunctionProvider` and add it to `ExecutionContext` (like the attribute datasources)\n1. bits and pieces for integration\n   \n   The design I was planning for the expression:\n   \n   \u00a0\n   ```java\n   \n   pub struct UnaryFunctionExpr<T, R>\n   where\n    T: ArrowPrimitiveType, // argument type\n    R: ArrowPrimitiveType, // return type\n   {\n    name: String,\n   /// name of the function\n    func:\n    Arc<dyn Fn(T::Native) -> arrow::error::Result<R::Native> + Sync + Send + 'static>,\n    arg: Arc<dyn PhysicalExpr>,\n    arg_type: DataType,\n    return_type: DataType,\n   }\n   ```\n   \u00a0\n   \n   for the kernel:\n   ```java\n   \n   pub fn unary_op<T, R>(\n    op: &dyn Fn(T::Native) -> Result<R::Native>,\n    arg: &PrimitiveArray<T>,\n   ) -> Result<PrimitiveArray<R>>\n   ```\n   \u00a0"
+        },
+        {
+            "created_at": "2020-02-09T13:18:17.839Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6947?focusedCommentId=17033194) by Jorge Leit\u00e3o (jorgecarleitao):*\nI finished a first draft of this that I am minimally happy with, see\u00a0<https://github.com/jorgecarleitao/arrow/commit/0c77ff531cee191712d08633080de9caed786b62> . Not all function signatures are implemented on purpose, as I see we need to take a design decision with respect to them.\r\n\r\nThe API is used as shown in\u00a0[this test](https://github.com/jorgecarleitao/arrow/commit/0c77ff531cee191712d08633080de9caed786b62#diff-8273e76b6910baa123f3a25a967af3b5R572):\r\n```java\n\r\n// declare a function\r\nlet f = FunctionSignature::UInt64UInt64(Arc::new(Box::new(|a: &u64| Ok(a * a))));\r\n\r\n// register function\r\nctx.register_function(\"pow2\", f);\r\n\r\nlet results = collect(&mut ctx, \"SELECT c2, pow2(c2) FROM test\")?;\r\n```\r\nThe important aspect here is that `FunctionSignature::UInt64UInt64` is an enum variant of the enum FunctionSignature (this is the design choice that we need to discuss).\r\n\r\nI took this design decision based on the following hypothesis:\r\n1. there are limited use-cases for UDFs with may arguments\n1. there are a limited number of different types in arrow (25ish)\n   \n   under these hypothesis, we can enumerate all variations on the relevant `match`. I am not entirely convinced that this is the correct approach, but it is the one that is the most aligned with enumerating all types in match currently in the code base and does not resort to dynamic typing.\n   \n   An alternative design is to use std::any::Any. I can also play around with this and see how it feels. Assuming that we can do it, I suspect that the trade-off is between run-time and compilation time+binary size."
+        },
+        {
+            "created_at": "2020-03-25T15:21:18.270Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6947?focusedCommentId=17066754) by Andy Grove (andygrove):*\nSorry for taking so long to get to this. I think it will be important for this to be more dynamic, where the function receives a batch of data or a vector of columns to operate on so we can have a function signature along the lines of:\r\n\r\n\r\n```java\n\r\ntrait ScalarFunction {\r\n  fn evaluate(args: Vec<Array>) -> Result<Array>;\r\n} \n```"
+        },
+        {
+            "created_at": "2020-03-25T15:22:35.320Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6947?focusedCommentId=17066755) by Andy Grove (andygrove):*\nIt's important to remember that these UDFs will operate on columns, not rows, so although there is overhead in checking the data types of the input arguments, this happens once per batch and not once per row."
+        },
+        {
+            "created_at": "2020-04-06T18:03:03.000Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6947?focusedCommentId=17076515) by Andy Grove (andygrove):*\nIssue resolved by pull request 6749\n<https://github.com/apache/arrow/pull/6749>"
+        }
+    ]
+}

@@ -1,0 +1,118 @@
+{
+    "issue": {
+        "title": "[JAVA] Provide ability to resync VectorSchemaRoot if types change",
+        "body": "***Note**: This issue was originally created as [ARROW-5658](https://issues.apache.org/jira/browse/ARROW-5658). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI can't transfer using apache arrow-flihgt. Contains listvector data. The problem description is as follows:\r\n> 1. I parse an xml file and convert it to an arrow format and finally convert it to a parquet data format. The address of the .xml file data is url [http://www.w3school.com.cn/example/xmle/cd_catalog.xml](http://www.w3school.com.cn/example/xmle/cd_catalog.xml))\n> 1. I created a schema that uses listvector.\n>    code show as below:\n>    List<FiledVector> list = childrenBuilder.add(ListVector.empty(column.getId().toString(),allocator));\n>    VectorSchemaRoot root = VectorSchemaRoot.of(inVector)\n> 1. Parse the xml file to get the list data in \"cd\". Use api use listvector.\n>    `ListVector listVector = (ListVector) valueVectors;\n>    List<Column> columns = column.getColumns();\n>    Column column1 = columns.get(0);\n>    String name = column1.getId().toString();\n>    UnionListWriter writer = listVector.getWriter();\n>    Writer.allocate();\n>    For (int j = 0; j < column1.getColumns().size();j++) {\n> \n> writer.setPosition(j);\n> writer.startList();\n> Writer.list().startList();\n> Column column2 = column1.getColumns().get(j);\n> List<Map<String, String>> lst = (List<Map<String, String>>) ((Map) val).get(name);\n> \n> For (int k = 0; k < lst.size(); k++) {\n> Map<String, String> stringStringMap = lst.get(k);\n> String value = stringStringMap.get(column2.getId().toString());\n> Switch (column2.getType()) {\n> Case FLOAT:\n> Writer.list().float4().writeFloat4(stringConvertFloat(value));\n> Break;\n> Case BOOLEAN:\n> Writer.list().bit().writeBit(stringConvertBoolean(value));\n> Break;\n> Case DECIMAL:\n> Writer.list().decimal().writeDecimal(stringConvertDecimal(value,column2.getScale()));\n> Break;\n> Case TIMESTAMP:\n> Writer.list().dateMilli().writeDateMilli(stringConvertTimestamp(value,column2.format.toString()));\n> Break;\n> Case INTEGER:\n> Case BIGINT:\n> Writer.list().bigInt().writeBigInt(stringConvertLong(value));\n> Break;\n> Case VARCHAR:\n> VarCharHolder varBinaryHolder = new VarCharHolder();\n> varBinaryHolder.start = 0;\n> Byte[] bytes =value.getBytes();\n> ArrowBuf buffer = listVector.getAllocator().buffer(bytes.length);\n> varBinaryHolder.buffer = buffer;\n> buffer.writeBytes(bytes);\n> varBinaryHolder.end=bytes.length;\n> Writer.list().varChar().write(varBinaryHolder);\n> Break;\n> Default:\n> Throw new IllegalArgumentException(\" error no type !!\");\n> }\n> }\n> Writer.list().endList();\n> writer.endList();\n> }`\n> \n> 4.\u00a0\n> \n> After the write is complete, I will send to the arrow-flight server. server code :\r\n> @Override\n> public Callable<Flight.PutResult> acceptPut(FlightStream flightStream) {\n> \n> return () -> {\n> \n> try (VectorSchemaRoot root = flightStream.getRoot()) {\n> \n> while (flightStream.next()) {\n> VectorSchemaRoot other = null;\n> try {\n> logger.info(\" Receive message ...... size: \" + root.getRowCount());\n> other = copyRoot(root);\n> ArrowMessage arrowMessage = new ArrowMessage(other, other.getSchema());\n> spmc.offer(arrowMessage);\n> } catch (Exception e) {\n> \n> logger.error(e.getMessage(), e);\n> }\n> }\n> }\n> \n> return Flight.PutResult.parseFrom(\"ok\".getBytes());\n> };\n> \n> }\r\n> But the server did not receive any information.!! it is error .\r\n> client code :\r\n> root = message.getRoot();\n> //client.close();\n> FlightClient.ClientStreamListener listener =\n> client.startPut(FlightDescriptor.path(message.getFilename()), root);\n> listener.putNext();\n> listener.completed();\n> client.close();\n> listener.putNext();\n> listener.completed();\n> Flight.PutResult result =\n> listener.getResult();\n> String s = new String(result.toByteArray());\n> System.out.println(s);",
+        "created_at": "2019-06-20T02:58:56.000Z",
+        "updated_at": "2019-07-03T04:51:41.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: FlightRPC",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-07-01T02:33:57.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-06-20T06:43:46.179Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16868294) by Liya Fan (fan_li_ya):*\nHi `[~liaotian1005]` thanks a lot for reporting the problem and the detailed information.\r\n\r\nI am not familiar with arrow-flight, but will take a look at this issue.\u00a0"
+        },
+        {
+            "created_at": "2019-06-20T07:43:55.274Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16868319) by Micah Kornfield (emkornfield@gmail.com):*\nWhat is message defined as in the code above?  It seems like parquet might be complicating the matters, did you try creating a simple in memory Vector to send? "
+        },
+        {
+            "created_at": "2019-06-21T04:26:54.593Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16869172) by Liya Fan (fan_li_ya):*\nHi `[~liaotian1005]`, so far I have failed to reproduce the problem.\r\n\r\nWould you please provide more code\u00a0to\u00a0reproduce the problem? Maybe you can upload the related code to github?"
+        },
+        {
+            "created_at": "2019-06-21T09:39:33.956Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16869344) by luckily (liaotian1005):*\nHi\u00a0[~fan_li_ya]\u00a0 I've written an example about the error, in the attachment, I put forward my opinion, whether the list write the varchar data is too much trouble, how to use the list, whether to give a detailed document, whether to support the ListVector <Structure Vector>, this general structure, if this structure does not support the image xml. And the json file format is converted to a row format. Thank you.\u00a0I've written an example about the error, in the attachment, I put forward my opinion, whether the list write the varchar data is too much trouble, how to use the list, whether to give a detailed document, whether to support the ListVector <Structure Vector>, this general structure, if this structure does not support the xml file. And the json file format is not converted to a\u00a0arrow format . Thank you."
+        },
+        {
+            "created_at": "2019-06-21T09:40:52.599Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16869346) by luckily (liaotian1005):*\nException in thread \"main\" java.lang.RuntimeException: java.util.concurrent.ExecutionException: io.grpc.StatusRuntimeException: UNKNOWN\r\n at com.google.common.base.Throwables.propagate(Throwables.java:241)\r\n at org.apache.arrow.flight.FlightClient$PutObserver.getResult(FlightClient.java:244)\r\n at ClientStart.main(ClientStart.java:45)\r\nCaused by: java.util.concurrent.ExecutionException: io.grpc.StatusRuntimeException: UNKNOWN\r\n at com.google.common.util.concurrent.AbstractFuture.getDoneValue(AbstractFuture.java:528)\r\n at com.google.common.util.concurrent.AbstractFuture.get(AbstractFuture.java:509)\r\n at com.google.common.util.concurrent.AbstractFuture$TrustedFuture.get(AbstractFuture.java:85)\r\n at org.apache.arrow.flight.FlightClient$PutObserver.getResult(FlightClient.java:242)\r\n ... 1 more\r\nCaused by: io.grpc.StatusRuntimeException: UNKNOWN\r\n at io.grpc.Status.asRuntimeException(Status.java:526)\r\n at io.grpc.stub.ClientCalls$StreamObserverToCallListenerAdapter.onClose(ClientCalls.java:420)\r\n at io.grpc.PartialForwardingClientCallListener.onClose(PartialForwardingClientCallListener.java:39)\r\n at io.grpc.ForwardingClientCallListener.onClose(ForwardingClientCallListener.java:23)\r\n at io.grpc.ForwardingClientCallListener$SimpleForwardingClientCallListener.onClose(ForwardingClientCallListener.java:40)\r\n at io.grpc.internal.CensusStatsModule$StatsClientInterceptor$1$1.onClose(CensusStatsModule.java:684)\r\n at io.grpc.PartialForwardingClientCallListener.onClose(PartialForwardingClientCallListener.java:39)\r\n at io.grpc.ForwardingClientCallListener.onClose(ForwardingClientCallListener.java:23)\r\n at io.grpc.ForwardingClientCallListener$SimpleForwardingClientCallListener.onClose(ForwardingClientCallListener.java:40)\r\n at io.grpc.internal.CensusTracingModule$TracingClientInterceptor$1$1.onClose(CensusTracingModule.java:403)\r\n at io.grpc.internal.ClientCallImpl.closeObserver(ClientCallImpl.java:459)\r\n at io.grpc.internal.ClientCallImpl.access$300(ClientCallImpl.java:63)\r\n at io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl.close(ClientCallImpl.java:546)\r\n at io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl.access$600(ClientCallImpl.java:467)\r\n at io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl$1StreamClosed.runInContext(ClientCallImpl.java:584)\r\n at io.grpc.internal.ContextRunnable.run(ContextRunnable.java:37)\r\n at io.grpc.internal.SerializingExecutor.run(SerializingExecutor.java:123)\r\n at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1149)\r\n at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:624)\r\n at java.lang.Thread.run(Thread.java:748)"
+        },
+        {
+            "created_at": "2019-06-21T11:58:07.941Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16869421) by David Li (lidavidm):*\n`[~liaotian1005]`, generally UNKNOWN means that there was an uncaught server-side exception. Do you see any traceback in the server output? If not, then we need to log these things inside Flight."
+        },
+        {
+            "created_at": "2019-06-24T01:14:41.467Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16870732) by luckily (liaotian1005):*\n`[~lidavidm]` \u00a0,The flight server does not receive any messages, nor does it have an error message prompt"
+        },
+        {
+            "created_at": "2019-06-24T01:29:42.751Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16870734) by luckily (liaotian1005):*\n`[~lidavidm]`,arrow stream api cannot send listvector too"
+        },
+        {
+            "created_at": "2019-06-24T09:46:52.920Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16871023) by Liya Fan (fan_li_ya):*\n`[~liaotian1005]` thanks for the additional information.\r\n\r\nWe have found the root cause, and is in the process of fixing it. The problem seems to be with the serialization/deserizlization process.\u00a0\r\n\r\nWhen there is any progress, we will let you know about it."
+        },
+        {
+            "created_at": "2019-06-25T10:04:23.283Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16872219) by Liya Fan (fan_li_ya):*\n`[~liaotian1005]` we have found the reason for the failure.\r\n\r\nIt is caused by inconsistent schema for VectorSchemaRoot.\r\n\r\nIn particular, the schema looks like this at the beginning:\r\n\r\n![image-2019-06-25-17-58-09-038.png](https://issues.apache.org/jira/secure/attachment/12972845/image-2019-06-25-17-58-09-038.png)\r\n\r\nAs new data are inserted to the vector,\u00a0vector structure changes to something like this:\r\n\r\n![image-2019-06-25-17-59-07-352.png](https://issues.apache.org/jira/secure/attachment/12972846/image-2019-06-25-17-59-07-352.png)\r\n\r\nThe change is due to a mechanism named writer promotion. For details, please see class\u00a0PromotableWriter.\r\n\r\nIn the client side, the new vector structure is sent along with the obsolete schema. In the server side, the code tries to decode the vector structure with the out-of-date schema, so it fails, without printing any output.\u00a0\r\n\r\n\u00a0\r\n\r\nOur solution is to provide a method in class VectorSchemaRoot, which brings the schema in sync with the vector structure.\u00a0So to fix the problem in your code, simply call this method after the data is inserted. Please see the modified code here:\u00a0[ClientStart.java](ClientStart.java)\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-06-26T08:04:21.863Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16873046) by luckily (liaotian1005):*\nI've got a new problem, that's the loss of data."
+        },
+        {
+            "created_at": "2019-06-26T08:09:44.372Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16873055) by luckily (liaotian1005):*\n[~fan_li_ya]\r\n\r\nI've got a new problem, that's the loss of data.\r\n\r\nI created a ListVector.. There are six index. in the data. Data such as the xml file mentioned above. There are six columns.\r\n\r\n![image-2019-06-26-16-07-23-366.png](https://issues.apache.org/jira/secure/attachment/12972942/image-2019-06-26-16-07-23-366.png)\r\n\r\nAfter I send the data, the server can only receive the data with the index of 0, and the other index locations are all missing.\r\n\r\n![image-2019-06-26-16-09-30-275.png](https://issues.apache.org/jira/secure/attachment/12972943/image-2019-06-26-16-09-30-275.png)\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-06-26T08:13:31.408Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16873060) by luckily (liaotian1005):*\nHi LiyaFan\u00a0\r\n\r\nI need to do an asynchronous process to prevent the IO thread from blocking. In many cases, the row data is not immediately processed, placed in an asynchronous queue, but cannot be placed directly. It is necessary to create a same container, if there is such an api, you can copy Root once, Create a same data"
+        },
+        {
+            "created_at": "2019-06-26T08:26:54.606Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16873076) by luckily (liaotian1005):*\nHi LiyaFan\u00a0\r\n\r\ni pull you code\u00a0"
+        },
+        {
+            "created_at": "2019-06-26T09:29:24.640Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16873138) by Liya Fan (fan_li_ya):*\nHi `[~liaotian1005]`, please check if our patch fixes your new problem. If not,\u00a0it may be appropriate to open a separate Jira to track it."
+        },
+        {
+            "created_at": "2019-06-26T09:52:52.936Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16873163) by luckily (liaotian1005):*\nHi Liya Fan,\r\n\r\nThank you for repairing. Now i can send ListVector, but introduce new problems."
+        },
+        {
+            "created_at": "2019-06-26T10:02:02.117Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16873179) by luckily (liaotian1005):*\nData url\u00a0<http://www.w3school.com.cn/example/xmle/cd_catalog.xml>\u00a0 \u00a0cd.xml.\u00a0\r\n\r\nI write the data in url to a VectorSchemaRoot, to look at this file from a global point of view. Is a piece of data, one of which includes a list,list. The number of bars is 24 (bars). The index is 6 (6 columns). So I send the data when the parsing is complete. VectorSchemaRoot.setvalueCount (1) listvector.setValueCount (6), but I didn't accept listVector data on the server. At the same time, I found out. When VectorSchemaRoot.setvalueCount (6), the server can accept the complete listVector data. But from a global point of view, there is only one, so I call VectorSchemaRoot.setvalueCount (1), but the server does not accept the data. Despite the use of listvector.setValueCount (6), why does the server receive data when VectorSchemaRoot.setvalueCount (6) is used?"
+        },
+        {
+            "created_at": "2019-06-26T11:57:48.468Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16873269) by Liya Fan (fan_li_ya):*\nHi `[~liaotian1005]`, I don't quite understand the new problem.\r\n\r\nWould you please provide the code to reproduce the problem?"
+        },
+        {
+            "created_at": "2019-06-27T01:39:27.559Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16873747) by luckily (liaotian1005):*\nhi [~fan_li_ya]\u00a0 ,Why when using root.setRowCount (3), the server can accept the complete data. When using root.setRowCount (2) or root.setRowCount (1). The server did not receive the complete data,\u00a0Why setRowCount this api determines whether the listat can accept the full data?\r\n\r\n![image-2019-06-27-09-38-52-735.png](https://issues.apache.org/jira/secure/attachment/12973012/image-2019-06-27-09-38-52-735.png)\r\n\r\nserver\u00a0\r\n\r\n![image-2019-06-27-09-39-18-597.png](https://issues.apache.org/jira/secure/attachment/12973013/image-2019-06-27-09-39-18-597.png)\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-06-27T08:04:57.911Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16873902) by Liya Fan (fan_li_ya):*\nHi `[~liaotian1005]`, thanks for the additional information.\r\n\r\nI did not reproduce the problem as described by you. When I set the row count to 1, 2 or 3,\u00a0the server could\u00a0receive the\u00a0record batch correctly:\r\n\r\nWhen row count was set to 1, the server receives the batch with only 1 row, and the second row is truncated.\r\n\r\nWhen row count was set to 2, the server receives the batch with 2 rows, as\u00a02 rows were sent from the client.\r\n\r\nWhen row count was set to 3, the server receives the batch with 3 rows, but the 3rd row is null, as\u00a0there were only 2 rows from the client side.\u00a0\r\n\r\nThe above results should be as expected.\r\n\r\nTo help you reproduce the above results, I have attached the code for my server side. Would you please try it?\u00a0[ServerStart.java](ServerStart.java)\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-06-28T00:56:14.608Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16874580) by luckily (liaotian1005):*\nSetRowCount determines that list can get index data?"
+        },
+        {
+            "created_at": "2019-06-28T02:31:55.380Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16874600) by Liya Fan (fan_li_ya):*\nSetRowCount determines the\u00a0range of indices that can be used without causing an IndexOutOfBoundException"
+        },
+        {
+            "created_at": "2019-06-28T04:13:30.945Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16874656) by luckily (liaotian1005):*\nI have two vector, one is varchar, the other is list.. Assuming that varchar has two pieces of data and list has three postion, how much rowcount should be set?"
+        },
+        {
+            "created_at": "2019-06-28T04:16:00.487Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16874659) by luckily (liaotian1005):*\nI don't think the data in position in listvector should have anything to do with rowcount."
+        },
+        {
+            "created_at": "2019-06-28T09:20:48.167Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5658?focusedCommentId=16874801) by Liya Fan (fan_li_ya):*\n`[~liaotian1005]` we have changed the code to automatically update the schema, so you do not need to call syncSchema in your code.\u00a0"
+        }
+    ]
+}

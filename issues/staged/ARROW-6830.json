@@ -1,0 +1,56 @@
+{
+    "issue": {
+        "title": "[R] Add col_select argument to read_ipc_stream",
+        "body": "***Note**: This issue was originally created as [ARROW-6830](https://issues.apache.org/jira/browse/ARROW-6830). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n**Note:**\u00a0 Not sure if this is a limitation of the R library or the underlying C++ code:\r\n\r\nI have a ~30 gig arrow file with almost 1000 columns - it has 12,000 record batches of varying row sizes\r\n\r\n1. Is it possible at to use **read_arrow** to filter out columns?\u00a0 (similar to how **read_feather** has a (col_select =... )\r\n\r\n2. Or is it possible using **RecordBatchFileReader** to filter columns?\r\n\r\n\u00a0\r\n\r\nThe only thing I seem to be able to do (please confirm if this is my only option) is loop over all record batches, select a single column at a time, and construct the data I need to pull out manually.\u00a0 ie like the following:\r\n```java\n\r\nfor(i in 0:data_rbfr$num_record_batches) {\r\n    rbn <- data_rbfr$get_batch(i)\r\n  \r\n  if (i == 0) \r\n  {\r\n    merged <- as.data.frame(rbn$column(5)$as_vector())\r\n  }\r\n  else \r\n  {\r\n    dfn <- as.data.frame(rbn$column(5)$as_vector())\r\n    merged <- rbind(merged,dfn)\r\n  }\r\n    \r\n  print(paste(i, nrow(merged)))\r\n} \n```\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2019-10-09T14:13:51.000Z",
+        "updated_at": "2020-04-02T18:49:00.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-09T18:43:08.865Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6830?focusedCommentId=16947927) by Neal Richardson (npr):*\nLooking at\u00a0<https://github.com/apache/arrow/blob/master/r/R/read-table.R>, `read_arrow` returns a data frame while `read_table` keeps the data in an Arrow Table. Tables have a `$select()` method (which is [how `read_csv_arrow` implements `col_select`](https://github.com/apache/arrow/blob/master/r/R/csv.R#L124)), and you can more naturally access that through the usual `[` method. So IIUC what you're trying to do,\u00a0\r\n```r\n\r\ntab <- read_table(data_rbfr)\r\nas.data.frame(tab[, 6])\r\n```\r\nand of course you could reference that column by name instead of position.\r\n\r\nIf you wanted to add `col_select` to `read_arrow()`, I'd recommend following the model of `read_csv_arrow`, which sounds pretty straightforward. Happy to review a pull request if you submit it."
+        },
+        {
+            "created_at": "2019-10-09T21:00:36.676Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6830?focusedCommentId=16947997) by John Muehlhausen (jgm-ktg):*\nNot sure how the R integration works, but if the 30gigs are memory-mapped but you only access certain columns, the other columns won't actually consume any memory."
+        },
+        {
+            "created_at": "2019-10-09T21:26:23.169Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6830?focusedCommentId=16948016) by Neal Richardson (npr):*\nThat's the intent, though in this example I don't know what `data_rbfr` is. If it's a file, you can use `mmap_open()` to memory map it."
+        },
+        {
+            "created_at": "2019-10-10T15:31:49.192Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6830?focusedCommentId=16948696) by Anthony Abate (abbot):*\nwhoops - forgot this line:\r\n```java\n\r\ndata_rbfr <- arrow::RecordBatchFileReader(\"bigfile.arrow\") \n```"
+        },
+        {
+            "created_at": "2019-10-10T15:47:10.839Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6830?focusedCommentId=16948713) by Anthony Abate (abbot):*\nI was using **RecordBatchFileReader** since it seemed to be the only to limit memory usage (I thought **read_arrow** was my only alternative) \u00a0\u00a0 We are indexing our data by record batch so we could be more efficient in filtering by passing the batch ids into the RecordBatchFileReader to avoid a 'full table scan'\u00a0\r\n\r\nFYI - It was not clear to me from the name that **read_table** has anything to do with arrow files.\u00a0\r\n\r\nIs read_table aware of underlying record batches so rows can be filtered out more efficiently?\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-10-10T16:03:53.443Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6830?focusedCommentId=16948727) by Neal Richardson (npr):*\n<https://github.com/apache/arrow/blob/master/r/R/read-table.R>\u00a0is pretty simple (and note that if you give it a string file name, it will invoke RecordBatchFileReader). There are no additional arguments that would let you push computation down to record batches contained within the file (though I thought we were talking about selecting columns). We are working on a [C++ Datasets API](https://docs.google.com/document/d/1bVhzifD38qDypnSjtf8exvpP3sSB5x_Kw9m-n66FB2c/edit?pli=1#heading=h.22aikbvt54fv)\u00a0that will do that and much more.\u00a0\r\n\r\nIf you want to do some of that in R now,\u00a0RecordBatchFileReader sounds like a reasonable place to start. It memory maps by default, and as you've seen you can iterate over the batches. You can filter each record batch separately (using `[` methods or lower level if you prefer) and collect them all into a data.frame."
+        },
+        {
+            "created_at": "2019-10-10T16:24:47.288Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6830?focusedCommentId=16948744) by Anthony Abate (abbot):*\nfrom my initial testing of read_table - it seems to be no better than read_arrow when it comes to memory usage and appears to load the entire file...\u00a0\r\n```java\n\r\ntab <- read_table(\"bigfile.arrow\")\r\nnrow(tab)  # uses 30 gigs!\r\n\r\n```"
+        },
+        {
+            "created_at": "2019-10-10T16:28:38.228Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6830?focusedCommentId=16948748) by Anthony Abate (abbot):*\nYes - my original question is about slicing the arrow file to reduce columns - whether it be via read_arrow, read_table, or RecordBatchFileReader\u00a0\r\n\r\n\u00a0\r\n\r\nso far the answer seems to be the following:\r\n\r\n\n|method|status|\r|\n|-|-|-|\n|read_arrow|unsupported|\r|\n|read_table|supported, but uses lots of memory|\r|\n|RecordBatchFileReader\u00a0|manually possible via the code I provided, but slow|\r<br>\r<br>\u00a0|\n"
+        },
+        {
+            "created_at": "2019-10-10T16:33:23.965Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6830?focusedCommentId=16948751) by Anthony Abate (abbot):*\n> You can filter each record batch separately (using `[` methods or lower level if you prefer) and collect them all into a data.frame.\r\n\u00a0\r\n\r\nthis is what I am doing - is there a better way so I can do multiple columns in a single pass?\r\n```java\n\r\nrbn <- data_rbfr$get_batch(i)\r\n  df <- data.frame(\r\n    rbn$column(5)$as_vector(),rbn$column(6)$as_vector(),rbn$column(100)$as_vector(),rbn$column(687)$as_vector(),\r\n    rbn$column(444)$as_vector(),rbn$column(36)$as_vector(),rbn$column(500)$as_vector(),rbn$column(897)$as_vector(),\r\n    rbn$column(24)$as_vector(),rbn$column(446)$as_vector(),rbn$column(777)$as_vector(),rbn$column(333)$as_vector(),\r\n    rbn$column(96)$as_vector(),rbn$column(555)$as_vector(),rbn$column(888)$as_vector(),rbn$column(222)$as_vector()\r\n    ) \n```\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-10-10T17:00:35.980Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6830?focusedCommentId=16948779) by Neal Richardson (npr):*\n`nrow(tab)` doesn't necessarily have any relationship to memory usage. If you want to see what memory the C++ library is using, you can look at `default_memory_pool()$bytes_allocated()`.\r\n\r\nRe: \"a better way so I can do multiple columns in a single pass\", see the examples on <https://arrow.apache.org/docs/r/reference/RecordBatch.html>\u00a0for using `[`."
+        }
+    ]
+}

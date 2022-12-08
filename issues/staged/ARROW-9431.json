@@ -1,0 +1,113 @@
+{
+    "issue": {
+        "title": "[C++/Python] Kernel for SetItem(IntegerArray, values)",
+        "body": "***Note**: This issue was originally created as [ARROW-9431](https://issues.apache.org/jira/browse/ARROW-9431). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe should have a kernel that allows overriding the values of an array using an integer array as the indexer and a scalar or array of equal length as the values.",
+        "created_at": "2020-07-13T12:12:03.000Z",
+        "updated_at": "2022-07-12T14:04:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-05-17T20:58:09.201Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17346435) by Niranda Perera (niranda):*\nIdentical issue"
+        },
+        {
+            "created_at": "2021-05-18T08:05:45.455Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17346672) by Joris Van den Bossche (jorisvandenbossche):*\n`[~niranda]` you linked ARROW-9430  as duplicate. Both are of course closely related, but there is a difference: using integer indices vs a boolean mask to select the values you want to set"
+        },
+        {
+            "created_at": "2021-05-18T13:08:04.710Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17346886) by Niranda Perera (niranda):*\nThank you `[~jorisvandenbossche]`. That was clearly my mistake :("
+        },
+        {
+            "created_at": "2021-05-18T13:59:55.174Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17346918) by Niranda Perera (niranda):*\nI'd like to take this one. `[~jorisvandenbossche]` \u00a0 `[~uwe]` `[~apitrou]` I'd like to get your feedback on the following.\r\n\r\nJust to be clear, an example of this would be,\r\n\r\n\u00a0\r\n```java\n\r\n// code placeholder\r\narr1 = [a, b, c, d]\r\narr2 = [l, m, n, o, p]\r\n\r\nto_replace = [0, 2, 3]\r\n\r\nres = replace_by_index(to_replace, arr1, arr2)\r\n\r\n# res --> [l, b, n, o]\r\n```\r\n\u00a0\r\n\r\nWhat is a good name for the kernel? I'm not sure about **replace_by_index** because Arrays are immutable. Any suggestions?\r\n\r\nCan we assume that 'to_replace' is a **non-null** Int64Array?\r\n\r\nAnd should we enforce 'to_replace' being sorted (IMO this would be more efficient)?\r\n\r\nWhat is the arity of this kernel? Unary or binary?\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-05-18T14:38:03.282Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17346939) by Joris Van den Bossche (jorisvandenbossche):*\nI think one difference in your example is that I expect the `arr2` to be of the same length as `to_replace` \r\n\r\n> Can we assume that 'to_replace' is a non-null Int64Array?\r\n\r\nThat might be the easiest for now. Or otherwise we can say nulls in `to_replace` give nulls in the output. The question is then how to interpret `arr2`, though (should it be of the same length as `to_replace`, or as the non-null values of `to_replace` ?)\r\n\r\n> And should we enforce 'to_replace' being sorted (IMO this would be more efficient)?\r\n\r\nHmm, not sure. Also for `Take` we generally don't require sortedness of the indices, I think?\r\n\r\n> What is the arity of this kernel? Unary or binary?\r\n\r\nTernary?"
+        },
+        {
+            "created_at": "2021-05-26T15:31:16.927Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17351870) by Antoine Pitrou (apitrou):*\nIndeed, we don't require sortedness of the indices for `Take`. Also, I'm not convinced it would be more efficient (why?). "
+        },
+        {
+            "created_at": "2021-05-26T15:32:12.907Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17351873) by Antoine Pitrou (apitrou):*\nThe example doesn't quite look right to me. I would expect:\r\n```python\n\r\narr1 = [a, b, c, d]\r\narr2 = [l, m, n, o, p]\r\n\r\nto_replace = [0, 2, 3]\r\n\r\nres = replace_by_index(to_replace, arr1, arr2)\r\n\r\n# res --> [l, b, m, n]\r\n```\r\n\r\n`[~uwe]` What do you think?"
+        },
+        {
+            "created_at": "2021-05-26T16:10:23.819Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17351905) by Niranda Perera (niranda):*\n`[~apitrou]` my idea was something like this.\r\n```java\n\r\ndef replace_by_index(to_replace: Array, arr1: Array, arr2: Array) -> Array:\r\n  out = arr1 # copy array\r\n  for i in to_replace:\r\n    out[i] = arr2[i]\r\n  return out \n```\r\n\u00a0\r\n\r\nIts like an if-else mask, but the mask's set bits are encoded in an array ARROW-10640"
+        },
+        {
+            "created_at": "2021-05-26T16:12:02.690Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17351909) by Antoine Pitrou (apitrou):*\nIf this is meant to emulate Numpy's advanced indexing, then I don't think this is the right semantics."
+        },
+        {
+            "created_at": "2021-05-26T16:17:51.572Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17351912) by Niranda Perera (niranda):*\nI see.. Can you give an example?"
+        },
+        {
+            "created_at": "2021-05-26T17:40:47.137Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17351966) by Antoine Pitrou (apitrou):*\n```python\n\r\n>>> a = np.array([\"a\", \"b\", \"c\", \"d\"])\r\n>>> b = np.array([\"m\", \"n\", \"o\"])\r\n>>> a[[0,2,3]] = b\r\n>>> a\r\narray(['m', 'b', 'n', 'o'], dtype='<U1')\r\n```"
+        },
+        {
+            "created_at": "2021-05-26T17:41:13.674Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17351967) by Antoine Pitrou (apitrou):*\n`[~uwe]` What is the intended use case?"
+        },
+        {
+            "created_at": "2021-05-26T17:58:16.489Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17351983) by Niranda Perera (niranda):*\nGot it. Think that makes sense. So, this will ultimately be another ternary kernel, isnt it?"
+        },
+        {
+            "created_at": "2021-05-26T17:59:43.218Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17351984) by Antoine Pitrou (apitrou):*\nWhat do you mean by \"another ternary kernel\"?"
+        },
+        {
+            "created_at": "2021-05-26T18:04:12.208Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17351989) by Niranda Perera (niranda):*\nI'm currently working on the 'if-else' function ARROW-10640. And AFAIK it is the only ternary function that is there ATM. This will be another one."
+        },
+        {
+            "created_at": "2021-05-27T19:25:03.696Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17352713) by Uwe Korn (uwe):*\n> `[~uwe]` \u00a0What is the intended use case?\r\n\r\nThe intention was to support pandas' ```Java\ndef __setitem__(self, key, value)\n```\u00a0where key is an array and value is an array of equal length. In fletcher we currently roundtrip to `numpy` for that: https://github.com/xhochy/fletcher/blob/master/fletcher/base.py#L998-L1018 The biggest use case for this is though the ArrowStringArray that is being built inside of pandas currently."
+        },
+        {
+            "created_at": "2021-05-27T19:38:24.118Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17352717) by Joris Van den Bossche (jorisvandenbossche):*\nIt's \"another ternary kernel\" in the sense that it accepts three arguments, but it's quite different from \"if-else\" in that it is not a scalar kernel like \"if-else\" is (for \"if-else\" all inputs are of the same length (or scalars broadcasted), end then the operation is basically element-wise, while for this \"setitem\" that is not the case).\r\n\r\n`[~niranda]` to use your pseudo-code, the expected behaviour looks like:\r\n\r\n```Java\n\r\ndef replace_by_index(to_replace: Array, arr1: Array, arr2: Array) -> Array:\r\n  out = arr1 # copy array\r\n  for idx, val in zip(to_replace, arr2):\r\n    out[idx] = val\r\n  return out \r\n```\r\n\r\nso where `to_replace` and `arr2` have the same length, but are not of the same length as `arr1`."
+        },
+        {
+            "created_at": "2021-05-28T04:52:44.955Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17352964) by Niranda Perera (niranda):*\nYes, understood. I will take this up once I have completed ARROW-10640. Still figuring out the housekeeping work for ternary kernels :)"
+        },
+        {
+            "created_at": "2021-06-01T19:06:14.931Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17355298) by Niranda Perera (niranda):*\n`[~jorisvandenbossche]` `[~uwe]` \u00a0 my initial idea is the following cases for the function.\r\n```python\n\r\ndef replace_by_index(source, indices, values)\r\n```\r\narray(k) --> array of size k, M <= N\r\n\n|source|indices|values|output|\r|\n|-|-|-|-|-|\n|array(N)|array(M)|array(M)|array(N)|\r|\n|array(N)|array(M)|\u00a0scalar|array(N)|\r|\n|array(N)|scalar|scalar|array(N)|\r<br>\r<br>That covers all the cases IMO. WDYT?|\n"
+        },
+        {
+            "created_at": "2021-06-01T19:37:02.828Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17355312) by Joris Van den Bossche (jorisvandenbossche):*\nYes, I think that covers all cases. I am personally not fully sure that the third case of a scalar for the indices is necessarily important to cover for an initial implementation (for example also the \"take\" kernel only supports an actual array for the `indices`)"
+        },
+        {
+            "created_at": "2021-06-01T19:40:10.320Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17355315) by Niranda Perera (niranda):*\n`[~jorisvandenbossche]` \u00a0 Got it!"
+        },
+        {
+            "created_at": "2021-11-16T19:08:31.823Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17444744) by Niranda Perera (niranda):*\nI'd like to start looking at this Jira again. `[~jorisvandenbossche]` \u00a0 Has there been any developments for the last couple of months (affecting this requirement) or can I still go ahead?\u00a0"
+        },
+        {
+            "created_at": "2021-11-17T08:40:06.803Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17445011) by Joris Van den Bossche (jorisvandenbossche):*\nI am not aware of any work that happened in the meantime. So taking a look at this issue would be very welcome!\r\n\r\nThe related ARROW-9430 has been done by now, and there we went with a name `replace_with_mask` for the kernel to set values with a mask. So maybe for this kernel we can then use `replace_with_indices` to follow the same naming scheme?"
+        },
+        {
+            "created_at": "2022-07-12T14:04:55.430Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9431?focusedCommentId=17565846) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

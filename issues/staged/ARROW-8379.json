@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[R] Investigate/fix thread safety issues (esp. Windows)",
+        "body": "***Note**: This issue was originally created as [ARROW-8379](https://issues.apache.org/jira/browse/ARROW-8379). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThere have been a number of issues where the R bindings' multithreading has been implicated in unstable behavior (ARROW-7844 for example). In ARROW-8375 I disabled `use_threads` in the Windows tests, and it appeared that the mysterious Windows segfaults stopped. We should fix whatever the underlying issues are.",
+        "created_at": "2020-04-08T23:36:21.000Z",
+        "updated_at": "2021-09-30T00:48:09.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-09-29T18:42:07.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-04-08T23:48:04.857Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8379?focusedCommentId=17078816) by Wes McKinney (wesm):*\nIf I had to naively guess (not knowing whether Rcpp handles this stuff itself), we need to add a global mutex any place that's creating new R objects, similar to the Python GIL. Basically anywhere where one of the `*Vector::create` functions is called"
+        },
+        {
+            "created_at": "2021-09-28T18:22:51.895Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8379?focusedCommentId=17421595) by Neal Richardson (npr):*\nSurveying the open issues (now linked here), it looks like:\r\n\r\n- On 32-bit Rtools 3.5, async multithreading just does not work. This means we should disable the dataset features entirely on this build. It does not appear that we can conditionally disable ARROW_DATASET only on this build, based on how configure.win works, so we should check this in the R code. Make arrow_with_dataset() check os, R version, and arch, which will get tests and examples to skip appropriately, and then we could check that inside Dataset$create() and error informatively to prevent users on this setup from trying. \n- Multithreaded conversion from Arrow to R is prone to issues on Windows across the board, regardless of rtools version or 32/64bits. We should set option.use_threads = FALSE on Windows in .onLoad. \n      \\* This will have the side effect of disabling multithreading in some other parts of C++ code where use_threads is an option. It is not clear that that is strictly required, but it will be a side effect unless we distinguish the use_threads controls we expose.\n- There may be more work to be done with CPU and IO threadpools, which get used internally in Arrow C++, but I think it might be best to release with these fixes and see if we still get error reports. \n      \\* Relatedly, an alternative to setting use_threads = FALSE globally would be to leave multithreading on but reduce the size of the CPU and IO threadpools; some reports suggest that setting them to less than the number of CPUs allow them to work. It's not clear though whether this fixes the problem or just decreases the frequency of deadlock. "
+        },
+        {
+            "created_at": "2021-09-28T18:39:30.247Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8379?focusedCommentId=17421606) by Jonathan Keane (jonkeane):*\nOverall this sounds good and in line with what I've been experiencing. A few comments on specific points (in no particular order):\r\n\r\n> just decreases the frequency of deadlock.\r\n\r\nI suspect this is true \u2014 with my work on DuckDB I had a similar experience where fewer threads meant fewer opportunities to deadlock (and not that it was fixed by some number greater than 1). \r\n\r\n> On 32-bit Rtools 3.5 disabling datasets\r\n\r\nI don't have a better solution, but part of me wonders if there's much of a point to install Arrow if one doesn't have datasets enabled (this would include basically any dplyr on tables as well, right?) Maybe it's time to end support for this (though that's earlier than I think is typical / we strive for!). At least, maybe we should include a message that says something like \"32bit windows 3.5 has substantially reduced functionality, please consider upgrading your R to take full advantage of...\""
+        },
+        {
+            "created_at": "2021-09-28T19:02:18.992Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8379?focusedCommentId=17421615) by Weston Pace (westonpace):*\n> On 32-bit Rtools 3.5, async multithreading just does not work. This means we should disable the dataset features entirely on this build.\r\n\r\n+1.  When I dug into this in detail I believe I found that mingw on 32-bit windows is using a rather custom backport / bespoke implementation of pthreads and there were other issues where it does not properly implement the std::thread expectations.  I'd really rather not dig into this.\r\n\r\n> Multithreaded conversion from Arrow to R is prone to issues on Windows across the board, regardless of rtools version or 32/64bits. We should set option.use_threads = FALSE on Windows in .onLoad.\r\n> This will have the side effect of disabling multithreading in some other parts of C++ code where use_threads is an option. It is not clear that that is strictly required, but it will be a side effect unless we distinguish the use_threads controls we expose.\r\n\r\n+1 on additional controls.  I don't think we should abandon threading on Windows entirely.  Dataset scanning, etc. has been running in a multi threaded fashion on CI rather reliably on RTools >= 4.\r\n\r\n> There may be more work to be done with CPU and IO threadpools, which get used internally in Arrow C++, but I think it might be best to release with these fixes and see if we still get error reports.\r\n\r\n+1 to fix the issues as they come.  Again, I don't want to abandon threading on Windows entirely.\r\n\r\n> Relatedly, an alternative to setting use_threads = FALSE globally would be to leave multithreading on but reduce the size of the CPU and IO threadpools; some reports suggest that setting them to less than the number of CPUs allow them to work. It's not clear though whether this fixes the problem or just decreases the frequency of deadlock.\r\n\r\nWe currently set the I/O thread pool to 8 and the CPU thread pool to \"# of cores\".  There are API methods to set the size of each pool.  Threads are created lazily so as long as you call these methods early enough you won't have too many threads.  My hunch would be that we are in the \"decreases the frequency of deadlock\" camp myself though."
+        },
+        {
+            "created_at": "2021-09-28T19:46:19.532Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8379?focusedCommentId=17421635) by Neal Richardson (npr):*\n> Dataset scanning, etc. has been running in a multi threaded fashion on CI rather reliably on RTools >= 4.\r\n\r\nActually it hasn't been--we set use_threads = FALSE on Windows in the test setup. I'm essentially proposing to move this to the package .onLoad hook, which means that users will experience the (relative) stability we see on CI.\r\n\r\nHow about we do that for 6.0, and then after 6.0 we explore more controls for multithreading. That way, we'll have time to see how it behaves on CI for a couple of months before we release next."
+        },
+        {
+            "created_at": "2021-09-28T20:21:20.449Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8379?focusedCommentId=17421666) by Neal Richardson (npr):*\nI created ARROW-14159 to explore more mulithreading controls after 6.0.0."
+        },
+        {
+            "created_at": "2021-09-29T18:42:07.870Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8379?focusedCommentId=17422324) by Neal Richardson (npr):*\nIssue resolved by pull request 11269\n<https://github.com/apache/arrow/pull/11269>"
+        }
+    ]
+}

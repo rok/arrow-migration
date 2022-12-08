@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[C++] Fuzzing for certain input formats",
+        "body": "***Note**: This issue was originally created as [ARROW-1589](https://issues.apache.org/jira/browse/ARROW-1589). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe arrow lib should have fuzzing tests for certain input formats, e.g. for reading record batches from streams. Ideally, malformed input must not crash the system but must report a proper error. This could easily be implemented e.g. w/ [libfuzzer](https://llvm.org/docs/LibFuzzer.html) in combination with address sanitizer (that's already implemented by Arrow's build system).",
+        "created_at": "2017-09-21T09:31:57.000Z",
+        "updated_at": "2019-06-03T12:48:50.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: test"
+        ],
+        "closed": true,
+        "closed_at": "2018-02-04T09:18:57.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-09-22T00:44:32.267Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1589?focusedCommentId=16175753) by Wes McKinney (wesm):*\nCould you clarify what kinds of malformed input you are talking about? I am not sure it is a requirement for the stream reader to be able to consistently return errors on random bytes input. \n\nIn Arrow we need to distinguish between \"can't fail\" and \"can fail\" errors. The \"can't fail\" errors you detect in debug builds with DCHECK assertions. These are the kinds of errors that can only occur if the library developer (for example, an Arrow Java developer or an Arrow C++ developer) has implemented something incorrectly. Unit tests or integration tests must be written to exercise relevant code paths to catch these issues. I have found the debug assertions are especially helpful when refactoring, and they cost nothing in release builds.\n\nIn the case of reading record batches from a stream, i.e. according to the encapsulated message format described in http://arrow.apache.org/docs/ipc.html, if you are able to read the indicated number of metadata bytes from the stream, then it is assumed to be a valid Flatbuffer, and the sender has respected invariants that are detectable in an integration test \u2013 we may check do some sanity checks of invariants such as the number of buffers in a record batch. Same goes for the message body.\n\nIf a Flatbuffer is truly malformed in some way in a way that cannot be detected with debug assertions, I am unsure whether we can protect ourselves from segfaults. The sender of a record batch stream must be assumed to be trusted (i.e. you have adequate integration tests against it to catch \"can't fail\" exceptions) to proceed with reading a stream at all."
+        },
+        {
+            "created_at": "2017-09-22T00:48:39.678Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1589?focusedCommentId=16175756) by Wes McKinney (wesm):*\nIt would be reasonable to implement an `UntrustedMessageReader` that is more robust to random bytes input, like using Flatbuffers' generated verification functions (see \"Access of untrusted buffers\" https://google.github.io/flatbuffers/md__cpp_usage.html). This will slow down IPC reads but perhaps not by that much"
+        },
+        {
+            "created_at": "2017-09-25T07:38:24.105Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1589?focusedCommentId=16178675) by Marco Neumann (marco.neumann.by):*\nCurrently it is not clearly stated that the message stream is trusted, therefore the opposite will be assumed by developers. Also, the naming you are proposing will very likely mislead people, since the current naming within the library does not contain any information about trust (\"trusted\" or \"untrusted\") so users minds will likely default to \"trusted\". So the current way method should rather be prefixed w/ \"trusted\"/\"unsafe\"/\"fast\".\n\nA tiny example that already segfaults is the creation and read-out of an empty stream, which IMHO should not happen. The reason why unit testing is not sufficient is that the same kind of devs who are writing the code are also writing the unit tests and therefore won't be able to think outside their box. (that's not an offense, it's just human behavior and applies to all developers). "
+        },
+        {
+            "created_at": "2017-09-25T13:56:59.946Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1589?focusedCommentId=16179053) by Wes McKinney (wesm):*\n> So the current way method should rather be prefixed w/ \"trusted\"/\"unsafe\"/\"fast\".\n\nThis seems a bit like overkill to me \u2013 if this were the norm for function naming we would see these naming conventions in Avro, Thrift, Protocol Buffers, Flatbuffers, and any other protocol / file format library. I think we can improve things in the short term by making the untrustedness explicit in the doxygen documentation / code comments. For example, there is no note of trustedness in\n\nhttp://arrow.apache.org/docs/cpp/classarrow_1_1ipc_1_1_record_batch_stream_reader.html\n\nThat is easy to change. \n\n> A tiny example that already segfaults is the creation and read-out of an empty stream, which IMHO should not happen. \n\nI agree; this should not be difficult to test for. The distinction I had hoped to draw was between failures arising through normal use of the software (bugs caused by Arrow developers implementing something incorrectly) and failures caused by bugs in third party systems (e.g. passing an empty string or buffer to a function). I agree that we should test and fix the most obvious causes of segfaults that may affect users of these functions.\n\nPlease understand that this software we are discussing is primarily the work of a single volunteer developer (me). The fact that there are not more tests for the cases you're describing is definitely not due to a failure on my part to think outside the box \u2013 if you look at my GitHub history you can see that I am operating at maximum output capacity 100% of the time. As a result of not having more development help, I have had to make tradeooffs: prioritizing more features / usability / integration with other projects vs. concerning myself with more esoteric matters (e.g. sanitizing inputs from thirdparty libraries). "
+        },
+        {
+            "created_at": "2017-09-25T14:55:56.581Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1589?focusedCommentId=16179136) by Marco Neumann (marco.neumann.by):*\n> Please understand that this software we are discussing is primarily the work of a single volunteer developer (me)...\n\nI am very thankful for your work. Arrow and parquet are absolutely amazing. I just want to help out. Integrating an automatic fuzzing solution is rather trivial (I actually have the corresponding PR nearly ready, just the usage docs are missing) and can prevent so many silly bugs (produces by smart people). I do NOT expect you to fix all bugs and problems found by the fuzzer, but it can help finding missing test coverage and could (on a long term) improve the stability of the library and the security aspect."
+        },
+        {
+            "created_at": "2017-09-25T18:17:20.383Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1589?focusedCommentId=16179491) by Uwe Korn (uwe):*\n(citing different posts)\n\n> Currently it is not clearly stated that the message stream is trusted, therefore the opposite will be assumed by developers.\n\nArrow is an in-memory specification and library, in this context you are likely to give away access to critical things like shared memory. Libraries in this space are never built for high security but assume many things to deliver results in the fastest fashion possible. You will see the same effects when using certain file readers or network protocol in the data analytics space. Security always comes at a (performance) cost, internal analytics is normally the area where you don't like to trade in performance for it.\n\n> UntrustedMessageReader\n\nThis might really be a confusing name, I would have rather expected to call it `SafeMessageReader`, maybe we should really look at other implementation how this can be best named.\n\n> The fact that there are not more tests for the cases you're describing is definitely not due to a failure on my part to think outside the box\n\nThis is actually a thing where I hope the fuzzing code will help all us Arrow developers: Spare us some time thinking about edge cases that we need to test. We still should think of the tests we need to write but simply running a fuzzer might already show us the simple edge cases that we forgot before we actually release the library."
+        },
+        {
+            "created_at": "2018-01-03T16:40:26.461Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1589?focusedCommentId=16309901) by Wes McKinney (wesm):*\nIt'd be great to get something set up here in the next few months"
+        },
+        {
+            "created_at": "2018-01-08T08:58:21.092Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1589?focusedCommentId=16315898) by Marco Neumann (marco.neumann.by):*\nI'll open a PR until end of January, sorry for the delay. The code is nearly ready but I've had some problems with the compilation workflow."
+        },
+        {
+            "created_at": "2018-01-24T23:28:06.672Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1589?focusedCommentId=16338415) by Wes McKinney (wesm):*\nI started a PR to test some malformed inputs here <https://github.com/apache/arrow/pull/1503.>\u00a0I haven't gone as far as using a Flatbuffer verifier yet, though. If there are some failures you've encountered could you please describe them or in ARROW-2023? Thanks!"
+        },
+        {
+            "created_at": "2018-01-29T11:25:22.911Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1589?focusedCommentId=16343242) by Marco Neumann (marco.neumann.by):*\nSo the \"empty input\" is one of them. The fuzzing process is still failing there when address sanitizer is enabled since the `BufferReader` produces a out of bounce read. So even though you're testing this case in PR1503, the current code on master results in undefined behavior."
+        },
+        {
+            "created_at": "2018-02-04T09:18:57.593Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1589?focusedCommentId=16351703) by Uwe Korn (uwe):*\nIssue resolved by pull request 1529\n<https://github.com/apache/arrow/pull/1529>"
+        }
+    ]
+}

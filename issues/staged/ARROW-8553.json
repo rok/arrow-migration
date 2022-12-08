@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[C++] Optimize unaligned bitmap operations",
+        "body": "***Note**: This issue was originally created as [ARROW-8553](https://issues.apache.org/jira/browse/ARROW-8553). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently, `BitmapAnd` uses a bit-by-bit loop for unaligned inputs. Using `Bitmap::VisitWords` instead would probably yield a manyfold performance increase.",
+        "created_at": "2020-04-22T12:43:22.000Z",
+        "updated_at": "2021-08-02T18:36:30.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-05-15T02:12:56.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-04-22T12:43:29.127Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8553?focusedCommentId=17089638) by Antoine Pitrou (apitrou):*\ncc `[~yibocai]`"
+        },
+        {
+            "created_at": "2020-04-23T01:39:17.388Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8553?focusedCommentId=17090150) by Yibo Cai (yibocai):*\nWill do some investigation."
+        },
+        {
+            "created_at": "2020-05-08T09:42:16.520Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8553?focusedCommentId=17102412) by Yibo Cai (yibocai):*\nDid a quick test, performance improvement is promising with VisitWords(>10x).\r\n\r\nThere's one issue need to address. Would like to hear your comments `[~apitrou]`, `[~bkietz]`\r\nVisitWords calls visitor on each word, but bits in first word is unknown to visitor, it may be less than a full word size. See [code](https://github.com/apache/arrow/blob/6002ec388840de5622e39af85abdc57a2cccc9b2/cpp/src/arrow/util/bit_util.h#L960).\r\nIt makes it hard to use VisitWords to handle bitmap operations (and, or, ...), as I don't how many valid bits to write to output buffer for first word, and bit offset of later words cannot be determined. VisitWords returns bit length of first word, but it's too late, all visitors are already finished.\r\n\r\nI recommend adding a parameter \"valid bits\" to visitor function, which tells how many bits are valid in current word. Only first and last word may be not full size.\r\nWhat's your opinion? Or are there better ways? Thanks."
+        },
+        {
+            "created_at": "2020-05-09T07:26:07.868Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8553?focusedCommentId=17103162) by Yibo Cai (yibocai):*\nNo worry about my comment above. Find a way to go forward.\r\nSee above 60x performance gain on my machine."
+        },
+        {
+            "created_at": "2020-05-11T12:17:57.798Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8553?focusedCommentId=17104396) by Antoine Pitrou (apitrou):*\nI think it's fine to a \"valid bits\" parameter to the VisitWord visitor. "
+        },
+        {
+            "created_at": "2020-05-11T12:18:23.276Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8553?focusedCommentId=17104397) by Antoine Pitrou (apitrou):*\n(it can also be a bitmask parameter)"
+        },
+        {
+            "created_at": "2020-05-14T20:44:55.008Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8553?focusedCommentId=17107661) by Wes McKinney (wesm):*\nAs I commented on the patch, in the aligned case still only one byte is being processed at a time. Maybe that can be optimized as a follow up patch"
+        },
+        {
+            "created_at": "2020-05-15T02:12:56.187Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8553?focusedCommentId=17107850) by Francois Saint-Jacques (fsaintjacques):*\nIssue resolved by pull request 7135\n<https://github.com/apache/arrow/pull/7135>"
+        },
+        {
+            "created_at": "2020-05-15T10:33:35.446Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8553?focusedCommentId=17108159) by Yibo Cai (yibocai):*\n`[~wesm]`, the aligned case is simple enough for compiler to auto vectorize the code.\r\n\r\nDid a quick test with below patch, no obvious performance diff found.\r\n```c\n\r\ndiff --git a/cpp/src/arrow/util/bit_util.cc b/cpp/src/arrow/util/bit_util.cc\r\nindex 395801f5e..8beaf6cb8 100644\r\n--- a/cpp/src/arrow/util/bit_util.cc\r\n+++ b/cpp/src/arrow/util/bit_util.cc\r\n@@ -261,7 +261,7 @@ template <template <typename> class BitOp>\r\n void AlignedBitmapOp(const uint8_t* left, int64_t left_offset, const uint8_t* right,\r\n                      int64_t right_offset, uint8_t* out, int64_t out_offset,\r\n                      int64_t length) {\r\n-  BitOp<uint8_t> op;\r\n+  BitOp<uint64_t> op;\r\n   DCHECK_EQ(left_offset % 8, right_offset % 8);\r\n   DCHECK_EQ(left_offset % 8, out_offset % 8);\r\n \r\n@@ -269,8 +269,11 @@ void AlignedBitmapOp(const uint8_t* left, int64_t left_offset, const uint8_t* ri\r\n   left += left_offset / 8;\r\n   right += right_offset / 8;\r\n   out += out_offset / 8;\r\n-  for (int64_t i = 0; i < nbytes; ++i) {\r\n-    out[i] = op(left[i], right[i]);\r\n+  uint64_t *out64 = (uint64_t*)out;\r\n+  uint64_t *left64 = (uint64_t*)left;\r\n+  uint64_t *right64 = (uint64_t*)right;\r\n+  for (int64_t i = 0; i < nbytes/8; ++i) {\r\n+    out64[i] = op(left64[i], right64[i]);\r\n   }\r\n }\r\n```\r\nBenchmark before this patch (in uint8)\r\n```c\n\r\nBenchmarkBitmapAnd/32768/0                   4253 ns         4251 ns       164715 bytes_per_second=7.17813G/s\r\nBenchmarkBitmapAnd/131072/0                 16767 ns        16760 ns        41875 bytes_per_second=7.28348G/s\r\nBenchmarkBitmapAnd/32768/0                   4264 ns         4262 ns       165145 bytes_per_second=7.15959G/s\r\nBenchmarkBitmapAnd/131072/0                 16702 ns        16695 ns        41952 bytes_per_second=7.31158G/s\r\n```\r\nBenchmark after this patch (in uint64)\r\n```c\n\r\nBenchmarkBitmapAnd/32768/0                   4133 ns         4131 ns       171808 bytes_per_second=7.38787G/s\r\nBenchmarkBitmapAnd/131072/0                 17167 ns        17157 ns        40529 bytes_per_second=7.11491G/s\r\nBenchmarkBitmapAnd/32768/0                   4103 ns         4101 ns       171883 bytes_per_second=7.44151G/s\r\nBenchmarkBitmapAnd/131072/0                 17351 ns        17343 ns        43299 bytes_per_second=7.0385G/s\r\n```"
+        },
+        {
+            "created_at": "2020-05-15T15:09:21.534Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8553?focusedCommentId=17108382) by Wes McKinney (wesm):*\nThanks for looking into it, sounds good to me"
+        }
+    ]
+}

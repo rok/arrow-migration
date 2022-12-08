@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[C++] Define public API for user-defined data types",
+        "body": "***Note**: This issue was originally created as [ARROW-585](https://issues.apache.org/jira/browse/ARROW-585). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis will include:\n\n- Implementing a subclass of DataType\n- A \"fallback\" mechanism for receivers that do not understand our custom metadata\n- Implementing a serializer interface for custom metadata (to be send and received in an IPC setting)",
+        "created_at": "2017-02-26T22:40:32.000Z",
+        "updated_at": "2019-05-15T22:03:28.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-02-26T02:09:41.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-02-08T21:30:07.807Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-585?focusedCommentId=16763898) by Wes McKinney (wesm):*\nI'm going to take a stab at a prototype of this. The idea is that the type's `id()` method will return `Type::USER_DEFINED`, and `UserDefinedArray` will have an API to return the physical representation of the data (which might be `BinaryArray` or something else depending on what kind of data it is). Then `UserDefinedArray` can be static-casted by application code to the desired container type. \r\n\r\nPython code can define similar wrapper-callbacks. This can be used to implement the \"uuid\" type that's been discussed elsewhere (though it may make sense at some point to add that to the spec)\r\n\r\nI think user-defined types can also be a useful way to experiment with new data types which may or may not formally become part of the Arrow specification.\r\n\r\ncc `[~xhochy]` `[~leif]` for any thoughts"
+        },
+        {
+            "created_at": "2019-02-10T01:22:43.385Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-585?focusedCommentId=16764273) by Leif Mortenson (leif):*\nCould you describe the planned interface for defining and consuming custom data types in the c++ and java APIs? For example, how would one define a new type and associate a name with the physical type and custom serializer/deserializer, and if any, how would one recognize such a field and dispatch to the appropriate serializer/deserializer in client code? "
+        },
+        {
+            "created_at": "2019-02-10T14:50:00.911Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-585?focusedCommentId=16764444) by Wes McKinney (wesm):*\nYes, in C++ the idea is to have a user-defined type registry. When defining a new user type we need to provide the registry the following:\r\n\r\n- A string (hopefully unique) identifier for the user-defined type. \n- A deserialization callback, which, when provided with a serialized representation of the user type, returns an instance of the type. So the callback signature would be `Status(const std::string& serialized, std::shared_ptr<DataType>* type)`\n- A callback to \"box\" the physical data into a subclass of `std::shared_ptr<Array>` so clients can then statically-cast to the user-container\n  \n  A user-defined type would look similar to this:\n  \n  ```Java\n  \n  class MyUserType : public UserDefinedType {\n   public:\n    // Get serialized representation of type, for schema serialization\n    std::string Serialize() const override;\n  };\n  ```\n  \n  So in the IPC code paths\n  \n- Serialize is invoked, and this is stored in the `custom_metadata` field on the wire. We need to decide what \"key\" is used something like \"arrow_user_type\"\n- On read in the consumer, if \"arrow_user_type\" is populated, look in the type registry, reconstruct the data type, then create the right \"box\" around the data. We'll need to add a special case for user types in https://github.com/apache/arrow/blob/master/cpp/src/arrow/array.cc#L884\n  \n  All and all this doesn't seem like too much work to me once you decide how to do it. In Java I'm not sure how this would have to be adapted. "
+        },
+        {
+            "created_at": "2019-02-10T14:52:18.721Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-585?focusedCommentId=16764446) by Wes McKinney (wesm):*\nTo be clear, with this scheme client code would not have to be involved with any of the serialization and deserialization details when consuming or producing IPC payloads, this would all be implemented in the Arrow libraries"
+        },
+        {
+            "created_at": "2019-02-18T19:49:28.343Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-585?focusedCommentId=16771338) by Leif Mortenson (leif):*\nLooks reasonable, I'm curious how the java side would look, and to see an integration test for UUID types or something."
+        },
+        {
+            "created_at": "2019-02-19T00:27:55.130Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-585?focusedCommentId=16771447) by Wes McKinney (wesm):*\nYeah, I think the next steps would be to create an equivalent Java implementation, then add support for extension types to the integration tests\r\n\r\nWe'll need to find a champion to help with the Java development. I presume that a similar scheme, aka creating an `ExtensionVector` class to be extended, will be possible"
+        },
+        {
+            "created_at": "2019-02-26T02:09:41.690Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-585?focusedCommentId=16777481) by Wes McKinney (wesm):*\nIssue resolved by pull request 3694\n<https://github.com/apache/arrow/pull/3694>"
+        }
+    ]
+}

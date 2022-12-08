@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[R] Implement exp() and sqrt() in Arrow dplyr queries",
+        "body": "***Note**: This issue was originally created as [ARROW-16871](https://issues.apache.org/jira/browse/ARROW-16871). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe change log for v8.0.0 notes that functions like exp(), log() and sqrt() can be used in R. I have been trying to calculate exp(x) on a field in a dataset, but this does not work. I _can_ calculate exp(10) on just some number, and I can raise to e manually (2.71828^(x)). Here's some basic reproducible code:\r\n```java\n\r\n```{r}\r\ntest_df <- data.frame(x = c(1, 2, 3, 4, 5), y = c(1, 2, 3, 4, 5))\r\nwrite_dataset(test_df, \"./test_ds\")\r\ntest_ds <- open_dataset(\"./test_ds\")\r\n\r\n# does not work\r\n\r\ntest_ds %>% mutate(z = exp(x)) %>% collect()\r\n\r\n# does work\r\n\r\ntest_ds %>% mutate(z = 2.71828^(x)) %>% collect()\r\n\r\n# also works\r\n\r\ntest_ds %>% mutate(z = exp(10)) %>% collect()\r\n``` \n```\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2022-06-21T17:12:02.000Z",
+        "updated_at": "2022-07-05T20:49:23.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-07-05T20:49:23.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-21T18:35:56.777Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16871?focusedCommentId=17557053) by Will Jones (willjones127):*\nAh. The change notes were referring to operating on Arrow Arrays in R, not writing dplyr queries on Arrow data. Sorry for the confusion. So this works in 8.0:\r\n\r\n```R\n\r\n> exp(Array$create(c(1,2,3)))\r\nArray\r\n<double>\r\n[\r\n  2.718281828459045,\r\n  7.3890560989306495,\r\n  20.085536923187664\r\n]\r\n```\r\n\r\nWe have dplyr bindings for `log`, but not yet for `exp` or `sqrt`. We can convert this ticket into a feature request, if you'd like."
+        },
+        {
+            "created_at": "2022-06-21T18:38:36.910Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16871?focusedCommentId=17557055) by Chris Higgins (higgicd):*\nThanks - I appreciate the quick reply. A feature request would be great!"
+        },
+        {
+            "created_at": "2022-06-29T21:54:21.540Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16871?focusedCommentId=17560669) by Neal Richardson (npr):*\n`[~higgicd]` would you like to make a pull request to implement this? I think it will be straightforward if you follow the examples of other function bindings (like https://github.com/apache/arrow/blob/master/r/R/dplyr-funcs-math.R#L71-L74 code and https://github.com/apache/arrow/blob/master/r/tests/testthat/test-dplyr-funcs-math.R tests)."
+        },
+        {
+            "created_at": "2022-07-04T19:16:48.666Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16871?focusedCommentId=17562273) by Chris Higgins (higgicd):*\nI did a bit of digging into the api_scalar.cc code where I assume the core arrow functions live, and while there is an entry for `SCALAR_ARITHMETIC_UNARY(Sqrt, \"sqrt\", \"sqrt_checked\")`, there is no explicit function for `exp` that the `dplyr` binding could call... Unless I am missing something - this is exceeding my coding skillset!"
+        },
+        {
+            "created_at": "2022-07-05T08:25:12.086Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16871?focusedCommentId=17562468) by Nicola Crane (thisisnic):*\nNice work digging into that there - and good find that it doesn't exist.\u00a0 We should probably open a C++ ticket for implementing `exp` but in the meantime you could take advantage of the fact that  exp(1)== exp(1) ^x\u00a0 so you could write a binding for `exp()` which works out exp(1) in R, and then uses the `power_checked` function in Arrow to work out the value you need.\r\n\r\nHere's an example that kinda manages to do that without the bindings:\r\n```r\n\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\nlibrary(arrow, warn.conflicts = FALSE) \u00a0df = tibble::tibble(\r\n  x = c(1, 2, 3, 4, 5)\r\n)\r\n\r\n# calculate exp in R\r\ndf_exp <- mutate(\r\n  df,\r\n  exp_x = exp(x),\r\n  exp_x_alt = exp(1) ^ x\r\n)\r\n\r\n# same thing\r\ndf_exp\r\n#> # A tibble: 5 \u00d7 3\r\n#>       x  exp_x exp_x_alt\r\n#>   <dbl>  <dbl>     <dbl>\r\n#> 1     1   2.72      2.72\r\n#> 2     2   7.39      7.39\r\n#> 3     3  20.1      20.1 \r\n#> 4     4  54.6      54.6 \r\n#> 5     5 148.      148.\r\n\r\n# same result\r\narrow_table(df_exp) %>%\r\n  mutate(exp_x_alt_arrow = exp(1)^x) %>% \r\n  collect()\r\n#> # A tibble: 5 \u00d7 4\r\n#>       x  exp_x exp_x_alt exp_x_alt_arrow\r\n#>   <dbl>  <dbl>     <dbl>           <dbl>\r\n#> 1     1   2.72      2.72            2.72\r\n#> 2     2   7.39      7.39            7.39\r\n#> 3     3  20.1      20.1            20.1 \r\n#> 4     4  54.6      54.6            54.6 \r\n#> 5     5 148.      148.            148.\r\n\r\n# let's look at the Arrow expression\r\n# Arrow has taken the value of exp(1) from R here so it works even though\r\n# we have no exp function in Arrow\r\narrow_table(df_exp) %>%\r\n  mutate(exp_x_manual = exp(1)^x)\r\n#> Table (query)\r\n#> x: double\r\n#> exp_x: double\r\n#> exp_x_alt: double\r\n#> exp_x_manual: double (power_checked(2.718281828459045, x))\r\n#> \r\n#> See $.data for the source Arrow object\r\n\r\n\r\n```"
+        },
+        {
+            "created_at": "2022-07-05T13:04:27.270Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16871?focusedCommentId=17562658) by Neal Richardson (npr):*\nYou're right. Looks like for the array math operation, we just used `power_checked` for both: https://github.com/apache/arrow/blob/master/r/R/arrow-datum.R#L126-L127\r\n\r\nTo expose them in dplyr, you'd wrap those in `build_expr` instead of `eval_array_expression` and register in dplyr-funcs-math.R. And since there is now an actual sqrt function, it would be nice to use that instead of power(x, .5). "
+        },
+        {
+            "created_at": "2022-07-05T20:49:23.823Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16871?focusedCommentId=17562835) by Neal Richardson (npr):*\nIssue resolved by pull request 13517\n<https://github.com/apache/arrow/pull/13517>"
+        }
+    ]
+}

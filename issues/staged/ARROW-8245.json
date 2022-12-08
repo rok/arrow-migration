@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[Python][Parquet] Skip hidden directories when reading partitioned parquet files",
+        "body": "***Note**: This issue was originally created as [ARROW-8245](https://issues.apache.org/jira/browse/ARROW-8245). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen writing a partitioned parquet file Spark can create a temporary hidden `.spark-staging`\u00a0directory within the parquet file. Because it is a directory and not a file, it is not skipped when trying to read the parquet file. Pyarrow currently only skips directories prefixed with `_`.",
+        "created_at": "2020-03-27T15:15:51.000Z",
+        "updated_at": "2020-04-10T12:14:41.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-04-03T21:13:26.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-03-27T18:37:47.361Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8245?focusedCommentId=17068973) by Wes McKinney (wesm):*\nWhat version of the library are you using?\r\n\r\nhttps://github.com/apache/arrow/blob/master/python/pyarrow/parquet.py#L877"
+        },
+        {
+            "created_at": "2020-03-27T18:39:05.566Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8245?focusedCommentId=17068974) by Wes McKinney (wesm):*\nAh I see that the issue is that this exclusion is only applied to file paths. See\r\n\r\nhttps://github.com/apache/arrow/blob/master/python/pyarrow/parquet.py#L927\r\n\r\nThis should be easy to fix. Will also need to be handled in the C++ Datasets API cc `[~jorisvandenbossche]`"
+        },
+        {
+            "created_at": "2020-03-27T19:33:15.914Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8245?focusedCommentId=17069004) by Caleb Overman (coverman):*\nWe're currently on 0.16.0 and have a patch to ignore directories with a . prefix. Happy to do a PR for this - are there any other known prefixes that should be ignored?"
+        },
+        {
+            "created_at": "2020-03-31T04:42:44.814Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8245?focusedCommentId=17071457) by Wes McKinney (wesm):*\nThis can be done after ARROW-8039 goes in"
+        },
+        {
+            "created_at": "2020-04-01T09:13:38.716Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8245?focusedCommentId=17072548) by Joris Van den Bossche (jorisvandenbossche):*\nI just checked, and the C++ Datasets API already handles this fine. It has an option for discovery of the dataset which prefixes to ignore (the default is `['.', '_']`), and this is applied to all parts of the path, so for both file names as directory names.\r\n\r\nReproducer (the dataset part needs pyarrow master):\r\n\r\n```Java\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nimport pyarrow.dataset as ds\r\n\r\nimport pathlib\r\n\r\n# Create a small toy dataset\r\nbasedir = pathlib.Path(\".\")\r\ncase2 = basedir / \"ignored_prefix_dot\"\r\ncase2.mkdir(exist_ok=True)\r\n\r\n(case2 / \"A=1\").mkdir(exist_ok=True)\r\n(case2 / \".staging\").mkdir(exist_ok=True)\r\npq.write_table(pa.table({'B': [1, 2, 3]}), case2 / \"A=1\" / \"data.parquet\")\r\npq.write_table(pa.table({'B': [4, 5, 6]}), case2 / \".staging\" / \"data.parquet\")\r\n\r\n# this fails \"ValueError: Directory name did not appear to be a partition: .staging\"\r\npq.read_table(str(case2))\r\n\r\n# this works fine\r\ndataset = ds.dataset(str(case2), format='parquet', partitioning=\"hive\")\r\n# returns only the file of 'ignored_prefix_dot/A=1/data.parquet'\r\ndataset.files\r\ndataset.to_table().to_pandas()\r\n```"
+        },
+        {
+            "created_at": "2020-04-01T09:17:06.663Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8245?focusedCommentId=17072558) by Joris Van den Bossche (jorisvandenbossche):*\n`[~coverman]` would you be able to do a PR this week? It would be a welcome fix for 0.17 which is planned for the end of this week (otherwise I can also do it this week)\r\n\r\nThere is a `_is_private_directory` helper function (https://github.com/apache/arrow/blob/4269cdde067122112d810fb1a257b36d4e26163b/python/pyarrow/parquet.py#L936-L938), which checks for underscores, and could be updated to also check for dots."
+        },
+        {
+            "created_at": "2020-04-01T13:49:12.362Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8245?focusedCommentId=17072787) by Caleb Overman (coverman):*\n`[~jorisvandenbossche]` \u00a0yes I can get a PR this week. I assume it still needs to wait for\u00a0ARROW-8039?"
+        },
+        {
+            "created_at": "2020-04-01T13:57:53.747Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8245?focusedCommentId=17072793) by Joris Van den Bossche (jorisvandenbossche):*\nYou can already start with a PR fixing it in the python ParquetDataset code and adding a test. Then depending on whether that PR or ARROW-8039 gets merged first, we can parametrize the test to test it for both the python and new datasets implementation."
+        },
+        {
+            "created_at": "2020-04-03T21:13:26.277Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8245?focusedCommentId=17074901) by Wes McKinney (wesm):*\nIssue resolved by pull request 6821\n<https://github.com/apache/arrow/pull/6821>"
+        }
+    ]
+}

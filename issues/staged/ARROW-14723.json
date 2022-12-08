@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[Python] pyarrow cannot import parquet files containing row groups whose lengths exceed int32 max. ",
+        "body": "***Note**: This issue was originally created as [ARROW-14723](https://issues.apache.org/jira/browse/ARROW-14723). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIt's possible to create Parquet files containing row groups whose lengths are greater than int32 max (2147483647). However, Pyarrow cannot read these files.\u00a0\r\n```java\n\r\n>>> import pyarrow as pa\r\n>>> import pyarrow.parquet as pq\r\n\r\n# intmax32.parq can be read in without any issues\r\n>>> t = pq.read_table(\"intmax32.parq\"); \r\n\r\n$ intmax32plus1.parq cannot be read in\r\n>>> t = pq.read_table(\"intmax32plus1.parq\"); \r\nTraceback (most recent call last):\r\n\u00a0 File \"<stdin>\", line 1, in <module>\r\n\u00a0 File \"/Library/Frameworks/Python.framework/Versions/3.8/lib/python3.8/site-packages/pyarrow/parquet.py\", line 1895, in read_table\r\n\u00a0 \u00a0 return dataset.read(columns=columns, use_threads=use_threads,\r\n\u00a0 File \"/Library/Frameworks/Python.framework/Versions/3.8/lib/python3.8/site-packages/pyarrow/parquet.py\", line 1744, in read\r\n\u00a0 \u00a0 table = self._dataset.to_table(\r\n\u00a0 File \"pyarrow/_dataset.pyx\", line 465, in pyarrow._dataset.Dataset.to_table\r\n\u00a0 File \"pyarrow/_dataset.pyx\", line 3075, in pyarrow._dataset.Scanner.to_table\r\n\u00a0 File \"pyarrow/error.pxi\", line 143, in pyarrow.lib.pyarrow_internal_check_status\r\n\u00a0 File \"pyarrow/error.pxi\", line 114, in pyarrow.lib.check_status\r\nOSError: Negative size (corrupt file?)\r\n\r\n\r\n```\r\n\u00a0\r\n\r\nHowever, both files can be imported via the C++ Arrow bindings without any issues.\r\n\r\n\u00a0",
+        "created_at": "2021-11-16T14:40:15.000Z",
+        "updated_at": "2021-11-18T16:12:59.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-17T10:37:48.813Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14723?focusedCommentId=17445067) by Joris Van den Bossche (jorisvandenbossche):*\nThanks for the report!\r\n\r\nI can reproduce this on master as well, and get the following extra debug information:\r\n\r\n```Java\n\r\nOSError: Negative size (corrupt file?)\r\n../src/parquet/arrow/reader.cc:108  LoadBatch(batch_size)\r\n../src/parquet/arrow/reader.cc:1011  ::arrow::internal::OptionalParallelFor( reader_properties_.use_threads(), static_cast<int>(readers.size()), [&](int i) { return readers[i]->NextBatch(batch_size, &columns[i]); })\r\n../src/arrow/util/iterator.h:530  parent_.Next()\r\n../src/arrow/record_batch.h:222  ReadNext(&batch)\r\n../src/arrow/util/iterator.h:152  value_.status()\r\n../src/arrow/util/iterator.h:180  maybe_element\r\n../src/arrow/dataset/scanner.cc:972  ::arrow::internal::SerialExecutor::RunInSerialExecutor<RecordBatchVector>( [&](Executor* executor) { return scan_task->SafeExecute(executor); })\r\n../src/arrow/dataset/scanner.cc:982  task_group->Finish()\r\n```\r\n\r\n(and I also noted that when not using the scanner / dataset interface, with `pq.read_table(\"intmax32plus1.parq\", use_legacy_dataset=True)` it actually completely blows up instead of erroring)"
+        },
+        {
+            "created_at": "2021-11-17T12:10:43.182Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14723?focusedCommentId=17445125) by Joris Van den Bossche (jorisvandenbossche):*\nOne problem with this file is that it indicates a negative number of rows (that's the direct cause of the error above):\r\n\r\n```python\n\r\nIn [3]: pq.read_metadata(\"../Downloads/intmax32plus1.parq\")\r\nOut[3]: \r\n<pyarrow._parquet.FileMetaData object at 0x7f3ee0eb6310>\r\n  created_by: parquet-cpp-arrow version 4.0.1\r\n  num_columns: 1\r\n  num_rows: -2147483648\r\n  num_row_groups: 1\r\n  format_version: 2.6\r\n  serialized_size: 330\r\n\r\nIn [4]: pq.read_metadata(\"../Downloads/intmax32plus1.parq\").row_group(0)\r\nOut[4]: \r\n<pyarrow._parquet.RowGroupMetaData object at 0x7f3e8e0b8400>\r\n  num_columns: 1\r\n  num_rows: -2147483648\r\n  total_byte_size: 40470\r\n```\r\n\r\nI didn't yet further check if this is an issue on the reader side (incorrectly reading the metadata), or actually an issue with the file (thus potentially an issue with the writer side)\r\n\r\n`[~sgilmore]` could you share the code how you created those files?"
+        },
+        {
+            "created_at": "2021-11-17T12:22:10.889Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14723?focusedCommentId=17445132) by Joris Van den Bossche (jorisvandenbossche):*\nChecking the file with an independent reader (fastparquet) also indicates a negative row number, so I _suppose_ there is an issue on the writer (or the code used to write this file)"
+        },
+        {
+            "created_at": "2021-11-18T16:12:59.221Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14723?focusedCommentId=17446022) by Sarah Gilmore (sgilmore):*\nHi `[~jorisvandenbossche]`,\r\n\r\nHere's code you can use to generate to generate both files: [main.cpp](main.cpp). In the terminal, you'll be prompted to give the output filename and the number of rows you want the Parquet file to have.\u00a0\r\n\r\nI noticed that if I linked against the latest version of Arrow (I believe 7.0.0), the files created by the program can be read in via pyarrow. However, if you link against 4.0.1, Parquet files with row groups that exceed 2147483647 in length cannot be read in via pyarrow. I suppose this issue has been resolved in a later release of Arrow?\r\n\r\n\u00a0\r\n\r\nBest,\r\n\r\nSarah\r\n\r\n\u00a0"
+        }
+    ]
+}

@@ -1,0 +1,40 @@
+{
+    "issue": {
+        "title": "[C++][Python][R] Deprecate \"scanner\" (but keep \"scan node\") from public API",
+        "body": "***Note**: This issue was originally created as [ARROW-16409](https://issues.apache.org/jira/browse/ARROW-16409). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe scanner, in its original form, was something of a prototype query engine.  It handled complex projection (beyond just casting) and filtering.  Over time features have been moved out of the scanner and into the execution engine to the point that the scanner now is just a tool for scanning multiple files simultaneously to feed as input to an exec plan (i.e. \"scan node\").\r\n\r\nThe concept of a \"scanner\" should mostly be removed from our public API surface.  Those working directly with the execution engine will still need to know about the scan node but that should be about it.\r\n\r\nFor example, in python we have pages [like this](https://arrow.apache.org/docs/python/generated/pyarrow.dataset.Scanner.html) and code like this:\r\n\r\n```\n\r\ndataset = ds.dataset('/tmp/my_dataset', format='parquet')\r\nscanner = dataset.scanner(columns=['x'])\r\nds.write_dataset(scanner, '/tmp/my_new_dataset', format='parquet')\r\n```\r\n\r\nOver time I think this will lead to confusion.  It's already a little convoluted.  For example, a call to `dataset.to_table(...)` creates a `Scanner` and calls `ToTable` with `ScanOptions`.  This method then creates an `ExecPlan` and, in order to do so, must create a `ScanNode`.  The `ScanNode` consumes some (but not all) of the options in `ScanOption` while the `ExecPlan` consumes the rest.\r\n\r\nThe `Scanner` (if one continues to exist) should be an internal detail not visible to users.  The previous code could either change to use a new term `query`:\r\n\r\n```\n\r\ndataset = ds.dataset('/tmp/my_dataset', format='parquet')\r\nquery = dataset.query(columns=['x'])\r\nds.write_dataset(query, '/tmp/my_new_dataset', format='parquet')\r\n```\r\n\r\nOr we could use the record batch reader concept:\r\n\r\n```\n\r\ndataset = ds.dataset('/tmp/my_dataset', format='parquet')\r\nrecord_batch_reader = dataset.to_reader(columns=['x'])\r\nds.write_dataset(record_batch_reader, '/tmp/my_new_dataset', format='parquet')\r\n```\r\n\r\nI would like to make some changes to the scanner in 9.0.0 and would hope to address this then so I'm happy to hear opinions / thoughts.",
+        "created_at": "2022-04-28T19:20:10.000Z",
+        "updated_at": "2022-10-13T17:51:27.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-04-28T19:23:12.679Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16409?focusedCommentId=17529602) by David Li (lidavidm):*\nThis seems reasonable. It means datasets in Python will effectively become the API to the query engine instead? (What about `select` instead of `query` :) ?)"
+        },
+        {
+            "created_at": "2022-04-28T19:36:30.938Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16409?focusedCommentId=17529607) by Weston Pace (westonpace):*\n`select` sounds reasonable but right now the `scanner()` method can take a filter as well which might be a bit odd for `select`.  I think pyarrow still needs to figure out what it wants to be the API to the query engine.  For example, we have `dataset.join` and `table.join` but both of those output tables and not execution plans (technically `dataset.join` outputs an in-memory-dataset but that's effectively a table).  R has taken the dplyr approach.  There is also the Ibis/Substrait approach.  The status quo would be introducing some kind of `Query` class that does what `Scanner` does today (container for dataset, projection, & filter)."
+        },
+        {
+            "created_at": "2022-04-28T19:58:15.005Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16409?focusedCommentId=17529618) by David Li (lidavidm):*\nAh, good point. But it does seem like we can/should just get rid of scanner to start with."
+        },
+        {
+            "created_at": "2022-05-04T07:39:44.015Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16409?focusedCommentId=17531537) by Mausam Kumar (mausam3407):*\nBut scanner gives more flexibility. For instance, we can count number of rows with filters without loading the table.\u00a0"
+        },
+        {
+            "created_at": "2022-05-04T14:43:56.736Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16409?focusedCommentId=17531752) by Weston Pace (westonpace):*\nThat is an important behavior.  In R, which has already abandoned the scanner, we can't do row-count queries.  However, my hope would be to add that to our query options so that a scan node with an empty list of columns will do a metadata-only query."
+        },
+        {
+            "created_at": "2022-10-13T17:51:27.206Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16409?focusedCommentId=17617220) by Apache Arrow JIRA Bot (arrowjira):*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned per [project policy](https://arrow.apache.org/docs/dev/developers/bug_reports.html#issue-assignment). Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

@@ -1,0 +1,89 @@
+{
+    "issue": {
+        "title": "[Python] pyarrow: hdfs: support file checksum",
+        "body": "***Note**: This issue was originally created as [ARROW-5995](https://issues.apache.org/jira/browse/ARROW-5995). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI was not able to find how to retrieve checksum (`getFileChecksum` or `hadoop fs/dfs -checksum`) for a file on hdfs. Judging by how it is implemented in hadoop CLI [1], looks like we will also need to implement it manually in pyarrow. Please correct me if I'm missing something. Is this feature desirable? Or was there a good reason why it wasn't implemented already?\r\n\r\n [1]\u00a0<https://github.com/hanborq/hadoop/blob/hadoop-hdh3u2.1/src/hdfs/org/apache/hadoop/hdfs/DFSClient.java#L719>",
+        "created_at": "2019-07-21T15:27:29.000Z",
+        "updated_at": "2021-08-04T09:04:01.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-08-04T09:04:01.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-07-22T20:54:55.335Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5995?focusedCommentId=16890469) by Neal Richardson (npr):*\nMost likely there's no intentional reason for it not having been done, probably just a lack of demand. Would you be interested in submitting a patch to implement it?"
+        },
+        {
+            "created_at": "2019-07-22T21:43:31.456Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5995?focusedCommentId=16890490) by Ruslan Kuprieiev (efiop):*\nGot it :)\u00a0Sure I would love to contribute a patch, but I'm not quite sure I fully understand what is going on there, so I'll need to do some research first. If you could give a short briefing on how checksum is computed (e.g. some sources call it as md5 of block CRCs, but I'm not quite sure where those CRCs are stored and how they are computed in the first place. Also is it possible to retrieve that crc using pyarrow? I didn't see it in `info` call or anywhere else.) it would be much appreciated. Or if you have some doc you could point me to, that would also be very helpful. I did some initial googling before I've opened this ticket, but it clearly wasn't quite enough. I'll do additional research surely, but getting some info from actual project developers is always invaluable :)"
+        },
+        {
+            "created_at": "2019-07-22T21:57:46.419Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5995?focusedCommentId=16890500) by Neal Richardson (npr):*\nIt sounds like you already know more about HDFS checksums, but\u00a0<https://wesmckinney.com/blog/python-hdfs-interfaces/>\u00a0may also be interesting reading for you. You may need to look into what\u00a0libhdfs(3) provide."
+        },
+        {
+            "created_at": "2019-07-23T13:33:22.723Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5995?focusedCommentId=16891002) by Wes McKinney (wesm):*\nlibhdfs3 is unmaintained software so I am likely to -1 any patches related to that project. I think we should probably remove integration with it from this project"
+        },
+        {
+            "created_at": "2019-07-23T13:42:30.666Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5995?focusedCommentId=16891017) by Ruslan Kuprieiev (efiop):*\n`[~wesmckinn]` I am aware that libhdfs3 is not maintained anymore and we are not using it. Checksum feature is not libhdfs3 specific, is it?"
+        },
+        {
+            "created_at": "2019-08-19T22:35:14.159Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5995?focusedCommentId=16910802) by Wes McKinney (wesm):*\nMy comment about libhdfs3 was an aside. The checksum feature is not libhdfs3-specific AFAIK"
+        },
+        {
+            "created_at": "2019-08-28T22:35:50.298Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5995?focusedCommentId=16918152) by Max Risuhin (Max Risuhin):*\nArrow codebase seems supports hdfs access by utilizing 2 different drivers - libhdfs3 and official C based library distributed with hadoop - libhdfs.\r\n\r\nSince further support of libhdfs3 is not in plans, official libhdfs is the only option.\r\n\r\nBad news is that libhdfs doesn't have C API to retrieve checksum. It's supposed that [libhdfs C API should be just subset of Hadoop FileSystem APIs\\|[https://hadoop.apache.org/docs/current/hadoop-project-dist/hadoop-hdfs/LibHdfs.html#The_APIs].]\r\n\r\nRelevant C API can be observed from [there\\|[https://github.com/apache/hadoop/blob/a55d6bba71c81c1c4e9d8cd11f55c78f10a548b0/hadoop-hdfs-project/hadoop-hdfs-native-client/src/main/native/libhdfs/include/hdfs/hdfs.h].] And, unfortunately, I can't see any checksum related field in retrieved data structures or dedicated API function. ( It should look somewhat like following:\u00a0https://hadoop.apache.org/docs/current/api/org/apache/hadoop/fs/FileSystem.html#getFileChecksum(org.apache.hadoop.fs.Path) )\r\n\r\n\u00a0\r\n\r\n`[~efiop]` it seems that\u00a0 the missed getFileChecksum API function is the main reason why this functionality is not available through Arrow.\r\n\r\nStraightforward, but long lasting to implement solution would be extension of libhdfs with getFileChecksum.\r\n\r\nAnother possibility, probably, is to calculate checksum based on available API calls (open, read, etc). But it doesn't sound like efficient approach.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-08-29T07:10:15.968Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5995?focusedCommentId=16918345) by Ruslan Kuprieiev (efiop):*\n[~Max Risuhin]\u00a0Thanks for the research! Just a few questions. Please correct me if I'm wrong. Checksum(md5 of blocks crcs) is always computed on request and is not stored anywhere, right? Are crcs stored by hdfs somewhere? If they are, is there already a way to retrieve them in pyarrow or do we need libhdfs support first? If they are not, then they are also computed on request and so we could compute them in pyarrow itself, without libhdfs support, right?"
+        },
+        {
+            "created_at": "2019-08-29T15:07:10.806Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5995?focusedCommentId=16918694) by Max Risuhin (Max Risuhin):*\n`[~efiop]`\r\n\r\n> Checksum(md5 of blocks crcs) is always computed on request and is not stored anywhere, right?\r\n\r\n> Are crcs stored by hdfs somewhere?\r\n\r\n\u00a0\r\n\r\nAccording to <https://hadoop.apache.org/docs/r3.1.2/hadoop-project-dist/hadoop-hdfs/HdfsDesign.html:>\r\n\r\n\"The HDFS client software implements checksum checking on the contents of HDFS files. When a client creates an HDFS file, it computes a checksum of each block of the file and stores these checksums in a separate hidden file in the same HDFS namespace. When a client retrieves file contents it verifies that the data it received from each DataNode matches the checksum stored in the associated checksum file. If not, then the client can opt to retrieve that block from another DataNode that has a replica of that block.\"\r\n\r\nRegarding final file md5 checksum retrieved from all blocks checksums, I can't find so far any place where request result might be cached and used later.\r\n\r\n\u00a0\r\n\r\n> If they are, is there already a way to retrieve them in pyarrow or do we need libhdfs support first? If they are not, then they are also computed on request and so we could compute them in pyarrow itself, without libhdfs support, right?\r\n\r\n\u00a0\r\n\r\nPyArrow/ArrowCpp communicates with hdfs only through libhdfs API. It seems we can't calculate file checksum on Arrow side because [hdfs.h](https://github.com/apache/hadoop/blob/a55d6bba71c81c1c4e9d8cd11f55c78f10a548b0/hadoop-hdfs-project/hadoop-hdfs-native-client/src/main/native/libhdfs/include/hdfs/hdfs.h) doesn't provide API to get checksum of each file's block.\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-08-29T15:51:12.139Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5995?focusedCommentId=16918730) by Ruslan Kuprieiev (efiop):*\n>\u00a0stores these checksums in a separate hidden file in the same HDFS namespace\r\n\r\nI wonder what `hidden` means in this case. First thing that comes to mind is just those files having `.` prefix :)\u00a0.\u00a0Could they be accessed as any regular file on hdfs?"
+        },
+        {
+            "created_at": "2019-08-29T17:28:11.722Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5995?focusedCommentId=16918799) by Max Risuhin (Max Risuhin):*\nI understand \"hidden\" as internal implementation details. Will try to look for them on local hadoop install."
+        },
+        {
+            "created_at": "2019-08-29T17:46:49.843Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5995?focusedCommentId=16918810) by Max Risuhin (Max Risuhin):*\nWell, storing of small file under /test/test.txt hadoop path results in following internal hadoop files structure:\r\n\r\n```\r\n\r\n(base) max@ubuntu:/usr/local/hadoop/yarn_data/hdfs/datanode/current/BP-701933085-127.0.1.1-1566905807010/current/finalized/subdir0/subdir0$ ls -l\r\ntotal 8\r\n-rw-rw-r-- 1 max max 15 Aug 29 10:35 blk_1073741843\r\n-rw-rw-r-- 1 max max 11 Aug 29 10:35 blk_1073741843_1021.meta\r\n\r\n```\r\n\r\n\u00a0\r\n\r\nWhere \"blk_1073741843\" file contains content of \"/test/test.txt\". And \"meta\" seems contains some kind of not readable meta data :)"
+        },
+        {
+            "created_at": "2019-08-29T18:03:44.969Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5995?focusedCommentId=16918825) by Ruslan Kuprieiev (efiop):*\n[~Max Risuhin]\u00a0Nice, so metafiles are indeed out there in the open, which means that we can read them directly in pyarrow, without a need for any underlying lib modification. So unless I'm missing something, we could indeed implement getFileChecksum in pyarrow by simply reading those metafiles to get crc's and then compute the resulting checksum as in <https://github.com/hanborq/hadoop/blob/hadoop-hdh3u2.1/src/hdfs/org/apache/hadoop/hdfs/DFSClient.java#L719>\u00a0. What do you think?"
+        },
+        {
+            "created_at": "2019-08-29T19:19:57.397Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5995?focusedCommentId=16918903) by Max Risuhin (Max Risuhin):*\nI think that relying on internal and not documented ( so far I was not able to find any docs ) behavior might will not work here well.\r\n\r\nI might would prefer any possible workaround to access Hadoop Java API method getFileChecksum <https://hadoop.apache.org/docs/current/api/org/apache/hadoop/fs/FileSystem.html#getFileChecksum(org.apache.hadoop.fs.Path)> by Arrow from underlying cpp implementation. For example, our own C library built to wire specifically `getFileChecksum` and which will be loaded by Arrow along with official libhdfs.so. This might be a solution till our possible contribution into official libhdfs to have `getFileChecksum` there will not be supported.\r\n\r\nAbove sounds like more clean solution to be accepted into Arrow than relying on Hadoop hdfs internals. But I'm not sure if it will be technically possible to load into memory both libhdfs.so and our own library to not create any conflicts with Java runtimes, etc."
+        },
+        {
+            "created_at": "2019-08-30T08:09:33.762Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5995?focusedCommentId=16919309) by Ruslan Kuprieiev (efiop):*\nYou are right, such a hackish approach would probably not pass the reviews. But it might be a good temporary pure-python workaround if parsing those metafiles is comparatively simple, so we don't have to mess around with our own C library, for which we would have to ship wheels (which is a hustle). And having that workaround, we could submit and patiently wait for proper patches to get merged into libhdfs and pyarrow. If the workaround is hard to implement, then we could skip it and keep using hadoop CLI as we do right now, focusing on proper patches to libhdfs and pyarrow. What do you think? :)"
+        },
+        {
+            "created_at": "2019-08-30T08:11:33.425Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5995?focusedCommentId=16919311) by Ruslan Kuprieiev (efiop):*\nBtw, `[~wesmckinn]` `[~npr]` \u00a0, what are your thoughts on this?"
+        },
+        {
+            "created_at": "2019-08-30T17:22:28.397Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5995?focusedCommentId=16919742) by Wes McKinney (wesm):*\nCan you invoke `hdfs dfs -checksum` using a system call to obtain the value? It would only work if the `hdfs` CLI tool is configured correctly to access your cluster"
+        },
+        {
+            "created_at": "2021-08-04T09:04:01.988Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5995?focusedCommentId=17392889) by Antoine Pitrou (apitrou):*\nThis does not seem to fit into our filesystem API, and besides the libhdfs library doesn't seem to support it either. Closing."
+        }
+    ]
+}

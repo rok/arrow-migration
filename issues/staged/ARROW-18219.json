@@ -1,0 +1,40 @@
+{
+    "issue": {
+        "title": "[R] read_csv_arrow fails when a string contains a backslash-escaped quote mark followed by a comma",
+        "body": "***Note**: This issue was originally created as [ARROW-18219](https://issues.apache.org/jira/browse/ARROW-18219). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n`read_csv_arrow()` incorrectly parses CSV files when a string value contains a comma that appears after a backslash-escaped quote mark. Originally noted by Thomas Klebel <https://scicomm.xyz/@tklebel/109270436511066953>\r\n\r\nThis is an example that throws the error:\r\n\r\n```r\n\r\nx <- tempfile()\r\nreadr::write_lines(\r\n'\r\nid,text\r\n1,\"some text on \\\\\"BLAH\r\n\" and X, and Y also\"\r\n', x)\r\n\r\ncat(system(paste('cat', x), intern = TRUE), sep = \"\\n\")\r\n#> \r\n#> id,text\r\n#> 1,\"some text on \\\"BLAH\\\" and X, and Y also\"\r\narrow::read_csv_arrow(x, escape_backslash = TRUE)\r\n#> Error:\r\n#> ! Invalid: CSV parse error: Expected 2 columns, got 3: 1,\"some text on \\\"BLAH\\\" and X, and Y also\"\r\n\r\n#> Backtrace:\r\n#> \u2586\r\n#> 1. \u2514\u2500arrow (local) `<fn>`(file = x, escape_backslash = TRUE, delim = \",\")\r\n#> 2. \u2514\u2500base::tryCatch(...) at r/R/csv.R:217:2\r\n#> 3. \u2514\u2500base (local) tryCatchList(expr, classes, parentenv, handlers)\r\n#> 4. \u2514\u2500base (local) tryCatchOne(expr, names, parentenv, handlers[[1L]])\r\n#> 5. \u2514\u2500value[[3L]](cond)\r\n#> 6. \u2514\u2500arrow:::augment_io_error_msg(e, call, schema = schema) at r/R/csv.R:222:6\r\n#> 7. \u2514\u2500rlang::abort(msg, call = call) at r/R/util.R:251:2\r\n```\r\n\r\n<sup>Created on 2022-11-02 with [reprex v2.0.2]([https://reprex.tidyverse.org](https://reprex.tidyverse.org/))</sup>\r\n\r\nThis version includes four lines that might potentially error but do not:\r\n\r\n```r\n\r\nx <- tempfile()\r\nreadr::write_lines(\r\n'\r\nid,text\r\n2,\"some text on X and Y\"\r\n3,\"some text on X, and Y\"\r\n4,\"some text on \\\\\"BLAH\r\n\"\r\n5,\"some text on X and Y, and \\\\\"BLAH\r\n\" also\"\r\n', x)\r\n\r\ncat(system(paste('cat', x), intern = TRUE), sep = \"\\n\")\r\n#> \r\n#> id,text\r\n#> 2,\"some text on X and Y\"\r\n#> 3,\"some text on X, and Y\"\r\n#> 4,\"some text on \\\"BLAH\\\"\r\n#> 5,\"some text on X and Y, and \\\"BLAH\\\" also\"\r\narrow::read_csv_arrow(x, escape_backslash = TRUE)\r\n#> # A tibble: 4 \u00d7 2\r\n#> id text \r\n#> <int> <chr> \r\n#> 1 2 \"some text on X and Y\" \r\n#> 2 3 \"some text on X, and Y\" \r\n#> 3 4 \"some text on \\\\BLAH\\\\\\\"\" \r\n#> 4 5 \"some text on X and Y, and \\\\BLAH\\\\\\\" also\\\"\"\r\n```\r\n\r\n<sup>Created on 2022-11-02 with [reprex v2.0.2]([https://reprex.tidyverse.org](https://reprex.tidyverse.org/))</sup>\r\n\r\nI'm not sure if the problem is R specific. I've partially reproduced the error using reticulate and pyarrow as follows, but notice that this errors at a different point: the pyarrow version appears to fail with the comma preceding the backslash-escaped quote mark:\r\n\r\n```r\n\r\nx <- tempfile()\r\nreadr::write_lines(\r\n'\r\nid,text\r\n1,\"some text on X and Y\"\r\n2,\"some text on X, and Y\"\r\n3,\"some text on \\\\\"BLAH\r\n\"\r\n4,\"some text on X and Y, and \\\\\"BLAH\r\n\" also\"\r\n5,\"some text on \\\\\"BLAH\r\n\" and X, and Y also\"\r\n', x)\r\n\r\ncat(system(paste('cat', x), intern = TRUE), sep = \"\\n\")\r\n#> \r\n#> id,text\r\n#> 1,\"some text on X and Y\"\r\n#> 2,\"some text on X, and Y\"\r\n#> 3,\"some text on \\\"BLAH\\\"\r\n#> 4,\"some text on X and Y, and \\\"BLAH\\\" also\"\r\n#> 5,\"some text on \\\"BLAH\\\" and X, and Y also\"\r\n\r\ncsv <- reticulate::import(\"pyarrow.csv\")\r\nopt <- csv$ParseOptions(escape_char='\r\n')\r\ncsv$read_csv(x, parse_options = opt)\r\n#> Error in py_call_impl(callable, dots$args, dots$keywords): pyarrow.lib.ArrowInvalid: CSV parse error: Expected 2 columns, got 3: 3,\"some text on \\\"BLAH\\\"\r\n#> 4,\"some text on X and Y, and \\\"BLAH\\\" also\"\r\n```\r\n\r\n<sup>Created on 2022-11-02 with [reprex v2.0.2]([https://reprex.tidyverse.org](https://reprex.tidyverse.org/))</sup>",
+        "created_at": "2022-11-02T05:38:55.000Z",
+        "updated_at": "2022-11-03T13:19:48.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-11-02T08:47:15.827Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18219?focusedCommentId=17627531) by Antoine Pitrou (apitrou):*\nHow was the original CSV file produced? By which utility?"
+        },
+        {
+            "created_at": "2022-11-02T08:48:06.492Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18219?focusedCommentId=17627532) by Antoine Pitrou (apitrou):*\nNote the CSV is incorrect: the third line misses an ending quote before the newline."
+        },
+        {
+            "created_at": "2022-11-02T10:41:54.718Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18219?focusedCommentId=17627608) by Antoine Pitrou (apitrou):*\n(for the record: the [Python CSV reader](https://docs.python.org/3/library/csv.html) also fails reading this CSV file \"correctly\")"
+        },
+        {
+            "created_at": "2022-11-03T09:02:43.980Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18219?focusedCommentId=17628211) by Thomas Klebel (tklebel):*\nThe original CSV I was having issues looked like this:\r\n```java\n\r\nid,text\r\n1,Some interesting text\r\n2,\"Some text on: \\\"how to break arrow\\\" by X, and Y\" \n```\r\nIt was created using spark_write_csv, with\r\n\r\nsparklyr v1.7.5\r\n\r\nSpark v2.3.2\r\n\r\nHDFS v3.1.1"
+        },
+        {
+            "created_at": "2022-11-03T13:18:08.632Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18219?focusedCommentId=17628325) by Antoine Pitrou (apitrou):*\n`[~tklebel]` That file is parsed correctly by PyArrow using the following options:\r\n```python\n\r\n>>> s\r\n'id,text\\n1,Some interesting text\\n2,\"Some text on: \\\\\"how to break arrow\\\\\" by X, and Y\" \\n'\r\n>>> parse_options = csv.ParseOptions(escape_char='\\\\', quote_char='\"', double_quote=False)\r\n>>> csv.read_csv(io.BytesIO(s.encode()), parse_options=parse_options).to_pandas()\r\n   id                                             text\r\n0   1                            Some interesting text\r\n1   2  Some text on: \"how to break arrow\" by X, and Y \r\n```"
+        },
+        {
+            "created_at": "2022-11-03T13:19:48.461Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18219?focusedCommentId=17628326) by Antoine Pitrou (apitrou):*\ncc `[~thisisnic]` `[~paleolimbot]`"
+        }
+    ]
+}

@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Rust] \u2013 Async Sans IO: R/W into/to Arrow Arrays",
+        "body": "***Note**: This issue was originally created as [ARROW-9275](https://issues.apache.org/jira/browse/ARROW-9275). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis issue can be considered an epic level that spans across other arrow projects.\r\n\r\n**Drill down**\r\n\r\nCurrently, traits like `ParquetReader` only allow synchronous interface which uses BufReader having 8KB constant buffer. Over the network, this becomes a problem. This can be easily solvable with differential buffers. In addition to this shortage, there is a problem of executor engine is needed to schedule from async trait methods to sync trait methods which should sit somewhere in between to make requests asynchronous to external IO. On-disk IO is acceptable with the approach we currently have since no reliable evented IO exists for on-disk IO on major platforms.\r\n\r\nAll these considered abstractions that will expose asynchronous IO without any side from executors, needs to be exposed.\r\n\r\n\u00a0\r\n\r\n**Design Suggestions & Considerations**\r\n\r\nThe design should apply and consider:\r\n \\* Sans IO, (for more information about Sans approach please see\u00a0<https://sans-io.readthedocs.io/> )\u00a0\r\n \\* Not including any executor specific data, at all.\r\n \\* Tests should work with any executor with little to no modification.\r\n \\* Buffers are adjusted accordingly and use differential buffers to optimize network trips.\r\n \\* Sync IO shouldn't be touched. At all costs. If we try to unify Sync IO traits or we do overlapping implementation, that will make our life harder in the future. Sans IO should be compartmentalized.\r\n\r\n\u00a0\r\n\r\n**Notes**\r\n\r\nIf Sans approach is not taken, the project will:\r\n \\* use an extreme amount of dependencies.\r\n \\* be not compatible with other Rust code at all.\r\n \\* break currently working code uses array ingestions.\r\n \\* integrations tests are going to be harder.\r\n \\* it will really hard to adapt to completion-based APIs stabilize in the future. (in the user projects)\r\n \\* this suggestion is not about the flight format or any flight-related information atm. This is purely making on-disk, remote IO (provider backends like AWS etc.) async.\r\n\r\n\u00a0\r\n\r\n**Open points**\r\n\r\nA couple of open points:\r\n \\* Identifying traits that are going to be asyncized.\r\n \\* Designing internal routines.\r\n \\* package name to expose.\r\n \\* Gather traits into the designated packages in all file formats.",
+        "created_at": "2020-06-30T10:28:31.000Z",
+        "updated_at": "2021-04-26T12:31:53.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-04-26T12:31:53.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-06-30T10:30:24.500Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9275?focusedCommentId=17148510) by Mahmut Bulut (vertexclique):*\n[~nevi_me], `[~andygrove]`, `[~paddyhoran]` \u00a0I need input for this from you if possible."
+        },
+        {
+            "created_at": "2020-07-01T19:16:41.647Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9275?focusedCommentId=17149648) by Neville Dipale (nevi_me):*\nHi `[~vertexclique]`, I'm out of my depth with Sans IO. Are you proposing a way of using async IO without being bound to a specific runtime (tokio, async-std, etc.)?\r\n\r\nThere has been interest in async IO, so I presume that once we have a concrete implementation plan, we might be able to get more contributors to help (assuming it's a lot of effort).\r\n\r\nAs you mention that this might potentially span across other projects; perhaps you could bring this up in the mailing list, to get more feedback from the wider community?"
+        },
+        {
+            "created_at": "2020-07-03T11:00:31.593Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9275?focusedCommentId=17150943) by Mahmut Bulut (vertexclique):*\nYes, exactly Neville, so users can choose whatever they want to incorporate in their workloads, which enables plenty of projects with different workloads, scenarios, etc.\r\n\r\nAnd yes again, I feel like there should be a collaborative effort together to add APIs around crates. Spans a little wider than other tickets.\r\n\r\nSure! I will send a similar email with similar content of this ticket. Tagging `[Rust]`. Thanks for the feedback, will send a mail asap."
+        },
+        {
+            "created_at": "2020-08-25T01:35:37.057Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9275?focusedCommentId=17183667) by Andy Grove (andygrove):*\n`[~vertexclique]` For some reason I didn't see this issue until now. I am interested in discussing this further and especially how it relates to other issues we have open around async.\r\n\r\nAlso pinging `[~alamb]` and `[~jorgecarleitao]` who have been involved in discussions related to this in the DataFusion crate."
+        },
+        {
+            "created_at": "2020-08-25T14:12:09.216Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9275?focusedCommentId=17184086) by Andrew Lamb (alamb):*\nIn general, I think the notion of implementing async Parquet and Arrow APIs that don't rely on tokio or other executors is a good idea. \r\n\r\nI think in order to make the crate as widely useful as possible, it should also retain a synchronous API for use with the rust standard library.\r\n\r\nOne pattern I have seen is a using a `async` crate option that adds the appropriate async options (and possibly additional dependencies). For example, https://docs.rs/bzip2/0.4.1/bzip2/#async-io\r\n\r\n"
+        },
+        {
+            "created_at": "2020-08-26T17:15:30.549Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9275?focusedCommentId=17185360) by Max Burke (m18e):*\nI'd be a little concerned about over-generalizing out of the gate. Having done a similar song and dance with some internal code one of the things I like about tailoring to a specific runtime is that synchronization primitives taken from a particular runtime are able to leverage that runtime. Tokio's mutex, for example, will yield back to the executor if it contends on a mutex lock rather than tying up a pool thread, which can be a Very Good Thing with async-heavy workloads.\r\n\r\nI'm not sure what you mean in terms of specifics for the \"sans-IO\" method, I assume by this you mean the user would be expected to pass in implementations of the AsyncRead/etc. traits which will read from disk or network or memory or wherever?\u00a0"
+        },
+        {
+            "created_at": "2021-04-26T12:31:52.216Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9275?focusedCommentId=17332103) by Andrew Lamb (alamb):*\nMigrated to github: https://github.com/apache/arrow-rs/issues/82"
+        }
+    ]
+}

@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[C++] ReadAt/WriteAt are inconsistent with moving the files position",
+        "body": "***Note**: This issue was originally created as [ARROW-2835](https://issues.apache.org/jira/browse/ARROW-2835). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nRight now, there is inconsistent behaviour regarding moving the files position pointer after calling ReadAt or WriteAt. For example, the default implementation of ReadAt seeks to the desired offset and calls Read which moves the position pointer. MemoryMappedFile::ReadAt, however, doesn't change the position. WriteableFile::WriteAt seem to move the position in the current implementation, but there is no docstring which prescribes this behaviour.\r\n\r\nAntoine suggested that \\*At methods shouldn't touch the position and it makes more sense, IMHO. The change isn't huge and doesn't seem to break anything internally, but it might break the existing user code.",
+        "created_at": "2018-07-12T09:40:59.000Z",
+        "updated_at": "2019-06-03T12:32:09.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-06-03T12:31:51.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-07-12T09:43:54.905Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2835?focusedCommentId=16541394) by Antoine Pitrou (apitrou):*\nUnfortunately, things are bit more complicated as in some cases, ReadAt / WriteAt are forced to update the file position anyway (on Windows, see implementation of `FileRead` in `io-util.cc`)."
+        },
+        {
+            "created_at": "2018-07-12T17:05:46.875Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2835?focusedCommentId=16541962) by Dimitri Vorona (alendit):*\nOk, then we should at least be consistent across implementation, i.e. advance the position in MemoryMappedFile::ReadAt, right?"
+        },
+        {
+            "created_at": "2018-07-12T17:21:01.078Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2835?focusedCommentId=16541972) by Antoine Pitrou (apitrou):*\nIn that case it would mean only advance the position if we're on Windows :) I don't think there's a nice way out of this. If we want to keep the parallelization benefits of ReadAt and WriteAt, we'll need to live with the platform specifics, I think. `[~wesmckinn]`"
+        },
+        {
+            "created_at": "2018-07-17T00:01:56.203Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2835?focusedCommentId=16545884) by Wes McKinney (wesm):*\nI agree that we may in general have to live with the platform specific behavior. When there is a choice (rather than being a platform specific detail), I would support having ReadAt/WriteAt set the position to the end of the read segment (or the end of the file, as the case may be). Does that sound like a reasonable scope for this JIRA?"
+        },
+        {
+            "created_at": "2018-07-20T14:33:44.260Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2835?focusedCommentId=16550822) by Wes McKinney (wesm):*\nMoving this off 0.10.0 for now. I will focus on getting ARROW-2701 merged"
+        },
+        {
+            "created_at": "2018-09-15T14:21:36.678Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2835?focusedCommentId=16616317) by Wes McKinney (wesm):*\nDo we want to make any changes here for 0.11?"
+        },
+        {
+            "created_at": "2018-11-21T17:43:53.866Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2835?focusedCommentId=16695018) by Wes McKinney (wesm):*\nBumping this issue. It seems this is mostly a documentation issue, but if we want to make MemoryMappedFile::WriteAt/ReadAt behave a certain way (e.g advancing the file position), feel free to propose changes"
+        },
+        {
+            "created_at": "2019-04-24T15:23:03.851Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2835?focusedCommentId=16825258) by Antoine Pitrou (apitrou):*\nI see two other ways around this:\r\n\r\n1) As soon as ReadAt or WriteAt is called, change the internal file state so that any implicitly-positioning operation (such as Read, Write or Tell) fails until Seek is called first.\r\n\r\nor 2) Have an internal \"positioning\" lock that ensures that we can have several ReadAt or WriteAt calls simultaneously, but that implicitly positioning operations wait for the last \\*At call to end and to restore the file pointer.\r\n\r\nI'm not sure how easy #2 is, but should be doable."
+        },
+        {
+            "created_at": "2019-04-30T14:30:11.085Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2835?focusedCommentId=16830348) by Antoine Pitrou (apitrou):*\nI'm leaning towards #1, because it helps expose bugs.\r\n\r\nAs a sidenote, Tensorflow's RandomAccessFile only supports ReadAt-like operation, not implicit positioning with Seek() or Tell(). See https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/platform/file_system.h#L231"
+        },
+        {
+            "created_at": "2019-06-03T12:31:51.919Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2835?focusedCommentId=16854546) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 4417\n<https://github.com/apache/arrow/pull/4417>"
+        }
+    ]
+}

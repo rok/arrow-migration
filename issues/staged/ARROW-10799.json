@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[C++] Take on string chunked arrays slow and fails",
+        "body": "***Note**: This issue was originally created as [ARROW-10799](https://issues.apache.org/jira/browse/ARROW-10799). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n\u00a0\r\n```java\n\r\nimport pyarrow as pa\r\na = pa.array(['a'] * 2**26)\r\nc = pa.chunked_array([a] * 2*18)\r\nc.take([0, 1])\r\n```\r\nGives\r\n```\n\r\n----------------------------------------\r\nArrowInvalidTraceback (most recent call last)\r\n<ipython-input-4-57099ee02815> in <module>\r\n----> 1 c.take([0, 1])\r\n\r\n~/github/apache/arrow/python/pyarrow/table.pxi in pyarrow.lib.ChunkedArray.take()\r\n\r\n~/github/apache/arrow/python/pyarrow/compute.py in take(data, indices, boundscheck, memory_pool)\r\n    421     \"\"\"\r\n    422     options = TakeOptions(boundscheck=boundscheck)\r\n--> 423     return call_function('take', [data, indices], options, memory_pool)\r\n    424 \r\n    425 \r\n\r\n~/github/apache/arrow/python/pyarrow/_compute.pyx in pyarrow._compute.call_function()\r\n\r\n~/github/apache/arrow/python/pyarrow/_compute.pyx in pyarrow._compute.Function.call()\r\n\r\n~/github/apache/arrow/python/pyarrow/error.pxi in pyarrow.lib.pyarrow_internal_check_status()\r\n\r\n~/github/apache/arrow/python/pyarrow/error.pxi in pyarrow.lib.check_status()\r\n\r\nArrowInvalid: offset overflow while concatenating arrays\r\n```\r\n\u00a0\r\n\r\nPS: did not check master but\u00a0 3.0.0.dev238+gb0bc9f8d\r\n\r\n\u00a0",
+        "created_at": "2020-12-03T18:13:20.000Z",
+        "updated_at": "2020-12-03T20:01:42.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-12-03T18:33:59.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-12-03T18:17:20.608Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10799?focusedCommentId=17243417) by Maarten Breddels (maartenbreddels):*\n```java\n\r\nimport pyarrow as pa\r\na = pa.array(['a'] * 2**26, type=pa.large_string())\r\nc = pa.chunked_array([a] * 2*18)\r\nc.take([0, 1])\n```\r\nthis works, but take is unreasonably slow (that might give a hint what goes wrong)\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-12-03T18:18:19.053Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10799?focusedCommentId=17243418) by David Li (lidavidm):*\nMight be similar to ARROW-9773; the Take kernel concatenates chunked arrays first (hence why it works with large_string)"
+        },
+        {
+            "created_at": "2020-12-03T18:28:53.794Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10799?focusedCommentId=17243422) by Maarten Breddels (maartenbreddels):*\nAh yes, that implementation makes sense. I saw the issue (linked to it), I thought this was a bit more isolated at least, but maybe it's just a duplicate indeed. Do you know of a workaround?"
+        },
+        {
+            "created_at": "2020-12-03T18:31:28.427Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10799?focusedCommentId=17243424) by David Li (lidavidm):*\nNot any simple one that I know of, unfortunately. I think you could do it by translating the indices into offsets into individual record batches, then calling take on each record batch, building up a new chunked array. I had started working on implementing this in C++ but haven't had the time to finish it."
+        },
+        {
+            "created_at": "2020-12-03T18:33:59.522Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10799?focusedCommentId=17243430) by Antoine Pitrou (apitrou):*\nClosing as duplicate. Thanks for noticing this."
+        },
+        {
+            "created_at": "2020-12-03T18:37:47.948Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10799?focusedCommentId=17243437) by Maarten Breddels (maartenbreddels):*\nWould you mind opening a draft PR for that, in case I have time to pick it up?"
+        },
+        {
+            "created_at": "2020-12-03T19:53:02.379Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10799?focusedCommentId=17243477) by David Li (lidavidm):*\nI didn't get very far at all, here's the diff (once I realized I needed to be generic over the index type without bloating the generated code excessively I set it aside)\r\n```cpp\n\r\ndiff --git a/cpp/src/arrow/compute/kernels/vector_selection.cc b/cpp/src/arrow/compute/kernels/vector_selection.cc\r\nindex 1967ce727..c462984eb 100644\r\n--- a/cpp/src/arrow/compute/kernels/vector_selection.cc\r\n+++ b/cpp/src/arrow/compute/kernels/vector_selection.cc\r\n@@ -1902,18 +1902,35 @@ Result<std::shared_ptr<ChunkedArray>> TakeCA(const ChunkedArray& values,\r\n   // Case 1: `values` has a single chunk, so just use it\r\n   if (num_chunks == 1) {\r\n     current_chunk = values.chunk(0);\r\n+    // Call Array Take on our single chunk\r\n+    ARROW_ASSIGN_OR_RAISE(new_chunks[0], TakeAA(*current_chunk, indices, options, ctx));\r\n   } else {\r\n     // TODO Case 2: See if all `indices` fall in the same chunk and call Array Take on it\r\n     // See\r\n     // https://github.com/apache/arrow/blob/6f2c9041137001f7a9212f244b51bc004efc29af/r/src/compute.cpp#L123-L151\r\n     // TODO Case 3: If indices are sorted, can slice them and call Array Take\r\n \r\n-    // Case 4: Else, concatenate chunks and call Array Take\r\n-    ARROW_ASSIGN_OR_RAISE(current_chunk,\r\n-                          Concatenate(values.chunks(), ctx->memory_pool()));\r\n+    // Case 4: for each run of indices that falls within a single\r\n+    // chunk, call Array Take for that chunk\r\n+    int64_t start = 0;\r\n+    int64_t end = 0;\r\n+    // An array of the (max index + 1) of each chunk\r\n+    std::vector<int64_t> boundaries(num_chunks);\r\n+    int64_t boundary = 0;\r\n+    for (const auto& chunk : values.chunks()) {\r\n+      boundary += chunk->length();\r\n+      boundaries.push_back(boundary);\r\n+    }\r\n+\r\n+    while (end < indices.length()) {\r\n+      int64_t chunk_index = 0;\r\n+      for (const auto& boundary : boundaries) {\r\n+        if (end >= )\r\n+      }\r\n+\r\n+      start = end;\r\n+    }\r\n   }\r\n-  // Call Array Take on our single chunk\r\n-  ARROW_ASSIGN_OR_RAISE(new_chunks[0], TakeAA(*current_chunk, indices, options, ctx));\r\n   return std::make_shared<ChunkedArray>(std::move(new_chunks));\r\n }\r\n```"
+        },
+        {
+            "created_at": "2020-12-03T20:01:42.843Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10799?focusedCommentId=17243482) by Antoine Pitrou (apitrou):*\nYou can take a look at <https://github.com/apache/arrow/pull/8823> for an optimization of chunked array indexing.\r\n\r\n\u00a0"
+        }
+    ]
+}

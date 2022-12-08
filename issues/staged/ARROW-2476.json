@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[Python/Question] Maximum length of an Array created from ndarray",
+        "body": "***Note**: This issue was originally created as [ARROW-2476](https://issues.apache.org/jira/browse/ARROW-2476). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSo the format [describes](https://github.com/apache/arrow/blob/master/format/Layout.md#array-lengths) that an array max length is 2^31 - 1, however the following python snippet creates a 2\\*\\*32 length arrow array:\r\n\r\n```python\n\r\na = np.ones((2**32,), dtype='int8')\r\nA = pa.Array.from_pandas(a)\r\ntype(A)\r\n```\r\n```Java\npyarrow.lib.Int8Array\n```\r\n\r\nBased the layout specification I'd expect a ChunkedArray of three Int8Array's with lengths:\r\n[2^31 - 1, 2^31 - 1, 2] or should raise an exception?\r\n\r\nIf it's the expectation is there any documentation for it?",
+        "created_at": "2018-04-19T07:44:36.000Z",
+        "updated_at": "2019-06-03T12:35:24.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-02-06T04:41:45.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-04-19T08:56:47.186Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2476?focusedCommentId=16443759) by Antoine Pitrou (apitrou):*\nI guess the spec is incorrect or obsolete, since at least in the C++ (and Python) implementation arrays a 64-bit length (signed, but it doesn't matter much).\r\n\r\nThe 32-bit limitation does apply to the underlying data of list arrays (and therefore also string and binary arrays)."
+        },
+        {
+            "created_at": "2018-04-19T09:09:19.453Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2476?focusedCommentId=16443768) by Krisztian Szucs (kszucs):*\nIn conjunction with https://issues.apache.org/jira/browse/ARROW-2367 now I'm totally confused. \r\n\r\nAre the array lengths `arrow format` specific or implementation specific? \r\nWhat are the actual limits of an array? Why are these limits datatype dependent?\r\n\r\nThe [list offset bulletpoint](https://github.com/apache/arrow/blob/master/format/Layout.md#list-type) in the format is also misleading."
+        },
+        {
+            "created_at": "2018-04-19T09:11:53.153Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2476?focusedCommentId=16443770) by Uwe Korn (uwe):*\nI think the array size restriction is in place as other implementation like Java are unable to support."
+        },
+        {
+            "created_at": "2018-04-19T09:15:23.314Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2476?focusedCommentId=16443776) by Antoine Pitrou (apitrou):*\n> Are the array lengths `arrow format` specific or implementation specific?\r\n\r\nI don't know. But array length is not part of array data, only metadata, so I guess implementations are free to represent it as they prefer?\r\n\r\n> The [list offset bulletpoint](https://github.com/apache/arrow/blob/master/format/Layout.md#list-type) in the format is also misleading.\r\n\r\nCan you explain what looks misleading to you?\u00a0"
+        },
+        {
+            "created_at": "2018-04-19T11:12:09.341Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2476?focusedCommentId=16443891) by Krisztian Szucs (kszucs):*\nQuoting from the spec:\r\n\r\n\"Any array has a known and fixed length, stored as a 32-bit signed integer, so a maximum of 2^31 - 1 elements.\" \r\n Conclusion:\r\n```Java\n\r\nmax_len(array) == 2**31 - 1\r\n```\r\n\"An offsets buffer containing 32-bit signed integers with length equal to the length of the top-level array plus one. Note that this limits the size of the values array to 2^31-1\" \r\n Conclusion:\r\n```Java\n\r\nlen(offsets) == len(array) + 1\r\nmax_len(array) == 2**31 - 1 \r\n\r\n# => thus\r\nmax_len(offsets) == 2**31  \r\n```\r\nIn [builder.h](https://github.com/apache/arrow/blob/master/cpp/src/arrow/builder.h#L44)\r\n```Java\n\r\nconstexpr int64_t kBinaryMemoryLimit = std::numeric_limits<int32_t>::max() - 1;\r\nconstexpr int64_t kListMaximumElements = std::numeric_limits<int32_t>::max() - 1;\r\n// where both are actually (2**31 - 1) - 1\r\n```\r\nAnd according to Antoine's first comment cpp and python impl uses (2^63 - 1) instead of (2^31 - 1) in case of primitive types but not for list, string, binary.\r\n Why is that limitation for list-like arrays but not for primitive ones?\r\n\r\nAs a sidenote the length of the offsets buffer can't be represented in a 32-bit signed integer (for an array with maximum (2^31 - 1) number of element), it requires a 64 bit signed integer like in the [implementation](https://github.com/apache/arrow/blob/master/cpp/src/arrow/buffer.h#L136). This also means that theoretically a list array with (2^63 - 1) element requires a buffer with maximum 2^63 number of elements, representable as int128 (of course we won't hit that limit).\r\n\r\nI mean the values are correct (plus/minus one), but the limits (or the limitlessness) should be documented somewhere - clearly and consistently."
+        },
+        {
+            "created_at": "2018-04-19T11:42:24.537Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2476?focusedCommentId=16443930) by Antoine Pitrou (apitrou):*\nThe offsets array is part of the data and needs to be interchangeable, so an implementation cannot use an array of int64_t if the spec says it's an array of int32_t.\r\n> As a sidenote the length of the offsets buffer can't be represented in a 32-bit signed integer (for an array with maximum (2^31 - 1) number of element), it requires a 64 bit signed integer\r\nYou seem to be confusing length in elements and size in bytes here. The spec says the number of elements is limited to 2\\*\\*31, not the size in bytes.\r\n\r\n(the 32-bit limitation doesn't look like a good idea to me, but I may be missing some context)"
+        },
+        {
+            "created_at": "2018-04-19T12:12:15.252Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2476?focusedCommentId=16443963) by Krisztian Szucs (kszucs):*\nI wasn't thinking of the datatype the array holds, just the maximum length of the arrays.\r\n In the sidenote ment the number of [offsets](https://github.com/apache/arrow/blob/master/cpp/src/arrow/array.cc#L204) (just can't find the right impl line).\r\n\r\nAccording to [array lengths section](https://github.com/apache/arrow/blob/master/format/Layout.md#array-lengths) I'd think that each array can have at most (2^31 - 1) elements.\r\n\r\nWhy does it apply to the [List<List<byte>> example](https://github.com/apache/arrow/blob/master/format/Layout.md#example-layout-listlistbyte) (including the top array and the nested ones) but doesn't to an array of primitive type like `array<int32>`?"
+        },
+        {
+            "created_at": "2019-02-06T04:41:45.435Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2476?focusedCommentId=16761471) by Wes McKinney (wesm):*\nThis was clarified in the format documentation"
+        }
+    ]
+}

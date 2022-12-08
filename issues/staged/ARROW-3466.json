@@ -1,0 +1,74 @@
+{
+    "issue": {
+        "title": "[Python] Crash when importing tensorflow and pyarrow",
+        "body": "***Note**: This issue was originally created as [ARROW-3466](https://issues.apache.org/jira/browse/ARROW-3466). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe're getting crashes on Travis-CI recently when running the Python test suite with coverage enabled. There is no specific output or traceback unfortunately. Example at https://travis-ci.org/apache/arrow/jobs/438624063#L3571",
+        "created_at": "2018-10-08T15:47:53.000Z",
+        "updated_at": "2019-03-01T23:42:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Continuous Integration",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-10-09T13:00:17.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-10-08T19:12:55.767Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3466?focusedCommentId=16642330) by Antoine Pitrou (apitrou):*\nThe build was ok in https://travis-ci.org/apache/arrow/builds/438507173\r\nIt started failing in https://travis-ci.org/apache/arrow/builds/438575632\r\n\r\nThe corresponding changeset are the big post-release rebase: https://github.com/apache/arrow/compare/ef9fd0e34864...9448f58cb649\r\n"
+        },
+        {
+            "created_at": "2018-10-08T20:13:50.108Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3466?focusedCommentId=16642408) by Wes McKinney (wesm):*\nOdd for sure. I'll push some builds to try to figure out which patch is causing issues"
+        },
+        {
+            "created_at": "2018-10-08T20:28:49.579Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3466?focusedCommentId=16642417) by Antoine Pitrou (apitrou):*\nI think I've narrowed it down to a tensorflow issue.\r\n\r\n"
+        },
+        {
+            "created_at": "2018-10-08T20:40:01.822Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3466?focusedCommentId=16642457) by Antoine Pitrou (apitrou):*\nApparently, the upgrade from protobuf 3.6.0 to 3.6.1 triggered the issue (though the underlying cause may be different).\r\n\r\nWith 3.6.0, nothing crashes:\r\nhttps://travis-ci.org/pitrou/arrow/builds/438824039#L2057\r\n\r\nWith 3.6.1, `python -c \"import pyarrow, tensorflow\"` crashes:\r\nhttps://travis-ci.org/pitrou/arrow/builds/438825255#L2054\r\n\r\nWith that information, it might be possible to reproduce the issue locally (note that ORC support apparently needs to be enabled)."
+        },
+        {
+            "created_at": "2018-10-08T21:01:21.541Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3466?focusedCommentId=16642486) by Wes McKinney (wesm):*\nAh. Well I'm sure tensorflow has a bunch of protobuf stuff statically linked =/"
+        },
+        {
+            "created_at": "2018-10-09T09:04:24.988Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3466?focusedCommentId=16643009) by Wes McKinney (wesm):*\nCan we fix this temporarily by pinning the old version of protobuf? Could also be related to the conda-forge compiler migration. "
+        },
+        {
+            "created_at": "2018-10-09T09:06:05.471Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3466?focusedCommentId=16643011) by Antoine Pitrou (apitrou):*\nIdeally I'd rather find out the root cause exactly.\r\n\r\n(or personally, I'd just remove Tensorflow from the CI flow :-))"
+        },
+        {
+            "created_at": "2018-10-09T09:09:44.859Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3466?focusedCommentId=16643015) by Wes McKinney (wesm):*\nAgreed, I would like to understand the root cause as well. This week is a bit of a challenge (traveling and at conference) but I will try to do some looking myself as I'm able"
+        },
+        {
+            "created_at": "2018-10-09T09:26:27.037Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3466?focusedCommentId=16643043) by Antoine Pitrou (apitrou):*\nI'm trying to look at it today. If after a couple hours I fail to reproduce and/or understand I'll leave it to you (and/or submit a temporary workaround)."
+        },
+        {
+            "created_at": "2018-10-09T10:00:56.181Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3466?focusedCommentId=16643070) by Antoine Pitrou (apitrou):*\nOk, I can confirm the crash locally with protobuf 3.6.1, working with protobuf 3.6.0.\r\nHere is the gdb backtrace for `python -c \"import pyarrow, tensorflow\"`:\r\n\r\n```Java\n\r\n(gdb) bt\r\n#0  __GI___pthread_mutex_lock (mutex=0x18) at ../nptl/pthread_mutex_lock.c:65\r\n#1  0x00007fffb8a867a5 in google::protobuf::internal::OnShutdownRun(void (*)(void const*), void const*) ()\r\n   from /home/antoine/miniconda3/envs/ttt/lib/python3.6/site-packages/google/protobuf/pyext/../../../../../libprotobuf.so.17\r\n#2  0x00007fffb8a98d79 in google::protobuf::internal::InitProtobufDefaults() ()\r\n   from /home/antoine/miniconda3/envs/ttt/lib/python3.6/site-packages/google/protobuf/pyext/../../../../../libprotobuf.so.17\r\n#3  0x00007fffb8a98f8f in google::protobuf::internal::InitSCCImpl(google::protobuf::internal::SCCInfoBase*) ()\r\n   from /home/antoine/miniconda3/envs/ttt/lib/python3.6/site-packages/google/protobuf/pyext/../../../../../libprotobuf.so.17\r\n#4  0x00007fffb8aab819 in protobuf_google_2fprotobuf_2fany_2eproto::AddDescriptorsImpl() ()\r\n   from /home/antoine/miniconda3/envs/ttt/lib/python3.6/site-packages/google/protobuf/pyext/../../../../../libprotobuf.so.17\r\n#5  0x00007ffff7688827 in __pthread_once_slow (once_control=0x7fffb8e3dcf8 <protobuf_google_2fprotobuf_2fany_2eproto::AddDescriptors()::once>, \r\n    init_routine=0x7fffc2fdffe1 <std::__once_proxy()>) at pthread_once.c:116\r\n#6  0x00007fffb8aac472 in void std::call_once<void (&)()>(std::once_flag&, void (&)()) ()\r\n   from /home/antoine/miniconda3/envs/ttt/lib/python3.6/site-packages/google/protobuf/pyext/../../../../../libprotobuf.so.17\r\n#7  0x00007ffff7de5733 in call_init (env=0x69c590, argv=0x7fffffffd9f8, argc=3, l=<optimized out>) at dl-init.c:72\r\n#8  _dl_init (main_map=main_map@entry=0xf168c0, argc=3, argv=0x7fffffffd9f8, env=0x69c590) at dl-init.c:119\r\n#9  0x00007ffff7dea1ff in dl_open_worker (a=a@entry=0x7fffffff4e50) at dl-open.c:522\r\n#10 0x00007ffff6a422df in __GI__dl_catch_exception (exception=0x7fffffff4e30, operate=0x7ffff7de9dc0 <dl_open_worker>, args=0x7fffffff4e50)\r\n    at dl-error-skeleton.c:196\r\n#11 0x00007ffff7de97ca in _dl_open (\r\n    file=0x7fffb9321eb0 \"/home/antoine/miniconda3/envs/ttt/lib/python3.6/site-packages/google/protobuf/pyext/_message.cpython-36m-x86_64-linux-gnu.so\", \r\n    mode=-2147483646, caller_dlopen=0x7ffff7a51191 <_PyImport_FindSharedFuncptr+417>, nsid=<optimized out>, argc=3, argv=<optimized out>, env=0x69c590)\r\n    at dl-open.c:605\r\n#12 0x00007ffff7475f96 in dlopen_doit (a=a@entry=0x7fffffff5080) at dlopen.c:66\r\n#13 0x00007ffff6a422df in __GI__dl_catch_exception (exception=exception@entry=0x7fffffff5020, operate=0x7ffff7475f40 <dlopen_doit>, args=0x7fffffff5080)\r\n    at dl-error-skeleton.c:196\r\n#14 0x00007ffff6a4236f in __GI__dl_catch_error (objname=0x6960b0, errstring=0x6960b8, mallocedp=0x6960a8, operate=<optimized out>, args=<optimized out>)\r\n    at dl-error-skeleton.c:215\r\n#15 0x00007ffff7476735 in _dlerror_run (operate=operate@entry=0x7ffff7475f40 <dlopen_doit>, args=args@entry=0x7fffffff5080) at dlerror.c:162\r\n#16 0x00007ffff7476051 in __dlopen (\r\n    file=file@entry=0x7fffb9321eb0 \"/home/antoine/miniconda3/envs/ttt/lib/python3.6/site-packages/google/protobuf/pyext/_message.cpython-36m-x86_64-linux-gnu.so\", mode=<optimized out>) at dlopen.c:87\r\n#17 0x00007ffff7a51191 in _PyImport_FindSharedFuncptr (prefix=prefix@entry=0x7ffff7ada746 \"PyInit\", \r\n    shortname=shortname@entry=0x7fffb92b8080 \"_message\", \r\n    pathname=pathname@entry=0x7fffb9321eb0 \"/home/antoine/miniconda3/envs/ttt/lib/python3.6/site-packages/google/protobuf/pyext/_message.cpython-36m-x86_64-linux-gnu.so\", fp=fp@entry=0x0) at ./Python/dynload_shlib.c:95\r\n#18 0x00007ffff7a230bf in _PyImport_LoadDynamicModuleWithSpec (spec=spec@entry=0x7fffb92afac8, fp=fp@entry=0x0) at ./Python/importdl.c:129\r\n[...]\r\n```\r\n"
+        },
+        {
+            "created_at": "2018-10-09T10:01:44.720Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3466?focusedCommentId=16643071) by Antoine Pitrou (apitrou):*\nAs you can see from the backtrace, it crashes when initialiazing libprotobuf.so. It seems the relevant protobuf change would be the following:\r\nhttps://github.com/protocolbuffers/protobuf/pull/4878"
+        },
+        {
+            "created_at": "2018-10-09T10:26:14.645Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3466?focusedCommentId=16643095) by Antoine Pitrou (apitrou):*\nI opened a PR to pin protobuf as a workaround. I hope the protobuf developers can provide guidance."
+        },
+        {
+            "created_at": "2018-10-09T11:41:48.361Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3466?focusedCommentId=16643173) by Antoine Pitrou (apitrou):*\nhttps://github.com/apache/arrow/pull/2731 fixes the issue by fixing the linker version script."
+        },
+        {
+            "created_at": "2018-10-09T13:00:18.014Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3466?focusedCommentId=16643382) by Wes McKinney (wesm):*\nIssue resolved by pull request 2731\n<https://github.com/apache/arrow/pull/2731>"
+        }
+    ]
+}

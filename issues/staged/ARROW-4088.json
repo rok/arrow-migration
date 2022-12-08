@@ -1,0 +1,34 @@
+{
+    "issue": {
+        "title": "[Python] Table.from_batches() fails when passed a schema with metadata",
+        "body": "***Note**: This issue was originally created as [ARROW-4088](https://issues.apache.org/jira/browse/ARROW-4088). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis seems to be a regression. In 0.10 I used to have this function to set column-level and table-level metadata on an existing Table:\r\n \u00a0\r\n```python\n\r\ndef set_metadata(tbl, col_meta={}, tbl_meta={}):\r\n# Create updated column fields with new metadata\r\n    if col_meta or tbl_meta:\r\n        fields = []\r\n        for col in tbl.itercolumns():\r\n            if col.name in col_meta:\r\n# Get updated column metadata\r\n                metadata = col.field.metadata or {}\r\n                for k, v in col_meta[col.name].items():\r\n                    metadata[k] = json.dumps(v).encode('utf-8')\r\n# Update field with updated metadata\r\n                fields.append(col.field.add_metadata(metadata))\r\n            else:\r\n                fields.append(col.field)\r\n\r\n# Get updated table metadata\r\n        tbl_metadata = tbl.schema.metadata\r\n        for k, v in tbl_meta.items():\r\n            tbl_metadata[k] = json.dumps(v).encode('utf-8')\r\n\r\n# Create new schema with updated metadata\r\n        schema = pa.schema(fields, metadata=tbl_metadata)\r\n\r\n# With updated schema build new table (shouldn't copy data?)\r\n        tbl = pa.Table.from_batches(tbl.to_batches(), schema=schema)\r\n\r\n    return tbl\r\n```\r\n\r\nHowever, in 0.11 this fails with error:\r\n\r\n```\n\r\nArrowInvalid: Schema at index 0 was different: \r\nx: int64\r\nvs\r\nx: int64\r\n...\r\n```\r\n\r\nIt works however if I replace from_batches() with from_arrays(), like this:\r\n```Java\n\r\ntbl = pa.Table.from_arrays(list(tbl.itercolumns()), schema=schema)\r\n```\r\n\r\nIt seems that from_batches() compares the existing batch's schema with the new schema, and upon encountering a difference (in metadata only) fails.\r\n\r\nA short test would be this:\r\n```Java\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\n\r\ndf = pd.DataFrame({'x': [0,1,2]})\r\ntbl = pa.Table.from_pandas(df, preserve_index=False)\r\n\r\nfield = tbl.schema[0].add_metadata({'test': 'data'})\r\nschema = pa.schema([field])\r\n# tbl2 = pa.Table.from_arrays(list(tbl.itercolumns()), schema=schema)\r\ntbl2 = pa.Table.from_batches(tbl.to_batches(), schema)\r\ntbl2.schema[0].metadata\r\n```",
+        "created_at": "2018-12-20T15:20:17.000Z",
+        "updated_at": "2018-12-27T20:03:49.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-12-27T16:27:06.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-12-20T17:34:30.179Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4088?focusedCommentId=16726068) by Wes McKinney (wesm):*\nThe test does not fail on the master branch. It's possible this is already fixed\r\n\r\n`[~kszucs]` can you take a closer look? Thanks"
+        },
+        {
+            "created_at": "2018-12-21T22:38:33.999Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4088?focusedCommentId=16727117) by Wes McKinney (wesm):*\nIf this can be reproduced on master, please reopen"
+        },
+        {
+            "created_at": "2018-12-23T21:43:59.442Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4088?focusedCommentId=16728059) by Krisztian Szucs (kszucs):*\nIt's a valid issue. Doesn't propagate check_metadata to fields."
+        },
+        {
+            "created_at": "2018-12-27T16:27:06.465Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4088?focusedCommentId=16729707) by Uwe Korn (uwe):*\nIssue resolved by pull request 3256\n<https://github.com/apache/arrow/pull/3256>"
+        }
+    ]
+}

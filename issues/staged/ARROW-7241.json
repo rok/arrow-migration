@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[C++] Gandiva exposes LLVM symbols",
+        "body": "***Note**: This issue was originally created as [ARROW-7241](https://issues.apache.org/jira/browse/ARROW-7241). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nDespite the fact the cmake seems to indicate the opposite, I see that gandiva on macOS is compiled with LLVM symbols exported. E.g.:\r\n\r\n```Java\n\r\nnm ../sw/osx_x86-64/arrow/latest/lib/libgandiva.dylib | grep _LLVMEnablePrettyStackTrace\r\n000000000120b5a0 T _LLVMEnablePrettyStackTrace\r\n```\r\n\r\nis\u00a0that expected?",
+        "created_at": "2019-11-22T12:20:21.000Z",
+        "updated_at": "2020-01-30T18:53:45.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: C++ - Gandiva",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2019-11-24T01:57:06.595Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7241?focusedCommentId=16980946) by Wes McKinney (wesm):*\nIt is not our intent to expose any symbols from statically-linked dependencies"
+        },
+        {
+            "created_at": "2019-11-25T12:34:20.825Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7241?focusedCommentId=16981511) by Giulio Eulisse (ktf):*\nUpdate on this. \r\n\r\nOn linux it seems to be sufficient to build LLVM with:\r\n\r\n```Java\n\r\n-DCMAKE_CXX_FLAGS=-fvisibility=hidden -DCLANG_TOOL_LIBCLANG_BUILD=OFF\r\n```\r\n\r\non macOS this is not the case. So far we managed to get the wanted result by hacking:\r\n\r\n```Java\n\r\nset_target_properties(${LIB_NAME}_shared PROPERTIES LINK_FLAGS -Wl,-unexported_symbol,_LLVMEnablePrettyStackTrace)\r\n```\r\n\r\ninto `cmake_modules/BuildUtils.cmake`.  This is of course not an acceptable solution because it hides only the symbol we check for, not all of them. Any better ideas?"
+        },
+        {
+            "created_at": "2019-11-26T13:39:35.870Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7241?focusedCommentId=16982483) by Giulio Eulisse (ktf):*\nIn the end we settled to:\r\n\r\n```Java\n\r\ncat >no-llvm-symbols.txt << EOF\r\n_LLVM*\r\n__ZN4llvm*\r\n__ZNK4llvm*\r\nEOF\r\ncmake ... -DCMAKE_SHARED_LINKER_FLAGS=\"-Wl,-unexported_symbols_list,$PWD/no-llvm-symbols.txt\"\r\n```\r\n\r\nwhich hides everything from LLVM which does not come from Gandiva itself. In our limited tests this works fine. Is this of common interest? How do we proceed from here?"
+        },
+        {
+            "created_at": "2020-01-30T18:04:23.523Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7241?focusedCommentId=17026889) by Antoine Pitrou (apitrou):*\n`[~ktf]` Sorry\u00a0 for the delay. Yes, this would be of interest. I've tried this patch:\r\nhttps://gist.github.com/pitrou/0e88d3d829175a6179b70671ed49a865\r\n\r\nBut unfortunately it crashes at the end of one of the Gandiva tests (in the `llvm::LLVMContext` destructor). Do you want to take it up and investigate?"
+        },
+        {
+            "created_at": "2020-01-30T18:53:45.423Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7241?focusedCommentId=17026923) by Giulio Eulisse (ktf):*\nSorry, by now we have fixed the dependency which was more under our control, so this is not particularly needed anymore on our side and I've other priorities."
+        }
+    ]
+}

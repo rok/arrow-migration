@@ -1,0 +1,63 @@
+{
+    "issue": {
+        "title": "[C++][Parquet] Parquet Writer always puts null_count=0 in Parquet statistics for dictionary-encoded array with nulls",
+        "body": "***Note**: This issue was originally created as [ARROW-12513](https://issues.apache.org/jira/browse/ARROW-12513). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen writing a Table as Parquet, when the table contains columns represented as dictionary-encoded arrays, those columns show an incorrect null_count of 0 in the Parquet metadata.\u00a0 If the same data is saved without dictionary-encoding the array, then the null_count is correct.\r\n\r\nConfirmed bug with PyArrow 1.0.1, 2.0.0, and 3.0.0.\r\n\r\nNOTE: I'm a PyArrow user, but I believe this bug is actually in the C++ implementation of the Arrow/Parquet writer.\r\n### Setup\r\n```python\n\r\nimport pyarrow as pa\r\nfrom pyarrow import parquet\n```\r\n### Bug\r\n\r\n(writes a dictionary encoded Arrow array to parquet)\r\n```python\n\r\narray1 = pa.array([None, 'foo', 'bar'] * 5, type=pa.string())\r\nassert array1.null_count == 5\r\narray1dict = array1.dictionary_encode()\r\nassert array1dict.null_count == 5\r\ntable = pa.Table.from_arrays([array1dict], [\"mycol\"])\r\nparquet.write_table(table, \"testtable.parquet\")\r\nmeta = parquet.read_metadata(\"testtable.parquet\")\r\nmeta.row_group(0).column(0).statistics.null_count  # RESULT: 0 (WRONG!)\n```\r\n### Correct\r\n\r\n(writes same data without dictionary encoding the Arrow array)\r\n```python\n\r\narray1 = pa.array([None, 'foo', 'bar'] * 5, type=pa.string())\r\nassert array1.null_count == 5\r\ntable = pa.Table.from_arrays([array1], [\"mycol\"])\r\nparquet.write_table(table, \"testtable.parquet\")\r\nmeta = parquet.read_metadata(\"testtable.parquet\")\r\nmeta.row_group(0).column(0).statistics.null_count  # RESULT: 5 (CORRECT)\r\n```\r\n\u00a0",
+        "created_at": "2021-04-22T18:09:53.000Z",
+        "updated_at": "2021-08-09T20:38:08.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Parquet",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-08-09T20:38:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-23T13:54:28.871Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12513?focusedCommentId=17368224) by Kirill Lykov (klykov):*\nI would like to have a look and will try to reproduce in a C++ unit test"
+        },
+        {
+            "created_at": "2021-07-02T15:12:38.122Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12513?focusedCommentId=17373588) by Kirill Lykov (klykov):*\nThis problem is only with strings and binarytype. It can be reproduced on cpp level. distinct_count is also 0"
+        },
+        {
+            "created_at": "2021-07-08T15:27:31.661Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12513?focusedCommentId=17377460) by Kirill Lykov (klykov):*\nLooks like there are different call stacks for int32 and strings.\r\nFor int32\r\ncolumn_writer.cc:1438\r\n\r\n> WriteArrowDense >WriteArrowZeroCopy >WriteBatchSpaced > WriteValuesSpaced\r\nthere we compute num_nulls: num_spaced_values - num_values;\r\nand pass the value down\r\n> UpdateSpaced > IncrementNullCount\r\n\r\n--------------\r\nwhile for string:\r\n\r\n> WriteArrow > WriteArrowDictionary \r\nthere is a suspicious TODO comment by wesm (If some dictionary values are unobserved...)\r\nhere as input we receive array and make dictionary out of it.\r\nAlso Array might have null_count != 0, dictionary will have it 0: \r\nsee https://github.com/apache/arrow/blob/master/cpp/src/parquet/column_writer.cc#L1455\r\nThis happens because in https://github.com/apache/arrow/blob/master/cpp/src/arrow/array/array_dict.cc#L111 we create array without null_count information.\r\nLater this dictionary passed down and we set null_count to 0\r\n>Update \r\n\u2013 Array values has null_count == 0\r\n> IncrementNullCount\r\n\r\n\r\nBut this is not all the differences between two call stacks.\r\nFor strings we return here \u2013 https://github.com/apache/arrow/blob/master/cpp/src/parquet/column_writer.cc#L1303\r\nSo the value stored in new_null_count is lost. "
+        },
+        {
+            "created_at": "2021-07-08T16:08:37.260Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12513?focusedCommentId=17377482) by Micah Kornfield (emkornfield):*\nI think this is exactly a problem with the comment left by Wes.\u00a0 In the Python example I would guess the dictionary array has zero nulls?"
+        },
+        {
+            "created_at": "2021-07-08T16:28:38.579Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12513?focusedCommentId=17377493) by Wes McKinney (wesm):*\nI agree that definitely we should compute the accurate statistics given the observed dictionary values and account for the nulls (if any) in the dictionary indices. This was an oversight on my part (the fact that a 0 null count would be written when using the dictionary values to compute the statistics) "
+        },
+        {
+            "created_at": "2021-07-08T20:04:34.799Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12513?focusedCommentId=17377579) by Weston Pace (westonpace):*\nThe comment is in the right spot but it's a little unclear what it is saying.\r\n\r\nAt the risk of being redundant, I'll add some explanation.\u00a0\u00a0 There are two ways that a null can be stored in a dictionary encoded array.\u00a0 Keep in mind that every dictionary contains two arrays.\u00a0 There is a long array of indices and a short array of values (usually called the \"dictionary\" but I will call it \"values\" to avoid confusion).\r\n\r\nThe first method, called \"MASK\", in arrow::compute::DictionaryEncodeOptions is done by storing a 0 in the validity bit of the long indices array:\r\n```java\n\r\nauto indices = ArrayFromJSON(int32(), \"[3, 0, 0, 0, null, null, 3, 0, null, 3, 0, null]\");\r\nauto values = ArrayFromJSON(int64(), \"[10, 20, 30, 40]\");\r\n```\r\nThe second method, called \"ENCODE\" in arrow::compute::DictionaryEncodeOptions is done by storing a 0 in the values array and then referencing the index of that null value.\r\n```java\n\r\nauto indices = ArrayFromJSON(int32(), \"[3, 0, 0, 0, 1, 1, 3, 0, 1, 3, 0, 1]\");\r\nauto values = ArrayFromJSON(int64(), \"[10, null, 30, 40]\");\r\n```\r\nBoth of these represent the (plain encoded) array:\r\n```java\n\r\nArrayFromJSON(int64(), \"[40, 10, 10, 10, null, null, 40, 10, null, 40, 10, null]\");\r\n```\r\nThe two approaches can also be mixed.\u00a0\u00a0 At one point in time (and I'm pretty sure it is still true today) an array created with ENCODE will not report a correct null count because the null count does not currently consider anything other than how many bits are masked.\r\n\r\nCurrently arrow will prevent you from trying to write parquet data unless the dictionary is fully MASKed (that is, there are no nulls in the values array) (<https://github.com/apache/arrow/blob/81ff679c47754692224f655dab32cc0936bb5f55/cpp/src/parquet/arrow/path_internal.cc#L753)>\r\n\r\n\u00a0\r\n\r\nSo, when actually writing an Arrow dictionary array to parquet it first splits the array into its two components (the indices array and the values array).\u00a0 It is then using the values array to update statistics.\u00a0 This makes sense for min/max.\u00a0 However, for null, we have already ensured that the values array does not have a null in it.\r\n\r\n\u00a0\r\n\r\nSo we should be using the indices array for the null count.\u00a0 Given that we know the values array does not have null we can safely assume that all nulls are stored in the indices array and that should always give us the correct value.\u00a0 I can take a stab at a fix if no one else is planning on it."
+        },
+        {
+            "created_at": "2021-07-08T20:12:59.134Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12513?focusedCommentId=17377582) by Micah Kornfield (emkornfield):*\n>\u00a0This makes sense for min/max.\u00a0\r\n\r\nThis doesn't necessarily make sense even for dictionary values.\u00a0 It only makes sense if all values in the dictionary are referenced.\u00a0 Otherwise the bounds still ends up being loose (there is was an open bug on this).\u00a0\u00a0"
+        },
+        {
+            "created_at": "2021-07-08T20:54:40.295Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12513?focusedCommentId=17377589) by Weston Pace (westonpace):*\nAh, I see your point Micah.\u00a0 Now Wes' comment is clear to me.\u00a0 Is there a performance concern for extracting the \"referenced\" / \"observed\" values?\u00a0 Or is it simply a \"to be implemented\"?"
+        },
+        {
+            "created_at": "2021-07-09T07:39:31.601Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12513?focusedCommentId=17377891) by Kirill Lykov (klykov):*\nThanks for detailed explanation, I didn't get that there are two ways of storing null_count from the code.\r\n`[~westonpace]` \u00a0> I can take a stab at a fix if no one else is planning on it.\r\nPlease go ahead, I've unassigned it, I think it will require too much guidance for me to fix it."
+        },
+        {
+            "created_at": "2021-07-09T15:52:50.973Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12513?focusedCommentId=17378140) by Micah Kornfield (emkornfield):*\n`[~westonpace]` \u00a0my thinking here is it would be better to have accurate statistics rather then any performance gains.\u00a0 If we ever want to support parquet indexes we will need to visit each value per page anyways."
+        },
+        {
+            "created_at": "2021-08-09T20:38:08.670Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12513?focusedCommentId=17396274) by Weston Pace (westonpace):*\nIssue resolved by pull request 10729\n<https://github.com/apache/arrow/pull/10729>"
+        }
+    ]
+}

@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[C++] xxhash not installed into dist/lib/include when building C++",
+        "body": "***Note**: This issue was originally created as [ARROW-16609](https://issues.apache.org/jira/browse/ARROW-16609). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nMy C++ build setup doesn\u2019t install `dist/include/arrow/vendored/xxhash/`\u00a0but only\u00a0`dist/include/arrow/vendored/xxhash.h`. The last time the module was installed was in november 2021.\r\n\r\nAs\u00a0`arrow/python/arrow_to_pandas.cc`\u00a0includes\u00a0`arrow/util/hashing.h`\u00a0-> \u00a0`arrow/vendored/xxhash.h`\u00a0 ->\u00a0`arrow/vendored/xxhash/xxhash.h` this module is needed to try to build Python C++ API separately from C++ (ARROW-16340).",
+        "created_at": "2022-05-18T18:24:06.000Z",
+        "updated_at": "2022-06-08T14:10:45.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2022-06-08T01:12:05.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-05-19T04:29:36.167Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16609?focusedCommentId=17539285) by Alenka Frim (alenka):*\nAlso <https://github.com/apache/arrow/blob/master/cpp/src/arrow/util/int_util_internal.h> would be needed in `dist/include` for [`arrow/python/python_to_arrow.cc:44`](https://github.com/apache/arrow/blob/1cdedc4cbf0709ce440d69242afd47474a7148c7/cpp/src/arrow/python/python_to_arrow.cc#L44) and `arrow/vendored/portable-snippets` for `arrow/util/int_util_internal.h:30`."
+        },
+        {
+            "created_at": "2022-05-19T18:58:02.627Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16609?focusedCommentId=17539746) by Weston Pace (westonpace):*\n`arrow/util/hashing.h` (which should probably be named `arrow/util/hashing_internal.h`) is an internal header file.  In addition, `int_util_internal.h` is an internal header file.  These header files are intentionally not installed and they should not be imported outside of their components.\r\n\r\nSo I think we have a few potential paths here:\r\n \\* We could decide that we really do want these things to be part of our public API\r\n \\* We could clone these dependencies into pyarrow so that pyarrow also has to keep a copy of these vendored files\r\n \\* We could wrap the vendored capabilities in some kind of Arrow API or find some way to mask them\r\n\r\nCould you maybe pinpoint where these internal header files are used in `python_to_arrow.cc`"
+        },
+        {
+            "created_at": "2022-05-19T19:16:53.793Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16609?focusedCommentId=17539755) by Alenka Frim (alenka):*\nThank you for the comment Weston!\r\n\r\nOh, I see. To make Python build separately for https://issues.apache.org/jira/browse/ARROW-16340 the second option would fit well, that is we could clone the dependencies like we do with `cpp/cmake_modules`.\r\n\r\nThese header files are used in `python_to_arrow.cc:`\u00a0\r\n\r\n<https://github.com/apache/arrow/blob/1cdedc4cbf0709ce440d69242afd47474a7148c7/cpp/src/arrow/python/python_to_arrow.cc#L44>\r\n\r\nand in `arrow_to_pandas.cc:`\r\n\r\n<https://github.com/apache/arrow/blob/c5a175dd61b3fa94a38b918c1cc3d7b4ffaefba7/cpp/src/arrow/python/arrow_to_pandas.cc#L41>\u00a0"
+        },
+        {
+            "created_at": "2022-05-25T10:25:08.427Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16609?focusedCommentId=17541953) by Alenka Frim (alenka):*\nSorry for not presenting a better usage of the internal header files. Digging into the files I see that:\r\n \\* `python_to_arrow.cc` uses next members of `arrow::internal` (from `{}int_util_internal.h{`});\r\n \\*\\* `MultiplyWithOverflow`\r\n \\*\\* `AddWithOverflow`\r\n \\*\\* `SubtractWithOverflow`\r\n\r\n \\* `arrow_to_pandas.cc` uses next member of `arrow::internal` (from `{}hashing.h{`}):\r\n \\*\\* `ScalarMemoTable`"
+        },
+        {
+            "created_at": "2022-05-25T17:07:40.602Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16609?focusedCommentId=17542118) by Weston Pace (westonpace):*\nI think `[~apitrou]`'s output would be valuable here.  I believe he is out until next week however.\r\n\r\nMy two cents, fwiw, is:\r\n\r\n`MultiplyWithOverflow/AddWithOverflow/SubtractWithOverflow` - These are shallow wrappers around a vendored version of https://github.com/nemequ/portable-snippets/tree/master/safe-math  .  I do not think it makes sense to expose these.  Instead I think it would make sense for pyarrow to vendor this library on its own (or to find some spot to stick the vendored library in the repo so that both libs can use it).\r\n\r\n`ScalarMemoTable` - This is a more complex utility that would not be very easy to replicate.  I think we should consider refactoring `arrow::internal::ScalarMemoTable` into a public header file (and probably renaming to `arrow::ScalarMemoTable`)."
+        },
+        {
+            "created_at": "2022-05-30T14:37:58.865Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16609?focusedCommentId=17543976) by Antoine Pitrou (apitrou):*\nI think that pragmatically it's ok to start installing `xxhash` and the `safe-math` snippets.\r\n\r\nAlso, we can rename `int_util_internal.h` to `int_util_overflow.h` or something similar, to also install it."
+        },
+        {
+            "created_at": "2022-06-08T01:12:05.712Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16609?focusedCommentId=17551339) by Kouhei Sutou (kou):*\nIssue resolved by pull request 13282\n<https://github.com/apache/arrow/pull/13282>"
+        }
+    ]
+}

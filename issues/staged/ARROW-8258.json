@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Rust] [Parquet] ArrowReader fails on some timestamp types",
+        "body": "***Note**: This issue was originally created as [ARROW-8258](https://issues.apache.org/jira/browse/ARROW-8258). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI discovered this bug with this query\r\n```java\n\r\n> SELECT tpep_pickup_datetime FROM taxi LIMIT 1;\r\nGeneral(\"InvalidArgumentError(\\\"column types must match schema types, expected Timestamp(Microsecond, None) but found UInt64 at column index 0\\\")\") \n```\r\nThe parquet reader detects this schema when reading from the file:\r\n```java\n\r\nSchema { \r\n  fields: [\r\n    Field { name: \"tpep_pickup_datetime\", data_type: Timestamp(Microsecond, None), nullable: true, dict_id: 0, dict_is_ordered: false }\r\n  ], \r\n  metadata: {} \r\n} \n```\r\nThe struct array read from the file contains:\r\n```java\n\r\n[PrimitiveArray<UInt64>\r\n[\r\n  1567318008000000,\r\n  1567319357000000,\r\n  1567320092000000,\r\n  1567321151000000, \n```\r\n\u00a0When the Parquet arrow reader creates the record batch, the following validation logic fails:\r\n```java\n\r\nfor i in 0..columns.len() {\r\n    if columns[i].len() != len {\r\n        return Err(ArrowError::InvalidArgumentError(\r\n            \"all columns in a record batch must have the same length\".to_string(),\r\n        ));\r\n    }\r\n    if columns[i].data_type() != schema.field(i).data_type() {\r\n        return Err(ArrowError::InvalidArgumentError(format!(\r\n            \"column types must match schema types, expected {:?} but found {:?} at column index {}\",\r\n            schema.field(i).data_type(),\r\n            columns[i].data_type(),\r\n            i)));\r\n    }\r\n}\r\n \n```",
+        "created_at": "2020-03-29T17:13:34.000Z",
+        "updated_at": "2020-12-15T12:54:26.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-12-15T12:54:25.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-03-29T18:32:57.761Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8258?focusedCommentId=17070472) by Andy Grove (andygrove):*\n`[~liurenjie1024]` `[~sunchao]` I may need some help with this one."
+        },
+        {
+            "created_at": "2020-03-30T03:36:17.070Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8258?focusedCommentId=17070666) by Renjie Liu (liurenjie1024):*\nI think the root cause is here\u00a0<https://github.com/apache/arrow/blob/master/rust/parquet/src/arrow/array_reader.rs#L220>\r\n\r\nThe array reader only did conversion of data buffer, but left data type incorrect. I'll submit a PR to fix it this week."
+        },
+        {
+            "created_at": "2020-10-23T06:53:08.541Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8258?focusedCommentId=17219506) by Neville Dipale (nevi_me):*\nWe'll get this fixed as part of the Parquet <> Arrow IO work"
+        },
+        {
+            "created_at": "2020-12-15T12:53:49.161Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8258?focusedCommentId=17249667) by Neville Dipale (nevi_me):*\nI'm closing this, as the reader in the current master supports converting types correctly."
+        }
+    ]
+}

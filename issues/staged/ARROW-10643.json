@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] Pandas<->pyarrow roundtrip failing to recreate index for empty dataframe",
+        "body": "***Note**: This issue was originally created as [ARROW-10643](https://issues.apache.org/jira/browse/ARROW-10643). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFrom https://github.com/pandas-dev/pandas/issues/37897\r\n\r\nThe roundtrip of an empty pandas.DataFrame _with_ and index (so no columns, but a non-zero shape for the rows) isn't faithful:\r\n\r\n```Java\n\r\nIn [33]: df = pd.DataFrame(index=pd.RangeIndex(0, 10, 1))\r\n\r\nIn [34]: df\r\nOut[34]: \r\nEmpty DataFrame\r\nColumns: []\r\nIndex: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]\r\n\r\nIn [35]: df.shape\r\nOut[35]: (10, 0)\r\n\r\nIn [36]: table = pa.table(df)\r\n\r\nIn [37]: table.to_pandas()\r\nOut[37]: \r\nEmpty DataFrame\r\nColumns: []\r\nIndex: []\r\n\r\nIn [38]: table.to_pandas().shape\r\nOut[38]: (0, 0)\r\n```\r\n\r\nSince the pandas metadata in the Table actually have this RangeIndex information:\r\n\r\n```Java\n\r\nIn [39]: table.schema.pandas_metadata\r\nOut[39]: \r\n{'index_columns': [{'kind': 'range',\r\n   'name': None,\r\n   'start': 0,\r\n   'stop': 10,\r\n   'step': 1}],\r\n 'column_indexes': [{'name': None,\r\n   'field_name': None,\r\n   'pandas_type': 'empty',\r\n   'numpy_type': 'object',\r\n   'metadata': None}],\r\n 'columns': [],\r\n 'creator': {'library': 'pyarrow', 'version': '3.0.0.dev162+g305160495'},\r\n 'pandas_version': '1.2.0.dev0+1225.g91f5bfcdc4'}\r\n```\r\n\r\nwe should in principle be able to correctly roundtrip this case.",
+        "created_at": "2020-11-18T13:48:24.000Z",
+        "updated_at": "2022-02-07T19:02:19.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-02-07T16:09:36.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-01-05T09:51:46.143Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10643?focusedCommentId=17469158) by Alenka Frim (alenka):*\nWhen trying out other types of indexes for empty pandas roundtrip I bumped into a different error.\r\n\r\nIn `_table_to_blocks` (pandas_compat.py) the input `extension_columns` should be equal to {} for an empty table but is equal to {None: interval[int64, right]} for `pd.interval_range` and so an error is triggered as None can not be encoded. Same happens for `pd.PeriodIndex`.\r\n\r\nExample:\r\n```python\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\n\r\ndf = pd.DataFrame(index=pd.interval_range(start=0, end=5))\r\ntable = pa.table(df)\r\ntable.to_pandas().shape\r\n```\r\nError:\r\n```python\n\r\nTypeError                                 Traceback (most recent call last)\r\n/var/folders/gw/q7wqd4tx18n_9t4kbkd0bj1m0000gn/T/ipykernel_13963/1439451337.py in <module>\r\n      1 df5 = pd.DataFrame(index=pd.PeriodIndex(year=[2000, 2002], quarter=[1, 3]))\r\n      2 table5 = pa.table(df5)\r\n----> 3 table5.to_pandas().shape\r\n\r\n~/repos/arrow/python/pyarrow/array.pxi in pyarrow.lib._PandasConvertible.to_pandas()\r\n    764             self_destruct=self_destruct\r\n    765         )\r\n--> 766         return self._to_pandas(options, categories=categories,\r\n    767                                ignore_metadata=ignore_metadata,\r\n    768                                types_mapper=types_mapper)\r\n\r\n~/repos/arrow/python/pyarrow/table.pxi in pyarrow.lib.Table._to_pandas()\r\n   1819                    types_mapper=None):\r\n   1820         from pyarrow.pandas_compat import table_to_blockmanager\r\n-> 1821         mgr = table_to_blockmanager(\r\n   1822             options, self, categories,\r\n   1823             ignore_metadata=ignore_metadata,\r\n\r\n~/repos/arrow/python/pyarrow/pandas_compat.py in table_to_blockmanager(options, table, categories, ignore_metadata, types_mapper)\r\n    787     _check_data_column_metadata_consistency(all_columns)\r\n    788     columns = _deserialize_column_index(table, all_columns, column_indexes)\r\n--> 789     blocks = _table_to_blocks(options, table, categories, ext_columns_dtypes)\r\n    790 \r\n    791     axes = [columns, index]\r\n\r\n~/repos/arrow/python/pyarrow/pandas_compat.py in _table_to_blocks(options, block_table, categories, extension_columns)\r\n   1133     # Convert an arrow table to Block from the internal pandas API\r\n   1134     columns = block_table.column_names\r\n-> 1135     result = pa.lib.table_to_blocks(options, block_table, categories,\r\n   1136                                     list(extension_columns.keys()))\r\n   1137     return [_reconstruct_block(item, columns, extension_columns)\r\n\r\n~/repos/arrow/python/pyarrow/table.pxi in pyarrow.lib.table_to_blocks()\r\n   1215         c_options.categorical_columns = {tobytes(cat) for cat in categories}\r\n   1216     if extension_columns is not None:\r\n-> 1217         c_options.extension_columns = {tobytes(col)\r\n   1218                                        for col in extension_columns}\r\n   1219 \r\n\r\n~/repos/arrow/python/pyarrow/lib.cpython-39-darwin.so in set.from_py.__pyx_convert_unordered_set_from_py_std_3a__3a_string()\r\n\r\n~/repos/arrow/python/pyarrow/lib.cpython-39-darwin.so in string.from_py.__pyx_convert_string_from_py_std__in_string()\r\n\r\nTypeError: expected bytes, NoneType found\r\n```\r\nI will create a separate issue for this."
+        },
+        {
+            "created_at": "2022-01-06T11:02:08.506Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10643?focusedCommentId=17469850) by Alenka Frim (alenka):*\nCreated issue for the error when using pd.interval_range index: https://issues.apache.org/jira/browse/ARROW-15253"
+        },
+        {
+            "created_at": "2022-01-18T08:37:18.929Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10643?focusedCommentId=17477663) by Joris Van den Bossche (jorisvandenbossche):*\nIssue resolved by pull request 12081\n<https://github.com/apache/arrow/pull/12081>"
+        },
+        {
+            "created_at": "2022-01-19T17:20:32.207Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10643?focusedCommentId=17478830) by Joris Van den Bossche (jorisvandenbossche):*\nReopening this issue, see https://github.com/apache/arrow/pull/12189"
+        },
+        {
+            "created_at": "2022-02-07T16:09:36.601Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10643?focusedCommentId=17488221) by Joris Van den Bossche (jorisvandenbossche):*\nIssue resolved by pull request 12311\n<https://github.com/apache/arrow/pull/12311>"
+        }
+    ]
+}

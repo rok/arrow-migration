@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[JS] Error reading dictionary-encoded integration test files",
+        "body": "***Note**: This issue was originally created as [ARROW-1693](https://issues.apache.org/jira/browse/ARROW-1693). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe JS implementation crashes when reading the dictionary test case from the integration tests.\r\n\r\nTo replicate, first generate the test files with java and cpp impls:\r\n```Java\n\r\n$ cd ${ARROW_HOME}/integration/\r\n$ python -c 'from integration_test import generate_dictionary_case; generate_dictionary_case().write(\"dictionary.json\")'\r\n$ ../cpp/debug/debug/json-integration-test --integration --json=dictionary.json --arrow=dictionary-cpp.arrow --mode=JSON_TO_ARROW\r\n$ java -cp ../java/tools/target/arrow-tools-0.8.0-SNAPSHOT-jar-with-dependencies.jar org.apache.arrow.tools.Integration -c JSON_TO_ARROW -a dictionary-java.arrow -j dictionary.json\r\n```\r\n\r\nAttempt to read the files with the JS impl:\r\n```Java\n\r\n$ cd ${ARROW_HOME}/js/\r\n$ ./bin/arrow2csv.js -s dict1_0 -f ../integration/dictionary-{java,cpp}.arrow\r\n```\r\n\r\nBoth files result in an error for me on [a8f51858](https://github.com/apache/arrow/commit/a8f518588fda471b2e3cc8e0f0064e7c4bb99899):\r\n`TypeError: Cannot read property 'buffer' of undefined`",
+        "created_at": "2017-10-20T14:22:01.000Z",
+        "updated_at": "2017-11-20T19:32:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: JavaScript",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-11-20T14:23:05.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-10-20T14:22:56.032Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1693?focusedCommentId=16212697) by Brian Hulette (bhulette):*\nPretty sure this is related to the vector layout representing the index vs. the dictionary data"
+        },
+        {
+            "created_at": "2017-10-20T17:03:53.598Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1693?focusedCommentId=16212893) by Wes McKinney (wesm):*\nThis was fixed in the C++ implementation in ARROW-1363 https://github.com/apache/arrow/commit/0ced74e1e39587c0ee10ac5979fefbaac97446f5"
+        },
+        {
+            "created_at": "2017-10-20T20:16:40.292Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1693?focusedCommentId=16213165) by Brian Hulette (bhulette):*\nARROW-1698 is only part of the problem. After fixing that bug, we can successfully read dictionary-java.arrow, but not dictionary-cpp.arrow. It looks like there's actually a difference in the schema between these two files: dictionary-java.arrow has 3 items in dict1_0's buffer layout (validity, offset, data - reflects the value type), but dictionary-cpp.arrow has 2 (validity, data - reflects the index type).\r\n\r\n`[~wesmckinn]` Is this a bug in the java writer?"
+        },
+        {
+            "created_at": "2017-10-20T20:40:25.742Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1693?focusedCommentId=16213199) by Wes McKinney (wesm):*\nThat's interesting. I'm surprised that the integration tests work \u2013 it must be that Java is not using the buffer layout information. Frankly, having the JS reader be so sensitive to the buffer layout is a source of brittleness. We do not use this data in C++, it is there for informational purposes. \r\n\r\nBecause the buffer structure of record batches will contain only the indexes, I think using the index buffer layout is the \"right\" answer, though nowhere are we encoding the buffer layout for the dictionary values. So this is a deficiency in the Arrow format that we may contemplate fixing. "
+        },
+        {
+            "created_at": "2017-10-20T21:09:41.131Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1693?focusedCommentId=16213247) by Paul Taylor (paul.e.taylor):*\n`[~bhulette]` thanks I can dig into this too. FYI there's a workaround for Dictionary vectors written before ARROW-1363 was fixed [here](https://github.com/apache/arrow/blob/a8f518588fda471b2e3cc8e0f0064e7c4bb99899/js/src/reader/vector.ts#L64) and [here](https://github.com/apache/arrow/blob/a8f518588fda471b2e3cc8e0f0064e7c4bb99899/js/src/reader/vector.ts#L108).\r\n\r\nIf the Java writer encodes a data buffer that isn't the offsets, that totally invalidates this assumption in the comment under line 108:\r\n\r\n> ...if we're parsing an Arrow file written by a version of the library published before ARROW-1363 was fixed, the IntVector's data buffer will be null, and the offset buffer will be the actual data. If data is null, it's safe to assume the offset buffer is the data, because IntVectors don't have offsets."
+        },
+        {
+            "created_at": "2017-10-20T21:29:45.842Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1693?focusedCommentId=16213275) by Brian Hulette (bhulette):*\n[~paul.e.taylor] feel free to dig into this, I'm wrapping up the ARROW-1698 PR and then I probably won't get to it any more over the weekend."
+        },
+        {
+            "created_at": "2017-11-03T00:05:03.295Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1693?focusedCommentId=16236855) by Paul Taylor (paul.e.taylor):*\n`[~wesmckinn]` digging into this now, yeah it looks like the the DictionaryBatch UTF8Vector field layout doesn't include the offsets buffer. Sounds like I should get those integration tests up and running.\r\n\r\nI wanna offer some push back on your comment about brittleness though. Maybe I'm alone on this, but seems like a cross-platform ipc format should strictly enforce its own spec \u2013 anything less and end up with a bunch of maybe-compatible implementations, right?"
+        },
+        {
+            "created_at": "2017-11-03T00:57:15.598Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1693?focusedCommentId=16236902) by Wes McKinney (wesm):*\nI think the idea of including the buffer layouts was hypothetically to permit an implementation to, say, omit the validity bitmap buffer without consequences. In practice, both the Java and C++ implementations are presuming to be sent the same buffer layout that the emit \u2013 i.e. with the buffers in same order (so in the case of strings, you would have validity, offsets, then data). But validating our presumptions is useful. So what we probably need to do is implement buffer layout validation in both Java and C++ so that we can assert that a sender has prepared the buffers in the way that are supported. I was wrong to call the JS implementation \"brittle\" in this regard, really it's that the more rigorous checking exposed bugs in the other implementations"
+        },
+        {
+            "created_at": "2017-11-03T01:00:04.720Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1693?focusedCommentId=16236908) by Wes McKinney (wesm):*\nSee ARROW-1362"
+        },
+        {
+            "created_at": "2017-11-08T22:08:36.800Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1693?focusedCommentId=16244812) by Jacques Nadeau (jnadeau):*\nI actually think having the vector layout was a mistake. I think we should remove it. It is a constant that is defined by the spec. We actually implemented an alternative representation internally where we skip inclusion of it because we don't want to send around information that is useless (and can be fairly substantial when talking about five record, several thousand field datasets)."
+        },
+        {
+            "created_at": "2017-11-20T14:23:05.991Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1693?focusedCommentId=16259282) by Wes McKinney (wesm):*\nIssue resolved by pull request 1294\n<https://github.com/apache/arrow/pull/1294>"
+        }
+    ]
+}

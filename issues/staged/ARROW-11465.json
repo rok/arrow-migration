@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "[C++] Parquet file writer snapshot API and proper ColumnChunk.file_path utilization",
+        "body": "***Note**: This issue was originally created as [ARROW-11465](https://issues.apache.org/jira/browse/ARROW-11465). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis is a follow up to the thread:\r\n<https://mail-archives.apache.org/mod_mbox/arrow-dev/202009.mbox/%3cCDD00783-0FFC-4934-AA24-529FB2A44D88@yahoo.com%3e>\r\n\r\nThe specific use case I am targeting is having the ability to partially read a parquet file while it's still being written to.\r\nThis is relevant for any process that is recording events over a long period of times and writing them to parquet (tracing data, logging events or any other live time series)\r\nThe solution relies on the fact that parquet specifications allows column chunk metadata to point explicitly to its location in a file which can theoretically be different from the file containing the metadata (as covered in other threads, this behavior is not fully supported by major parquet implementations).\r\nMy solution is centered around adding a method,\r\n\r\n\u00a0\r\n\r\n{{void ParquetFileWriter::Snapshot(const std::string& data_path,\r\n                                 std::shared_ptr<::arrow::io::OutputStream>& sink) }}\r\n\r\n,that writes writes the metadata for the RowGroups given so far to the\u00a0`sink`\u00a0stream and updates all the ColumnChunk metadata\u00a0`file_path`\u00a0to point to\u00a0`data_path`. This was intended as a minimalist change to\u00a0`ParquetFileWriter`\r\n\r\nOn the reading side I implemented full support for ColumnChunk.file_path by introducing\u00a0`ArrowMultiInputFile`\u00a0as an alternative to\u00a0`ArrowInputFile`\u00a0in the\u00a0`ParquetFileReader`\u00a0implementation stack. In the PR implementation one can default to the current behavior by using the\u00a0`SingleFile`\u00a0class, have full read support for multi-file parquet in line with the specification by using\u00a0`MultiReadableFile`\u00a0implementation (that captures the metafile base directory and uses it as the base directory to the ColumChunk.file_path) or one can provide a separate implementation for a non-posix file system storage.\r\n\r\nFor an example see\u00a0`write_parquet_file_with_snapshot`\u00a0function in reader-writer.cc that illustrates the snapshotting write while the\u00a0`read_whole_file`\u00a0function has been modified to read one of the snapshots (I will rollback that change and provide separate example before the merge)",
+        "created_at": "2021-02-01T22:22:50.000Z",
+        "updated_at": "2022-10-13T17:51:28.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-02T16:45:09.345Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11465?focusedCommentId=17485954) by Antoine Pitrou (apitrou):*\nSorry that no-one commented before. This is a complex issue to solve on the API side.\r\n\r\nI have trouble understanding the proposed API. Intuitively, I would expect user code to create two Parquet files explicitly: the actual data file and the metadata file.\r\n\r\nAlso, I think it would be good to start first with just the writer API, then once it gets approved submit another PR for the reader API."
+        },
+        {
+            "created_at": "2022-02-22T18:58:45.792Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11465?focusedCommentId=17496275) by Radu Teodorescu (rteodorescu):*\nHi `[~apitrou]`, my turn to apologize for the follow-up lag.\r\n\r\nThe idea is indeed to allow for separation between the metadata footer location and the actual data file\r\n\r\nI am happy to submit a separate writer API PR if that is an acceptable path forward."
+        },
+        {
+            "created_at": "2022-10-13T17:51:28.149Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11465?focusedCommentId=17617232) by Apache Arrow JIRA Bot (arrowjira):*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned per [project policy](https://arrow.apache.org/docs/dev/developers/bug_reports.html#issue-assignment). Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

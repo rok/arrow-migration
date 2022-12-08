@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[R] Add Arrow methods slice_min(), slice_max()",
+        "body": "***Note**: This issue was originally created as [ARROW-13766](https://issues.apache.org/jira/browse/ARROW-13766). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nImplement [`slice_min()` and `slice_max()`](https://dplyr.tidyverse.org/reference/slice.html)\u00a0methods for\u00a0`ArrowTabular`, `Dataset`,\u00a0and `arrow_dplyr_query`\u00a0objects.\r\n\r\nThese dplyr functions supersede the\u00a0older dplyr function [`top_n()`](https://dplyr.tidyverse.org/reference/top_n.html) which I suppose we should also consider implementing a method for.",
+        "created_at": "2021-08-26T15:31:33.000Z",
+        "updated_at": "2022-10-14T21:52:50.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-13T23:59:36.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-12-17T17:08:04.002Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13766?focusedCommentId=17461567) by Dewey Dunnington (paleolimbot):*\nSome example usage maybe useful for a test:\r\n\r\n```R\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\n\r\ndf <- tibble(a = rep(letters, 10), b = 1:260, c = 260:1)\r\n\r\ndf %>% slice_min(a, n = 5, with_ties = TRUE)\r\n#> # A tibble: 10 \u00d7 3\r\n#>    a         b     c\r\n#>    <chr> <int> <int>\r\n#>  1 a         1   260\r\n#>  2 a        27   234\r\n#>  3 a        53   208\r\n#>  4 a        79   182\r\n#>  5 a       105   156\r\n#>  6 a       131   130\r\n#>  7 a       157   104\r\n#>  8 a       183    78\r\n#>  9 a       209    52\r\n#> 10 a       235    26\r\ndf %>% slice_min(a, n = 5, with_ties = FALSE)\r\n#> # A tibble: 5 \u00d7 3\r\n#>   a         b     c\r\n#>   <chr> <int> <int>\r\n#> 1 a         1   260\r\n#> 2 a        27   234\r\n#> 3 a        53   208\r\n#> 4 a        79   182\r\n#> 5 a       105   156\r\n\r\ndf %>% slice_min(c, n = 5)\r\n#> # A tibble: 5 \u00d7 3\r\n#>   a         b     c\r\n#>   <chr> <int> <int>\r\n#> 1 z       260     1\r\n#> 2 y       259     2\r\n#> 3 x       258     3\r\n#> 4 w       257     4\r\n#> 5 v       256     5\r\ndf %>% slice_min(c, prop = 5 / 260)\r\n#> # A tibble: 5 \u00d7 3\r\n#>   a         b     c\r\n#>   <chr> <int> <int>\r\n#> 1 z       260     1\r\n#> 2 y       259     2\r\n#> 3 x       258     3\r\n#> 4 w       257     4\r\n#> 5 v       256     5\r\n```\r\n\r\n\r\n"
+        },
+        {
+            "created_at": "2021-12-17T17:21:28.050Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13766?focusedCommentId=17461577) by Dewey Dunnington (paleolimbot):*\nWithout ties this isn't bad:\r\n\r\n```R\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\n\r\ndf <- tibble(a = rep(letters, 10), b = 1:260, c = 260:1)\r\n\r\n# slice_*() without ties is easier\r\nrecord_batch(df) %>% \r\n  arrange(c) %>% head(5) %>%\r\n  collect()\r\n#> # A tibble: 5 \u00d7 3\r\n#>   a         b     c\r\n#>   <chr> <int> <int>\r\n#> 1 z       260     1\r\n#> 2 y       259     2\r\n#> 3 x       258     3\r\n#> 4 w       257     4\r\n#> 5 v       256     5\r\n\r\nrecord_batch(df) %>% \r\n  arrange(desc(c)) %>% head(5) %>%\r\n  collect()\r\n#> # A tibble: 5 \u00d7 3\r\n#>   a         b     c\r\n#>   <chr> <int> <int>\r\n#> 1 a         1   260\r\n#> 2 b         2   259\r\n#> 3 c         3   258\r\n#> 4 d         4   257\r\n#> 5 e         5   256\r\n```\r\n\r\nWith ties isn't too bad either (just needs a join):\r\n\r\n```R\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\n\r\ndf <- tibble(a = rep(letters, 10), b = 1:260, c = 260:1)\r\n\r\n# slice_*() with ties needs a join\r\nrb <-  record_batch(df)\r\nrb %>% arrange(a) %>% select(a) %>% head(5) %>% distinct() %>% left_join(rb) %>% collect()\r\n#> # A tibble: 10 \u00d7 3\r\n#>    a         b     c\r\n#>    <chr> <int> <int>\r\n#>  1 a         1   260\r\n#>  2 a        27   234\r\n#>  3 a        53   208\r\n#>  4 a        79   182\r\n#>  5 a       105   156\r\n#>  6 a       131   130\r\n#>  7 a       157   104\r\n#>  8 a       183    78\r\n#>  9 a       209    52\r\n#> 10 a       235    26\r\n```\r\n\r\n"
+        },
+        {
+            "created_at": "2022-10-13T23:59:36.857Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13766?focusedCommentId=17617359) by Neal Richardson (npr):*\nIssue resolved by pull request 14361\n<https://github.com/apache/arrow/pull/14361>"
+        }
+    ]
+}

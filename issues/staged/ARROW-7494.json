@@ -1,0 +1,80 @@
+{
+    "issue": {
+        "title": "[Java] Remove reader index and writer index from ArrowBuf",
+        "body": "***Note**: This issue was originally created as [ARROW-7494](https://issues.apache.org/jira/browse/ARROW-7494). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nReader and writer index and functionality doesn't belong on a chunk of memory and is due to inheritance from ByteBuf. As part of removing ByteBuf inheritance, we should also remove reader and writer indexes from ArrowBuf functionality. It wastes heap memory for rare utility. In general, a slice can be used instead of a reader/writer index pattern.",
+        "created_at": "2020-01-03T23:11:36.000Z",
+        "updated_at": "2022-07-03T19:15:07.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: task"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-01-06T09:56:43.301Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7494?focusedCommentId=17008693) by Ji Liu (tianchen92):*\n<q>In general, a slice can be used instead of a reader/writer index pattern.</q>\r\n\r\n`[~jnadeau]` , I don't quite understand, dose this mean hold a slice `ArrowBuf`\u00a0in `ArrowBuf`\u00a0to replace reader/writer index? doesn't this introduce more heap memory? Could you please explain a little more, thanks a lot!"
+        },
+        {
+            "created_at": "2020-01-06T21:01:40.675Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7494?focusedCommentId=17009168) by Jacques Nadeau (jnadeau):*\nWhat I'm saying: \r\n\r\nReader and writer index are typically used to decide what portion of data needs to be written to a socket. For example, if you have a buffer that is 10 bytes but you only want to write bytes 2..4 to the buffer, you'll need to set the reader index to two and the writer index to 4. By so doing, you can then hand that buffer to someone and they will only write the two selected bytes.\r\n\r\nIn the case of ArrowBuf, we have the concept of slices. As such, in cases where we're currently relying on reader/writer index to write the correct bytes to an io location, we should change the code to get the appropriate slice of the underlying buffer instead and simply write the whole thing. For example, I believe the getBuffers() has the behavior of changing reader/writer indexes to solve this. For example, if you do getBuffers() on a valuecount of 1 for an int vector, I believe we set the writer index to 4 bytes but return the whole large buffer. Instead, here we want to do the slice of bytes 0..4.\r\n"
+        },
+        {
+            "created_at": "2020-01-07T12:49:28.706Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7494?focusedCommentId=17009688) by Ji Liu (tianchen92):*\nThanks for your clarification, I opened a PR, please help take a look, thanks!"
+        },
+        {
+            "created_at": "2020-01-10T03:27:09.823Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7494?focusedCommentId=17012422) by Ji Liu (tianchen92):*\nI met a Gandiva java test fail problem in this issue and I am not familiar with this. Could you please give a detailed guidance for how to run gandiva java test locally?\u00a0:)\u00a0thanks! `[~pravindra]`"
+        },
+        {
+            "created_at": "2020-07-14T00:20:18.860Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7494?focusedCommentId=17157048) by Wes McKinney (wesm):*\nWe have to move this out of 1.0.0"
+        },
+        {
+            "created_at": "2020-10-07T22:50:02.506Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7494?focusedCommentId=17209913) by Krisztian Szucs (kszucs):*\nIt's not likely to land in 2.0 so postponing."
+        },
+        {
+            "created_at": "2021-01-13T19:48:51.473Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7494?focusedCommentId=17264388) by Neal Richardson (npr):*\nStill valid? The pull request is very stale and has lots of conflicts with master."
+        },
+        {
+            "created_at": "2021-01-13T22:46:54.969Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7494?focusedCommentId=17264471) by Jacques Nadeau (jnadeau):*\nYes, this should still be done. It's a remnant of the old coupling with Netty that should be corrected."
+        },
+        {
+            "created_at": "2021-03-26T18:57:58.983Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7494?focusedCommentId=17309660) by Bob Tinsman (bobtinsman):*\nI was looking for Java issues and this one showed up. I can see that there was a lot of work done on it by `[~tianchen92]` but the activity has petered out, so I can take it if no one objects.\r\n\r\nI've reviewed the previous work (including the related ARROW-7539) and decided to start from scratch. I've been experimenting locally but will put my work into a PR soon so I can get people to review it.\r\n\r\nI agree with `[~jnadeau]` that there is leftover stuff from an old implementation--ArrowBuf is overloaded. It's a tricky thing to factor out the r/w indices, but I think it can be done by looking at the usage patterns. Here's a rough summary (feel free to clarify or correct any mistakes):\r\n \\* The main pattern is to allocate ArrowBufs and slice them up into the buffers used by various vector implementations. This doesn't really require the indices.\r\n \\* Some code (the JsonFileReader for example) uses the various byte-twiddling methods (like writeByte(), writeShort(), etc.) that make use of the indices.\r\n \\* Some core buffer management code like BufferLedger sets the indices; I assume this is to reset them to known values before handing out ArrowBufs.\r\n\r\nPossible approaches:\r\n \\* The original approach: rip out the indices and methods that use them, then change all the code using those methods to use equivalent logic\r\n \\*\\* It's a lot of changes, and difficult to get them all right.\r\n \\*\\* It could be a tough merge to other Arrow forks or other projects\r\n \\* Minimal approach that saves memory: put the r/w indices in a helper object that is allocated as needed; otherwise, no change to ArrowBuf methods\r\n \\*\\* Pro: save 12 bytes in ArrowBuf (4 byte object ref vs. 2 long indices)\r\n \\*\\* Pro: pretty safe, incremental refactoring that you could build on\r\n \\*\\* Con: haven't really cleaned up ArrowBuf\r\n \\* Factor out superclass (BaseArrowBuf) without indices, replace use of ArrowBuf with BaseArrowBuf where possible (I'm trying this one now)\r\n \\*\\* Pro: ArrowBuf doesn't change\r\n \\*\\* Con: The replacement of ArrowBuf touches a lot of code\r\n \\*\\* Con: Unclear how to change some of the core buffer management code like BufferLedger, which sets indices\r\n \\* Push indices and related methods into subclass (IndexedArrowBuf)\r\n \\*\\* Pro: clean up ArrowBuf, the original goal\r\n \\*\\* Pro: code that still needs old methods can work on a subclass instance\r\n \\*\\* Pro: core buffer logic still uses ArrowBuf\r\n \\*\\* Con: have to make sure semantics of setting the indices in core buffer logic are still the same"
+        },
+        {
+            "created_at": "2021-03-26T23:33:09.106Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7494?focusedCommentId=17309803) by Micah Kornfield (emkornfield):*\nI think everything but the original approach don't really get at the core issue.\u00a0 Note we probably at least need size (data in buffer) and capacity values (largest data that can be stored) but I could be wrong about this.\r\n\r\n\u00a0\r\n\r\nI think the original approach can be done incrementally.\u00a0 i.e. we can make targetted changes to get rid the uses of read/writer indexes (maybe per maven module, and for vector split it further into individual java packages)."
+        },
+        {
+            "created_at": "2021-03-26T23:36:15.415Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7494?focusedCommentId=17309807) by Micah Kornfield (emkornfield):*\nAlso there has been some relevant discussion on the ML:\u00a0http://mail-archives.apache.org/mod_mbox/arrow-dev/202008.mbox/%3CCAC__DOAsuxUpon1bpxANGTC_Ed8h_nYUt5PHr1t-OWqHp0NFGg@mail.gmail.com%3E"
+        },
+        {
+            "created_at": "2021-03-27T01:38:03.879Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7494?focusedCommentId=17309832) by Bob Tinsman (bobtinsman):*\nGreat, thanks for that feedback. While perusing the two pull requests, I did see the issue with the switched buffers, but that ML link gives me some extra info.\r\n\r\nI think what you're saying is to keep to the described goal of trimming down ArrowBuf to a more focused class (\"a chunk of memory\"), and I think my last approach would get most of the way there. The code that would use the proposed IndexedArrowBuf is not a lot; so once I get to that point, I could just use ArrowBuf."
+        },
+        {
+            "created_at": "2021-03-27T01:58:19.801Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7494?focusedCommentId=17309839) by Micah Kornfield (emkornfield):*\nI guess, I'm not sure the value of a subclass, versus a first class concept that has reader/writer indices that is a facade on top of a delegate ArrowBuf.\u00a0 If we end up needed to down-cast places or change APIs it seems like it defeats the goal."
+        },
+        {
+            "created_at": "2021-07-29T21:56:04.181Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7494?focusedCommentId=17390173) by Jacques Nadeau (jnadeau):*\n> Possible approaches: 1..2..3..4\r\n\r\nThanks `[~bobtinsman]` for looking at this.\r\n\r\nI continue to believe that #1 is the best approach. I don't see the changes as excessively complex or risky. The few places where someone wants something indexed should be able to create a composite object to achieve that without messing with the core library.  From my pov, ArrowBuf is too fundamental in the library to have excessive additional methods and we should avoid object state that is outside the design goals. I was the one who initially built ArrowBuf as a subclass ByteBuf from Netty. It was a mistake and we should try to clean up any legacy crufty-ness that caused. The idea with ArrowBuf is to be as close to a lightweight chunk of memory as possible thus the drive towards a tuple of [address, length, release object address] being the core data structure. In general, I also recommend maintaining ArrowBuf as a final class to avoid the potential of getting into performance impacting-specializations when people start creating multiple subclasses. Use in this way allows direct references in the ValueVector classes to keep the indirection to a minimum.\r\n\r\nWRT to the index use in buffer management code: this is code that exists for legacy reasons, primarily due to how Dremio was originally built using Arrow. It would be good to just clean that stuff up and constraining specialized (read weird) behavior in those systems as opposed to having it bleed into everyone's use of the library.\r\n\r\n"
+        },
+        {
+            "created_at": "2022-06-29T16:57:06.842Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7494?focusedCommentId=17560378) by Antoine Pitrou (apitrou):*\nIs this issue still valid? cc `[~dsusanibara]` \u00a0 `[~ljw1001]` \u00a0"
+        },
+        {
+            "created_at": "2022-07-03T19:15:07.306Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7494?focusedCommentId=17561933) by Micah Kornfield (emkornfield):*\nIt still seems like a valid improvement to me, but it has proved to be a little challenging in general."
+        }
+    ]
+}

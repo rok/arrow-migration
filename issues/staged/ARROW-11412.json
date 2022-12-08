@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Python] Expressions not working with logical boolean operators  (and, or, not)",
+        "body": "***Note**: This issue was originally created as [ARROW-11412](https://issues.apache.org/jira/browse/ARROW-11412). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThere's a problem with boolean \"and\", \"or\" and \"not\" expressions when creating them in python (or I'm doing something completely stupid).\r\n\r\n\u00a0\r\n```java\n\r\n>>> import pyarrow\r\n>>> pyarrow.__version__\r\n'3.0.0'\r\n>>> import pyarrow.dataset as ds\r\n>>> ds. scalar(False) and ds.scalar(True) # <--- I expect false\r\n<pyarrow.dataset.Expression true>\r\n>>> ds.scalar(True) and ds.scalar(False) # this works\r\n<pyarrow.dataset.Expression false>\r\n\r\n>>> ds.scalar(True) or ds.scalar(False) # this works\r\n<pyarrow.dataset.Expression true>\r\n>>> ds.scalar(False) or ds.scalar(True) # <--- I expect true\r\n<pyarrow.dataset.Expression false>\r\n\r\n>>> not ds.scalar(True)   # this works                                                                                                                                                                                                  \r\nFalse                                                                                                                                                                                                                       \r\n>>> not ds.scalar(False)      <--- I expect true                                                                                                                                                                                              \r\nFalse  \r\n```\r\nI tried to figure out what goes wrong here, but there are no obvious problems in the python code, same for C++ (but I didn't quite understand everything of it yet).\r\n\r\n\u00a0\r\n\r\nThis happens with pyarrow3 and pyarrow2\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2021-01-28T06:25:05.000Z",
+        "updated_at": "2021-02-05T16:27:33.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-02-05T16:26:48.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-01-28T08:22:21.246Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11412?focusedCommentId=17273407) by Joris Van den Bossche (jorisvandenbossche):*\n`[~romankarlstetter]` Thanks for the report!\r\n\r\nSo using `&` instead of `and` does work (and the same for `|` instead of `or`, and `~` instead of `not`):\r\n\r\n```Java\n\r\nIn [10]: ds.scalar(False) & ds.scalar(True)\r\nOut[10]: <pyarrow.dataset.Expression (false and true)>\r\n```\r\n\r\n(note it gives \"False and True\", because the expression is only captured and not directly simplified)\r\n\r\nNow, the reason for the unexpected results is that we don't control the behaviour of `and` and `or` (Python let's you override & and | with bitwise `\\_\\_and\\_\\_` and `\\_\\_or\\_\\_` operators). So it is using \"plain\" Python logic for the `and` and `or` operators. In which case it looks at the \"truthiness\" of the object (`bool(..)`, which _can_ be overriden with `\\_\\_bool\\_\\_`). And because we currently don't override this, each expression (also the \"False\" expression) simply is seen as \"true\". \r\n\r\nAll the example return values you show above follow from that. For example in `ds.scalar(False) or ds.scalar(True)`, Python will first check if the left value is \"true\", if that's the case return it (`or` cuts short here without evaluating the right side), and otherwise check whether the right side value is \"true\". In our case, because `ds.scalar(False)`  is \"true\", that is simply returned. You can observe something similar by doing `2 or 3`, which will return 2 because it is a \"truthy\" value.  \r\nSomething similar can be explained for the other examples (also the ones with the \"expected\" result are actually not fully correct, e.g. `not ds.scalar(True)` no longer returns an expression, which is not what we would ideally want). \r\n\r\nNow, we are limited here to what Python let's us customize. So I don't think we are able to fully get `and`, `or` and `not` working as we would like. The better option might be to raise an error in `\\_\\_bool\\_\\_`, with an informative error message to avoid that people run into this trap (similarly as eg numpy arrays also raise in `\\_\\_bool\\_\\_`, try eg `not np.array([1, 2])`)"
+        },
+        {
+            "created_at": "2021-01-28T08:29:15.231Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11412?focusedCommentId=17273410) by Roman Karlstetter (romankarlstetter):*\nFirst of all, thanks for the fast response!\r\n\r\nRaising an error with a descriptive message might indeed be helpful. Furthermore, easy examples of such expressions in the documentation (I found no real examples for that) could make the whole idea of how to write such expressions more clear."
+        },
+        {
+            "created_at": "2021-02-05T16:25:14.258Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11412?focusedCommentId=17279785) by Joris Van den Bossche (jorisvandenbossche):*\nIssue resolved by pull request 9351\n<https://github.com/apache/arrow/pull/9351>"
+        },
+        {
+            "created_at": "2021-02-05T16:26:48.708Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11412?focusedCommentId=17279786) by Joris Van den Bossche (jorisvandenbossche):*\nIssue resolved by pull request 9352\n<https://github.com/apache/arrow/pull/9352>"
+        }
+    ]
+}

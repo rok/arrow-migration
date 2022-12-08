@@ -1,0 +1,42 @@
+{
+    "issue": {
+        "title": "[Python][C++] Possible Memory Leak in RecordBatchStreamWriter and RecordBatchFileWriter",
+        "body": "***Note**: This issue was originally created as [ARROW-10417](https://issues.apache.org/jira/browse/ARROW-10417). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThere might be a memory leak in the `RecordBatchStreamWriter`. The memory resources were not released. It always hit the memory limit and started doing virtual memory swapping. See the picture below:\r\n\r\n![Screen Shot 2020-10-28 at 9.43.32 PM.png](https://issues.apache.org/jira/secure/attachment/13014324/Screen+Shot+2020-10-28+at+9.43.32+PM.png)\r\n\r\nThis was the code:\r\n```python\n\r\nimport tempfile\r\nimport os\r\nimport sys\r\n\r\nimport pyarrow as pa\r\n\r\nB = 1\r\nKB = 1024 * B\r\nMB = 1024 * KB\r\n\r\nschema = pa.schema(\r\n    [\r\n        pa.field(\"a_string\", pa.string()),\r\n        pa.field(\"an_int\", pa.int32()),\r\n        pa.field(\"a_float\", pa.float32()),\r\n        pa.field(\"a_list_of_floats\", pa.list_(pa.float32())),\r\n    ]\r\n)\r\n\r\nnrows_in_a_batch = 1000\r\nnbatches_in_a_table = 1000\r\n\r\ncolumn_arrays = [\r\n    [\"string\"] * nrows_in_a_batch,\r\n    [123] * nrows_in_a_batch,\r\n    [456.789] * nrows_in_a_batch,\r\n    [range(1000)] * nrows_in_a_batch,\r\n]\r\n\r\ndef main(sys_args) -> None:\r\n    batch = pa.RecordBatch.from_arrays(column_arrays, schema=schema)\r\n    table = pa.Table.from_batches([batch] * nbatches_in_a_table, schema=schema)\r\n\r\n    with tempfile.TemporaryDirectory() as tmpdir:\r\n        filename_template = \"file-{n}.arror\"\r\n        i = 0\r\n\r\n        while True:\r\n            path = os.path.join(tmpdir, filename_template.format(n=i))\r\n            i += 1\r\n\r\n            with pa.OSFile(path, \"w\") as sink:\r\n                with pa.RecordBatchStreamWriter(sink, schema) as writer:\r\n                    writer.write_table(table)\r\n                    print(f\"pa.total_allocated_bytes(): {pa.total_allocated_bytes() / MB} mb\")\r\n\r\nif __name__ == \"__main__\":\r\n    main(sys.argv[1:])\r\n```\r\nStrangely enough, printing `total_allocated_bytes`, it seemed normal.\r\n```python\n\r\npa.total_allocated_bytes(): 3.95556640625 mb\r\npa.total_allocated_bytes(): 3.95556640625 mb\r\npa.total_allocated_bytes(): 3.95556640625 mb\r\npa.total_allocated_bytes(): 3.95556640625 mb\r\npa.total_allocated_bytes(): 3.95556640625 mb\r\n```\r\n\r\nAm I using `RecordBatchStreamWriter` incorrectly? If not, how can I release the resources?\r\n\r\n[Updates 10/29/2020]\r\n\r\nI tested on `pyarrow==2.0.0`. I still see the same issue.\r\n![Screen Shot 2020-10-29 at 9.22.58 AM.png](https://issues.apache.org/jira/secure/attachment/13014364/Screen+Shot+2020-10-29+at+9.22.58+AM.png) \r\n\r\nI changed `RecordBatchStreamWriter` to `RecordBatchFileWriter` in my code, i.e.:\r\n\r\n```python\n\r\n...\r\n            with pa.OSFile(path, \"w\") as sink:\r\n                with pa.RecordBatchFileWriter(sink, schema) as writer:\r\n                    writer.write_table(table)\r\n                    print(f\"pa.total_allocated_bytes(): {pa.total_allocated_bytes() / MB} mb\")\r\n...\r\n```\r\n\r\nI observed the same memory profile. I'm wondering if it is caused by [WriteRecordBatch ](https://github.com/apache/arrow/blob/maint-0.15.x/cpp/src/arrow/ipc/writer.cc#L594) not being able to release memory.",
+        "created_at": "2020-10-29T04:55:43.000Z",
+        "updated_at": "2021-03-22T22:10:51.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-03-22T22:10:51.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-10-29T15:41:07.946Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10417?focusedCommentId=17222969) by Wes McKinney (wesm):*\nIs this issue still present in 2.0.0 or on master? If so, `[~jorisvandenbossche]` or `[~bkietz]` can you take a look?"
+        },
+        {
+            "created_at": "2020-10-29T16:21:48.099Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10417?focusedCommentId=17222998) by Shouheng Yi (shouheng):*\n`[~wesm]` See the [Updates] in the description section. TLDR; `pyarrow 2.0.0` has the same memory profile. I swapped `RecordBatchStreamWriter` with `RecordBatchFileWriter` and the profile looks the same.\r\n\r\nI suspect [WriteRecordBatch ](https://github.com/apache/arrow/blob/maint-0.15.x/cpp/src/arrow/ipc/writer.cc#L594) is not releasing the memory."
+        },
+        {
+            "created_at": "2021-01-11T21:50:42.717Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10417?focusedCommentId=17262950) by Weston Pace (westonpace):*\n`[~shouheng]` I'm having trouble reproducing this with the file you've provided.\u00a0 I am running on an Ubuntu 20.04.1 desktop and RAM usage stays constant.\u00a0 Can you provide me some more details around the environment you are running in?\u00a0 From the charts it appears you might be submitting some kind of batch job?\u00a0 Do you know any details about what kind of OS is running or how it is configured?\r\n\r\nIf you put...\r\n```java\n\r\npa.jemalloc_set_decay_ms(10000)\r\n```\r\n..in your script (immediately after import pyarrow) does it change the behavior?\r\n\r\nAlso, do you see this kind of memory growth with other calls or is it specifically the record batch writer calls?\u00a0 For example, can you try the following similar program and see if you see the same kind of growth?\r\n```java\n\r\nimport tempfile\r\nimport os\r\nimport sys\r\n\r\nimport pyarrow as pa\r\n\r\nB = 1\r\nKB = 1024 * B\r\nMB = 1024 * KB\r\n\r\nschema = pa.schema(\r\n    [\r\n        pa.field(\"a_string\", pa.string()),\r\n        pa.field(\"an_int\", pa.int32()),\r\n        pa.field(\"a_float\", pa.float32()),\r\n        pa.field(\"a_list_of_floats\", pa.list_(pa.float32())),\r\n    ]\r\n)\r\n\r\nnrows_in_a_batch = 1000\r\nnbatches_in_a_table = 1000\r\n\r\ncolumn_arrays = [\r\n    [\"string\"] * nrows_in_a_batch,\r\n    [123] * nrows_in_a_batch,\r\n    [456.789] * nrows_in_a_batch,\r\n    [range(1000)] * nrows_in_a_batch,\r\n]\r\n\r\ndef main(sys_args) -> None:\r\n\r\n    for iteration in range(1000):\r\n        if iteration % 100 == 0:\r\n            print(f'Percent complete: {100*iteration/1000.0}')\r\n        batch = pa.RecordBatch.from_arrays(column_arrays, schema=schema)\r\n        table = pa.Table.from_batches([batch] * nbatches_in_a_table, schema=schema)\r\n\r\nif __name__ == \"__main__\":\r\n    main(sys.argv[1:])\r\n```\r\n![arrow-10417-memtest-1.png](https://issues.apache.org/jira/secure/attachment/13018565/arrow-10417-memtest-1.png)"
+        },
+        {
+            "created_at": "2021-03-22T16:29:39.667Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10417?focusedCommentId=17306347) by Antoine Pitrou (apitrou):*\n`[~shouheng]` would you like to provide feedback to `[~westonpace]` 's questions?"
+        },
+        {
+            "created_at": "2021-03-22T21:40:40.970Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10417?focusedCommentId=17306600) by Shouheng Yi (shouhengyi):*\nHi `[~westonpace]` \u00a0and `[~apitrou]`. Thank you for the investigation. I was running my job on AWS Batch when I encountered the aforementioned memory issue. Currently I don't have the access to that cluster anymore. Therefore I can't reproduce it. I tested your script locally and it worked as expected. I think we can close this ticket for now, since I can't access the compute environment or the code at the moment."
+        },
+        {
+            "created_at": "2021-03-22T22:10:51.166Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10417?focusedCommentId=17306612) by Antoine Pitrou (apitrou):*\nThanks for the feedback `[~shouheng]`! Closing now."
+        }
+    ]
+}

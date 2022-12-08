@@ -1,0 +1,22 @@
+{
+    "issue": {
+        "title": "[Go] Parquet ByteArray statistics cause memory leak",
+        "body": "***Note**: This issue was originally created as [ARROW-17573](https://issues.apache.org/jira/browse/ARROW-17573). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen using `arrow.BinaryTypes.String` in a schema, appending multiple strings, and then writing a record out to parquet the memory of the program continuously increases. This also applies for the other `arrow.BinaryTypes`\u00a0\r\n\r\n\u00a0\r\n\r\nI took a heap dump midway through the program and the majority of allocations comes from `StringBuilder.Append` which is not GC'd. I approached 16GB of RAM before terminating the program.\r\n\r\n\u00a0\r\n\r\nI was not able to replicate this behavior with just PrimativeTypes. Another interesting point, if the records are created but never written with pqarrow memory does not grow. In the below program commenting out `w.Write(rec)` will not cause memory issues.\r\n\r\nExample program which causes memory to leak:\r\n```java\n\r\npackage main\r\n\r\nimport (\r\n   \"os\"\r\n\r\n   \"github.com/apache/arrow/go/v9/arrow\"\r\n   \"github.com/apache/arrow/go/v9/arrow/array\"\r\n   \"github.com/apache/arrow/go/v9/arrow/memory\"\r\n   \"github.com/apache/arrow/go/v9/parquet\"\r\n   \"github.com/apache/arrow/go/v9/parquet/compress\"\r\n   \"github.com/apache/arrow/go/v9/parquet/pqarrow\"\r\n)\r\n\r\nfunc main() {\r\n   f, _ := os.Create(\"/tmp/test.parquet\")\r\n\r\n   arrowProps := pqarrow.DefaultWriterProps()\r\n   schema := arrow.NewSchema(\r\n      []arrow.Field{\r\n         {Name: \"aString\", Type: arrow.BinaryTypes.String},\r\n      },\r\n      nil,\r\n   )\r\n   w, _ := pqarrow.NewFileWriter(schema, f, parquet.NewWriterProperties(parquet.WithCompression(compress.Codecs.Snappy)), arrowProps)\r\n\r\n   builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)\r\n   for i := 1; i < 5000000000; i++ {\r\n      builder.Field(0).(*array.StringBuilder).Append(\"HelloWorld!\")\r\n      if i%2000000 == 0 {\r\n         // Write row groups out every 2M times\r\n         rec := builder.NewRecord()\r\n         w.Write(rec)\r\n         rec.Release()\r\n      }\r\n   }\r\n   w.Close()\r\n}\n```\r\n\u00a0",
+        "created_at": "2022-08-30T19:59:32.000Z",
+        "updated_at": "2022-08-31T22:22:59.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Go",
+            "Component: Parquet",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-08-31T17:31:07.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-08-31T17:31:07.021Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17573?focusedCommentId=17598528) by Matthew Topol (zeroshade):*\nIssue resolved by pull request 14013\n<https://github.com/apache/arrow/pull/14013>"
+        }
+    ]
+}

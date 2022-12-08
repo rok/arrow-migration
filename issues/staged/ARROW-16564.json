@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "[Python] Add option to have dataset infer the parquet schema from the last file",
+        "body": "***Note**: This issue was originally created as [ARROW-16564](https://issues.apache.org/jira/browse/ARROW-16564). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAccording to <https://arrow.apache.org/docs/python/dataset.html#dataset-discovery>, dataset will infer the schema for parquet based on the first file in the path.\r\n\r\nI have a situation where a column was added to the schema after a certain date. As a result, when I try to read the parquet in this path, the new column is ignored because it is not part of the schema of the first file in that path.\r\n\r\nI would like the option to infer the schema based on the last file in the path to avoid this issue.\u00a0",
+        "created_at": "2022-05-12T23:21:28.000Z",
+        "updated_at": "2022-05-13T15:50:37.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-05-13T07:12:22.255Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16564?focusedCommentId=17536474) by Alenka Frim (alenka):*\nYou can add a custom schema to `ds.dataset()` which should solve you problem.\r\n\r\nUsing an example from the docs:\r\n```python\n\r\nimport tempfile\r\nimport pathlib\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nimport numpy as np\r\n\r\n# Creating an example dataset with two parquet files\r\nbase = pathlib.Path(tempfile.mkdtemp(prefix=\"pyarrow-\"))\r\n(base / \"parquet_dataset\").mkdir(exist_ok=True)\r\ntable = pa.table({'a': range(10), 'b': np.random.randn(10), 'c': [1, 2] * 5})\r\npq.write_table(table.slice(0, 5), base / \"parquet_dataset/data1.parquet\")\r\npq.write_table(table.slice(5, 10), base / \"parquet_dataset/data2.parquet\")\r\n\r\n# reading the data\r\n\r\nimport pyarrow.dataset as ds\r\n# Define the schema that includes the newly added column\r\n# In this example both parquet files are without the new column to show that also works\r\nschema = pa.schema([\r\n    ('a', pa.int64()),\r\n    ('b', pa.float64()),\r\n    ('c', pa.int64()),\r\n    ('new', pa.bool_())\r\n])\r\n# Read the data with the new schema and convert it into a table to check the result\r\nds.dataset(base / \"parquet_dataset\", format=\"parquet\", schema=schema).to_table()\r\n```\r\nYou should get:\r\n```python\n\r\n>>> ds.dataset(base / \"parquet_dataset\", format=\"parquet\", schema=schema).to_table()\r\npyarrow.Table\r\na: int64\r\nb: double\r\nc: int64\r\nnew: bool\r\n----\r\na: [[0,1,2,3,4],[5,6,7,8,9]]\r\nb: [[0.2154222083206493,1.4903968099339355,0.7135195619005714,0.10383436484447274,-1.7986589196024543],[0.7329661943015637,-0.025262270751709868,-1.5908999186628758,0.7745704844800078,-0.9614861072871166]]\r\nc: [[1,2,1,2,1],[2,1,2,1,2]]\r\nnew: [[null,null,null,null,null],[null,null,null,null,null]]\r\n```"
+        },
+        {
+            "created_at": "2022-05-13T07:16:21.551Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16564?focusedCommentId=17536475) by Alenka Frim (alenka):*\nAnd you can use `pq.read_schema` to save custom schema from a selected file, not needing to do it manually. Following the previous example:\r\n```python\n\r\n>>> schema_new = pq.read_schema(base / \"parquet_dataset/data2.parquet\")\r\n>>> schema_new\r\na: int64\r\nb: double\r\nc: int64\r\n\r\n>>> ds.dataset(base / \"parquet_dataset\", format=\"parquet\", schema=schema_new).to_table()\r\npyarrow.Table\r\na: int64\r\nb: double\r\nc: int64\r\n----\r\na: [[0,1,2,3,4],[5,6,7,8,9]]\r\nb: [[0.6874650721200516,0.9966515452505028,-1.0808214751696879,-0.9947358097037932,-1.241984930419355],[0.03802943296976132,0.6485772781216572,-0.21611062870855477,-0.6399976359764785,0.6034991641788295]]\r\nc: [[1,2,1,2,1],[2,1,2,1,2]]\r\n```"
+        },
+        {
+            "created_at": "2022-05-13T15:50:37.777Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16564?focusedCommentId=17536738) by Aaron Philip (aaronphilip):*\nIf I use the new schema, is there any way for Pyarrow to ignore files that don't conform to that schema?"
+        }
+    ]
+}

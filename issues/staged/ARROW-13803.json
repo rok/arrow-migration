@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[C++] Segfault on filtering taxi dataset",
+        "body": "***Note**: This issue was originally created as [ARROW-13803](https://issues.apache.org/jira/browse/ARROW-13803). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFound this while testing ARROW-13740. Using the nyc-taxi dataset:\r\n\r\n```Java\n\r\nds %>%\r\n  filter(total_amount > 0, passenger_count > 0) %>%\r\n  summarise(n = n()) %>%\r\n  collect()\r\n```\r\n\r\n```Java\n\r\n *** caught segfault ***\r\naddress 0x161784000, cause 'invalid permissions'\r\n\r\nTraceback:\r\n 1: .Call(`_arrow_ExecPlan_run`, plan, final_node, sort_options)\r\n...\r\n```\r\n\r\nlldb shows \r\n\r\n```Java\n\r\n* thread #11, stop reason = EXC_BAD_ACCESS (code=1, address=0x1631a8000)\r\n    frame #0: 0x000000013a79d9cc libarrow.600.dylib`arrow::BitUtil::SetBitmap(unsigned char*, long long, long long) + 296\r\nlibarrow.600.dylib`arrow::BitUtil::SetBitmap:\r\n->  0x13a79d9cc <+296>: ldrb   w10, [x8]\r\n    0x13a79d9d0 <+300>: cmp    w9, #0x8                  ; =0x8 \r\n    0x13a79d9d4 <+304>: cset   w11, lo\r\n    0x13a79d9d8 <+308>: and    w9, w9, #0x7\r\nTarget 0: (R) stopped.\r\n(lldb) \r\n```\r\n\r\nInterestingly, I can evaluate those filter expressions just fine, and it only seems to crash if both are provided. And I can count over the data with both:\r\n\r\n```Java\n\r\nds %>% \r\n  group_by(total_amount > 0, passenger_count > 0) %>% \r\n  summarize(n=n()) %>% \r\n  collect()\r\n\r\n# A tibble: 4 \u00d7 3\r\n  `total_amount > 0` `passenger_count > 0`          n\r\n  <lgl>              <lgl>                      <int>\r\n1 FALSE              FALSE                        805\r\n2 FALSE              TRUE                      368680\r\n3 TRUE               FALSE                    5810556\r\n4 TRUE               TRUE                  1541561340\r\n```",
+        "created_at": "2021-08-30T21:35:07.000Z",
+        "updated_at": "2021-09-06T12:45:44.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-09-06T12:22:34.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-31T12:54:34.593Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13803?focusedCommentId=17407321) by Neal Richardson (npr):*\nSome more investigation: the `kleene_and` does seem to be involved, and it seems it crashes if you `&` together two filter expressions where at least one of them is a float type. I made several queries with &ed filters on integer and string types and they did not crash.\r\n\r\n```Java\n\r\n> ds %>% filter(passenger_count > 0 & passenger_count < 4) %>% summarize(n = n()) %>%     collect()\r\n# A tibble: 1 \u00d7 1\r\n           n\r\n       <int>\r\n1 1373176060\r\n\r\n> ds %>% filter(payment_type == \"CAS\" & payment_type != \"CRD\") %>% summarize(n=n()) %>% collect()\r\n# A tibble: 1 \u00d7 1\r\n         n\r\n     <int>\r\n1 26876825\r\n\r\n> ds %>% filter(total_amount > 0 & total_amount < 4) %>% summarize(n = n()) %>%     collect()\r\n\r\n *** caught bus error ***\r\naddress 0x139448000, cause 'invalid alignment'\r\n\r\n> ds %>% filter(trip_distance > 0 & trip_distance < 4) %>% summarize(n=n()) %>% collect()\r\n\r\n *** caught segfault ***\r\naddress 0x120e3c000, cause 'invalid permissions'\r\n\r\n```"
+        },
+        {
+            "created_at": "2021-08-31T13:46:00.898Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13803?focusedCommentId=17407357) by David Li (lidavidm):*\nHmm, I built the branch on a Linux/x64 machine and ran the first query using a copy of the NYC Taxi dataset from the Ursa Labs bucket, and it did not crash:\r\n```\n\r\n> ds <- open_dataset(\"/home/lidavidm/Documents/taxi\", partitioning = c(\"year\", \"month\"))\r\n> ds %>% filter(total_amount > 0, passenger_count > 0) %>% summarise(n=n()) %>% collect()\r\n# A tibble: 1 \u00d7 1\r\n           n\r\n       <int>\r\n1 1541561340 \n```\r\nso this might be something OS-specific or otherwise not as easily reproducible :/"
+        },
+        {
+            "created_at": "2021-09-01T19:49:25.236Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13803?focusedCommentId=17408350) by David Li (lidavidm):*\nI tried again on an x86_64 Mac and didn't get the error either, though I tested only a couple years of the NYC Taxi dataset."
+        },
+        {
+            "created_at": "2021-09-02T13:48:57.080Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13803?focusedCommentId=17408844) by David Li (lidavidm):*\nTrying again on an M1 Mac, I still don't get the crash. Just to check a few things, then:\r\n \\* Is the source of the NYC Taxi dataset you're using also the Parquet files in the Ursa bucket?\r\n \\* What flags are you using to build Arrow and the R library?\r\n \\* Are you using Conda or Homebrew or some other source for dependencies? (Though I couldn't get Conda to work on the M1 Mac.)"
+        },
+        {
+            "created_at": "2021-09-02T14:23:37.568Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13803?focusedCommentId=17408877) by Neal Richardson (npr):*\nWhich years did you test? It's possible there's a data issue in some file that's not being handled correctly, I know there are quirks.\r\n\r\nI am testing with the Ursa bucket data.\r\n\r\nNo conda here, dependency source AUTO and I haven't installed much on the system so it's basically bundling everything except lz4 and zlib AFAICT. My cmake invocation is \r\n\r\n```Java\n\r\ncmake \\\r\n  -GNinja \\\r\n  -DARROW_COMPUTE=ON \\\r\n  -DARROW_CSV=ON \\\r\n  -DARROW_DATASET=ON \\\r\n  -DARROW_FILESYSTEM=ON \\\r\n  -DARROW_JEMALLOC=ON \\\r\n  -DARROW_JSON=ON \\\r\n  -DARROW_PARQUET=ON \\\r\n  -DCMAKE_BUILD_TYPE=release \\\r\n  -DARROW_INSTALL_NAME_RPATH=OFF \\\r\n  -DARROW_S3=ON \\\r\n  -DARROW_MIMALLOC=OFF \\\r\n  -DARROW_WITH_BROTLI=ON \\\r\n  -DARROW_WITH_BZ2=ON \\\r\n  -DARROW_WITH_LZ4=ON \\\r\n  -DARROW_WITH_SNAPPY=ON \\\r\n  -DARROW_WITH_ZLIB=ON \\\r\n  -DARROW_WITH_ZSTD=ON \\\r\n  -DARROW_EXTRA_ERROR_CONTEXT=ON \\\r\n  -DCMAKE_INSTALL_PREFIX=$ARROW_HOME \\\r\n  -DARROW_BUILD_TESTS=OFF \\\r\n  -DARROW_WITH_UTF8PROC=ON \\\r\n  ..\r\n```\r\n\r\nNo special compilation flags; cmake reports\r\n\r\n```Java\n\r\n-- CMAKE_C_FLAGS:  -Qunused-arguments -O3 -DNDEBUG  -Wall -Wno-unknown-warning-option -Wno-pass-failed -stdlib=libc++ -march=armv8-a \r\n-- CMAKE_CXX_FLAGS:   -Qunused-arguments -fcolor-diagnostics -O3 -DNDEBUG  -Wall -Wno-unknown-warning-option -Wno-pass-failed -stdlib=libc++ -march=armv8-a \r\n```"
+        },
+        {
+            "created_at": "2021-09-02T14:25:52.242Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13803?focusedCommentId=17408881) by David Li (lidavidm):*\nThanks, I'll give it a try with bundled dependencies.\r\n\r\nI'm testing using the entire dataset already as well."
+        },
+        {
+            "created_at": "2021-09-02T14:42:59.597Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13803?focusedCommentId=17408900) by David Li (lidavidm):*\nOk! I can reproduce it, turns out a release build was very important (should've thought of that earlier\u2026)"
+        },
+        {
+            "created_at": "2021-09-02T15:36:19.323Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13803?focusedCommentId=17408929) by David Li (lidavidm):*\nIt still doesn't replicate on Linux/x64 or MacOS/x64, unfortunately, so it does seem ARM-specific."
+        },
+        {
+            "created_at": "2021-09-02T17:09:35.118Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13803?focusedCommentId=17408992) by David Li (lidavidm):*\nThere is an off-by-one error in [BitUtil::SetBitmap](https://github.com/apache/arrow/blob/8c70a5f5178c5b74cc181dc8bdd4b03ba14f36d9/cpp/src/arrow/util/bit_util.cc#L112-L115). In this case, offset started as 0 and length started as 65536. At this point in the function, offset is now 65536 and length is now 0. data is a pointer to an 8192-byte buffer. Hence it indexes `data[8192]` which is past the end of the buffer. We then crash because the memory at this region is not mapped on this platform. (I'm surprised valgrind/ASan/etc. don't catch the access on x64.)"
+        },
+        {
+            "created_at": "2021-09-06T12:22:34.850Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13803?focusedCommentId=17410573) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 11070\n<https://github.com/apache/arrow/pull/11070>"
+        }
+    ]
+}

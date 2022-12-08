@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[Python][C++] Date64 converted to Date32 on parquet",
+        "body": "***Note**: This issue was originally created as [ARROW-9502](https://issues.apache.org/jira/browse/ARROW-9502). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nExecuting the example below, \r\n\r\n```python\n\r\nimport datetime\r\nimport pyarrow as pa\r\nimport pyarrow.parquet\r\n\r\ndata = [\r\n    datetime.datetime(2000, 1, 1, 12, 34, 56, 123456), \r\n    datetime.datetime(2000, 1, 1)\r\n]\r\n\r\ndata32 = pa.array(data, type='date32')\r\ndata64 = pa.array(data, type='date64')\r\ntable = pyarrow.Table.from_arrays([data32, data64], names=['a', 'b'])\r\n\r\npyarrow.parquet.write_table(table, 'a.parquet')\r\n\r\nprint(table)\r\nprint()\r\nprint(pyarrow.parquet.read_table('a.parquet'))\r\n```\r\n\r\nyields\r\n\r\n\r\n```java\n\r\npyarrow.Table\r\na: date32[day]\r\nb: date64[ms]\r\n\r\npyarrow.Table\r\na: date32[day]\r\nb: date32[day]   <------- IMO it should be date64[ms]\r\n```\r\n\r\nindicating that pyarrow converted its date64[ms] schema to date32[day]. I used the rust crate to print parquet's metadata, and the value is indeed stored as i32, which suggests that this likely happens on the writer, not reader.\r\n\r\nIMO this does not have any practical implication because they are both dates and a 32 bit date (in days) can hold more dates than a 64 bit date in milliseconds, but still constitutes an error as the roundtrip serialization does not yield the same schema.\r\n\r\nA broader question I have is why data64 exists in the first place? I can't see any reason to store a **date** in milliseconds since EPOCH.",
+        "created_at": "2020-07-16T05:29:11.000Z",
+        "updated_at": "2022-08-10T21:31:20.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-08-07T15:27:45.441Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9502?focusedCommentId=17173209) by Joris Van den Bossche (jorisvandenbossche):*\nSuch a conversion will indeed happen on the write path because Parquet has only a single DATE type, which is equivalent to date32[day] (see https://github.com/apache/parquet-format/blob/master/LogicalTypes.md#date).\r\n\r\nThe question is then when _reading_, should we simply always use the `date32[day]` type, or should we check the Arrow schema that is saved in the parquet file's metadata to see which date type was used originally? \r\n\r\nI think both have its pros/cons: checking the metadata can indeed give a fully faithful roundtrip, but on the other hand will then also give a conversion step when reading it into `date64[ms]` (while reading it as `date32[day]` needs no transformation once deserialized).\r\n"
+        },
+        {
+            "created_at": "2022-08-10T21:31:20.982Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9502?focusedCommentId=17578157) by Aldrin Montana (octalene):*\nJust wanted to add that a relevant GH issue was opened: https://github.com/apache/arrow/issues/13847"
+        }
+    ]
+}

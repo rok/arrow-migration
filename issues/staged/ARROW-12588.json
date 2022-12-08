@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "[Python] Expose JSON schema inference to Python API",
+        "body": "***Note**: This issue was originally created as [ARROW-12588](https://issues.apache.org/jira/browse/ARROW-12588). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen using `pyarrow.json.read_json()`, the schema is automatically inferred. It would be useful to infer the schema from a json that is already loaded in memory (i.e. possibly a list of dicts in Python).",
+        "created_at": "2021-04-28T16:06:41.000Z",
+        "updated_at": "2021-12-16T16:32:51.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-05-03T11:56:49.750Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12588?focusedCommentId=17338332) by Joris Van den Bossche (jorisvandenbossche):*\nCan you give a concrete example?\r\n\r\nSome level of schema inference also happens in the general `pa.array()` constructor. For example, passing a list of dicts works in simple cases:\r\n\r\n```Java\n\r\nIn [2]: arr = pa.array([{'a': 1, 'b': 2}, {'a': 3, 'b': 4}])\r\n\r\nIn [3]: arr.type\r\nOut[3]: StructType(struct<a: int64, b: int64>)\r\n\r\nIn [4]: arr\r\nOut[4]: \r\n<pyarrow.lib.StructArray object at 0x7f160695d4c0>\r\n-- is_valid: all not null\r\n-- child 0 type: int64\r\n  [\r\n    1,\r\n    3\r\n  ]\r\n-- child 1 type: int64\r\n  [\r\n    2,\r\n    4\r\n  ]\r\n\r\n```"
+        },
+        {
+            "created_at": "2021-05-04T19:56:57.573Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12588?focusedCommentId=17339272) by Piotr \u017belasko (pzelasko):*\nThank you, you solved my issue :)\u00a0Previously, I read in the documentation that pa.array() works in >>simple cases<<, so I guess I assumed it won't work for mine. But it did!\r\n\r\nIf it's interesting: I have lists of JSON manifests representing different objects (in Lhotse <https://github.com/lhotse-speech/lhotse>\u00a0\u2013 a library for speech data pipelines that I'm developing, where arrow currently helps me deal with cases when metadata can be massive itself, e.g. for terabyte-sized speech datasets). Some of them can compose others, and so the schema is quite complex, e.g. these two items can be held in the same manifest:\r\n\r\nItem #1\r\n\r\n{'id': 'cut-1', 'start': 0.0, 'duration': 10.0, 'channel': 0, 'supervisions': [\\{'id': 'sup-1', 'recording_id': 'irrelevant', 'start': 0.5, 'duration': 6.0, 'channel': 0}, \\{'id': 'sup-2', 'recording_id': 'irrelevant', 'start': 7.0, 'duration': 2.0, 'channel': 0}], 'features': \\{'type': 'fbank', 'num_frames': 100, 'num_features': 40, 'frame_shift': 0.01, 'sampling_rate': 16000, 'start': 0.0, 'duration': 10.0, 'storage_type': 'lilcom', 'storage_path': 'irrelevant', 'storage_key': 'irrelevant'}, 'recording': \\{'id': 'rec-1', 'sources': [{'type': 'file', 'channels': [0], 'source': 'irrelevant'}], 'sampling_rate': 16000, 'num_samples': 160000, 'duration': 10.0}, 'type': 'Cut'}\r\n\r\nItem #2\r\n\r\n{'id': '3693dee0-1ac8-4f5a-a8c1-d6b4f6f80fbb', 'tracks': [\\{'cut': {'id': 'cut-1', 'start': 0.0, 'duration': 10.0, 'channel': 0, 'supervisions': [{'id': 'sup-1', 'recording_id': 'irrelevant', 'start': 0.5, 'duration': 6.0, 'channel': 0}, \\{'id': 'sup-2', 'recording_id': 'irrelevant', 'start': 7.0, 'duration': 2.0, 'channel': 0}], 'features': \\{'type': 'fbank', 'num_frames': 100, 'num_features': 40, 'frame_shift': 0.01, 'sampling_rate': 16000, 'start': 0.0, 'duration': 10.0, 'storage_type': 'lilcom', 'storage_path': 'irrelevant', 'storage_key': 'irrelevant'}, 'recording': \\{'id': 'rec-1', 'sources': [{'type': 'file', 'channels': [0], 'source': 'irrelevant'}], 'sampling_rate': 16000, 'num_samples': 160000, 'duration': 10.0}}, 'offset': 0.0}, \\{'cut': {'id': 'cut-1', 'start': 0.0, 'duration': 10.0, 'channel': 0, 'supervisions': [{'id': 'sup-1', 'recording_id': 'irrelevant', 'start': 0.5, 'duration': 6.0, 'channel': 0}, \\{'id': 'sup-2', 'recording_id': 'irrelevant', 'start': 7.0, 'duration': 2.0, 'channel': 0}], 'features': \\{'type': 'fbank', 'num_frames': 100, 'num_features': 40, 'frame_shift': 0.01, 'sampling_rate': 16000, 'start': 0.0, 'duration': 10.0, 'storage_type': 'lilcom', 'storage_path': 'irrelevant', 'storage_key': 'irrelevant'}, 'recording': \\{'id': 'rec-1', 'sources': [{'type': 'file', 'channels': [0], 'source': 'irrelevant'}], 'sampling_rate': 16000, 'num_samples': 160000, 'duration': 10.0}}, 'offset': 5.0, 'snr': 8}], 'type': 'MixedCut'}\r\n\r\nIt turns out that pa.array works just fine with a list of those."
+        },
+        {
+            "created_at": "2021-05-05T12:40:28.849Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12588?focusedCommentId=17339630) by Joris Van den Bossche (jorisvandenbossche):*\nGood to hear that it's working! \r\n\r\nWe could certainly have better documentation regarding this, i.e. what approaches can be used when having in-memory json like data / dict, and you want to convert this to a pyarrow Table. I agree that using `pa.array(..)` is not necessarily the first thing you would think about. \r\n\r\n"
+        }
+    ]
+}

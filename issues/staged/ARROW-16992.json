@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Java][C++] Separate JNI compilation & linking from main arrow CMakeLists ",
+        "body": "***Note**: This issue was originally created as [ARROW-16992](https://issues.apache.org/jira/browse/ARROW-16992). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe need to separate the JNI elements from CMakeLists, with related modifications to the CI build scripts likely. Separating the JNI portion serves two related purposes:\r\n1. Simplify building JNI code against precompiled lib arrow C++ code\n1. Enable control of JNI build through Maven, rather than requiring Java devs to work with CMake directly\n   \n   `[~dsusanibara]`\n   \n   `[~kou]` \u00a0",
+        "created_at": "2022-07-06T15:55:11.000Z",
+        "updated_at": "2022-08-15T20:45:43.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Java",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-07-08T03:17:40.835Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16992?focusedCommentId=17564065) by Kouhei Sutou (kou):*\nI consider this and here are my opinions:\r\n\r\n- We should use CMake for building share libraries (`.so`, `.dylib` and `.dll`) for JNI\n- We should remove all JNI related codes from `cpp/`\n- We should add `java/CMakeLists.txt` to build all shared libraries for JNI\n  \n  Here are reasons of my opinions.\n  \n- Maven's shared library building support is too poor (Note that I'm not familiar with Maven. So this may be wrong.)\n  - -> Maintaining Maven configurations will be higher cost than maintaining CMake configurations\n  - It seems that we need to use Native Maven Plugin: https://www.mojohaus.org/maven-native/native-maven-plugin/\n  - Native Maven Plugin doesn't have a feature to choose shared object type for the current environment (e.g. `.so` for Linux)\n    - We need to prepare one `pom.xml` per one shared object type (We need to create `java/c/c-jni-so`, `java/c/c-jni-dylib` and `java/c/c-jni-dll`)\n  - Native Maven Plugin doesn't have a feature to find a library in the current environment\n\\*\\*\\*\\* We can't detect installed Apache Arrow C++\r\n- We can't build `.jar` that works on all environments (Linux, macOS and Windows) on one machine\n  - We keep using CI to build JNI related artifacts by `dev/tasks/java-jars/`\n  - -> Normal Java developers don't need to think about JNI and CMake. Java developers who work on JNI too need to know CMake but it will not too hard because they know C++.\n  - We need to build `.so`, `.dylib` and `.dll` for `.jar` that works on all environments\n  - If we build all shared libraries for JNI on one machine, we need to do cross-compiling\n  - Cross-compiling is very complex. We should avoid it as much as possible.\n- We can simplify `ci/scripts/java_jni_*` used by `dev/tasks/java-jars/` by introducing `java/CMakeLists.txt`\n  - -> We can use general `cmake ... && cmake --build ... install` steps to build and install shared libraries for JNI\n    \n    I can provide a PoC implementation of this idea if you need.\n"
+        },
+        {
+            "created_at": "2022-07-11T15:34:12.143Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16992?focusedCommentId=17565058) by Larry White (ljw1001):*\nThank you `[~kou]`. This is super helpful. I have a few thoughts/comments/questions.\u00a0\r\n> It seems that we need to use Native Maven Plugin: <https://www.mojohaus.org/maven-native/native-maven-plugin/>\r\nI think this is correct. There is a decent post on how this works here: <https://medium.com/geekculture/a-simple-guide-to-java-native-interface-jni-using-native-maven-plugin-e01f4077a8a5>\r\n> Native Maven Plugin doesn't have a feature to choose shared object type for the current environment (e.g. `.so` for Linux)\r\nThe post mentions another limitation in there not being an Environment Factory for a recent MSVC compiler (the author created one for MSVC2017), but the project does seem reasonably active. https://github.com/mojohaus/maven-native \u00a0\r\n> -> Normal Java developers don't need to think about JNI and CMake. Java developers who work on JNI too need to know CMake but it will not too hard because they know C++.\r\nI think this is a key point, but I would twist it around to another perspective: If we follow a strategy of wrapping as much native code as possible (to avoid rewriting in Java), then _most_ contributors will need to work on JNI. As you mentioned, they will need to be able to at least read C++ code, and so will probably have some familiarity with CMake. They will also incur the other overhead of cross-platform development (e.g. having the correct compiler installed, configuring an IDE properly, long build times), even if we do the build using Maven. Unfortunately, JNI expertise is not widespread in the Java community. Overall, I don't think wrapping JNI compilation with Maven will move the needle much in terms of opening up Arrow Java to POJD (plain old Java developers), even if we are able to address, for example, the limitations in the Native Maven plugin.\u00a0\r\n> We should use CMake for building share libraries (`{}.so{`}, `.dylib` and `{}.dll{`}) for JNI\n> \n> We should remove all JNI related codes from `cpp/`\n> \n> We should add `java/CMakeLists.txt` to build all shared libraries for JNI\r\nI agree with all these points. `[~dsusanibara]`, what do you think?\r\n> I can provide a PoC implementation of this idea if you need.\r\nThat would be awesome. Thank you.\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-07-13T14:12:11.148Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16992?focusedCommentId=17566332) by David Dali Susanibar Arce (dsusanibara):*\nI agree with all of these points.\r\n\r\n\u00a0\r\n\r\nPoC could help us a lot to have an idea about how the JNI java modules projects are building isolated and then try to call that building execution by Maven side."
+        },
+        {
+            "created_at": "2022-07-15T08:13:01.556Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16992?focusedCommentId=17567147) by Kouhei Sutou (kou):*\nOK. I'll create a top-level `CMakeLists.txt` in ARROW-17080 and move datasets build configuration to `java/` from `cpp/` in ARROW-17081. Other components such as Gandiva and Plasma will be able to follow this approach by using them as an example."
+        }
+    ]
+}

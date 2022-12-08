@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[C++][R] Option for is_nan(null) to evaluate to false or true",
+        "body": "***Note**: This issue was originally created as [ARROW-12960](https://issues.apache.org/jira/browse/ARROW-12960). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n(This is the flip side of\u00a0ARROW-12959.)\r\n\r\nCurrently the Arrow compute kernel `is_nan`\u00a0always treats\u00a0`null` as a missing value, returning `null`\u00a0at positions of the input datum with `null`\u00a0(missing) values.\r\n\r\nIt would be helpful to be able to control this behavior with an option. The option could be\u00a0named\u00a0`value_for_null`\u00a0or something similar and it would take a nullable boolean scalar.\u00a0\u00a0It would default to `null`, consistent with current behavior. When set to `false` or `true`, it would return\u00a0`false` or `true` at positions of the input datum with `null`\u00a0values.\r\n\r\nAmong other things, this would enable the `arrow` R package to evaluate\u00a0`is.nan()` consistently with the way base R does.\u00a0In base R, `is.nan()` returns `FALSE` on\u00a0`NA`. But in the `arrow` R package, it returns `NA`:\r\n```r\n\r\n> is.nan(c(3.14, NA, NaN))\r\n##[1] FALSE FALSE  TRUE\r\n\r\nas.vector(is.nan(Array$create(c(3.14, NA, NaN))))\r\n##[1] FALSE    NA  TRUE\n```\r\n\u00a0I think solving this with an option in the C++ kernel is the best solution, because I suspect there are other cases in which users would want the ability to return all non-missing values in the output from `is_nan` without needing to call another kernel to fill the missing values in.\u00a0However, it would also be possible to solve this just in the R package, by changing the mapping of `is.nan` in the R package.\u00a0If we choose to go that route, we should change this Jira issue summary to\u00a0\"[R] Make is.nan(NA) consistent with base R\".",
+        "created_at": "2021-06-03T17:11:56.000Z",
+        "updated_at": "2022-10-06T09:09:16.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-26T01:21:43.921Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12960?focusedCommentId=17404825) by Ian Cook (icook):*\n`[~christian8491]` \u00a0I'm curious to hear your idea for how to implement the options for this. It is different from\u00a0ARROW-12959 because it must allow for three different possibilities:\r\n \\* is_nan(null) returns null (current behavior)\r\n \\* is_nan(null) returns true\r\n \\* is_nan(null) returns false\r\n\r\nI think my suggestion to make the option a nullable boolean is actually not possible. Is that right?"
+        },
+        {
+            "created_at": "2021-08-26T15:36:42.591Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12960?focusedCommentId=17405314) by Eduardo Ponce (edponce):*\nFrom an API perspective, invoking a function of the form \"is_xxx(...)\", I would only expect either a true/false value.\r\n- Are there other boolean functions that return \"null\"? \n- Are there other functions that given a \"null\" input, return other than \"null\"?"
+        },
+        {
+            "created_at": "2021-08-26T16:19:38.312Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12960?focusedCommentId=17405335) by Ian Cook (icook):*\n`[~edponce]` \u00a0I think that's a fair point, but I assume that it is important to preserve the existing behavior of is_nan as the default behavior in the future, and the existing behavior is: is_nan(null) returns null.\r\n\r\n`[~bu2]` `[~yibocai]` `[~apitrou]` what do you think, would it be OK for is_nan(null) to return either true or false (controlled by an option) but not have the option to return null?"
+        },
+        {
+            "created_at": "2021-08-26T16:53:20.177Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12960?focusedCommentId=17405364) by Eduardo Ponce (edponce):*\nAfter more careful thought, I do understand and agree with \"is_nan(null) = null\". There are multiple ways of reasoning about it and having the option allows the client code to choose their way.\r\n\r\nFrom Arrow perspective, \"is_nan\" shouldn't by default change the null semantics corresponding to the input data.\r\n For example, if \"null\" is treated as False, then\r\n```java\n\r\nis_null(is_nan([3.14, NA, NaN]))\n```\r\nwould hide the fact that there was a \"null\" in the original input."
+        },
+        {
+            "created_at": "2021-08-26T17:13:10.880Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12960?focusedCommentId=17405380) by Antoine Pitrou (apitrou):*\nWell, we could add an option to control handling of nulls in the input. Is this required only for `is_nan`, or also for `is_finite` and `is_inf`?"
+        },
+        {
+            "created_at": "2021-08-27T01:31:35.638Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12960?focusedCommentId=17405525) by Ian Cook (icook):*\nI haven't opened Jiras for them all yet, but eventually I think we will want to add options to allow users to choose how nulls are handled by\u00a0`is_finite` and `is_inf` and also how nans are handled by various other functions including `coalesce`. This is kind of a nuisance but it seems important because it will allow us to provide consistent, expected behavior to different bindings and front-ends.\r\n\r\nFor example, in R, is.finite(NA) returns FALSE, whereas is_finite(null) returns null in Arrow."
+        },
+        {
+            "created_at": "2021-08-27T03:32:15.096Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12960?focusedCommentId=17405559) by Christian Cordova (christian8491):*\nAs a humble opinion (and as a user), i do would prefer \"is_nan()\" always returns True or False as the base R and numpy does. If someone wants to check for the input data always can use \"is_null()\" and combine operations to get what they want."
+        },
+        {
+            "created_at": "2021-12-13T17:21:57.682Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12960?focusedCommentId=17458559) by Antoine Pitrou (apitrou):*\nWhat is the status on this?"
+        },
+        {
+            "created_at": "2021-12-17T19:26:25.484Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12960?focusedCommentId=17461623) by Dewey Dunnington (paleolimbot):*\nReprex:\r\n\r\n```R\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\n\r\nrecord_batch(\r\n  dbl = c(1, NA, NaN),\r\n  float = Array$create(c(1, NA, NaN))$cast(float32())\r\n) %>% \r\n  transmute(\r\n    dbl_is_nan = is.nan(dbl),\r\n    float_is_nan = is.nan(float)\r\n  ) %>% \r\n  collect()\r\n#> # A tibble: 3 \u00d7 2\r\n#>   dbl_is_nan float_is_nan\r\n#>   <lgl>      <lgl>       \r\n#> 1 FALSE      FALSE       \r\n#> 2 FALSE      FALSE       \r\n#> 3 TRUE       TRUE\r\n```\r\n\r\n\r\nWhere this lives in the package:\r\n\r\nhttps://github.com/apache/arrow/blob/master/r/R/dplyr-functions.R#L96-L105\r\n\r\nhttps://github.com/apache/arrow/blob/master/r/tests/testthat/test-dplyr-funcs-type.R#L182-L203\r\n\r\nhttps://github.com/apache/arrow/blob/master/r/src/compute.cpp#L129-L130\r\n\r\nhttps://github.com/apache/arrow/blob/master/cpp/src/arrow/compute/api_scalar.h#L295-L302\r\n\r\n"
+        },
+        {
+            "created_at": "2021-12-17T20:57:45.748Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12960?focusedCommentId=17461669) by Ian Cook (icook):*\nAs seen in the first link Dewey shared above, the R bindings currently translate the R expression\r\n```java\n\r\nis.nan(x)\n```\r\nto the Arrow expression\u00a0\r\n```java\n\r\nand_kleene(is_nan(x), is_valid(x))\n```\r\nwhen `x` has a floating point data type. This is for consistency with the behavior of R.\r\n\r\nThe gist of this Jira is that we would like to simplify that translation (and other bindings' translations) so they can simply call `is_nan` with an option."
+        },
+        {
+            "created_at": "2022-01-12T18:56:43.374Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12960?focusedCommentId=17474890) by Neal Richardson (npr):*\n`[~christian8491]` are you working on this? If not, can you please unassign it so someone else could pick it up?"
+        }
+    ]
+}

@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[C++][Python][Parquet] pyarrow.parquet crash writing zero-chunk dictionary-type column",
+        "body": "***Note**: This issue was originally created as [ARROW-6568](https://issues.apache.org/jira/browse/ARROW-6568). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nTrying to write a zero-RecordBatch file to parquet:\r\n\r\n```python\n\r\nimport pyarrow\r\nimport pyarrow.parquet\r\ntable = pyarrow.Table.from_batches([], pyarrow.schema([('A', pyarrow.dictionary(pyarrow.int32(), pyarrow.string()))]))\r\npyarrow.parquet.write_table(table, 'x.parquet')\r\n```\r\n\r\n... I receive an error and Python exits with exit code `139`:\r\n\r\n```\n\r\nWARNING: Logging before InitGoogleLogging() is written to STDERR\r\nF0915 18:37:23.099939     1 table.cc:64]  Check failed: (chunks.size()) > (0) cannot construct ChunkedArray from empty vector and omitted type\r\n*** Check failure stack trace: ***\r\n```\r\n\r\n",
+        "created_at": "2019-09-15T18:47:05.000Z",
+        "updated_at": "2019-09-17T17:14:23.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-09-17T17:14:23.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-09-15T19:04:42.859Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6568?focusedCommentId=16930052) by Adam Hooper (adamhooper):*\nMy workaround, in my function that wraps `pyarrow.parquet.write_table()`:\r\n\r\n```python\n\r\nif table.num_rows == 0:\r\n# Workaround for https://issues.apache.org/jira/browse/ARROW-6568\r\n# If table is zero-length, guarantee it has a RecordBatch so Arrow\r\n# won't crash when writing a DictionaryArray.\r\n    def empty_array_for_field(field):\r\n        if pyarrow.types.is_dictionary(field.type):\r\n            return pyarrow.DictionaryArray.from_arrays(\r\n                pyarrow.array([], type=field.type.index_type),\r\n                pyarrow.array([], type=field.type.value_type),\r\n            )\r\n        else:\r\n            return pyarrow.array([], type=field.type)\r\n    table = pyarrow.table(\r\n        {field.name: empty_array_for_field(field) for field in table.schema}\r\n    )\r\n\r\n# ... and now `table` is safe to use in `pyarrow.parquet.write_table()`.\r\n```"
+        },
+        {
+            "created_at": "2019-09-15T22:22:10.560Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6568?focusedCommentId=16930140) by Wes McKinney (wesm):*\nAdded to 0.15.0. This may be fixed already in master"
+        },
+        {
+            "created_at": "2019-09-17T17:14:23.729Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6568?focusedCommentId=16931667) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 5393\n<https://github.com/apache/arrow/pull/5393>"
+        }
+    ]
+}

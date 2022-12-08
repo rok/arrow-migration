@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[C++] Change or rationalize output of array_sort_indices on ChunkedArray",
+        "body": "***Note**: This issue was originally created as [ARROW-12042](https://issues.apache.org/jira/browse/ARROW-12042). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently when the `array_sort_indices` compute function is called on a ChunkedArray\u00a0of two or more Arrays, it returns a ChunkedArray of Arrays of\u00a0_local_ sort indices for each Array.\u00a0Demonstrating this with the R bindings:\r\n```java\n\r\n> x <- ChunkedArray$create(c(2L, 1L), c(4L, 3L))\r\n> arrow:::call_function(\"array_sort_indices\", x, options = list(order = FALSE))\r\nChunkedArray\r\n[\r\n  [\r\n    1,\r\n    0\r\n  ],\r\n  [\r\n    1,\r\n    0\r\n  ]\r\n]\r\n```\r\nCompare to the `sort_indices` compute function which returns an Array of\u00a0_global_ sort indices in this case:\r\n```java\n\r\n> arrow:::call_function(\"sort_indices\", x, options = list(names = \"\", orders = 0L))\r\nArray\r\n<uint64>\r\n[\r\n  1,\r\n  0,\r\n  3,\r\n  2\r\n]\n```\r\nIs this behavior deliberate? If so, we should document it clearly. If not, we should change it.\r\n\r\nNote that the docs currently states that `array_sort_indices` only works on Arrays\u00a0<https://arrow.apache.org/docs/cpp/compute.html#sorts-and-partitions>\u00a0(see note (4)) but evidently that is not exactly correct.",
+        "created_at": "2021-03-22T16:47:28.000Z",
+        "updated_at": "2022-01-03T20:41:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-01-03T17:37:53.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-03-22T17:18:47.611Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12042?focusedCommentId=17306420) by Antoine Pitrou (apitrou):*\nI definitely don't see this in Python. This looks like a bug on the R side?\r\n```python\n\r\n>>> arr = pa.chunked_array([[2, 1], [4, 3]])\r\n>>> pc.sort_indices(arr)\r\n<pyarrow.lib.UInt64Array object at 0x7f4e4a121c90>\r\n[\r\n  1,\r\n  0,\r\n  3,\r\n  2\r\n]\r\n>>> arr.take(pc.sort_indices(arr))\r\n<pyarrow.lib.ChunkedArray object at 0x7f4e4a11e170>\r\n[\r\n  [\r\n    1,\r\n    2,\r\n    3,\r\n    4\r\n  ]\r\n]\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-03-22T17:20:08.910Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12042?focusedCommentId=17306431) by Antoine Pitrou (apitrou):*\nOops, sorry, I had missed part of the report :)\r\n\r\n```python\n\r\n>>> pc.array_sort_indices(arr)\r\n<pyarrow.lib.ChunkedArray object at 0x7f4e4a112e30>\r\n[\r\n  [\r\n    1,\r\n    0\r\n  ],\r\n  [\r\n    1,\r\n    0\r\n  ]\r\n]\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-03-22T17:25:42.862Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12042?focusedCommentId=17306436) by Antoine Pitrou (apitrou):*\n`[~icook]` Do you want to take this?"
+        },
+        {
+            "created_at": "2021-03-22T17:39:36.705Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12042?focusedCommentId=17306452) by Ian Cook (icook):*\n`[~apitrou]` \u00a0sure, I can try :)\u00a0"
+        },
+        {
+            "created_at": "2021-03-22T20:50:43.102Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12042?focusedCommentId=17306565) by Kouhei Sutou (kou):*\nHow do we solve this?\r\nCan we return an error when `ChunkedArray` is used with `array_sort_indices`?"
+        },
+        {
+            "created_at": "2021-03-22T21:01:49.649Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12042?focusedCommentId=17306577) by Neal Richardson (npr):*\nNaive question: why do we have a special array_sort_indices function when everything else goes through sort_indices?"
+        },
+        {
+            "created_at": "2021-03-22T21:18:33.990Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12042?focusedCommentId=17306586) by Kouhei Sutou (kou):*\nI renamed the old `sort_indices` to `array_sort_indices` when I added support for `ChunkedArray`, `RecordBatch` and `Table`.\r\nI thought `array_sort_indices` is convenient when we want to sort `Array`. `sort_indices` uses `SortOptions` that requires sort column name when we specify sort order. We need to specify a dummy sort column name for `Array`.\r\nBut we may be able to just remove `array_sort_indices` because it confuses us."
+        },
+        {
+            "created_at": "2021-03-23T14:37:46.657Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12042?focusedCommentId=17307134) by Antoine Pitrou (apitrou):*\nIf we remove `array_sort_indices`, then we should allow constructing `SortOptions` from a single `order` parameter, for convenience."
+        },
+        {
+            "created_at": "2022-01-03T17:37:53.869Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12042?focusedCommentId=17468123) by David Li (lidavidm):*\nIssue resolved by pull request 12064\n<https://github.com/apache/arrow/pull/12064>"
+        }
+    ]
+}

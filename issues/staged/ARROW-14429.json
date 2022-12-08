@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[C++] RecordBatchFileReader performance really bad in S3",
+        "body": "***Note**: This issue was originally created as [ARROW-14429](https://issues.apache.org/jira/browse/ARROW-14429). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe are using\u00a0RecordBatchFileWriter to write Arrow type directly to S3 using the S3FileSystem, then using\u00a0RecordBatchFileReader to read from S3. The write is pretty efficient, write a 50MB finishes within 0.2s. But reading that file is taking 30s, which is definitely too long. Then I did several tests:\r\n1. I tried to use\u00a0S3FileSystem to read the file into bytes, it's only taking 1s. which somehow makes me believe it's an issue with\u00a0RecordBatchFileReader\n1. Half the size (around 25MB), with\u00a0[RecordBatchFileReader](https://arrow.apache.org/docs/python/generated/pyarrow.RecordBatchFileReader.html)\u00a0took 17s, without\u00a0[RecordBatchFileReader](https://arrow.apache.org/docs/python/generated/pyarrow.RecordBatchFileReader.html)\u00a0took 0.28s\n1. Double the size (around 100MB), with\u00a0[RecordBatchFileReader](https://arrow.apache.org/docs/python/generated/pyarrow.RecordBatchFileReader.html)\u00a0took 61s, without\u00a0[RecordBatchFileReader](https://arrow.apache.org/docs/python/generated/pyarrow.RecordBatchFileReader.html)\u00a0took 2.3s\n1. I tried to get all bytes using\u00a0S3FileSystem first, then create a reader from the bytes. Then read all context from the reader, it's only taking 0.1s.\u00a0",
+        "created_at": "2021-10-21T22:18:08.000Z",
+        "updated_at": "2022-01-17T14:40:11.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-01-17T14:40:11.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-10-21T23:03:44.563Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14429?focusedCommentId=17432743) by David Li (lidavidm):*\nFrom what I recall, the reader seeks around and reads each record batch and its header individually. This means separate requests to S3, for which the latency can add up. This is especially true if the record batches are relatively small or there are a lot of them, and especially true if you're reading from a different S3 region (=higher latency). As you've found, reading all the bytes up front helps.\r\n\r\nThere are optimizations for this in the datasets project - is reading the file through that interface faster? (You will have to enable the async scanner.)"
+        },
+        {
+            "created_at": "2021-10-21T23:09:51.516Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14429?focusedCommentId=17432745) by David Li (lidavidm):*\nAlso we can and should probably optimize this in the first place - at the very least, we should be able to read each record batch together with its metadata header, instead of separately like we currently do."
+        },
+        {
+            "created_at": "2021-10-21T23:58:21.270Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14429?focusedCommentId=17432750) by Lingkai Kong (lingkai2):*\n`[~lidavidm]` \u00a0Is there a way to configure how large a\u00a0record batch is? If we can make a record batch large I guess it would mean fewer requests to S3\r\n\r\nAlso, haven't tried the\u00a0datasets project. I will give it a try to see if that is faster or not.\u00a0\r\n\r\nThanks for your help!"
+        },
+        {
+            "created_at": "2021-10-22T13:15:12.484Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14429?focusedCommentId=17432970) by David Li (lidavidm):*\n`[~lingkai2]` the size of the record batches in the file is determined when you write the file. How is the file being written?\r\n\r\nAlso I would note that if you are reading the entire file, and the file is relatively small, it will be hard to do much better than just reading the entire thing into memory first."
+        },
+        {
+            "created_at": "2021-10-22T19:56:46.312Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14429?focusedCommentId=17433134) by David Li (lidavidm):*\n~~Oh, I forgot to mention, but arrow::io::BufferedInputStream may also help.~~\r\n\r\nI forgot that the IPC reader needs a RandomAccessFile, not a BufferedInputStream, so that won't apply here."
+        },
+        {
+            "created_at": "2021-10-25T15:34:29.004Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14429?focusedCommentId=17433829) by David Li (lidavidm):*\n`[~lingkai2]` does the Datasets reader perform better?\r\n\r\nAlso see the [pull request](https://github.com/apache/arrow/pull/11535); while the API is less convenient, the generator-based reader may be the fastest for you."
+        },
+        {
+            "created_at": "2021-10-25T16:50:48.130Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14429?focusedCommentId=17433869) by Lingkai Kong (lingkai2):*\nI realize why the read from\u00a0RecordBatchFileReader is really slow now. That's because when I write, each batch size is very small. Now I call combine_chunk before I write to DBFS and the read become much faster now.\u00a0\r\n\r\nAnd for our case, the file might be quite large so we can't load all the content into memory first"
+        },
+        {
+            "created_at": "2021-10-25T16:53:33.206Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14429?focusedCommentId=17433871) by David Li (lidavidm):*\nThanks for the update.\r\n\r\nAs mentioned, the PR should speed things up somewhat as well. If you are accessing random record batches in the file, this is the best it can do. However, if you are sequentially scanning through all the record batches in the file, the record batch generator in the PR is likely the fastest - it will read from S3 in chunks to avoid the latency of making requests for each record batch. (It does use more memory though - please follow up if you find that to be an issue.)"
+        },
+        {
+            "created_at": "2022-01-17T14:36:39.012Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14429?focusedCommentId=17477253) by Krisztian Szucs (kszucs):*\n`[~lidavidm]` `[~westonpace]` is this resolved by https://issues.apache.org/jira/browse/ARROW-14577 ?"
+        },
+        {
+            "created_at": "2022-01-17T14:40:11.913Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14429?focusedCommentId=17477258) by David Li (lidavidm):*\nYes, we can close this. `[~lingkai2]` please report if you do not see an improvement."
+        }
+    ]
+}

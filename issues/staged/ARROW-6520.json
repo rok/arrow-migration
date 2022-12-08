@@ -1,0 +1,65 @@
+{
+    "issue": {
+        "title": "[Python] Segmentation fault on writing tables with fixed size binary fields ",
+        "body": "***Note**: This issue was originally created as [ARROW-6520](https://issues.apache.org/jira/browse/ARROW-6520). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI'm not sure if this should be reported to Parquet or here.\r\n\r\nWhen I tried to serialize a pyarrow table with a fixed size binary field (holds 16 byte UUID4 information) to a parquet file, segmentation fault occurs.\r\n\r\nHere is the minimal example to reproduce:\r\n\r\n`import pyarrow as pa`\r\n`from pyarrow import parquet as pq`\r\n`data = \\{\"col\": pa.array([b\"1234\" for _ in range(10)])`}\r\n`fields = [(\"col\", pa.binary(4))]`\r\n`schema = pa.schema(fields)`\r\n`table = pa.table(data, schema)`\r\n`pq.write_table(table, \"test.parquet\")`\r\n`segmentation fault (core dumped) ipython`\r\n\r\n\u00a0\r\n\r\nYet, it works if I don't specify the size of the binary field.\r\n\r\n`import pyarrow as pa`\r\n`from pyarrow import parquet as pq`\r\n`data = \\{\"col\": pa.array([b\"1234\" for _ in range(10)])`}\r\n`fields = [(\"col\", pa.binary())]`\r\n`schema = pa.schema(fields)`\r\n`table = pa.table(data, schema)`\r\n`pq.write_table(table, \"test.parquet\")`\r\n\r\nThanks,",
+        "created_at": "2019-09-10T22:43:54.000Z",
+        "updated_at": "2019-09-18T16:47:51.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-09-18T16:47:51.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-09-11T00:36:18.045Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6520?focusedCommentId=16927147) by Wes McKinney (wesm):*\nSeems like there's an unhandled case somewhere in the write path. This should work \u2013 I added to 0.15.0. Are you able to take a look at the C++ code?"
+        },
+        {
+            "created_at": "2019-09-11T11:33:41.223Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6520?focusedCommentId=16927496) by Joris Van den Bossche (jorisvandenbossche):*\nI can reproduce this on 0.14.1, but not any more on master. So it might already be fixed. \r\n\r\nWill do a PR with adding a test to see if it passes on CI as well."
+        },
+        {
+            "created_at": "2019-09-11T11:39:19.693Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6520?focusedCommentId=16927499) by Krisztian Szucs (kszucs):*\nCould not reproduce with latest master. I'll add a test case though."
+        },
+        {
+            "created_at": "2019-09-11T11:40:00.675Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6520?focusedCommentId=16927500) by Krisztian Szucs (kszucs):*\n`[~jorisvandenbossche]` Didn't see your comment, are you handling it?"
+        },
+        {
+            "created_at": "2019-09-11T11:42:57.666Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6520?focusedCommentId=16927504) by Joris Van den Bossche (jorisvandenbossche):*\nSo this is due to an invalid creation of the table in 0.14.1. With the table as created above:\r\n\r\n```Java\n\r\n In [4]: table.column(0)                                                                                                                                                                                            \r\nOut[4]: \r\n<Column name='col' type=FixedSizeBinaryType(fixed_size_binary[4])>\r\n[\r\n  [\r\n    31323334,\r\n    31323334,\r\n    31323334,\r\n    31323334,\r\n    31323334,\r\n    31323334,\r\n    31323334,\r\n    31323334,\r\n    31323334,\r\n    31323334\r\n  ]\r\n]\r\n\r\nIn [5]: table.column(0).type \r\nOut[5]: FixedSizeBinaryType(fixed_size_binary[4])\r\n\r\nIn [7]: table.column(0).data.chunk(0).type\r\nOut[7]: DataType(binary)\r\n```\r\n\r\nSo the Column (now gone) and ChunkedArray are of FixedSizeBinary type, but the actual Array that they are holding is variable binary type. This is probably related to the fixed issue where the passed schema was not properly used (there have been several PRs related to that I think, eg https://github.com/apache/arrow/pull/5189. We now also validate the created table in cython).\r\n\r\n\r\n\r\n"
+        },
+        {
+            "created_at": "2019-09-11T11:45:12.463Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6520?focusedCommentId=16927505) by Joris Van den Bossche (jorisvandenbossche):*\n`[~kszucs]` yes, will add a test case for the table creation (not related to parquet)"
+        },
+        {
+            "created_at": "2019-09-11T12:40:00.709Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6520?focusedCommentId=16927530) by Joris Van den Bossche (jorisvandenbossche):*\nSo the reason it was passing on master, is because it was not actually testing it. The signature of `pa.table` changed, and now the first argument is names and not schema, and when passing a schema as such it was silently ignored. Will open a separate JIRA for this.\r\n\r\nThen, when trying to do this properly, it now fails on master (which is better down creating an invalid array as before). It boils down to this:\r\n\r\n```Java\n\r\nIn [31]: arr = pa.array([b\"1234\" for _ in range(10)])  \r\n\r\nIn [32]: pa.array(arr, type=pa.binary(4)) \r\n---------------------------------------------------------------------------\r\nArrowTypeError                            Traceback (most recent call last)\r\n<ipython-input-32-4651f2f37039> in <module>\r\n----> 1 pa.array(arr, type=pa.binary(4))\r\n\r\n~/scipy/repos/arrow/python/pyarrow/array.pxi in pyarrow.lib.array()\r\n\r\n~/scipy/repos/arrow/python/pyarrow/array.pxi in pyarrow.lib._sequence_to_array()\r\n\r\n~/scipy/repos/arrow/python/pyarrow/error.pxi in pyarrow.lib.check_status()\r\n\r\nArrowTypeError: Expected a string or bytes object, got a 'pyarrow.lib.BinaryValue' object\r\n```\r\n\r\nSo due to some changes (I think a bit buried in the Column removal PR: https://github.com/apache/arrow/pull/4841), we started calling `pa.array` on the values in the dict, but, we do not yet accept actual pyarrow arrays in `pa.array` (see ARROW-5295). And apparently we did not yet have the case of a dict of arrow arrays + specifying a schema covered in our tests.\r\n"
+        },
+        {
+            "created_at": "2019-09-11T16:16:53.620Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6520?focusedCommentId=16927730) by Wes McKinney (wesm):*\nThere's several layers of rottenness here. I'll work on a patch that addresses these rough edges "
+        },
+        {
+            "created_at": "2019-09-11T16:54:35.447Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6520?focusedCommentId=16927800) by Joris Van den Bossche (jorisvandenbossche):*\n`[~wesmckinn]` ah, I started looking at it as well. Sorry should have noted here (only mentioned it on the standup). Now, I went away for dinner so didn't do anything worthy of actual code yet, but I was planning to:\r\n\r\n- accept `pyarrow.Array` in `pyarrow.array` and if a `type` is specified try to `cast` it to that type (which will still mean that the example of the top post will now fail, as we don't have a cast from var binary to fixed size binary). This should then also fix `from_dict` using `pyarrow.array(.. type=type)` on all input.\n- switch the order of the `names` and `schema` keywords of the `pyarrow.table` factory function to preserve backwards compatibility."
+        },
+        {
+            "created_at": "2019-09-11T19:35:40.168Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6520?focusedCommentId=16927947) by Wes McKinney (wesm):*\nYes, that was basically my thinking except to handle a Schema passed to `names=` as though it were passed as `schema=`"
+        },
+        {
+            "created_at": "2019-09-11T22:44:25.783Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6520?focusedCommentId=16928069) by Wes McKinney (wesm):*\nI haven't gotten to this yet, so if you have time tomorrow in Europe to take it on just let me know here"
+        },
+        {
+            "created_at": "2019-09-18T16:47:51.962Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6520?focusedCommentId=16932654) by Wes McKinney (wesm):*\nIssue resolved by pull request 5366\n<https://github.com/apache/arrow/pull/5366>"
+        }
+    ]
+}

@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[Python]\u00a0Inconsistent handling of np.nan",
+        "body": "***Note**: This issue was originally created as [ARROW-2806](https://issues.apache.org/jira/browse/ARROW-2806). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently we handle `np.nan` differently between having a list or a numpy array as an input to `pa.array()`:\r\n\r\n```Java\n\r\n>>> pa.array(np.array([1, np.nan]))\r\n<pyarrow.lib.DoubleArray object at 0x11680bea8>\r\n[\r\n  1.0,\r\n  nan\r\n]\r\n\r\n>>> pa.array([1., np.nan])\r\nOut[9]:\r\n<pyarrow.lib.DoubleArray object at 0x10bdacbd8>\r\n[\r\n  1.0,\r\n  NA\r\n]\r\n```\r\n\r\nI would actually think the last one is the correct one. Especially once one casts this to an integer column. There the first one produces a column with INT_MIN and the second one produces a real null.\r\n\r\nBut, in `test_array_conversions_no_sentinel_values`\u00a0we check that `np.nan`\u00a0does not produce a Null.\r\n\r\nEven weirder: \r\n\r\n```Java\n\r\n>>> df = pd.DataFrame({'a': [1., None]})\r\n>>> df\r\n     a\r\n0  1.0\r\n1  NaN\r\n>>> pa.Table.from_pandas(df).column(0)\r\n<Column name='a' type=DataType(double)>\r\nchunk 0: <pyarrow.lib.DoubleArray object at 0x104bbf958>\r\n[\r\n  1.0,\r\n  NA\r\n]\r\n```",
+        "created_at": "2018-07-07T15:28:44.000Z",
+        "updated_at": "2018-07-17T12:54:48.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-07-17T12:54:48.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-07-07T15:35:19.304Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2806?focusedCommentId=16535803) by Uwe Korn (uwe):*\n`[~wesmckinn]` \u00a0Would it be ok for you to change the test so that `np.nan`\u00a0is always a null indicator for Arrow?"
+        },
+        {
+            "created_at": "2018-07-07T19:00:46.427Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2806?focusedCommentId=16535872) by Wes McKinney (wesm):*\nOof, I actually think `pa.array([1, NaN])` should either raise an exception or return a DoubleArray with a NaN, unless `from_pandas=True`."
+        },
+        {
+            "created_at": "2018-07-07T19:03:12.309Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2806?focusedCommentId=16535873) by Wes McKinney (wesm):*\nAnd `pa.array([1., NaN])` should preserve the NaN"
+        },
+        {
+            "created_at": "2018-07-08T19:43:51.702Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2806?focusedCommentId=16536393) by Uwe Korn (uwe):*\nDo we have a well-supported reasoning why we should have this behaviour? I'm asking because this is quite a breaking change now and my feeling was that we wanted to achieve the opposite for quite some. Therefore I would like to document our approach with the appropriate reasoning in the docs."
+        },
+        {
+            "created_at": "2018-07-08T22:00:11.224Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2806?focusedCommentId=16536421) by Wes McKinney (wesm):*\nIn the context of basically any database-type system (PostgreSQL, Spark SQL, etc.), NaN is just another floating point value. It only happens to be that we use NaN as a null sentinel in pandas. When we pass `from_pandas=True`, then we should treat it as null because those are the pandas semantics. "
+        },
+        {
+            "created_at": "2018-07-09T17:07:47.109Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2806?focusedCommentId=16537272) by Uwe Korn (uwe):*\nThis makes sense. I can adapt the things to adhere to this principle. \r\n\r\nWhat should be the result of `pa.array(np.array([np.nan])).cast(pa.int64())` then?"
+        },
+        {
+            "created_at": "2018-07-09T17:18:47.819Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2806?focusedCommentId=16537289) by Wes McKinney (wesm):*\nI guess it should raise unless `safe=False`. What do you think?"
+        },
+        {
+            "created_at": "2018-07-09T17:35:25.275Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2806?focusedCommentId=16537309) by Wes McKinney (wesm):*\nClosely related https://issues.apache.org/jira/browse/ARROW-488"
+        },
+        {
+            "created_at": "2018-07-17T12:54:48.314Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2806?focusedCommentId=16546549) by Uwe Korn (uwe):*\nIssue resolved by pull request 2270\n<https://github.com/apache/arrow/pull/2270>"
+        }
+    ]
+}

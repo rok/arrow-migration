@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[C++][R]Opening a multi-file dataset and writing a re-partitioned version of it fails",
+        "body": "***Note**: This issue was originally created as [ARROW-14736](https://issues.apache.org/jira/browse/ARROW-14736). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAttempting to open a multi-file dataset and write a re-partitioned version of it fails as it seems there is an attempt to collect data into memory first. This happens both for wide and long data.\r\n\r\nSteps to reproduce the issue:\r\n1. Create a large dataset (100k columns, 300k rows) and write it to disk and create 20 copies of it. Each file will have a footprint of roughly 7.5GB.\u00a0\r\n```r\n\r\nlibrary(arrow)\r\nlibrary(dplyr)\r\nlibrary(fs)\r\n\r\nrows <- 300000\r\ncols <- 100000\r\npartitions <- 20\r\n\r\nwide_df <- as.data.frame(\r\n  matrix(\r\n    sample(1:32767, rows * cols / partitions, replace = TRUE), \r\n    ncol = cols)\r\n)\r\n\r\nschem <- sapply(colnames(wide_df), function(nm) {int16()})\r\nschem <- do.call(schema, schem)\r\n\r\nwide_tab <- Table$create(wide_df, schema = schem)\r\n\r\nwrite_parquet(wide_tab, \"~/Documents/arrow_playground/wide.parquet\")\r\n\r\nfs::dir_create(\"~/Documents/arrow_playground/wide_ds\")\r\nfor (i in seq_len(partitions)) {\r\n  file.copy(\"~/Documents/arrow_playground/wide.parquet\", \r\n            glue::glue(\"~/Documents/arrow_playground/wide_ds/wide-{i-1}.parquet\"))\r\n}\r\n\r\nds_wide <- open_dataset(\"~/Documents/arrow_playground/wide_ds/\")\r\n```\r\nAll the following steps fail:\r\n\r\n2. Creating and writing a partitioned version of `{}ds_wide{`}.\r\n```r\n\r\n  ds_wide %>%\r\n    mutate(grouper = round(V1 / 1024)) %>%\r\n    write_dataset(\"~/Documents/arrow_playground/partitioned\", \r\n                   partitioning = \"grouper\",\r\n                   format = \"parquet\")\r\n```\r\n3. Writing a non-partitioned dataset:\r\n```r\n\r\n  ds_wide %>%\r\n    write_dataset(\"~/Documents/arrow_playground/partitioned\", \r\n                  format = \"parquet\")\r\n```\r\n4. Creating the partitioning variable first and then attempting to write:\r\n```r\n\r\n  ds2 <- ds_wide %>% \r\n    mutate(grouper = round(V1 / 1024))\r\n\r\n  ds2 %>% \r\n    write_dataset(\"~/Documents/arrow_playground/partitioned\", \r\n                  partitioning = \"grouper\", \r\n                  format = \"parquet\")  \r\n```\r\n5. Attempting to write to csv:\r\n```r\n\r\nds_wide %>% \r\n  write_dataset(\"~/Documents/arrow_playground/csv_writing/test.csv\",\r\n                format = \"csv\")\r\n```\r\nNone of the failures seem to originate in R code and they all result in a similar behaviour: the R sessions consume increasing amounts of RAM until they crash.",
+        "created_at": "2021-11-17T11:25:57.000Z",
+        "updated_at": "2022-07-12T14:04:51.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-17T13:29:03.524Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14736?focusedCommentId=17445161) by Nicola Crane (thisisnic):*\nOut of interest, do you get the same behaviour if you set up the grouping variable in the original data generation rather than via `mutate()`?"
+        },
+        {
+            "created_at": "2021-11-17T13:41:18.826Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14736?focusedCommentId=17445171) by Nicola Crane (thisisnic):*\nI suppose that Parquet is capable of storing metadata whereas CSV isn't, so if you write a grouped dataset to a Parquet file and read it back in and it's still grouped, then the answer for sure is \"yes\"."
+        },
+        {
+            "created_at": "2021-11-17T13:55:33.932Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14736?focusedCommentId=17445183) by Neal Richardson (npr):*\n\"the R sessions consume increasing amounts of RAM until they crash\" suggests something in the C++ query evaluation (cc `[~westonpace]`)\r\n\r\nAre you actually testing with the release version (6.0.0.2) or are you on the latest on the master branch?"
+        },
+        {
+            "created_at": "2021-11-17T13:59:38.294Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14736?focusedCommentId=17445186) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\n`[~thisisnic]` I can confirm the same behaviour is observed when the original data frame (that gets written to a parquet file) is grouped."
+        },
+        {
+            "created_at": "2021-11-17T14:18:43.020Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14736?focusedCommentId=17445202) by Jonathan Keane (jonkeane):*\nFor (4) the ram-fill-up happens at the write step and not the mutate step above, correct?"
+        },
+        {
+            "created_at": "2021-11-17T14:20:24.268Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14736?focusedCommentId=17445203) by Jonathan Keane (jonkeane):*\nAdditionally: does anything change if the dataset is longer and less wide (say 30000000 rows and 1000 cols, repeated twenty times)?"
+        },
+        {
+            "created_at": "2021-11-17T14:45:18.019Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14736?focusedCommentId=17445259) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\n`[~jonkeane]` \u00a0correct for (4) the ram fill-up happens at the write step. Other than the size of the first parquet file which gets written on disk (2.95GB instead of 7.5GB) nothing seems to change when switching to a long dataset. However, I did notice that the memory pressure in my Activity monitor is not simply just going up (gradually filling up), it's more of a saw teeth profile. The yellow plateau is writing the 20 copies of the parquet file and the red + yellow is the attempt to re-partition it.\r\n\r\n![image-2021-11-17-14-43-37-127.png](https://issues.apache.org/jira/secure/attachment/13036230/image-2021-11-17-14-43-37-127.png)"
+        },
+        {
+            "created_at": "2021-11-17T14:55:15.258Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14736?focusedCommentId=17445268) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nMemory pressure when writing a wide re-partitioned dataset: ![image-2021-11-17-14-55-08-597.png](https://issues.apache.org/jira/secure/attachment/13036232/image-2021-11-17-14-55-08-597.png) \u00a0"
+        },
+        {
+            "created_at": "2021-11-17T15:23:47.593Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14736?focusedCommentId=17445291) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\n`[~npr]` \u00a0I have tried both with the release version of the \\{arrow} R package and the dev one. The same behaviour. Worth mentioning that, with the dev version of the arrow package, the size on disk of the (wide) parquet file is larger, at 8.21GB, approximately a 10% increase.\u00a0"
+        },
+        {
+            "created_at": "2021-11-17T18:33:01.463Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14736?focusedCommentId=17445433) by Weston Pace (westonpace):*\nI suspect this is going to be a problem until https://issues.apache.org/jira/browse/ARROW-14648 is resolved.\u00a0 By specifying backpressure in terms of \"# of batches\" instead of \"# of bytes\" the limits depend very much on the shape of the input.\r\n\r\n\u00a0\r\n\r\nFurthermore, those limits were designed around the CSV reader (my mistake) which yields ~1MB sized batches.\u00a0 So the readahead limit for CSV is 256MB while the readahead limit for parquet (where people often create 1GB sized row groups) is more like 256GB.\r\n\r\n\u00a0\r\n\r\nTry shaping your data so that row groups are 10MB large and see if that helps with memory pressure (I'd expect it to cap out around 3GB).\u00a0 With a database that wide however small row groups are going to hurt performance so this is just a workaround and not a long term solution.\r\n\r\n\r\nEven with ARROW-14648 your memory pressure is going to be red until ARROW-14635 is addressed because a dataset write just hands off RAM to the OS."
+        },
+        {
+            "created_at": "2022-07-12T14:04:51.402Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14736?focusedCommentId=17565795) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

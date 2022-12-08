@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[C++] arrow-utility-test fails with clang-12 (TestCopyAndReverseBitmapPreAllocated)",
+        "body": "***Note**: This issue was originally created as [ARROW-15461](https://issues.apache.org/jira/browse/ARROW-15461). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nUnit test `BitUtilTests.TestCopyAndReverseBitmapPreAllocated` failed if release build arrow with clang-12, on both x86 and Arm.\r\n\r\nPer my debug, it's related to `GetReversedBlock` function [1], when right shift a uint8 value by 8 bits.\r\nI think it's a compiler bug. From the test code [2], clang-12 returns 1, which is wrong. clang-11 and clang-13 both return 2, the correct answer. Looks clang-12 over optimized the code, there should be no UB in the code (uint8 is promoted to integer before shift).\r\n\r\nA workaround is to treat shifting 8 bits as a special case. Or we can simply ignore this error if the compiler bug is confirmed (I didn't find clang bug report).\r\n\r\n[1] https://github.com/apache/arrow/blob/master/cpp/src/arrow/util/bitmap_ops.cc#L101\r\n[2] https://godbolt.org/z/TzYWfcP1E",
+        "created_at": "2022-01-26T11:34:21.000Z",
+        "updated_at": "2022-04-27T01:38:01.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-01-28T04:42:37.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-01-26T11:45:27.876Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15461?focusedCommentId=17482406) by Antoine Pitrou (apitrou):*\nI don't think there is any promotion to int when shifting. Shifting uint8 by 8 bits is probably UB."
+        },
+        {
+            "created_at": "2022-01-26T11:51:48.540Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15461?focusedCommentId=17482410) by Antoine Pitrou (apitrou):*\nActually, you're right, the arguments should be promoted: <https://en.cppreference.com/w/cpp/language/operator_arithmetic>"
+        },
+        {
+            "created_at": "2022-01-26T11:57:17.404Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15461?focusedCommentId=17482416) by Antoine Pitrou (apitrou):*\nThe `and     cl, 7` in the optimized code produced by clang 12 seems clearly wrong."
+        },
+        {
+            "created_at": "2022-01-27T00:59:32.709Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15461?focusedCommentId=17482820) by Yibo Cai (yibocai):*\nconfirmed this is clang-12 bug.\r\nhttps://github.com/llvm/llvm-project/issues/53421"
+        },
+        {
+            "created_at": "2022-01-27T08:52:34.836Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15461?focusedCommentId=17482980) by Antoine Pitrou (apitrou):*\nWhat if we rewrite the function like this:\r\nhttps://godbolt.org/z/qdrvj9WKP\r\n\r\n"
+        },
+        {
+            "created_at": "2022-01-27T13:05:09.196Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15461?focusedCommentId=17483111) by Yibo Cai (yibocai):*\nGreat! Compiler generates much better machine code.\r\nRecommend opening a PR for this change.\r\n\r\nCurious why current c code is not optimized this way, given (len > 8) is UB."
+        },
+        {
+            "created_at": "2022-01-27T13:45:49.703Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15461?focusedCommentId=17483131) by Antoine Pitrou (apitrou):*\nProbably because nobody thought of it :)"
+        },
+        {
+            "created_at": "2022-01-28T04:42:37.393Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15461?focusedCommentId=17483559) by Yibo Cai (yibocai):*\nIssue resolved by pull request 12276\n<https://github.com/apache/arrow/pull/12276>"
+        }
+    ]
+}

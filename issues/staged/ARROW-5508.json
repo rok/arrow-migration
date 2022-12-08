@@ -1,0 +1,73 @@
+{
+    "issue": {
+        "title": "[C++] Create reusable Iterator<T> interface ",
+        "body": "***Note**: This issue was originally created as [ARROW-5508](https://issues.apache.org/jira/browse/ARROW-5508). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe have various iterator-like classes. I envision a reusable interface like\r\n\r\n```Java\n\r\ntemplate <typename T>\r\nclass Iterator {\r\n public:\r\n  virtual ~Iterator() = default;\r\n  virtual Status Next(T* out) = 0;\r\n}\r\n```",
+        "created_at": "2019-06-04T19:39:56.000Z",
+        "updated_at": "2022-08-29T14:15:14.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-08-29T14:14:04.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-06-05T01:39:39.306Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5508?focusedCommentId=16856229) by Liya Fan (fan_li_ya):*\n`[~wesmckinn]`, thanks for the good point.\r\n\r\nWhat is the standard way to know if there is a next element in the iterator?"
+        },
+        {
+            "created_at": "2019-06-13T19:57:42.631Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5508?focusedCommentId=16863415) by Wes McKinney (wesm):*\nI added a prototype for this here, see the comment on the Next method\r\n\r\nhttps://github.com/apache/arrow/blob/master/cpp/src/arrow/util/iterator.h\r\n\r\nI notice that I missed the virtual destructor.\r\n\r\nIf this is the preferred Iterator interface, then I would suggest refactoring one or two of our ad hoc iterator classes in the codebase to use `arrow::Iterator<T>` as a path to resolving this issue. Thoughts?"
+        },
+        {
+            "created_at": "2019-06-14T14:44:01.053Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5508?focusedCommentId=16864152) by Ben Kietzman (bkietz):*\nWhy not just use the [`Range` concept](https://en.cppreference.com/w/cpp/language/range-for)? We already have [arrow::util::LazyRange](https://github.com/apache/arrow/blob/aedba2c/cpp/src/arrow/util/lazy.h) which provides the functionality you want, I think. If you prefer the `Iterator` interface as you have written it then we should include an adapter so that range for loops are easy"
+        },
+        {
+            "created_at": "2019-06-14T19:12:40.474Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5508?focusedCommentId=16864368) by Wes McKinney (wesm):*\nLet's wait until `StatusOr` lands and evaluate options. It might be nice to have `Next` return `StatusOr<T>`. Ultimately this is about having an abstract base type like `std::unique_ptr<Iterator<T>>` to return from functions that deal in streams"
+        },
+        {
+            "created_at": "2019-06-19T10:49:36.133Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5508?focusedCommentId=16867492) by Liya Fan (fan_li_ya):*\nI still have not figured out how to check the end of the iterator by the Next method:\r\n1. If it is through the return value, this could be inefficient - Status is a class, and there can be object copy when returning an Status object.\n1. If it is through the method parameter, I think the parameter type should be T\\*& or T\\*\\* ?\n   \n   \u00a0"
+        },
+        {
+            "created_at": "2019-06-19T15:00:18.674Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5508?focusedCommentId=16867739) by Ben Kietzman (bkietz):*\n3. A separate out parameter of type `bool*`\r\n\r\n```Java\n\r\ntemplate <typename T>\r\nclass Iterator {\r\n public:\r\n  virtual ~Iterator() = default;\r\n  virtual Status Next(T* value, bool* done) = 0;\r\n}\r\n```"
+        },
+        {
+            "created_at": "2019-08-22T22:47:32.051Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5508?focusedCommentId=16913772) by Wes McKinney (wesm):*\n`[~pitrou]` `[~bkietz]` `[~fsaintjacques]` is the `Iterator<T>` in the codebase now satisfactory?"
+        },
+        {
+            "created_at": "2019-08-23T01:17:32.763Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5508?focusedCommentId=16913838) by Francois Saint-Jacques (fsaintjacques):*\nMy take after implementing MapIterator, FlattenIterator and using it heavily in the dataset code.\r\n\r\n1. `T` must be of pointer type (or support assignment/comparison of nullptr). Iterator completion is signaled by assigning `T\\* out` to nullptr.\n1. Due to previous point, the iterator may never yield nullptr as a valid value.\n1. The interface forces consuming a value to know if it's empty, i.e. there's no Done()/HasNext(). This can lead to [odd](https://github.com/fsaintjacques/arrow/commit/36ba801f47a1053c292fd461afd4ec23e63c1e97#diff-df9646433131d9cf9f31a395c2719b70R157-R190) consumption.\n1. I question the user of Status as a return code, maybe we should have a specialized `FailableIterator<T> : Iterator<Result<T>>` for the same effect.\n   \n   The first and second point could be tackled by returning `Option<T>` (Result<T> wouldn't work because we can't use Status::OK() as a sentinel-completion value). The third is annoying for streaming iterators (when there's no way to know completion without side effect), since the iterator itself must consume on Done() call and cache the result. I think I prefer putting the onus on the iterator implementor than the user of the interface."
+        },
+        {
+            "created_at": "2019-08-26T18:08:32.575Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5508?focusedCommentId=16916021) by Francois Saint-Jacques (fsaintjacques):*\nping for input:\u00a0 `[~pitrou]` `[~bkietz]` [~emkornfield@gmail.com]"
+        },
+        {
+            "created_at": "2019-08-26T18:14:39.003Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5508?focusedCommentId=16916031) by Antoine Pitrou (apitrou):*\nWe could also take a page from Python and have a special `Status::StopIteration` to signal completion.\r\n\r\nI also think it's essential to be able to return errors - either via `Status` or `Result<T>`.\r\n\r\nAs for signaling completion without consuming a value, well, the problem is that not all iterators may support that. Is there a use case where this matters?"
+        },
+        {
+            "created_at": "2019-08-28T08:15:35.182Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5508?focusedCommentId=16917538) by Micah Kornfield (emkornfield@gmail.com):*\nMy only comment on this is might pay to sketch out what iteration looks like in each case.\u00a0\r\n\r\n\u00a0\r\n\r\nUsing StopIteration and Result I think you get something like:\r\n\r\nwhile (RETURN_IF_NOT_STOPPED_ERROR(v,\u00a0 iter.next()) {\r\n\r\n\u00a0 \u00a0 doSomethingWith(v)\r\n\r\n}\r\n\r\nNot sure if the macros to make that nice are even vaible.\r\n\r\n\u00a0\r\n\r\n\"As for signaling completion without consuming a value, well, the problem is that not all iterators may support that. Is there a use case where this matters?\"\r\n\r\nI think in many cases this can be solved with a \"peek\" style iterator?\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-08-28T13:24:05.043Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5508?focusedCommentId=16917771) by Ben Kietzman (bkietz):*\nI think the existing interface is sufficient for our current use cases.\r\n\r\nWRT easier iteration, we currently have `Iterator<T>::Visit`:\r\n\r\n```Java\n\r\nASSERT_OK(iter.Visit([&](T v) {\r\n  doSomethingWith(v);\r\n  return Status::OK();\r\n}));\r\n```"
+        },
+        {
+            "created_at": "2019-09-06T21:06:50.279Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5508?focusedCommentId=16924598) by Wes McKinney (wesm):*\nMoved out of 0.15.0 as it seems like there is more thinking to do on this"
+        },
+        {
+            "created_at": "2019-12-04T19:32:55.122Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5508?focusedCommentId=16988129) by Antoine Pitrou (apitrou):*\nIs there something left to do here? It seems the `Iterator<T>` interface and its `Visit` method are sufficient."
+        }
+    ]
+}

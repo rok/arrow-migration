@@ -1,0 +1,30 @@
+{
+    "issue": {
+        "title": "[Rust][DataFusion] Add support for Dictionary types in data fusion",
+        "body": "***Note**: This issue was originally created as [ARROW-10159](https://issues.apache.org/jira/browse/ARROW-10159). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe have a system that need to process low cardinality string data (aka there are only a few distinct values, but there are many millions of values).\r\n\r\nUsing a `StringArray` is very expensive as the same string value is copied over and over again. The `DictionaryArray` was exactly designed to handle this situatio:  rather than repeating each string, it uses indexes into a dictionary and thus repeats integer values. \r\n\r\nSadly, DataFusion does not support processing on `DictionaryArray` types for several reasons.\r\n\r\nThis test (to be added to `arrow/rust/datafusion/tests/sql.rs`) shows what I would like to be possible:\r\n\r\n```Java\n\r\n\r\n#[tokio::test]\r\nasync fn query_on_string_dictionary() -> Result<()> {\r\n    // ensure that data fusion can operate on dictionary types\r\n    // Use StringDictionary (32 bit indexes = keys)\r\n    let field_type = DataType::Dictionary(\r\n        Box::new(DataType::Int32),\r\n        Box::new(DataType::Utf8),\r\n    );\r\n    let schema = Arc::new(Schema::new(vec![Field::new(\"d1\", field_type, true)]));\r\n\r\n\r\n    let keys_builder = PrimitiveBuilder::<Int32Type>::new(10);\r\n    let values_builder = StringBuilder::new(10);\r\n    let mut builder = StringDictionaryBuilder::new(\r\n        keys_builder, values_builder\r\n    );\r\n\r\n    builder.append(\"one\")?;\r\n    builder.append_null()?;\r\n    builder.append(\"three\")?;\r\n    let array = Arc::new(builder.finish());\r\n\r\n    let data = RecordBatch::try_new(\r\n        schema.clone(),\r\n        vec![array],\r\n    )?;\r\n\r\n    let table = MemTable::new(schema, vec![vec![data]])?;\r\n    let mut ctx = ExecutionContext::new();\r\n    ctx.register_table(\"test\", Box::new(table));\r\n\r\n\r\n    // Basic SELECT\r\n    let sql = \"SELECT * FROM test\";\r\n    let actual = execute(&mut ctx, sql).await.join(\"\\n\");\r\n    let expected = \"\\\"one\\\"\\nNULL\\n\\\"three\\\"\".to_string();\r\n    assert_eq!(expected, actual);\r\n\r\n    // basic filtering\r\n    let sql = \"SELECT * FROM test WHERE d1 IS NOT NULL\";\r\n    let actual = execute(&mut ctx, sql).await.join(\"\\n\");\r\n    let expected = \"\\\"one\\\"\\n\\\"three\\\"\".to_string();\r\n    assert_eq!(expected, actual);\r\n\r\n    // filtering with constant\r\n    let sql = \"SELECT * FROM test WHERE d1 = 'three'\";\r\n    let actual = execute(&mut ctx, sql).await.join(\"\\n\");\r\n    let expected = \"\\\"three\\\"\".to_string();\r\n    assert_eq!(expected, actual);\r\n\r\n    // Expression evaluation\r\n    let sql = \"SELECT concat(d1, '-foo') FROM test\";\r\n    let actual = execute(&mut ctx, sql).await.join(\"\\n\");\r\n    let expected = \"\\\"one-foo\\\"\\nNULL\\n\\\"three-foo\\\"\".to_string();\r\n    assert_eq!(expected, actual);\r\n\r\n    // aggregation\r\n    let sql = \"SELECT COUNT(d1) FROM test\";\r\n    let actual = execute(&mut ctx, sql).await.join(\"\\n\");\r\n    let expected = \"2\".to_string();\r\n    assert_eq!(expected, actual);\r\n\r\n\r\n    Ok(())\r\n}\r\n```\r\n\r\nHowever, it errors immediately:\r\n\r\n{code}\r\n\r\n---- query_on_string_dictionary stdout ----\r\nthread 'query_on_string_dictionary' panicked at 'assertion failed: `(left == right)`\r\n  left: `\"\\\"one\\\"\\nNULL\\n\\\"three\\\"\"`,\r\n right: `\"?<q>\\nNULL\\n</q>?\"`', datafusion/tests/sql.rs:989:5\r\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\r\n\r\n{code{\r\n\r\nThis ticket tracks adding proper support Dictionary types to DataFusion. I will break the work down into several smaller subtasks",
+        "created_at": "2020-10-02T11:43:53.000Z",
+        "updated_at": "2020-10-19T09:57:36.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Component: Rust - DataFusion",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-10-19T09:57:35.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-10-18T19:14:25.846Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10159?focusedCommentId=17216350) by Neville Dipale (nevi_me):*\n`[~alamb]` \u00a0if there aren't more subtasks, we can mark this as completed. Thanks for getting this done"
+        },
+        {
+            "created_at": "2020-10-19T09:57:25.634Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10159?focusedCommentId=17216587) by Andrew Lamb (alamb):*\nGood call [~nevi_me] \u2013 I have indeed completed the work I planned for DictionaryArray / DataFusion at this time. Thank you for the reminder. "
+        },
+        {
+            "created_at": "2020-10-19T09:57:35.995Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10159?focusedCommentId=17216588) by Andrew Lamb (alamb):*\nAll subtasks completed"
+        }
+    ]
+}

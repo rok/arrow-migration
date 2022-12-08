@@ -1,0 +1,64 @@
+{
+    "issue": {
+        "title": "[C++] [Dataset] Improve the _metadata example to show how to properly create _metadata if there is a partitioning",
+        "body": "***Note**: This issue was originally created as [ARROW-13269](https://issues.apache.org/jira/browse/ARROW-13269). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIf there are partition columns specified then the writers will only write the non-partition columns and thus they will not contain the fields used for the partition.",
+        "created_at": "2021-07-06T22:22:13.000Z",
+        "updated_at": "2022-01-12T13:14:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-07-06T22:25:55.672Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13269?focusedCommentId=17376073) by Weston Pace (westonpace):*\nAnother potential fix could be to modify pyarrow.parquet.write_metadata.\u00a0 The function currently takes the table schema (which will have the partition columns) and the collected metadata (which do not).\u00a0 So it could add the columns from the table schema to the collected metadata."
+        },
+        {
+            "created_at": "2021-07-07T10:35:46.705Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13269?focusedCommentId=17376474) by Weston Pace (westonpace):*\nOne question to consider also is whether we need to fix the behavior when use_legacy=True or require users to migrate away from legacy if they want this fix.\u00a0 Right now both fail, but it would be easier to fix use_legacy=False than the older code I think."
+        },
+        {
+            "created_at": "2021-07-07T14:41:33.438Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13269?focusedCommentId=17376610) by Ben Kietzman (bkietz):*\narrow::dataset::FileWriter should probably have a partition_expression property (containing the partition information with which the file was written), which would probably help here (though not in the case of use_legacy=True)"
+        },
+        {
+            "created_at": "2021-07-07T16:53:41.581Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13269?focusedCommentId=17376695) by Joris Van den Bossche (jorisvandenbossche):*\nI think the metadata object should reflect the file that is written. So if the file doesn't contain the partition columns, then also the metadata shouldn't contain them? \r\n\r\n"
+        },
+        {
+            "created_at": "2021-07-07T17:04:45.458Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13269?focusedCommentId=17376714) by Joris Van den Bossche (jorisvandenbossche):*\nIt took me a while to understand the actual issue with partition columns not being included in the metadata, but so to get concrete, we currently have an example in the docs about how you can write a `_metadata` file using the metadata_collector and write_metadata utilities (https://arrow.apache.org/docs/python/parquet.html#writing-metadata-and-common-medata-files)\r\n\r\n```python\n\r\n# Write a dataset and collect metadata information of all written files\r\nmetadata_collector = []\r\npq.write_to_dataset(table, root_path, metadata_collector=metadata_collector)\r\n\r\n# Write the ``_common_metadata`` parquet file without row groups statistics\r\npq.write_metadata(table.schema, root_path / '_common_metadata')\r\n\r\n# Write the ``_metadata`` parquet file with row groups statistics of all files\r\npq.write_metadata(\r\n    table.schema, root_path / '_metadata',\r\n    metadata_collector=metadata_collector\r\n)\r\n```\r\n\r\nNow, this example doesn't actually use a partitioned dataset. And once you add a `partition_cols` argument to the `write_to_dataset` call, the above snippet will fail (so it's a not very useful example ..).\r\n\r\nFor example:\r\n\r\n```python\n\r\nimport pathlib\r\nroot_path = pathlib.Path.cwd() / \"test_metadata\"\r\ntable = pa.table({'Month': [5, 5, 5, 5, 6, 6, 6, 6], 'Day': [1, 1, 2, 2, 1, 1, 2, 2], 'Temp': range(8)})\r\n\r\nmetadata_collector = []\r\npq.write_to_dataset(table, root_path, partition_cols=[\"Month\", \"Day\"], metadata_collector=metadata_collector)\r\n\r\n# Write the ``_metadata`` parquet file with row groups statistics of all files\r\npq.write_metadata(\r\n   table.schema, root_path / '_metadata',\r\n   metadata_collector=metadata_collector\r\n)\r\n```\r\n\r\ngives:\r\n\r\n```Java\n\r\n---------------------------------------------------------------------------\r\nRuntimeError                              Traceback (most recent call last)\r\n<ipython-input-18-f3324e50d348> in <module>\r\n      6 \r\n      7 # Write the ``_metadata`` parquet file with row groups statistics of all files\r\n----> 8 pq.write_metadata(\r\n      9     table.schema, root_path / '_metadata',\r\n     10     metadata_collector=metadata_collector\r\n\r\n~/scipy/repos/arrow/python/pyarrow/parquet.py in write_metadata(schema, where, metadata_collector, **kwargs)\r\n   2082     if metadata_collector is not None:\r\n   2083         # ParquetWriter doesn't expose the metadata until it's written. Write\r\n-> 2084         # it and read it again.\r\n   2085         metadata = read_metadata(where)\r\n   2086         for m in metadata_collector:\r\n\r\n~/scipy/repos/arrow/python/pyarrow/_parquet.pyx in pyarrow._parquet.FileMetaData.append_row_groups()\r\n\r\nRuntimeError: AppendRowGroups requires equal schemas.\r\n```\r\n\r\nBecause indeed the `table.schema` passed to `write_metadata` is not matching the schemas of the collected metadata (and thus those can't be appended)"
+        },
+        {
+            "created_at": "2021-07-07T17:12:40.293Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13269?focusedCommentId=17376721) by Joris Van den Bossche (jorisvandenbossche):*\nBut so the question is: do we actually need to include the partition columns in the metadata, or do we need to update the example to work with a partitioned dataset by removing the partition columns from the table.schema passes to `write_metadata`.\r\n\r\nComparing with what dask does, using the above example:\r\n\r\n```python\n\r\nimport dask.dataframe as dd\r\nddf = dd.from_pandas(table.to_pandas(), npartitions=1)\r\n\r\nroot_path2 = pathlib.Path.cwd() / \"test_metadata_dask\"\r\nddf.to_parquet(root_path2, partition_on=[\"Month\", \"Day\"], engine=\"pyarrow\")\r\nmeta = pq.read_metadata(root_path2 / \"_metadata\")\r\n```\r\n\r\nHere, the metadata also doesn't include the partition columns:\r\n\r\n```Java\n\r\n>>> meta = pq.read_metadata(root_path2 / \"_metadata\")\r\n>>> meta.schema\r\n<pyarrow._parquet.ParquetSchema object at 0x7f1459573ac0>\r\nrequired group field_id=-1 schema {\r\n  optional int64 field_id=-1 Temp;\r\n  optional int64 field_id=-1 __null_dask_index__;\r\n}\r\n```"
+        },
+        {
+            "created_at": "2021-07-07T17:14:35.220Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13269?focusedCommentId=17376723) by Joris Van den Bossche (jorisvandenbossche):*\nSidenote: there is also the question whether we should drop partition columns at all from the written files for a partitioned dataset. Based on a previous conversation on the mailing list, it seems there are other systems that don't exclude those columns. At the time I opened an issue to check that we can _read_ such datasets (with duplicate information between partitioning and file columns) -> ARROW-10347. But we should maybe also consider if we want to be able to _write_ such datasets."
+        },
+        {
+            "created_at": "2021-07-07T19:39:02.523Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13269?focusedCommentId=17376806) by Weston Pace (westonpace):*\nIf the intent is for the metadata object to only contain the columns written then that does make things simpler.\u00a0 I suppose the same question holds for common_metadata.\u00a0 Should common_metadata contain only the columns written?\u00a0 Or should it also contain the partition columns?\u00a0 Also, I think we need to support individual files having different metadata?\u00a0 That should probably be tested as part of this feature as well."
+        },
+        {
+            "created_at": "2021-07-08T07:11:46.764Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13269?focusedCommentId=17377159) by Joris Van den Bossche (jorisvandenbossche):*\n>  I suppose the same question holds for common_metadata.  Should common_metadata contain only the columns written?  Or should it also contain the partition columns? \r\n\r\nThe _common_metadata file typically doesn't hold any information about file (no row group info) but just the schema, so the intent here is to reflect the schema of the \"full\" dataset (so including partitioning columns). \r\n\r\nAt least, that's what dask does. Continuing the example from above (reading the file written by dask):\r\n\r\n```python\n\r\n>>> meta = pq.read_metadata(root_path2 / \"_common_metadata\")\r\n>>> meta\r\n<pyarrow._parquet.FileMetaData object at 0x7f1449286720>\r\n  created_by: parquet-cpp-arrow version 5.0.0-SNAPSHOT\r\n  num_columns: 4\r\n  num_rows: 0\r\n  num_row_groups: 0\r\n  format_version: 1.0\r\n  serialized_size: 2433\r\n\r\n>>> meta.schema\r\n<pyarrow._parquet.ParquetSchema object at 0x7f14368d5c80>\r\nrequired group field_id=-1 schema {\r\n  optional int64 field_id=-1 Month;\r\n  optional int64 field_id=-1 Day;\r\n  optional int64 field_id=-1 Temp;\r\n  optional int64 field_id=-1 __null_dask_index__;\r\n}\r\n```\r\n\r\nAnd to be clear, all this `_metadata` and `_common_metadata` is \"implementation-defined\", there is not a standard description or specification about what this is expected to do, there are just some implementations that use such files (spark in the past, dask still right now).  \r\n(some discussion about this in eg ARROW-1983)\r\n\r\n> Also, I think we need to support individual files having different metadata?  That should probably be tested as part of this feature as well.\r\n\r\nCurrently, if you combine multiple Parquet FileMetadata objects into a single one (appending the row groups), we require matching schemas. There was some discussion about that when this restriction was introduced (the change was introduced in https://github.com/apache/arrow/pull/7180 (ARROW-8062), some discussion of it on the dask side: https://github.com/dask/dask/issues/6243). \r\n\r\nPersonally I think it could be fine to have the restriction that if you want to use the `_metadata` approach you can't have schema evolution (there are other \"data lake management\" tools that are more advanced than a metadata file)."
+        },
+        {
+            "created_at": "2021-07-09T08:52:30.267Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13269?focusedCommentId=17377946) by Joris Van den Bossche (jorisvandenbossche):*\n`[~westonpace]` I don't fully understand your updated title. In the doc example, the `_common_metadata` and `_metadata` files are written with two separate `pq.write_metadata` calls, and so you can pass a different schema to each (eg `table.schema` for `_common_metadata` and `table.select([.. all column except partitioning columns ..]).schema` for `_metadata`)."
+        },
+        {
+            "created_at": "2021-07-09T18:59:40.360Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13269?focusedCommentId=17378248) by Weston Pace (westonpace):*\nI see now.\u00a0 It's all part of the single call to create the `_metadata` file.\u00a0 So it is a matter of updating the example and not a problem with the call.\u00a0 I'll fix the title.\u00a0 Thanks for the help understanding."
+        },
+        {
+            "created_at": "2022-01-12T13:14:40.506Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13269?focusedCommentId=17474514) by David Li (lidavidm):*\nShould this issue be updated to reflect it's a Python docs change now that we have a PR? Or do we still want a fix in the C++ side somehow?"
+        }
+    ]
+}

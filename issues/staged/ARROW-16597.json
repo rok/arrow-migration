@@ -1,0 +1,26 @@
+{
+    "issue": {
+        "title": "[Python][FlightRPC] Active server may segfault if Python interpreter shuts down",
+        "body": "***Note**: This issue was originally created as [ARROW-16597](https://issues.apache.org/jira/browse/ARROW-16597). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nOn Linux, this reliably segfaults for me with `{}FATAL: exception not rethrown{`}. Adding a `server.shutdown` to the end fixes it.\r\n\r\nThe reason is that the Python interpreter exits after running the script, and other Python threads [call PyThread_exit_thread](https://github.com/python/cpython/blob/v3.10.4/Python/ceval_gil.h#L221). But one of the Python threads is currently in the middle of executing the RPC handler. PyThread_exit_thread boils down to pthread_exit which works by throwing an exception that it expects will not be caught. But gRPC places a `catch(...)` around RPC handlers and catches this exception, and then pthreads aborts when it doesn't catch the exception.\r\n\r\nWe should force servers to shutdown at exit to avoid this.\r\n\r\n```python\n\r\nimport traceback\r\nimport pyarrow as pa\r\nimport pyarrow.flight as flight\r\n\r\nclass Server(flight.FlightServerBase):\r\n    def do_put(self, context, descriptor, reader, writer):\r\n        raise flight.FlightCancelledError(\"foo\", extra_info=b\"bar\")\r\n\r\n\r\nprint(\"PyArrow version:\", pa.__version__)\r\nserver = Server(\"grpc://localhost:0\")\r\nclient = flight.connect(f\"grpc://localhost:{server.port}\")\r\n\r\nschema = pa.schema([])\r\nwriter, reader = client.do_put(flight.FlightDescriptor.for_command(b\"\"), schema)\r\ntry:\r\n    writer.done_writing()\r\nexcept flight.FlightError as e:\r\n    traceback.print_exc()\r\n    print(e.extra_info)\r\nexcept Exception:\r\n    traceback.print_exc()\r\n```",
+        "created_at": "2022-05-17T15:23:57.000Z",
+        "updated_at": "2022-06-01T09:32:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: FlightRPC",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-05-31T16:27:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-05-17T15:50:32.794Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16597?focusedCommentId=17538294) by Antoine Pitrou (apitrou):*\nI think forcing Python Flight servers to exit at shutdown is a reasonable solution.\r\n\r\nI'm surprised that `pthread_exit` raises a C++ exception, by the way."
+        },
+        {
+            "created_at": "2022-05-31T16:27:08.626Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16597?focusedCommentId=17544493) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 13176\n<https://github.com/apache/arrow/pull/13176>"
+        }
+    ]
+}

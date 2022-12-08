@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[C++] IpcFormatWriter writes dictionary batches with wrong ID",
+        "body": "***Note**: This issue was originally created as [ARROW-8749](https://issues.apache.org/jira/browse/ARROW-8749). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIpcFormatWriter assigns dictionary IDs once when it writes the schema message. Then, when it writes dictionary batches, it assigns dictionary IDs again because it re-collects dictionaries from the given batch. So for example, if you have 5 dictionaries, the first dictionary will end up with ID 0 but be written with ID 5.\r\n\r\nFor example, this will fail with \"'_error_or_value11.status()' failed with Key error: No record of dictionary type with id 9\"\r\n```cpp\n\r\nTEST_F(TestMetadata, DoPutDictionaries) {\r\n  ASSERT_OK_AND_ASSIGN(auto sink, arrow::io::BufferOutputStream::Create());\r\n  std::shared_ptr<Schema> schema = ExampleDictSchema();\r\n  BatchVector expected_batches;\r\n  ASSERT_OK(ExampleDictBatches(&expected_batches));\r\n  ASSERT_OK_AND_ASSIGN(auto writer, arrow::ipc::NewStreamWriter(sink.get(), schema));\r\n  for (auto& batch : expected_batches) {\r\n    ASSERT_OK(writer->WriteRecordBatch(*batch));\r\n  }\r\n  ASSERT_OK_AND_ASSIGN(auto buf, sink->Finish());\r\n  arrow::io::BufferReader source(buf);\r\n  ASSERT_OK_AND_ASSIGN(auto reader, arrow::ipc::RecordBatchStreamReader::Open(&source));\r\n  AssertSchemaEqual(schema, reader->schema());\r\n  for (auto& batch : expected_batches) {\r\n    ASSERT_OK_AND_ASSIGN(auto actual, reader->Next());\r\n    AssertBatchesEqual(*actual, *batch);\r\n  }\r\n}\n```",
+        "created_at": "2020-05-09T20:46:18.000Z",
+        "updated_at": "2020-08-29T19:37:11.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-08-29T19:37:11.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-05-09T20:54:11.580Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8749?focusedCommentId=17103475) by Wes McKinney (wesm):*\nDefinitely not good. This may be an artifact of the fact that the way that we attribute dictionary id's to fields is not very robust. Is this a regression (I marked for 0.17.1 in case it is)?"
+        },
+        {
+            "created_at": "2020-05-09T21:20:11.502Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8749?focusedCommentId=17103483) by David Li (lidavidm):*\nIt seems to affect 0.16.0 as well. I'd have to do some work to get 0.15.1 to build locally."
+        },
+        {
+            "created_at": "2020-05-09T21:21:55.717Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8749?focusedCommentId=17103484) by Wes McKinney (wesm):*\nI'd guess the bug has been present for a while, then"
+        },
+        {
+            "created_at": "2020-05-10T00:38:26.743Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8749?focusedCommentId=17103558) by David Li (lidavidm):*\nSo the important thing here is that in this test, the schema comes from a different (but identical value/schema-wise) batch. This is something the Flight tests do but the IPC tests don't do.\r\n\r\n```cpp\n\r\n      ASSERT_OK_AND_ASSIGN(auto sink, arrow::io::BufferOutputStream::Create());\r\n      BatchVector expected_batches;\r\n      std::shared_ptr<RecordBatch> batch;\r\n      ASSERT_OK(MakeDictionary(&batch));\r\n      std::shared_ptr<Schema> schema = batch->schema();\r\n      // Uncomment this and the test will fail\r\n      // ASSERT_OK(MakeDictionary(&batch));\r\n      expected_batches.push_back(batch);\r\n      ASSERT_OK_AND_ASSIGN(auto writer, arrow::ipc::NewStreamWriter(sink.get(), schema));\r\n      for (auto& batch : expected_batches) {\r\n        ASSERT_OK(writer->WriteRecordBatch(*batch));\r\n      }\r\n      ASSERT_OK_AND_ASSIGN(auto buf, sink->Finish());\r\n      arrow::io::BufferReader source(buf);\r\n      ASSERT_OK_AND_ASSIGN(auto reader, arrow::ipc::RecordBatchStreamReader::Open(&source));\r\n      AssertSchemaEqual(schema, reader->schema());\r\n      for (auto& batch : expected_batches) {\r\n        ASSERT_OK_AND_ASSIGN(auto actual, reader->Next());\r\n        AssertBatchesEqual(*actual, *batch);\r\n      }\r\n```"
+        },
+        {
+            "created_at": "2020-05-10T00:41:19.912Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8749?focusedCommentId=17103559) by David Li (lidavidm):*\nAh, and it's because DictionaryMemo uses field _addresses_ to determine whether a field has been seen before. So to DictionaryMemo, these are completely new dictionaries, but the reader won't have made the same confusion..."
+        },
+        {
+            "created_at": "2020-08-29T19:36:07.275Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8749?focusedCommentId=17187088) by David Li (lidavidm):*\nThis was fixed by Antoine's patch in ARROW-9660.\r\n\r\nSmall reproducer for Python:\r\n```python\n\r\nfrom io import BytesIO\r\nimport pyarrow as pa\r\n\r\ns1 = pa.schema([pa.field(\"foo\", pa.dictionary(pa.int16(), pa.string()))])\r\ns2 = pa.schema([pa.field(\"foo\", pa.dictionary(pa.int16(), pa.string()))])\r\n\r\nt1 = pa.Table.from_arrays([pa.DictionaryArray.from_arrays(pa.array([0, 1, 2, 0, 1], type=pa.int16()), pa.array(['a', 'b', 'c']))], schema=s1)\r\nt2 = pa.Table.from_arrays([pa.DictionaryArray.from_arrays(pa.array([0, 1, 2, 0, 1], type=pa.int16()), pa.array(['a', 'b', 'c']))], schema=s2)\r\n\r\nsink = BytesIO()\r\n\r\nwriter = pa.RecordBatchStreamWriter(sink, s2)\r\nwriter.write(t1)\r\nwriter.write(t2)\r\nwriter.close()\r\nprint(pa.RecordBatchStreamReader(sink.getvalue()).read_all())\r\n```\r\nWith Arrow 1.0.1 it gives\r\n```\n\r\nTraceback (most recent call last):\r\n  File \"arrow8749.py\", line 16, in <module>\r\n    print(pa.RecordBatchStreamReader(sink.getvalue()).read_all())\r\n  File \"pyarrow/ipc.pxi\", line 445, in pyarrow.lib._CRecordBatchReader.read_all\r\n  File \"pyarrow/error.pxi\", line 103, in pyarrow.lib.check_status\r\npyarrow.lib.ArrowKeyError: No record of dictionary type with id 1\r\n```\r\nWith the nightly, it passes."
+        },
+        {
+            "created_at": "2020-08-29T19:37:11.522Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8749?focusedCommentId=17187089) by David Li (lidavidm):*\nResolving as fixed by Antoine."
+        }
+    ]
+}

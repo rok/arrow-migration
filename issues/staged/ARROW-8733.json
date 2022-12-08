@@ -1,0 +1,50 @@
+{
+    "issue": {
+        "title": "[C++][Dataset][Python] ParquetFileFragment should provide access to parquet FileMetadata",
+        "body": "***Note**: This issue was originally created as [ARROW-8733](https://issues.apache.org/jira/browse/ARROW-8733). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nRelated to ARROW-8062 (as there we will also need a way to expose the global FileMetadata). But independently, it would be useful to get access to the FileMetadata on each `ParquetFileFragment` (eg to get access to the statistics).\r\n\r\nThis would be relatively simple to code on the Python/R side, since we have access to the file path, and could read the metadata from the file backing the fragment, and return this as a FileMetadata object. \r\n\r\nI am wondering if we want to integrate this with ARROW-8062, since when the fragments were created from a `_metadata` file, a `ParquetFileFragment.metadata` attribute would not need to read it from the parquet file in this case, but from the global metadata (at least for eg the row group data).\r\n\r\nAnother question: what for a ParquetFileFragment that maps to a single row group?",
+        "created_at": "2020-05-07T15:04:39.000Z",
+        "updated_at": "2020-07-07T09:18:51.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-06-26T03:06:44.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-05-07T17:36:29.974Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8733?focusedCommentId=17101909) by Francois Saint-Jacques (fsaintjacques):*\nWe could expose this yes. In ARROW-8062, I'm constructing the ParquetFileFragment without holding the original FileMetaData for mutltiple reasons, but more importantly because it may or not map to what the real physical FileMetaData holds. I think that it would be ill conceived to create a fake FileMetaData constructed from the `_metadata`. I plan to expose the statistics probably via shared_ptr<Expression>.\r\n\r\nThere is various details to flesh out regarding this, especially the one where a fragment only contains a strict subset of the row groups.\r\n\r\nWhat about serialization for dask? That's another potential issue."
+        },
+        {
+            "created_at": "2020-05-12T08:27:52.800Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8733?focusedCommentId=17105223) by Joris Van den Bossche (jorisvandenbossche):*\n> but more importantly because it may or not map to what the real physical FileMetaData holds\r\n\r\nDo you mean because the `_metadata` file might not be correct (I think we can assume it is, responsibility of the user to ensure the integrity f the dataset?), or rather that the metadata might not map anymore to the exact fragment for other reasons? (eg we might already have filtered out some fragment / parts of fragments)\r\n\r\nThe file paths contained in the metadata of a `_metadata` file will of course also not map to the one in the physical metadata of the actual data file.\r\n\r\n> I plan to expose the statistics probably via shared_ptr<Expression>.\r\n\r\nThe idea here would then be to expose statistics of a Fragment in a file format-agnostic way?\r\n\r\n> What about serialization for dask? That's another potential issue.\r\n\r\nThe FileMetadata itself are already serializable in Python, as well as expressions. "
+        },
+        {
+            "created_at": "2020-05-12T11:27:48.980Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8733?focusedCommentId=17105331) by Francois Saint-Jacques (fsaintjacques):*\nI mean that the `_metadata`'s FileMetaData might differ significantly from the file's FileMetaData on disk. For example, `num_rows` will be out of sync, or the encryption might be different per-file.\r\n\r\nSo, do we re-use the  FileMetaData taken from the `_metadata` file (if constructed that way), or do we always pay the filesystem cost whenever the user requests this metadata?"
+        },
+        {
+            "created_at": "2020-05-12T11:33:59.687Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8733?focusedCommentId=17105335) by Joris Van den Bossche (jorisvandenbossche):*\nHmm, good questions. Currently in ParquetDataset, we expose this metadata, and dask actually uses it (but only for the statistics, not for something like the encryption information).\r\n\r\ncc `[~rjzamora]`"
+        },
+        {
+            "created_at": "2020-06-18T19:58:37.026Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8733?focusedCommentId=17139960) by Joris Van den Bossche (jorisvandenbossche):*\n> So, do we re-use the FileMetaData taken from the `_metadata` file (if constructed that way), or do we always pay the filesystem cost whenever the user requests this metadata?\r\n\r\nFor dask's use case, being able to access the metadata (or at least the statistics) for a certain fragment without the filesystem cost (in case the dataset/fragments were constructed with the ParquetFactory from a `_metadata` file) is quite important I think.\r\n\r\nAnd I think ideally this can be accessed from the Fragments. Because if the fragments are filtered, there is no easy way for dask to process the `_metadata` file themselves to gather all the statistics, as they would then need to repeat the filtering to get the statistics matching the filtered fragments .. (which is not going to very robust if there are small variations in filtering logic, plus it would be duplicating this logic).\r\n\r\n"
+        },
+        {
+            "created_at": "2020-06-18T20:02:46.761Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8733?focusedCommentId=17139966) by Joris Van den Bossche (jorisvandenbossche):*\n> I mean that the `_metadata`'s FileMetaData might differ significantly from the file's FileMetaData on disk. For example, `num_rows` will be out of sync, or the encryption might be different per-file.\r\n\r\nIndeed those things might be different or not relevant for the fragment. \r\nHowever, I think that for dask, they only need the statistics. Would it therefore be an option to only expose this? Or only the RowGroupMetadata, which should be file specific?"
+        },
+        {
+            "created_at": "2020-06-19T03:50:52.798Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8733?focusedCommentId=17140180) by Rick Zamora (rjzamora):*\nAlthough the current dask code is using pyarrow to construct a list of statistics for all row-groups in the dataset (ideally using `__metadata`), I am certainly willing to put in the effort to relax this approach a bit. If pyarrow is capable of returning a list of filtered row-group fragments, the only other thing dask really _needs_ is the min/max value of the index column for each of those fragments (assuming the index must be specified by the user or the \"pandas\" metadata).\u00a0 This is all to say that Dask doesn't need to inspect the `_metadata`itself if the relevent statistics for the actual fragments are already available."
+        },
+        {
+            "created_at": "2020-06-26T03:06:44.407Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8733?focusedCommentId=17145988) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 7546\n<https://github.com/apache/arrow/pull/7546>"
+        }
+    ]
+}

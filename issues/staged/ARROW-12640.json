@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[C++] Fix errors from VS 2019 in cpp/src/parquet/types.h",
+        "body": "***Note**: This issue was originally created as [ARROW-12640](https://issues.apache.org/jira/browse/ARROW-12640). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nOn April 30, a nightly CI job that builds libarrow with Visual Studio 2019 (`test-build-vcpkg-win`) started failing because of numerous syntax errors:\r\n```java\n\r\nD:\\a\\crossbow\\crossbow\\arrow\\cpp\\src\\parquet/types.h(115,38): error C2143: syntax error: missing '}' before '=' [D:\\a\\crossbow\\crossbow\\arrow\\cpp\\build\\src\\arrow\\dataset\\arrow_dataset_shared.vcxproj]\r\n4423D:\\a\\crossbow\\crossbow\\arrow\\cpp\\src\\parquet/types.h(115,38): error C2059: syntax error: '=' [D:\\a\\crossbow\\crossbow\\arrow\\cpp\\build\\src\\arrow\\dataset\\arrow_dataset_shared.vcxproj]\r\n4424D:\\a\\crossbow\\crossbow\\arrow\\cpp\\src\\parquet/types.h(115,87): error C2143: syntax error: missing ';' before '}' [D:\\a\\crossbow\\crossbow\\arrow\\cpp\\build\\src\\arrow\\dataset\\arrow_dataset_shared.vcxproj]\r\n4425D:\\a\\crossbow\\crossbow\\arrow\\cpp\\src\\parquet/types.h(115,87): error C2238: unexpected token(s) preceding ';' [D:\\a\\crossbow\\crossbow\\arrow\\cpp\\build\\src\\arrow\\dataset\\arrow_dataset_shared.vcxproj]\r\n4426D:\\a\\crossbow\\crossbow\\arrow\\cpp\\src\\parquet/types.h(173,22): error C2039: 'schema': is not a member of 'parquet' [D:\\a\\crossbow\\crossbow\\arrow\\cpp\\build\\src\\arrow\\dataset\\arrow_dataset_shared.vcxproj]\r\n4427D:\\a\\crossbow\\crossbow\\arrow\\cpp\\src\\parquet/types.h(40): message : see declaration of 'parquet' [D:\\a\\crossbow\\crossbow\\arrow\\cpp\\build\\src\\arrow\\dataset\\arrow_dataset_shared.vcxproj]\r\n4428D:\\a\\crossbow\\crossbow\\arrow\\cpp\\src\\parquet/types.h(173,22): error C3083: 'schema': the symbol to the left of a '::' must be a type [D:\\a\\crossbow\\crossbow\\arrow\\cpp\\build\\src\\arrow\\dataset\\arrow_dataset_shared.vcxproj]\r\n4429D:\\a\\crossbow\\crossbow\\arrow\\cpp\\src\\parquet/types.h(173,30): error C2039: 'DecimalMetadata': is not a member of 'parquet' \n```\r\nSee full log at\u00a0<https://github.com/ursacomputing/crossbow/runs/2473230854#step:4:4422>\r\n\r\n`[~bkietz]` `[~davidli]` \u00a0I am almost certain that this was caused by\u00a0ARROW-11929\r\n\r\nPR: <https://github.com/apache/arrow/pull/10166>\r\n\r\nCommit: <https://github.com/apache/arrow/commit/7430bbdfcda5d23cf18d7222da8419eb594d9f3f>\r\n\r\nWhen I check out the commit immediately before this one, the build succeeds without these errors. When I check out this commit, the build shows these errors.\r\n\r\nI believe the issue is not directly related to vcpkg. It happens also when I use conda for dependencies. It seems to be related to Visual Studio 2019.",
+        "created_at": "2021-05-03T19:57:30.000Z",
+        "updated_at": "2021-05-04T16:25:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-05-04T16:25:00.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-05-03T20:04:57.421Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12640?focusedCommentId=17338592) by Antoine Pitrou (apitrou):*\nCan you try adding the following lines somewhere in `src/parquet/types.h`:\r\n\r\n```c++\n\r\n#ifdef OPTIONAL\r\n#undef OPTIONAL\r\n#endif\r\n```"
+        },
+        {
+            "created_at": "2021-05-03T20:43:14.077Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12640?focusedCommentId=17338600) by David Li (lidavidm):*\nI can confirm Antoine's suggestion fixes the error in a local build."
+        },
+        {
+            "created_at": "2021-05-03T21:12:35.173Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12640?focusedCommentId=17338611) by Ian Cook (icook):*\n`[~apitrou]` \u00a0that solved it; thank you.\r\n\r\nDoes it matter where in the file I add this? Should it be at the top?"
+        },
+        {
+            "created_at": "2021-05-03T21:16:09.233Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12640?focusedCommentId=17338614) by Ian Cook (icook):*\nOh, I see\u2014I'll add this to the top of\u00a0 `src/parquet/types.h`\u00a0just below `#pragma once`:\r\n```c++\n\r\n#include \"parquet/windows_compatibility.h\" \n```"
+        },
+        {
+            "created_at": "2021-05-03T21:28:33.453Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12640?focusedCommentId=17338620) by Antoine Pitrou (apitrou):*\nPlease don't. This will indirectly include `windows.h`. We don't want to do this in header files."
+        },
+        {
+            "created_at": "2021-05-03T21:31:51.411Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12640?focusedCommentId=17338621) by Ian Cook (icook):*\nAh, ok. Then I'll just add this below the includes:\r\n```c++\n\r\n#ifdef _WIN32\r\n\r\n// parquet.thrift's OPTIONAL RepetitionType conflicts with a #define from\r\n// above, so we undefine it\r\n#ifdef OPTIONAL\r\n#undef OPTIONAL\r\n#endif\r\n\r\n#endif \n```"
+        },
+        {
+            "created_at": "2021-05-04T16:25:01.004Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12640?focusedCommentId=17339119) by Ian Cook (icook):*\nIssue resolved by pull request 10234\n<https://github.com/apache/arrow/pull/10234>"
+        }
+    ]
+}

@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "as_vector() downgrades int64 even when arrow.int64_downcast = TRUE",
+        "body": "***Note**: This issue was originally created as [ARROW-14509](https://issues.apache.org/jira/browse/ARROW-14509). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nUsing as_vector() on a Table or Array when the type is Int64 and arrow.int64_downcast = TRUE still downgrades, unless there is a value greater than Int32 can store (actually it switches over at some lower value; guessing the integer to numeric switch over in R).\r\n> library(arrow)\n> options(arrow.int64_downcast = TRUE)\n> int64s <- bit64::as.integer64(c(1:10, 101:110, 201:205))\n> y <- Array$create(int64s)\n> y$type\n> yv <- y$as_vector()\n> class(yv)\n> int64s <- c(int64s, bit64::as.integer64(\"68719476735\")) # 0xF FFFFFFFF\n> y <- Array$create(int64s)\n> y$type\n> yv <- y$as_vector()\n> class(yv)\r\nOutputs:\r\n> Int64\n> int64\n> [1] \"integer\"\n> Int64\n> int64\n> [1] \"integer64\"\r\nThis can cause an unexpected overflow\r\n> int64s <- bit64::as.integer64(c(1:10, 101:110, 201:205, 268435454, 2147483632)) # 0xFFFFFFE, 0x7FFFFFF0\n> cumsum(int64s)\n> y <- Array$create(int64s)\n> y$type\n> yv <- y$as_vector()\n> class(yv)\n> cumsum(yv)\r\nas shown in the second cumsum\r\n> integer64\n> [1] 1 3 6 10 15 21 \n> [7] 28 36 45 55 156 258 \n> [13] 361 465 570 676 783 891 \n> [19] 1000 1110 1311 1513 1716 1920 \n> [25] 2125 268437579 2415921211\n> Int64\n> int64\n> [1] \"integer\"\n> [1] 1 3 6 10 15 21 28\n> [8] 36 45 55 156 258 361 465\n> [15] 570 676 783 891 1000 1110 1311\n> [22] 1513 1716 1920 2125 268437579 NA\n> Warning message:\n> integer overflow in 'cumsum'; use 'cumsum(as.numeric(.))'\r\nThe actual version is Version: 5.0.0.9000 running under R 3.6.3",
+        "created_at": "2021-10-28T14:24:45.000Z",
+        "updated_at": "2022-08-27T14:41:43.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-10-29T20:42:43.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-10-28T14:54:31.954Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14509?focusedCommentId=17435474) by Ian Cook (icook):*\nHi `[~mcolosimo-p4]`, I believe you're looking for\r\n```java\n\r\noptions(arrow.int64_downcast = FALSE) \n```\r\nwhich tells `as_vector()` to return an `integer64` vector.\r\n\r\nWhen you set the option to `FALSE`, does that solve it for you?"
+        },
+        {
+            "created_at": "2021-10-28T15:46:10.788Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14509?focusedCommentId=17435507) by Marc Colosimo (mcolosimo-p4):*\nYes that solves it, I somehow reversed that. Sorry about that. However, I'm building an R package and I don't think setting\r\n\r\n\u00a0\r\n```\n\r\noptions(arrow.int64_downcast = FALSE) \n```\r\nin our package is the correct way forward. Since I can't control the end-users environment, I'm currently manually casting to integer64 so that we don't get an integer overflow (or underflow).\u00a0 I'm trying to keep as much of the data in arrow and use the compute_functions, but there are cases that I can't (as shown above). What would you recommend?"
+        },
+        {
+            "created_at": "2021-10-28T18:31:39.692Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14509?focusedCommentId=17435617) by Ian Cook (icook):*\n`[~mcolosimo-p4]` \u00a0the option defaults to `TRUE`. To set it to `FALSE` within package code, you could use [`withr::with_options()`](https://withr.r-lib.org/reference/with_options.html). Alternatively you could call `bit64::as.integer64()` in your package code (as it looks like you're already doing). Do those solutions work sufficiently for you?"
+        },
+        {
+            "created_at": "2021-10-29T16:57:23.573Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14509?focusedCommentId=17436080) by Marc Colosimo (mcolosimo-p4):*\nI'll just guard numerically sensitive code with bit64::as.integer64(). Not ideal, but it is working. "
+        },
+        {
+            "created_at": "2021-10-29T20:42:09.280Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14509?focusedCommentId=17436165) by Ian Cook (icook):*\nOk, thanks. If you encounter problems with that approach, and if using `withr::with_options()` or similar is not a viable alternative in your case, please open a separate Jira for an enhancement request and we can consider other possible solutions. In the meantime, I'll close this Jira."
+        },
+        {
+            "created_at": "2022-08-27T14:41:43.811Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14509?focusedCommentId=17585811) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] Steadily increasing time to load file using read_parquet",
+        "body": "***Note**: This issue was originally created as [ARROW-6985](https://issues.apache.org/jira/browse/ARROW-6985). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI've noticed that reading from parquet using pandas read_parquet function is taking steadily longer with each invocation. I've seen the other ticket about memory usage but I'm seeing no memory impact just steadily increasing read time until I restart the python session.\r\n\r\nBelow is some code to reproduce my results. I notice it's particularly bad on wide matrices, especially using pyarrow==0.15.0\r\n```python\n\r\nimport pyarrow.parquet as pq\r\nimport pyarrow as pa\r\nimport pandas as pd\r\nimport os\r\nimport numpy as np\r\nimport time\r\n\r\nfile = \"skinny_matrix.pq\"\r\n\r\nif not os.path.isfile(file):\r\n    mat = np.zeros((6000, 26000))\r\n    mat.ravel()[::100] = np.random.randn(60 * 26000)\r\n    df = pd.DataFrame(mat.T)\r\n    table = pa.Table.from_pandas(df)\r\n    pq.write_table(table, file)\r\n\r\nn_timings = 50\r\ntimings = np.empty(n_timings)\r\nfor i in range(n_timings):\r\n    start = time.time()\r\n    new_df = pd.read_parquet(file)\r\n    end = time.time()\r\n    timings[i] = end - start\r\n```",
+        "created_at": "2019-10-24T14:25:08.000Z",
+        "updated_at": "2020-04-18T23:27:59.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-04-18T23:27:59.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-25T11:02:58.932Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6985?focusedCommentId=16959653) by Joris Van den Bossche (jorisvandenbossche):*\n`[~CHDev93]` thanks for the report. There was a performance regression regarding parquet files with many columns in 0.15.0 (see ARROW-6876, fixed on master and will shortly be released as 0.15.1). So that could clarify at least a general slowdown. \r\n\r\nHow much do you see it slow down during the loop? \r\nI ran your code and possibly see some slowdown (max 2x), but it's a bit noisy."
+        },
+        {
+            "created_at": "2019-10-25T13:57:49.129Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6985?focusedCommentId=16959779) by Casey (CHDev93):*\nOkay looks like the wide matrix case was explained in the ticket you linked. As for the loop slowdown I'm seeing it gradually increase over time depending on the data's shape.\r\n\r\nBelow are my results for a wide matrix, the wide matrix transposed, and the matrix unraveled as a column. On the number of loops I tried this with, I see about 2x in the wide and wide transpose cases though the trend of the line indicates it will continue growing. Is this expected?\r\n\r\n![image-2019-10-25-14-52-46-165.png](https://issues.apache.org/jira/secure/attachment/12984027/image-2019-10-25-14-52-46-165.png)\r\n\r\n![image-2019-10-25-14-53-37-623.png](https://issues.apache.org/jira/secure/attachment/12984028/image-2019-10-25-14-53-37-623.png)\r\n\r\n![image-2019-10-25-14-54-32-583.png](https://issues.apache.org/jira/secure/attachment/12984029/image-2019-10-25-14-54-32-583.png)\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-10-25T14:36:14.440Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6985?focusedCommentId=16959816) by Wes McKinney (wesm):*\nReally wide tables are likely causing heap fragmentation to take place, so degraded memory performance is a likely culprit but there could be something else going on. "
+        },
+        {
+            "created_at": "2019-10-28T09:55:49.216Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6985?focusedCommentId=16960896) by Casey (CHDev93):*\nSo it sounds like this is just a known use case where parquet is not well suited. For my own knowledge, why exactly is the heap fragmenting? Shouldn't the heap allocation just grab the same memory that was used in the previous iteration?\r\n\r\n\u00a0\r\n\r\nAnyway, happy to have the issue closed as not needed and I'll restructure our data to work within these limitations."
+        },
+        {
+            "created_at": "2020-04-18T23:27:59.791Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6985?focusedCommentId=17086687) by Wes McKinney (wesm):*\nClosing this for now. If you run into this issue again please reopen the issue. Thanks!"
+        }
+    ]
+}

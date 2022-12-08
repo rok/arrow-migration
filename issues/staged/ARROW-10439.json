@@ -1,0 +1,56 @@
+{
+    "issue": {
+        "title": "[C++][Dataset] Add max file size as a dataset writing option",
+        "body": "***Note**: This issue was originally created as [ARROW-10439](https://issues.apache.org/jira/browse/ARROW-10439). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis should be specified as a row limit.",
+        "created_at": "2020-10-30T20:29:35.000Z",
+        "updated_at": "2022-07-12T14:04:48.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-10-30T20:29:51.417Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10439?focusedCommentId=17223874) by Ben Kietzman (bkietz):*\n`[~jorisvandenbossche]`"
+        },
+        {
+            "created_at": "2021-05-03T17:25:56.852Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10439?focusedCommentId=17338511) by Mordechai Ben Zechariah (motibz):*\nHi\r\n\r\n`[~westonpace]` \u00a0does anybody have a good workaround for this request?\r\n\r\nI'm trying to use write_data_set and I want to create multiple files in each partition."
+        },
+        {
+            "created_at": "2021-07-14T19:04:52.962Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10439?focusedCommentId=17380812) by Weston Pace (westonpace):*\n`[~motibz]` I'm sorry that I did not see this earlier.\u00a0 One possible workaround is to split the input into multiple pieces manually and then call `write_dataset` multiple times using a different `basename_template` for each write but it is not a great workaround."
+        },
+        {
+            "created_at": "2021-08-09T06:46:36.399Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10439?focusedCommentId=17395851) by Ruben Laguna (ecerulm):*\nMy current workaround is to use ParquetWriter and create a new file when the input data is bigger than x amount of bytes. So that indirectly limits the output file size but the output file size still varies depending on compression ratio for the particular input data in the split. \r\n\r\n\r\nhttps://stackoverflow.com/a/68679635/90580\r\n```python\n\r\nbytes_written = 0\r\nindex = 0\r\nwriter = pq.ParquetWriter(f'output_{index:03}.parquet', table.schema)\r\n\r\nfor i in range(300000):\r\n  writer.write_table(table)\r\n  bytes_written = bytes_written + table.nbytes\r\n  if bytes_written >= 500000000: # 500MB, start a new file\r\n    writer.close()\r\n    index = index + 1\r\n    writer = pq.ParquetWriter(f'output_{index:03}.parquet', table.schema)\r\n    bytes_written = 0\r\n\r\nwriter.close()\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-08-18T15:08:35.174Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10439?focusedCommentId=17401132) by Alessandro Molina (amol-):*\nIt would probably make sense to see if we can come up with an API that allows something more flexible. For example I can see cases where someone might want to \"start a new file\" every 1M rows instead of starting a new file every 100MB."
+        },
+        {
+            "created_at": "2021-08-24T02:13:34.254Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10439?focusedCommentId=17403455) by Weston Pace (westonpace):*\nhttps://github.com/apache/arrow/pull/10955 (as part of ARROW-13650) adds a `max_rows_per_file` option.  Max bytes is a little trickier (table.nbytes is the in-memory size and I assume one would want the on-disk size) although doable (the file writer's should be able to keep track of how many bytes they've written but they don't do this today.)  I'd prefer to avoid max bytes unless someone has a need for it though."
+        },
+        {
+            "created_at": "2021-09-15T01:41:54.259Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10439?focusedCommentId=17415285) by Weston Pace (westonpace):*\nI'm going to leave this open to track adding a `max_bytes_per_file` limit."
+        },
+        {
+            "created_at": "2021-09-29T23:11:31.979Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10439?focusedCommentId=17422441) by Weston Pace (westonpace):*\nSo the challenge with a bytes limit is that we need to know how many bytes are going to be written before the potentially blocking write call.  The way the file writers are currently structured that is not easy.  Options available:\r\n\r\n \\* Modify the file writers to be truly asynchronous and return \"{ bytes_queued: int64_t, Future<>: write_future }\" (or they could return a Future<> and have a method to query how many total bytes have been queued to be written to the file).\r\n \\* Use the in-memory size of the data (the downside is that this can be quite different from the written size if compression is used which is often the case).\r\n \\* Enforce a best-effort limit which checks the current file size when determining if a new file should be opened.  The problem in this case is we will queue some number of batches more than we should so the limit will be a soft limit that we will typically shoot past by some amount.\r\n\r\nDoes anyone have any other ideas or suggestions or have a preference amongst the available options?  `[~lidavidm]` what was the approach used for flight?"
+        },
+        {
+            "created_at": "2021-09-29T23:44:45.113Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10439?focusedCommentId=17422446) by David Li (lidavidm):*\nThe approach used for Flight would really only work for IPC, unfortunately. It optimistically assumes batches are below the limit and hooks into the low-level IPC writer implementation so that it gets passed the already-serialized batches - that way, it doesn't waste work computing the actual serialized size (which is expensive) - and if the batch is over the size limit, rejects it. The caller is then expected to try again. I suppose you could generalize this to CSV (by serializing rows to a buffer before writing them out), though that would be an expensive/invasive refactor (and I have no clue about Parquet).\r\n\r\nI'll note even \"in-memory size\" can be difficult to compute if you have slices. The GetRecordBatchSize function actually serializes the batch under the hood and reads the bytes written."
+        },
+        {
+            "created_at": "2022-07-12T14:04:48.666Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10439?focusedCommentId=17565762) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

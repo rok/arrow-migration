@@ -1,0 +1,81 @@
+{
+    "issue": {
+        "title": "[C++] Kernel to localize naive timestamps to a timezone (preserving clock-time)",
+        "body": "***Note**: This issue was originally created as [ARROW-13033](https://issues.apache.org/jira/browse/ARROW-13033). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nGiven a tz-naive timestamp, \"localize\" would interpret that timestamp as local in a given timezone, and return a tz-aware timestamp keeping the same \"clock time\" (the same year/month/day/hour/etc in the printed representation). Under the hood this converts the timestamp value from that timezone to UTC, since tz-aware timestamps are stored as UTC.\r\n\r\nReferences: [tz_localize](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DatetimeIndex.tz_localize.html) in pandas, or [force_tz](https://lubridate.tidyverse.org/reference/force_tz.html) in R's lubridate package\r\n\r\nThis will (eventually) also have to deal with ambiguous or non-existing times.",
+        "created_at": "2021-06-10T09:57:54.000Z",
+        "updated_at": "2022-10-04T21:03:15.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-09-09T13:59:42.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-10T12:10:59.479Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13033?focusedCommentId=17360829) by Antoine Pitrou (apitrou):*\nHmm, I think there's a misunderstanding. The timestamp value is always UTC. The timezone is only supposed to govern how the timezone is displayed to the user.\r\n\r\n```Java\n\r\n  /// The time zone is a string indicating the name of a time zone, one of:\r\n  ///\r\n  /// * As used in the Olson time zone database (the \"tz database\" or\r\n  ///   \"tzdata\"), such as \"America/New_York\"\r\n  /// * An absolute time zone offset of the form +XX:XX or -XX:XX, such as +07:30\r\n  ///\r\n  /// Whether a timezone string is present indicates different semantics about\r\n  /// the data:\r\n  ///\r\n  /// * If the time zone is null or equal to an empty string, the data is \"time\r\n  ///   zone naive\" and shall be displayed *as is* to the user, not localized\r\n  ///   to the locale of the user. This data can be though of as UTC but\r\n  ///   without having \"UTC\" as the time zone, it is not considered to be\r\n  ///   localized to any time zone\r\n  ///\r\n  /// * If the time zone is set to a valid value, values can be displayed as\r\n  ///   \"localized\" to that time zone, even though the underlying 64-bit\r\n  ///   integers are identical to the same data stored in UTC. Converting\r\n  ///   between time zones is a metadata-only operation and does not change the\r\n  ///   underlying values\r\n```"
+        },
+        {
+            "created_at": "2021-06-10T16:10:06.070Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13033?focusedCommentId=17361054) by Adam Hooper (adamhooper):*\nGreat function. It needs a different name.\r\n\r\nPandas' `tz_localize` does the opposite of this. Lubridate's `force_tz` is a better name, but it's also confusing.\r\n\r\nThe confusion comes because this operation uses its `tz` parameter _twice_:\r\n\r\nA. Converts int64s to UTC timestamps, interpreting the int64s as being in `tz`\r\nB. Sets `tz` as the timezone on the resulting array\r\n\r\nMaybe a name like `interpret_naive_as_being_in_timezone()` would make this clearer?\r\n\r\n... I've come to believe timezone information in a timestamp-column metadata is an antipattern. In a few cases, it's convenient. In more cases (I think), it's a confusing red herring. Here, for instance: why would a user want the output timezone to be `tz`?\r\n\r\nAs a timezone refugee, I'd love a function that does _only_ A: `localtime_to_utc(timestamps, tz)`. This would be like a [LocalDateTime => Instant](https://docs.oracle.com/javase/8/docs/api/java/time/package-summary.html) conversion in Java."
+        },
+        {
+            "created_at": "2021-06-11T07:20:54.324Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13033?focusedCommentId=17361481) by Joris Van den Bossche (jorisvandenbossche):*\n> Pandas' tz_localize does the opposite of this.\r\n\r\nI don't think so, I opened this issue explicitly based on my experience with the usefulness of tz_localize in pandas, so thinking we need an equivalent in arrow. Can you show an example to illustrate how you think it is different? (note that in pandas, to add to the confusion, you can use tz_localize with `tz=None` to do the opposite conversion from tz-aware to tz-naive local time preserving the clock time)\r\n\r\nI agree that we should try to come up with a better name, though (it clearly causes confusion, as I also noticed with discussing with colleagues)"
+        },
+        {
+            "created_at": "2021-06-11T07:22:55.826Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13033?focusedCommentId=17361482) by Antoine Pitrou (apitrou):*\nI would again prefer an approach where timestamp conversion (to UTC) is done at the boundary, not on data that already claims to be in Arrow format. "
+        },
+        {
+            "created_at": "2021-06-11T13:55:53.773Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13033?focusedCommentId=17361801) by Adam Hooper (adamhooper):*\n> Pandas' tz_localize does the opposite of this.\r\n\r\n> I don't think so\r\n\r\nMy bad! I didn't realize Numpy `datetime64` is actually stored in UTC. I'm sorry for confusing.\r\n\r\n(Queue my insistence: I'm sure I'm smart. Yet when timezones enter my brain, I err consistently. I am certain other humans err as well: I've seen bugs all over the place. I insist the verbs \"localize\" and \"force\" imply the opposite of what those functions do.)\r\n\r\n`[~apitrou]` I completely agree: I think this function is supports an anti-pattern and it's confusing for most humans.\r\n\r\nBut these values exist in the wild. Should we call them \"`struct tm` encoded as `int64`\"?\r\n\r\nArrow actually generates such `int64` values when it reads Parquet timestamp columns with [\"local semantics\"](https://github.com/apache/parquet-format/blob/master/LogicalTypes.md#local-semantics-timestamps-not-normalized-to-utc).\r\n\r\nWithout this function, how do you convert \"`int64`-encoded `struct tm`\" to timestamp? The sub-tasks are 1. decode `int64` to `struct tm`; and then 2. convert `struct tm` to UNIX time. But Arrow has no `struct tm` type.\r\n\r\nSo maybe as a hack, you 1. treat the `int64s` as UTC and format them into ISO8601 strings, 2. nix the \"Z\", and then 3. parse those strings in the new timezone. (Absurd, right? I've done something similar in JavaScript: I know of no other way to use its timezone database.)\r\n\r\nIf `int64`-encoded `struct tm` values are to be supported, this function seems like the least-ugly solution. It does the entire `int64` => `struct tm` => `int64` round trip, so users can convert those Parquet columns to Arrow timestamps.\r\n\r\nI think this function would be easier to explain and use if its output were always UTC. I guarantee I'll misunderstand the documentation otherwise. I embarrassed myself in my prior comment, and I'd love for the take-away to be, \"let's write functions that don't embarrass people like Adam.\""
+        },
+        {
+            "created_at": "2021-06-11T15:29:00.306Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13033?focusedCommentId=17361850) by Joris Van den Bossche (jorisvandenbossche):*\n If we do it at the boundary, we need to have the functionality anyway. But indeed, it can just be an internal helper function, and doesn't necessarily need to be a public kernel. It's then a question of what we think is useful user API to expose.\r\n\r\nBut personally I think only having it at the boundary level will not be very practical:\r\n\r\n- We would need to add it to all readers (CSV, JSON, Parquet, etc), but since we don't support all data sources, we also need to add it to the in-memory conversion functions (from numpy/pandas in the Python case) for when the user uses another library to obtain the data.\n- This functionality probably will need additional options (e.g. for how to deal with ambiguous and non-existent timestamps due to DST changes). Adding options for this in each functionality at the boundary might be more complex than having one kernel with options that users can directly use after IO.\n- Interpreting local times is inherently messy (which relates to the need of the options, bullet point above), and I think it's not uncommon that you might want to inspect the before and after values, to check what went wrong. \"Hiding\" this operation in the boundary functions will make such process more difficult.\n  \n  > Maybe a name like `interpret_naive_as_being_in_timezone()` would make this clearer?\n  \n  That's certainly explicit ;) \n  Some other names that I encountered: `withZoneRetainFields` (https://www.joda.org/joda-time/apidocs/index.html), `atZone` (https://docs.oracle.com/javase/8/docs/api/java/time/LocalDateTime.html#atZone-java.time.ZoneId-), `AT TIME ZONE` (https://www.postgresql.org/docs/13/functions-datetime.html#FUNCTIONS-DATETIME-ZONECONVERT)\n"
+        },
+        {
+            "created_at": "2021-06-11T15:32:23.957Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13033?focusedCommentId=17361851) by Antoine Pitrou (apitrou):*\nAgain, there are no \"naive\" timestamps in Arrow. All timestamps have an UTC value. The timezone is just an optional piece of metadata that has no impact on the actual value.\r\n\r\nExposing this function will encourage users to have the wrong interpretation of \"naive timestamp\" that you're talking about."
+        },
+        {
+            "created_at": "2021-06-11T16:25:45.852Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13033?focusedCommentId=17361876) by Rok Mihevc (rokm):*\nRight by \"naive timestamp\" we are saying an int64 arrow array representing local time in some locale that needs to get converted into arrow timestamp by some calendar aware logic.\r\n\r\nAnd indeed if we can't/don't want to control all boundaries users will sooner or later need to do this conversion.\r\n\r\nPerhaps we could simply start by implementing an internal function, start using it for parsers and pospone the kernel yes / no decision?"
+        },
+        {
+            "created_at": "2021-06-11T16:35:06.396Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13033?focusedCommentId=17361882) by Antoine Pitrou (apitrou):*\nIf the proposed kernel goes from Int64 to Timestamp then that would alleviate my concern. But my intuition is that usability-wise it wouldn't solve the problem that `[~jorisvandenbossche]` wants to solve."
+        },
+        {
+            "created_at": "2021-06-11T17:32:22.695Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13033?focusedCommentId=17361918) by Rok Mihevc (rokm):*\nint64 would make per row timezone \"normalization\" easier. But maybe there's something else I'm missing here."
+        },
+        {
+            "created_at": "2021-06-11T19:29:53.356Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13033?focusedCommentId=17362000) by Rok Mihevc (rokm):*\n`from_timezone` ?"
+        },
+        {
+            "created_at": "2021-06-14T13:20:53.199Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13033?focusedCommentId=17362954) by Joris Van den Bossche (jorisvandenbossche):*\n> Again, there are no \"naive\" timestamps in Arrow. All timestamps have an UTC value. The timezone is just an optional piece of metadata that has no impact on the actual value.\r\n\r\nIf there is a timezone, it indeed doesn't impact the value. But our specification that you quoted above does mention \"naive\" in case a timezone is omitted:\r\n\r\n```Java\n\r\n  /// * If the time zone is null or equal to an empty string, the data is \"time\r\n  ///   zone naive\" and shall be displayed *as is* to the user, not localized\r\n  ///   to the locale of the user.\r\n```\r\n\r\nI omitted the the \"can be thought of as UTC\" part above, because \"can be thought of as\" is not the same as \"is\"; it's only a hint on how to interpret the \"naive\" local timestamps.\r\n\r\n> Exposing this function will encourage users to have the wrong interpretation of \"naive timestamp\" that you're talking about.\r\n\r\nWhat do you mean exactly with \"the wrong interpretation\"? "
+        },
+        {
+            "created_at": "2021-06-14T15:48:05.861Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13033?focusedCommentId=17363043) by Adam Hooper (adamhooper):*\n> I omitted the the \"can be thought of as UTC\" part above, because \"can be thought of as\" is not the same as \"is\"; it's only a hint on how to interpret the \"naive\" local timestamps.\r\n\r\nFull spec also says timestamp is `Time elapsed from the Unix epoch`. There's only one [UNIX epoch](https://en.wikipedia.org/wiki/Unix_time), and it's UTC. I agree the spec's wording is wishy-washy, and maybe the intent was originally different; but as written, I don't see any other spec-compliant interpretation.\r\n\r\nPerhaps the spec should clarify this?\r\n\r\nUTC-only, timezone-free timestamps are standard in my field (Web development). It's my understanding that \"naive timestamp\" is the correct way to encode them. Otherwise, if they were stored as timezone=UTC, I'd deviate from the spec every time I displayed UTC timestamps in non-UTC.\r\n"
+        },
+        {
+            "created_at": "2021-06-14T16:04:58.683Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13033?focusedCommentId=17363045) by Antoine Pitrou (apitrou):*\nSince clarifying this is an important concern, I've started a discussion thread on arrow-dev:\r\nhttps://lists.apache.org/thread.html/r8216e5de3efd2935e3907ad9bd20ce07e430952f84de69b36337e5eb%40%3Cdev.arrow.apache.org%3E"
+        },
+        {
+            "created_at": "2021-08-19T11:20:10.370Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13033?focusedCommentId=17401634) by Joris Van den Bossche (jorisvandenbossche):*\nThe discussion mentioned above lead to ARROW-13218 / https://github.com/apache/arrow/pull/10629, clarifying (amongst other things) how to interpret local timestamps without timezone. "
+        },
+        {
+            "created_at": "2021-09-09T13:59:42.485Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13033?focusedCommentId=17412598) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 10610\n<https://github.com/apache/arrow/pull/10610>"
+        }
+    ]
+}

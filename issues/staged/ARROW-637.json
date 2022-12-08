@@ -1,0 +1,77 @@
+{
+    "issue": {
+        "title": "[Format] Add time zone metadata to Timestamp type",
+        "body": "***Note**: This issue was originally created as [ARROW-637](https://issues.apache.org/jira/browse/ARROW-637). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAs a metadata-only convenience, it would be useful to have an optional Olson time zone name or absolute time offset (e.g. `+07:30`) in the `Timestamp` flatbuffers type: https://github.com/apache/arrow/blob/master/format/Message.fbs#L94\n\nNull or length-0 string would indicate that the data is time zone naive, and shall not be considered to be localized. \n\nhttps://github.com/apache/arrow/pull/388",
+        "created_at": "2017-03-16T02:13:34.000Z",
+        "updated_at": "2017-05-24T16:38:27.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Format",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2017-03-18T00:21:00.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-03-16T16:46:42.076Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-637?focusedCommentId=15928411) by Julien Le Dem (julienledem):*\nSounds good to me with the following tweak:\n - timezone field present means data stored in that timezone (including UTC). Which means when displayed to the user it can be converted to the display timezone.\n - timezone field missing means the data is timezone-less similar to the SQL behavior. a Timestamp without timezone should be printed exactly the same (as if we had stored the string representing it) independently of the \"client\" timezone. It is stored as UTC but does not get converted to the user timezone."
+        },
+        {
+            "created_at": "2017-03-16T17:50:42.011Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-637?focusedCommentId=15928515) by Wes McKinney (wesm):*\nI agree. I opened a PR reflecting this https://github.com/apache/arrow/pull/388 \u2013 it would be good to get the perspective of `[~julianhyde]` or others more familiar with SQL implementations to make sure we're capturing the semantics correctly. "
+        },
+        {
+            "created_at": "2017-03-16T20:11:24.740Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-637?focusedCommentId=15928783) by Julian Hyde (julianhyde):*\nWhen you say a \"timezone in the Timestamp flatbuffers type\" do you mean that the timezone is stored in the type, or in the value? If you have 1M values, would they each have their own timezone?\n\nIf it's stored in the type, then `[~julienledem]` is correct that it would be a good way to emulate SQL's TIMESTAMP type. Just store UTC in the type.\n\nIf the timeonze is stored in the value, then you have re-created SQL's `TIMESTAMP WITH TIMEZONE` type. Think of each value consisting of a (milliseconds, timezone) pair. Note that this is much more rarely used, and lower priority IMHO. (PostgreSQL has a `TIMESTAMP WITH TIMEZONE` type but they botched it \u2013 they don't store a timezone, so it is interpreted as an Instant, similar to java.util.Date. I do see value in having an \"instant\" type, in addition to a \"zoneless timestamp\" type, just don't confuse everyone by calling it \"timestamp with timezone\".)\n\nI don't know whether offsets, e.g. \"+7:30\" are valid as Olson timezone names, but you should allow these. SQL's `TIMESTAMP WITH TIMEZONE` type uses offsets, not timezone names, IIRC."
+        },
+        {
+            "created_at": "2017-03-16T20:16:10.133Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-637?focusedCommentId=15928794) by Wes McKinney (wesm):*\n`[~julianhyde]` This is a metadata-only time zone, so a single timezone for the entire array, not a different timezone for each value. I've occasionally seen demand for having a time zone for each value but I don't think it's high priority. \n\nIf you can look at the changes in https://github.com/apache/arrow/pull/388/files#diff-520b20e87eb508faa3cc7aa9855030d7R97 and confirm this looks semantically correct"
+        },
+        {
+            "created_at": "2017-03-16T20:24:04.864Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-637?focusedCommentId=15928813) by Julian Hyde (julianhyde):*\nLooks good. Except that you should support offsets as well as timezone names. That probably just means changing the comment at this point."
+        },
+        {
+            "created_at": "2017-03-16T20:28:45.714Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-637?focusedCommentId=15928823) by Wes McKinney (wesm):*\nGot it. Updating comment now"
+        },
+        {
+            "created_at": "2017-03-16T21:13:29.174Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-637?focusedCommentId=15928920) by Julian Hyde (julianhyde):*\nOne last quibble. You wrote\n\n> Null or length-0 string would indicate that the data has no time zone (UTC)\n\nbut I would correct it to\n\n> Null or length-0 string would indicate that the data has no time zone\n\nUTC is a time zone. \"No time zone\" is different; it means that the user needs to bring their own interpretation."
+        },
+        {
+            "created_at": "2017-03-16T21:38:56.041Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-637?focusedCommentId=15928948) by Wes McKinney (wesm):*\nYou're right, I corrected the JIRA description \u2013 this is correctly stated in the patch https://github.com/apache/arrow/pull/388"
+        },
+        {
+            "created_at": "2017-03-17T20:43:09.692Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-637?focusedCommentId=15930689) by Greg Rahn (grahn):*\nJust to comment: most SQL implementations of `TIMESTAMP WITH TIME ZONE` do not store timezone info (AFAIK, just Oracle's `TIMESTAMP WITH TIME ZONE`), however, the data is normalized to UTC when stored.  This means that a stored value of 0 would return 1970-01-01 00:00 (or in PostgreSQL year 2000 since their epoch is different than unix time) for a w/o timezone timestamp, but the same value of 0 would return 1970-01-01 00:00Z adjusted for local time zone settings if the type were \"with time zone\".\n\nFor example:\n```\ngrahn=# create table ts (\ngrahn(#   ts_string varchar(50),\ngrahn(#   ts_timestamp timestamp without time zone,\ngrahn(#   ts_timestamptz timestamp with time zone\ngrahn(# );\n\ngrahn=# insert into ts values (\ngrahn(#   '2016-01-01 00:00:00+10'::varchar,\ngrahn(#   '2016-01-01 00:00:00+10'::timestamp,\ngrahn(#   '2016-01-01 00:00:00+10'::timestamptz\ngrahn(# );\n\ngrahn=# show timezone;\n  TimeZone\n------------\n US/Pacific\n\ngrahn=# select * from ts;\n       ts_string        |    ts_timestamp     |     ts_timestamptz\n------------------------+---------------------+------------------------\n 2016-01-01 00:00:00+10 | 2016-01-01 00:00:00 | 2015-12-31 06:00:00-08\n\ngrahn=# set time zone 'Europe/Rome';\ngrahn=# show timezone;\n  TimeZone\n-------------\n Europe/Rome\n\ngrahn=# select * from ts;\n       ts_string        |    ts_timestamp     |     ts_timestamptz\n------------------------+---------------------+------------------------\n 2016-01-01 00:00:00+10 | 2016-01-01 00:00:00 | 2015-12-31 15:00:00+01\n```\n"
+        },
+        {
+            "created_at": "2017-03-17T21:02:15.386Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-637?focusedCommentId=15930725) by Julian Hyde (julianhyde):*\n`[~grahn]`, I know that PostgreSQL's \"timestamp with time zone\" is basically an \"instant\". Thanks for confirming.\n\nIt wasn't clear in your comment whether Oracle does the correct thing (per the SQL standard) and stores a time zone value. Can you clarify?\n\nAs far as I know Teradata and DB2 do the right thing. And I don't know of any other DBs that support it.\n\nAs an aside: my biggest gripe with PostgreSQL is that they called their type \"TIMESTAMP WITH TIME ZONE\". Their type is a useful one to have in any DBMS, since it matches what C/UNIX and Java developers are used to. I just wish they'd called it \"INSTANT\"."
+        },
+        {
+            "created_at": "2017-03-18T00:21:00.845Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-637?focusedCommentId=15930929) by Julien Le Dem (julienledem):*\nIssue resolved by pull request 388\n<https://github.com/apache/arrow/pull/388>"
+        },
+        {
+            "created_at": "2017-03-18T17:59:27.248Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-637?focusedCommentId=15931309) by Greg Rahn (grahn):*\n`[~julianhyde]` - Oracle has 3 timestamp types (from https://docs.oracle.com/database/121/SQLRF/sql_elements001.htm#SQLRF0021)\n- timestamp w/o time zone\n- timestamp with local time zone\n  - Data is normalized to the database time zone when it is stored in the database.\n  - When the data is retrieved, users see the data in the session time zone.\n- timestamp with time zone\n  - Data is stored with an explicit time zone, but not adjusted/normalized for local time zone.\n  - Value returned contains time zone offset information.\n\nThe ANSI and Oracle w/o TZ versions are the same, but the ANSI with TZ aligns more to Oracle's with LOCAL TZ.  \n\n```\ncreate table ts (\n  ts_string        varchar(50),\n  ts_timestamp     timestamp,\n  ts_timestamp_tz  timestamp with time zone,\n  ts_timestamp_ltz timestamp with local time zone\n);\n\ninsert into ts values (\n  '2016-01-01 00:00:00 +10:00',\n  timestamp '2016-01-01 00:00:00 +10:00',\n  timestamp '2016-01-01 00:00:00 +10:00',\n  timestamp '2016-01-01 00:00:00 +10:00'\n);\n\nalter session set NLS_TIMESTAMP_FORMAT = 'YYYY-MM-DD HH24:MI:SSXFF';\nalter session set NLS_TIMESTAMP_TZ_FORMAT = 'YYYY-MM-DD HH24:MI:SSXFF TZR';\n\nselect dbtimezone from dual;\n\nDBTIME\n------\n+00:00\n\nselect sessiontimezone from dual;\n\nSESSIONTIMEZONE\n---------------\n-05:00\n\nselect * from ts;\n\nTS_STRING                   TS_TIMESTAMP                TS_TIMESTAMP_TZ                    TS_TIMESTAMP_LTZ\n--------------------------  --------------------------  ---------------------------------  --------------------------\n2016-01-01 00:00:00 +10:00  2016-01-01 00:00:00.000000  2016-01-01 00:00:00.000000 +10:00  2015-12-31 09:00:00.000000\n```\n\n"
+        },
+        {
+            "created_at": "2017-03-18T19:06:58.298Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-637?focusedCommentId=15931331) by Wes McKinney (wesm):*\nSo it seems that we are well covered for if we have the two notions of:\n\n- Time zone naive data (w/o time zone) \u2013 no localization will occur when displaying these time stamps to the user\n- Time zone aware data: data is internally normalized to UTC, but can be displayed as a localized timestamp to the user\n\nI spent a bunch of time on this in pandas in 2012, here is how things work there:\n\n```Java\nIn [4]: import pandas as pd\n\nIn [5]: stamp = pd.Timestamp('2000-01-01 00:00:00')\n\nIn [6]: stamp.value  # nanoseconds\nOut[6]: 946684800000000000\n\nIn [7]: stamp_as_utc = stamp.tz_localize('utc')\n\nIn [8]: stamp_as_utc\nOut[8]: Timestamp('2000-01-01 00:00:00+0000', tz='UTC')\n\nIn [9]: stamp_as_utc.value\nOut[9]: 946684800000000000\n\nIn [10]: stamp_as_eastern = stamp_as_utc.tz_convert('America/New_York')\n\nIn [11]: stamp_as_eastern\nOut[11]: Timestamp('1999-12-31 19:00:00-0500', tz='America/New_York')\n\nIn [12]: stamp_as_eastern.value\nOut[12]: 946684800000000000\n\nIn [13]: stamp_as_eastern.year\nOut[13]: 1999\n\nIn [14]: stamp_as_eastern.month\nOut[14]: 12\n\nIn [15]: stamp_as_eastern.hour\nOut[15]: 19\n```\n\nHere, you can see the physical int64 value is the same in all cases, but we have 3 different notions: tz-naive (`stamp` has no time zone), with UTC, with a particular local time zone \u2013 but the tz is used for display only and computing day/month/year/hms components\n\n"
+        },
+        {
+            "created_at": "2017-03-20T20:18:55.172Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-637?focusedCommentId=15933463) by Julian Hyde (julianhyde):*\nI agree with `[~wesmckinn]`; Arrow is in good shape.\n\nThank you, `[~grahn]`, for your clear explanation of Oracle's semantics."
+        },
+        {
+            "created_at": "2017-03-20T21:01:21.269Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-637?focusedCommentId=15933547) by Greg Rahn (grahn):*\n\ud83d\udc4d"
+        }
+    ]
+}

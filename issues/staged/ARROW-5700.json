@@ -1,0 +1,101 @@
+{
+    "issue": {
+        "title": "[C++] Failed to open local file: Bad file descriptor",
+        "body": "***Note**: This issue was originally created as [ARROW-5700](https://issues.apache.org/jira/browse/ARROW-5700). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI open an output stream to write a parquet file. Here is the code:\r\n```java\n\r\nstd::shared_ptr<arrow::io::OutputStream> outStream;\r\narrow::Status err;\r\n\r\nerr = arrow::io::FileOutputStream::Open(filePath.toStdString(), false, &outStream);\r\nif (err.code() != arrow::StatusCode::OK) {\r\n    std::cout << err.message() << std::endl;\r\n}\r\n```\r\nHere is the error message I got:\r\n```java\n\r\nFailed to open local file: <path_to_parquet_file> , error: Bad file descriptor\"\r\n```\r\nI've got this error only when running on Windows version\u00a010.0.10586.1106 (th2_release.170904-1742).\r\n\r\nAny idea?",
+        "created_at": "2019-06-24T04:06:23.000Z",
+        "updated_at": "2022-08-27T14:41:48.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-07-25T07:48:44.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-06-24T14:52:39.751Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16871252) by Antoine Pitrou (apitrou):*\nTo start with, which version of Arrow are you using and did you compile it yourself?"
+        },
+        {
+            "created_at": "2019-06-25T03:35:40.225Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16871962) by Tham (thamha):*\n`[~pitrou]` \u00a0Yes, I build arrow from source myself at this commit: <https://github.com/apache/arrow/commit/3eb07b7ed173e2ecf41d689b0780dd103df63a00>\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-06-25T08:23:35.147Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16872147) by Antoine Pitrou (apitrou):*\nDoes it happen with any output file?"
+        },
+        {
+            "created_at": "2019-06-25T08:39:52.965Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16872159) by Antoine Pitrou (apitrou):*\nI took a look at the CRT source code, and it's mysterious how EBADF \"Invalid file descriptor\" could be returned by [_wsopen_s](https://docs.microsoft.com/fr-fr/cpp/c-runtime-library/reference/sopen-s-wsopen-s?view=vs-2019).\r\n\r\nSince you compiled, you could probably try to debug with the Arrow source code. The function is `FileOpenWritable` in `cpp/src/arrow/util/io-util.cc`.\r\n\r\n(you could also try to upgrade to a more recent version, as I think the code changed slightly)\r\n\r\n"
+        },
+        {
+            "created_at": "2019-06-25T09:28:25.676Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16872189) by Tham (thamha):*\n> Does it happen with any output file?\r\nI'm not sure. We receive this crash from customer. After this issue makes our application crashed, every time our application is started again, it fails immediately with another message (on same file):\r\n```java\n\r\nFailed to open local file: <path_to_parquet_file>, error: File exists\n```\r\nSo we don't know if it fails with another files.\r\n\r\nI will try to install some Windows version (or at least this Windows version) on our office and try to debug as you suggested.\r\n\r\n> (you could also try to upgrade to a more recent version, as I think the code changed slightly)\r\nI will try with current version first, then upgrade later to see if this issue remains."
+        },
+        {
+            "created_at": "2019-06-25T09:33:51.418Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16872194) by Tham (thamha):*\n> I took a look at the CRT source code, and it's mysterious how EBADF \"Invalid file descriptor\" could be returned by [_wsopen_s]\r\nIs there any chances that open() is called instead of _wsopen_s(), meaning _WIN32 is not defined?"
+        },
+        {
+            "created_at": "2019-06-25T09:36:12.967Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16872195) by Antoine Pitrou (apitrou):*\n> Is there any chances that open() is called instead of _wsopen_s(), meaning _WIN32 is not defined?\r\n\r\nI don't think so, compilation would probably fail.\r\n"
+        },
+        {
+            "created_at": "2019-06-27T05:24:37.132Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16873826) by Tham (thamha):*\n`[~pitrou]` I can reproduce this issue on this Windows version.\r\n> Does it happen with any output file?\r\nYes, I'm sure now it happens with any output file on this Windows.\r\n\r\nHere is the output after _wsopen_s() is called.\r\n\r\n```java\n\r\n_wsopen_s: fd:0000024308936AE8 (*fd): -1 oflag:163721 pmode:384 errno_actual:9\r\n```\r\nCan you take a look?"
+        },
+        {
+            "created_at": "2019-06-27T08:53:58.545Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16873925) by Antoine Pitrou (apitrou):*\nHave you checked the value of `file_name.ToNative().c_str()` ?"
+        },
+        {
+            "created_at": "2019-06-27T09:18:05.227Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16873945) by Antoine Pitrou (apitrou):*\nAlso, what happens if you replace `_wsopen_s` with the less secure `_wsopen` ?"
+        },
+        {
+            "created_at": "2019-06-27T09:22:08.521Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16873948) by Antoine Pitrou (apitrou):*\nAnother question still: what does `GetLastError()` return?"
+        },
+        {
+            "created_at": "2019-06-27T15:19:58.792Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16874232) by Antoine Pitrou (apitrou):*\nBy the way, I've submitted https://github.com/apache/arrow/pull/4724 which should possibly give better error messages, as \"Bad file descriptor\" doesn't make sense here."
+        },
+        {
+            "created_at": "2019-06-27T18:33:14.082Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16874411) by Wes McKinney (wesm):*\nIssue resolved by pull request 4724\n<https://github.com/apache/arrow/pull/4724>"
+        },
+        {
+            "created_at": "2019-06-27T18:33:37.258Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16874412) by Wes McKinney (wesm):*\nThe PR didn't actually resolve the problem, just gives better error messages"
+        },
+        {
+            "created_at": "2019-06-27T18:49:16.041Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16874420) by Antoine Pitrou (apitrou):*\nRight :-)"
+        },
+        {
+            "created_at": "2019-06-28T05:48:52.588Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16874694) by Tham (thamha):*\n> Have you checked the value of\u00a0`file_name.ToNative().c_str()`\u00a0?\r\n\r\n> Another question still: what does\u00a0`GetLastError()`\u00a0return?\r\n```java\n\r\n_wsopen_s: fd:000001ADAF819D88 (*fd):-1 file_name.ToNative().c_str():000001ADA8E7A100 oflag:163721 pmode:384errno_actual:9\r\nGetLastError():80\r\n```\r\n>\u00a0what happens if you replace\u00a0`_wsopen_s`\u00a0with the less secure\u00a0`_wsopen`\u00a0?\r\n\r\nSame result.\r\n```java\n\r\n_wsopen: fd:000001DF24EA9DD8 (*fd):-1 file_name.ToNative().c_str():000001DF24D911B0 oflag:163721 pmode:384errno_actual:9\r\nGetLastError():80\r\n```"
+        },
+        {
+            "created_at": "2019-06-28T05:55:07.572Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16874697) by Tham (thamha):*\nOtherwise, I've tried to build arrow with\u00a0\r\n\n|ARROW_USE_STATIC_CRT_OPTION=ON|\r<br>\r<br>This issue happened on all Windows platforms. I think that there\u00a0might be some problem with our build config and Windows Kits. Can you please give any hint?\u00a0|\n|-|-|\n"
+        },
+        {
+            "created_at": "2019-06-28T06:55:50.484Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16874724) by Antoine Pitrou (apitrou):*\nError code 80 is ERROR_FILE_EXISTS. It's a bit weird, because this shouldn't fail even if the file exists.\r\nCan you double-check by calling SetLastError(0) before _wsopen_s?\r\n"
+        },
+        {
+            "created_at": "2019-06-28T08:32:37.448Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16874773) by Tham (thamha):*\n\u00a0\r\n\r\n>\u00a0Can you double-check by calling SetLastError(0) before _wsopen_s?\r\n\r\nSetLastError(0) has been set before _wsopen_s():\r\n```java\n\r\nGetLastError() before _wsopen_s():0\r\n_wsopen_s: fd:000001F5DA662558 (*fd):-1 file_name.ToNative().c_str():000001F5DA58E4B0 oflag:163721 pmode:384 errno_actual:9\r\nGetLastError():80\n```\r\n\u00a0There is no file before I run application. The file had been created before application crashed.\u00a0It's a empty file."
+        },
+        {
+            "created_at": "2019-07-25T07:36:51.203Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=16892502) by Tham (thamha):*\nThis issue has the same root cause as ARROW-5410 (`oflag` has unexpected value because of optimization) then we can close this ticket as well."
+        },
+        {
+            "created_at": "2022-08-27T14:41:48.694Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5700?focusedCommentId=17585858) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

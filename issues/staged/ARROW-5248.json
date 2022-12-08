@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] support zoneinfo / dateutil timezones",
+        "body": "***Note**: This issue was originally created as [ARROW-5248](https://issues.apache.org/jira/browse/ARROW-5248). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe `dateutil` packages also provides a set of timezone objects (https://dateutil.readthedocs.io/en/stable/tz.html) in addition to `pytz`. In pyarrow, we only support pytz timezones (and the stdlib datetime.timezone fixed offset):\r\n\r\n```Java\n\r\nIn [2]: import dateutil.tz                                                                                                                                    \r\n\r\nIn [3]: import pyarrow as pa                                                                                                                                  \r\n\r\nIn [5]: pa.timestamp('us', dateutil.tz.gettz('Europe/Brussels'))                                                                                              \r\n...\r\n~/miniconda3/envs/dev37/lib/python3.7/site-packages/pyarrow/types.pxi in pyarrow.lib.tzinfo_to_string()\r\n\r\nValueError: Unable to convert timezone `tzfile('/usr/share/zoneinfo/Europe/Brussels')` to string\r\n```\r\n\r\nBut pandas also supports dateutil timezones. As a consequence, when having a pandas DataFrame that uses a dateutil timezone, you get an error when converting to an arrow table.",
+        "created_at": "2019-05-02T12:15:12.000Z",
+        "updated_at": "2022-02-25T01:32:21.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-02-24T16:04:10.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-06-12T10:16:52.848Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5248?focusedCommentId=16861969) by Joris Van den Bossche (jorisvandenbossche):*\nAnother example of dateutil timezone was reported in ARROW-5540.\r\n\r\nReproducible example:\r\n\r\n```python\n\r\nIn [32]: import dateutil\r\n\r\nIn [33]: tz = dateutil.tz.tzoffset(None, -14400)\r\n\r\nIn [34]: pd.Timestamp(\"2019-01-01\", tz=tz)\r\nOut[34]: Timestamp('2019-01-01 00:00:00-0400', tz='tzoffset(None, -14400)')\r\n\r\nIn [39]: pa.array(pd.Series([pd.Timestamp(\"2019-01-01\", tz=tz)]))\r\n...\r\nValueError: Unable to convert timezone `tzoffset(None, -14400)` to string\r\n```"
+        },
+        {
+            "created_at": "2020-12-20T10:44:23.150Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5248?focusedCommentId=17252394) by mafrosis (mafrosis):*\nI believe another instance of the same bug can be seen rather simply with the following:\r\n```java\n\r\nIn [1]: import pyarrow as pa\r\n\r\nIn [2]: from dateutil.tz import tzlocal\r\n\r\nIn [3]: pa.timestamp('ns', tzlocal())\r\n---------------------------------------------------------------------------\r\nAttributeError                            Traceback (most recent call last)\r\n<ipython-input-3-95e5f76d00ff> in <module>\r\n----> 1 pa.timestamp('ns', tzlocal())\r\n\r\n~/Development/jiracli/venv/lib/python3.8/site-packages/pyarrow/types.pxi in pyarrow.lib.timestamp()\r\n\r\n~/Development/jiracli/venv/lib/python3.8/site-packages/pyarrow/types.pxi in pyarrow.lib.tzinfo_to_string()\r\n\r\n~/Development/jiracli/venv/lib/python3.8/site-packages/pyarrow/error.pxi in pyarrow.lib.pyarrow_internal_check_status()\r\n\r\n~/Development/jiracli/venv/lib/python3.8/site-packages/dateutil/tz/tz.py in tzname(self, dt)\r\n    236     @tzname_in_python2\r\n    237     def tzname(self, dt):\r\n--> 238         return self._tznames[self._isdst(dt)]\r\n    239\r\n    240     def is_ambiguous(self, dt):\r\n\r\n~/Development/jiracli/venv/lib/python3.8/site-packages/dateutil/tz/tz.py in _isdst(self, dt, fold_naive)\r\n    289\r\n    290         # Check for ambiguous times:\r\n--> 291         dstval = self._naive_is_dst(dt)\r\n    292         fold = getattr(dt, 'fold', None)\r\n    293\r\n\r\n~/Development/jiracli/venv/lib/python3.8/site-packages/dateutil/tz/tz.py in _naive_is_dst(self, dt)\r\n    257\r\n    258     def _naive_is_dst(self, dt):\r\n--> 259         timestamp = _datetime_to_timestamp(dt)\r\n    260         return time.localtime(timestamp + time.timezone).tm_isdst\r\n    261\r\n\r\n~/Development/jiracli/venv/lib/python3.8/site-packages/dateutil/tz/tz.py in _datetime_to_timestamp(dt)\r\n   1812     seconds since January 1, 1970, ignoring the time zone.\r\n   1813     \"\"\"\r\n-> 1814     return (dt.replace(tzinfo=None) - EPOCH).total_seconds()\r\n   1815\r\n   1816\r\n\r\nAttributeError: 'NoneType' object has no attribute 'replace'\n```"
+        },
+        {
+            "created_at": "2021-08-05T13:52:27.865Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5248?focusedCommentId=17394022) by Antoine Pitrou (apitrou):*\nThe problem is that, once you have `tz = dateutil.tz.gettz('Europe/Brussels')`, it seems impossible to get back the \"Europe/Brussels\" string from `tz`."
+        },
+        {
+            "created_at": "2021-08-05T15:07:45.347Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5248?focusedCommentId=17394101) by Joris Van den Bossche (jorisvandenbossche):*\nIn addition, we should probably also support the Python 3.9+ `zoneinfo` timezones:\r\n\r\n```Java\n\r\n>>> import zoneinfo\r\n>>> tz = zoneinfo.ZoneInfo(\"Europe/Brussels\")\r\n>>> tz\r\nzoneinfo.ZoneInfo(key='Europe/Brussels')\r\n>>> tz.key\r\n'Europe/Brussels'\r\n```"
+        },
+        {
+            "created_at": "2021-08-05T15:15:35.638Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5248?focusedCommentId=17394109) by Joris Van den Bossche (jorisvandenbossche):*\nFor dateutil, I indeed don't directly know how to get the zone name. You can get the \"displayed name\" with:\r\n\r\n```python\n\r\n>>> import dateutil\r\n>>> tz = dateutil.tz.gettz('Europe/Brussels')\r\n>>> tz\r\ntzfile('/usr/share/zoneinfo/Europe/Brussels')\r\n>>> import datetime\r\n>>> dt = datetime.datetime(2012, 1, 1)\r\n>>> tz.tzname(dt)\r\n'CET'\r\n```\r\n\r\nbut that's not the name we want to store in the tz metadata.\r\n\r\nThere seems to be a long-time issue about it: https://github.com/dateutil/dateutil/issues/76"
+        },
+        {
+            "created_at": "2022-02-24T16:04:10.722Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5248?focusedCommentId=17497501) by Joris Van den Bossche (jorisvandenbossche):*\nIssue resolved by pull request 12421\n<https://github.com/apache/arrow/pull/12421>"
+        }
+    ]
+}

@@ -1,0 +1,20 @@
+{
+    "issue": {
+        "title": "[C++] count_distinct aggregates incorrectly across row groups",
+        "body": "***Note**: This issue was originally created as [ARROW-16808](https://issues.apache.org/jira/browse/ARROW-16808). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen reading from parquet files with multiple row groups, `count_distinct` (wrapped by `n_distinct` in R) returns inaccurate and inconsistent results:\r\n```r\n\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\n\r\npath <- tempfile(fileext = '.parquet')\r\narrow::write_parquet(dplyr::starwars, path, chunk_size = 20L)\r\n\r\nds <- arrow::open_dataset(path)\r\n\r\nds %>% count(sex) %>% collect()\r\n#> # A tibble: 5 \u00d7 2\r\n#> \u00a0 sex \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0n\r\n#> \u00a0 <chr> \u00a0 \u00a0 \u00a0 \u00a0 \u00a0<int>\r\n#> 1 male \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a060\r\n#> 2 none \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 6\r\n#> 3 female \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a016\r\n#> 4 hermaphroditic \u00a0 \u00a0 1\r\n#> 5 <NA> \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 4\r\n\r\nds %>% summarise(n = n_distinct(sex)) %>% collect()\r\n#> # A tibble: 1 \u00d7 1\r\n#> \u00a0 \u00a0 \u00a0 n\r\n#> \u00a0 <int>\r\n#> 1 \u00a0 \u00a019\r\nds %>% summarise(n = n_distinct(sex)) %>% collect()\r\n#> # A tibble: 1 \u00d7 1\r\n#> \u00a0 \u00a0 \u00a0 n\r\n#> \u00a0 <int>\r\n#> 1 \u00a0 \u00a017\r\nds %>% summarise(n = n_distinct(sex)) %>% collect()\r\n#> # A tibble: 1 \u00d7 1\r\n#> \u00a0 \u00a0 \u00a0 n\r\n#> \u00a0 <int>\r\n#> 1 \u00a0 \u00a017\r\nds %>% summarise(n = n_distinct(sex)) %>% collect()\r\n#> # A tibble: 1 \u00d7 1\r\n#> \u00a0 \u00a0 \u00a0 n\r\n#> \u00a0 <int>\r\n#> 1 \u00a0 \u00a016\r\nds %>% summarise(n = n_distinct(sex)) %>% collect()\r\n#> # A tibble: 1 \u00d7 1\r\n#> \u00a0 \u00a0 \u00a0 n\r\n#> \u00a0 <int>\r\n#> 1 \u00a0 \u00a016\r\nds %>% summarise(n = n_distinct(sex)) %>% collect()\r\n#> # A tibble: 1 \u00d7 1\r\n#> \u00a0 \u00a0 \u00a0 n\r\n#> \u00a0 <int>\r\n#> 1 \u00a0 \u00a017\r\nds %>% summarise(n = n_distinct(sex)) %>% collect()\r\n#> # A tibble: 1 \u00d7 1\r\n#> \u00a0 \u00a0 \u00a0 n\r\n#> \u00a0 <int>\r\n#> 1 \u00a0 \u00a017\r\n\r\n# correct\r\nds %>% collect() %>% summarise(n = n_distinct(sex))\r\n#> # A tibble: 1 \u00d7 1\r\n#> \u00a0 \u00a0 \u00a0 n\r\n#> \u00a0 <int>\r\n#> 1 \u00a0 \u00a0 5\r\n```\r\n\r\nIf the file is stored as a single row group, results are correct. When grouped, results are correct.\r\n\r\nI can reproduce this in Python as well using the same file and `pyarrow.compute.count_distinct`:\r\n\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\npa.__version__\r\n#> 8.0.0\r\n\r\nstarwars = pq.read_table('/var/folders/0j/zz6p_mjx2_b727p6xdpm5chc0000gn/T//Rtmp2wnWl5/file1744f6cc6cea8.parquet')\r\n\r\nprint(pa.compute.count_distinct(starwars.column('sex')).as_py())\r\n#> 15\r\nprint(pa.compute.unique(starwars.column('sex')))\r\n#> [\r\n#>   \"male\",\r\n#>   \"none\",\r\n#>   \"female\",\r\n#>   \"hermaphroditic\",\r\n#>    null\r\n#> ]\r\n```\r\n\r\nThis seems likely to be the same problem in this StackOverflow question: https://stackoverflow.com/questions/72561901/how-do-i-compute-the-number-of-unique-values-in-a-pyarrow-array which is working from orc files.",
+        "created_at": "2022-06-10T17:00:54.000Z",
+        "updated_at": "2022-10-03T15:32:53.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-06-10T17:04:10.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-10T17:04:10.923Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16808?focusedCommentId=17552868) by Edward Visel (alistaire):*\nDuplicate of [ARROW-16807]"
+        }
+    ]
+}

@@ -1,0 +1,46 @@
+{
+    "issue": {
+        "title": "Align Java and C++ RecordBatch data and metadata layout",
+        "body": "***Note**: This issue was originally created as [ARROW-384](https://issues.apache.org/jira/browse/ARROW-384). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nlayout on C++ side:\n```\n<buffers> <metadata> <metadata size: int32>\n```\nand on the java side:\n```\n<metadata> <buffers>\n```\nIn the file format the footer has a Block info that contains the metadata length.\nhttps://github.com/apache/arrow/blob/f082b17323354dc2af31f39c15c58b995ba08360/format/File.fbs#L36\nSee:\nhttps://github.com/apache/arrow/pull/211#issuecomment-262080545",
+        "created_at": "2016-11-21T23:33:04.000Z",
+        "updated_at": "2019-06-03T13:17:52.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2016-11-30T16:49:46.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2016-11-21T23:35:48.970Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-384?focusedCommentId=15685108) by Julien Le Dem (julienledem):*\nHere is a 3rd suggestion:\n```\n<metadata size: int32> <metadata> <buffers> \n```\nSince we probably know the size of the flatbuffer already before writing.\n\n`[~wesmckinn]`: One thing I am missing is that in the context of shared memory, buffers are not contiguous."
+        },
+        {
+            "created_at": "2016-11-22T00:59:52.575Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-384?focusedCommentId=15685289) by Jacques Nadeau (jnadeau):*\n+1 on this approach. "
+        },
+        {
+            "created_at": "2016-11-22T02:07:40.592Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-384?focusedCommentId=15685423) by Wes McKinney (wesm):*\nThis seems reasonable, and saves you from always requiring the metadata size. \n\nIf we look at the flatbuffers IDL for the RecordBatch and Buffer metadata (https://github.com/apache/arrow/blob/master/format/Message.fbs#L210), it says the offset is \"The relative offset into the shared memory page where the bytes for this buffer starts\". This is somewhat rigid because it means that file-like record batches are not easily relocatable \u2013 by that definition, the offset would need to be the position in the file relative to the start, not the start of the record batch. This is what the C++ implementation is doing now. \n\nHere's my idea: add an enum flag to RecordBatch that indicates whether the buffer offsets are absolute (relative to the start of the file or shared memory block) or relative to a contiguous blob of bytes (what the Java file implementation is doing now). The latter is not good necessarily for shared memory because it presumes contiguousness, but it also makes record batches relocatable when they are (e.g. in a file-like setting).\n\nRelocatable record batch metadata / fully relative offsets is also better for RPC / socket-based exchange (which is effectively the same as sending a segment of the current \"file format\"), so that's another argument for adding that as an option.\n\nI don't think I can make an argument that either absolute (needed for general shared memory IPC) or relative (better for file / RPC) offsets should be the only option available to the exclusion of the other. "
+        },
+        {
+            "created_at": "2016-11-22T21:56:29.316Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-384?focusedCommentId=15688028) by Wes McKinney (wesm):*\nOn this layout:\n\n```\n<metadata size: int32> <metadata> <buffers> \n```\n\nOne issue we need to address is alignment / padding. The `<metadata size: int32> <metadata>` block should be 64-byte aligned. I don't think that the flatbuffers library cares about the alignment, but the buffer block should start on a 64-byte offset. Whatever we decide we will want to write this up in the format docs"
+        },
+        {
+            "created_at": "2016-11-23T16:02:02.283Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-384?focusedCommentId=15690537) by Wes McKinney (wesm):*\nI talked this proposal through with Julien yesterday and we should be able to manage without additional metadata by treating the contiguous buffer block written as part of the file format as a \"memory page\" for the purposes of record batch reconstruction \u2013 so we will not consider the offset from the beginning of the physical file to be semantically meaningful. This is distinct from the shared memory IPC case where the buffers may occur in many different places in one or more shared memory regions. \n\nI'll write up some details under format/ about this more precisely in the course of implementing this in my patch for ARROW-363. "
+        },
+        {
+            "created_at": "2016-11-29T02:33:38.486Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-384?focusedCommentId=15703944) by Wes McKinney (wesm):*\nThis was partially addressed in https://github.com/apache/arrow/commit/e3c167bd101734f92c3a2be2eb7f56f1fba91e67. Leaving this open until we have some more functioning integration tests"
+        },
+        {
+            "created_at": "2016-11-30T16:49:48.305Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-384?focusedCommentId=15709082) by Wes McKinney (wesm):*\nThis was resolved in https://github.com/apache/arrow/commit/e3c167bd101734f92c3a2be2eb7f56f1fba91e67 \u2013 other incompatibilities are likely to be data-type-specific from here on out"
+        }
+    ]
+}

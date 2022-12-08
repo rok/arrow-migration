@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[C++][Parquet] parquet::arrow::ColumnReader: ByteArrayDictionaryRecordReader repeats returned values when calling `NextBatch()`",
+        "body": "***Note**: This issue was originally created as [ARROW-6895](https://issues.apache.org/jira/browse/ARROW-6895). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nGiven most columns, I can run a loop like:\r\n\r\n```cpp\n\r\nstd::unique_ptr<parquet::arrow::ColumnReader> columnReader(/*...*/);\r\nwhile (nRowsRemaining > 0) {\r\n    int n = std::min(100, nRowsRemaining);\r\n    std::shared_ptr<arrow::ChunkedArray> chunkedArray;\r\n    auto status = columnReader->NextBatch(n, &chunkedArray);\r\n    // ... and then use `chunkedArray`\r\n    nRowsRemaining -= n;\r\n}\r\n```\r\n\r\n(The context is: \"convert Parquet to CSV/JSON, with small memory footprint.\" Used in https://github.com/CJWorkbench/parquet-to-arrow)\r\n\r\nNormally, the first `NextBatch()` return value looks like `val0...val99`; the second return value looks like `val100...val199`; and so on.\r\n\r\n... but with a `ByteArrayDictionaryRecordReader`, that isn't the case. The first `NextBatch()` return value looks like `val0...val100`; the second return value looks like `val0...val99, val100...val199` (ChunkedArray with two arrays); the third return value looks like `val0...val99, val100...val199, val200...val299` (ChunkedArray with three arrays); and so on. The returned arrays are never cleared.\r\n\r\nIn sum: `NextBatch()` on a dictionary column reader returns the wrong values.\r\n\r\nI've attached a minimal Parquet file that presents this problem with the above code; and I've written a patch that fixes this one case, to illustrate where things are wrong. I don't think I understand enough edge cases to decree that my patch is a correct fix.",
+        "created_at": "2019-10-15T19:20:53.000Z",
+        "updated_at": "2020-03-27T20:40:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-03-27T20:40:54.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-17T18:47:50.588Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6895?focusedCommentId=16954020) by Wes McKinney (wesm):*\nThanks, I indeed see the issue. Your patch touches some things that are not related to the core problem so I'll write a new patch and add a unit test. "
+        },
+        {
+            "created_at": "2020-01-08T00:22:14.661Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6895?focusedCommentId=17010200) by Wes McKinney (wesm):*\nWas this never fixed? I must have gotten sidetracked. Leaving in 0.16.0"
+        },
+        {
+            "created_at": "2020-01-16T22:29:41.874Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6895?focusedCommentId=17017536) by Neal Richardson (npr):*\nIssue resolved by pull request 6206\n<https://github.com/apache/arrow/pull/6206>"
+        },
+        {
+            "created_at": "2020-02-18T15:26:08.180Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6895?focusedCommentId=17039170) by Adam Hooper (adamhooper):*\nThe code snippet given in the bug description still fails to read the `bad.parquet` file I uploaded.\r\n\r\nPerhaps there were two bugs, and only one has been fixed? Please advise me whether I should leave this bug open (since the supplied code+file still aren't read properly) or open a new issue (since the GitHub patch does address the title of this bug).\r\n\r\nBy my reading, GitHub pull request #6206 did not add a test case for dictionary delta batches, like the one `bad.parquet` produces. The spec suggests the `isDelta` flag should prevent the dictionary from being cleared between column chunks: https://arrow.apache.org/docs/format/Columnar.html#dictionary-messages. So from my understanding, the reader should not be allowed to reset the dictionary builder until after it receives a dictionary batch for which `isDelta == false`."
+        },
+        {
+            "created_at": "2020-02-18T15:52:43.272Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6895?focusedCommentId=17039184) by Adam Hooper (adamhooper):*\nI just uploaded `01-fix-arrow-6895.diff`, which I _imagine_ contains the final pieces needed to make my code snippet work on my uploaded file. I haven't submitted a unit test."
+        },
+        {
+            "created_at": "2020-02-18T16:25:42.132Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6895?focusedCommentId=17039212) by Francois Saint-Jacques (fsaintjacques):*\nThanks for the followup Adam, would you mind opening a PR for this, you'd get the credits for fixing it."
+        },
+        {
+            "created_at": "2020-03-10T01:01:28.143Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6895?focusedCommentId=17055488) by Wes McKinney (wesm):*\nI'll see if I can add a unit test and merge this for 0.17.0"
+        },
+        {
+            "created_at": "2020-03-23T16:15:46.318Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6895?focusedCommentId=17064910) by Wes McKinney (wesm):*\nI'll try to add a test for this and close out the PR"
+        },
+        {
+            "created_at": "2020-03-27T20:40:54.648Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6895?focusedCommentId=17069036) by Wes McKinney (wesm):*\nIssue resolved by pull request 6460\n<https://github.com/apache/arrow/pull/6460>"
+        }
+    ]
+}

@@ -1,0 +1,84 @@
+{
+    "issue": {
+        "title": "[Python] Explode array column",
+        "body": "***Note**: This issue was originally created as [ARROW-12099](https://issues.apache.org/jira/browse/ARROW-12099). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn Apache Spark, [explode](https://spark.apache.org/docs/latest/api/sql/index.html#explode) separates the elements of an array column (or expression) into multiple row.\r\n\r\nNote that each explode works at the top-level only (not recursively).\r\n\r\nThis would also work with the existing [flatten](https://arrow.apache.org/docs/python/generated/pyarrow.Table.html#pyarrow.Table.flatten) method to allow fully unnesting a [pyarrow.StructArray](https://arrow.apache.org/docs/python/generated/pyarrow.StructArray.html#pyarrow-structarray).",
+        "created_at": "2021-03-26T16:54:24.000Z",
+        "updated_at": "2022-06-17T00:13:33.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-03-26T21:06:36.944Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12099?focusedCommentId=17309732) by Micah Kornfield (emkornfield):*\nNote there is a flatten o[n list array](https://arrow.apache.org/docs/python/generated/pyarrow.ListArray.html#pyarrow.ListArray.flatten)\u00a0which sounds very similar to explode?"
+        },
+        {
+            "created_at": "2021-03-26T21:32:02.430Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12099?focusedCommentId=17309744) by Malthe Borch (malthe):*\n`[~emkornfield]` that looks helpful but what's very useful about Spark's explode is that it works directly on the table level. I'm not sure how easy it would be to join this flattened list array back with the original table?"
+        },
+        {
+            "created_at": "2021-03-26T22:03:13.844Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12099?focusedCommentId=17309766) by Micah Kornfield (emkornfield):*\nOK, does explode do so recursively or only for top-level types.\u00a0 It would be good to formally specify this.\u00a0"
+        },
+        {
+            "created_at": "2021-03-26T22:10:11.452Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12099?focusedCommentId=17309767) by Malthe Borch (malthe):*\n`[~emkornfield]` added; there is no support for recursively exploding a structure. I think that is a reasonable position to take here as well."
+        },
+        {
+            "created_at": "2021-03-29T15:12:28.879Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12099?focusedCommentId=17310717) by Joris Van den Bossche (jorisvandenbossche):*\nIn the `pyarrow.compute` module, we also have `list_parent_indices` which can be used to join the flattened list column with repeated rows of the original table.\r\n\r\nSo it's already possible to write an explode function with this functionality in python:\r\n\r\n```python\n\r\nimport pyarrow.compute as pc\r\n\r\ndef explode_table(table, column):\r\n    other_columns = list(table.schema.names)\r\n    other_columns.remove(column)\r\n    indices = pc.list_parent_indices(table[column])\r\n    result = table.select(other_columns).take(indices)\r\n    result = result.append_column(pa.field(column, table.schema.field(column).type.value_type), pc.list_flatten(table[column]))\r\n    return result\r\n```\r\n\r\n```Java\n\r\nIn [80]: table = pa.table({'a': range(3), 'b': [[1, 2], None, [3, 4, 5]]})\r\n\r\nIn [81]: explode_table(table, 'b')\r\nOut[81]: \r\npyarrow.Table\r\na: int64\r\nb: int64\r\n\r\nIn [82]: explode_table(table, 'b').to_pandas()\r\nOut[82]: \r\n   a  b\r\n0  0  1\r\n1  0  2\r\n2  2  3\r\n3  2  4\r\n4  2  5\r\n```\r\n\r\nThat said, I think it could be nice to provide this functionality in pyarrow itself."
+        },
+        {
+            "created_at": "2021-03-29T16:01:20.969Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12099?focusedCommentId=17310753) by Malthe Borch (malthe):*\n`[~jorisvandenbossche]` in Spark, explode does not \"zip\" arrays in different columns actually \u2013 it just copies the entire row for each value in the exploded column (which is originally an array) such that if the array had N values, there would now be N rows in place of the original row. Rinse and repeat for all rows in the original dataframe."
+        },
+        {
+            "created_at": "2021-03-29T16:32:20.856Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12099?focusedCommentId=17310772) by Joris Van den Bossche (jorisvandenbossche):*\nYour description to me sounds more or less what I showed. Can you eg show an example of input / expected result? (as you would expect it from spark)"
+        },
+        {
+            "created_at": "2021-03-29T16:47:16.339Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12099?focusedCommentId=17310781) by Malthe Borch (malthe):*\n\u00a0\r\n\r\nSo Spark cannot actually explode (or \"generate\") more than one expression per select statement (that is simply not allowed), but I suppose sometimes you want to \"zip\" the arrays (like you have shown) and other times you would want to form the cartesian product from them:\r\n```java\n\r\nspark-sql> SELECT a, explode(b) FROM (SELECT explode(sequence(0, 2)) a, sequence(4, 6) b);\r\n0\t4\r\n0\t5\r\n0\t6\r\n1\t4\r\n1\t5\r\n1\t6\r\n2\t4\r\n2\t5\r\n2\t6\r\nTime taken: 0.187 seconds, Fetched 9 row(s)\r\n```\r\nIn your `explode_table` function, what role does the `column` parameter have exactly? Why does it touch the `'a'` column if you mention `'b' - ?`\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-03-29T16:50:39.870Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12099?focusedCommentId=17310784) by Joris Van den Bossche (jorisvandenbossche):*\nThanks. Could you also post what the FROM clause looks like? (`SELECT explode(sequence(0, 2)) a, sequence(4, 6) b`) (to be sure how the input data looks like)"
+        },
+        {
+            "created_at": "2021-03-29T16:58:29.437Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12099?focusedCommentId=17310789) by Malthe Borch (malthe):*\nWhat I can perhaps add is that I imagine an API such as:\r\n```python\n\r\ntable.explode(\"a\")      # This would unroll the \"a\" array, but leave any other array as it is.\r\ntable.explode(\"a, \"b\")  # This would unroll the provided columns, \"zipping\" them.\r\n```\r\nThat is, the interface would work strictly with already existing array columns."
+        },
+        {
+            "created_at": "2021-03-31T12:50:58.035Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12099?focusedCommentId=17312346) by Joris Van den Bossche (jorisvandenbossche):*\n`[~malthe]` can you show small example input/output of what you imagine? (as has been clear above, describing it in words doesn't seem sufficient to be sure we understand it the same way ;))"
+        },
+        {
+            "created_at": "2021-03-31T12:57:59.927Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12099?focusedCommentId=17312363) by Joris Van den Bossche (jorisvandenbossche):*\nI _assume_ your example starts with a table like the following?\r\n\r\n```Java\n\r\nIn [100]: table = pa.table({'a': [0, 1, 2], 'b': [[4, 5, 6]]*3})\r\n\r\nIn [101]: table.to_pandas()\r\nOut[101]: \r\n   a          b\r\n0  0  [4, 5, 6]\r\n1  1  [4, 5, 6]\r\n2  2  [4, 5, 6]\r\n```\r\n\r\nThe function I wrote above to explode a list column in such a table gives:\r\n\r\n```Java\n\r\nIn [102]: explode_table(table, 'b').to_pandas()\r\nOut[102]: \r\n   a  b\r\n0  0  4\r\n1  0  5\r\n2  0  6\r\n3  1  4\r\n4  1  5\r\n5  1  6\r\n6  2  4\r\n7  2  5\r\n8  2  6\r\n```\r\n\r\nwhich seems the same output as you showed above?"
+        },
+        {
+            "created_at": "2021-08-26T17:05:27.148Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12099?focusedCommentId=17405371) by Ian Cook (icook):*\n+1 Hive also has an [`explode`](https://cwiki.apache.org/confluence/display/hive/languagemanual+udf#LanguageManualUDF-explode)\u00a0function that works like this, but it is very difficult to use at a table level\u2014you need to use something called a [lateral view](https://cwiki.apache.org/confluence/display/hive/languagemanual+lateralview) to do that, and the API is very unintuitive.\r\n\r\n`[~jorisvandenbossche]` \u00a0I think your example\u00a0in the previous comment is exactly correct. It would be very nice to have an `explode_table` kernel like that in the Arrow C++ library, exposed to Python and R through bindings.\r\n\r\nIn addition to working on ListArrays like in this example, this\u00a0should also work on MapArrays. When called on a MapArray, it should return two exploded columns\u2014one with the keys, one with the values."
+        },
+        {
+            "created_at": "2021-08-26T17:12:42.611Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12099?focusedCommentId=17405379) by Ian Cook (icook):*\nI think for the initial implementation, we should limit this to explode only a single ListArray or MapArray column, like:\r\n```Java\nexplode_table(table, 'b')\n```\r\nThe case of exploding multiple columns, like\r\n```Java\nexplode_table(table, 'b', 'c')\n```\r\nseems quite complicated and is probably best to consider separately."
+        },
+        {
+            "created_at": "2021-11-22T11:21:59.011Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12099?focusedCommentId=17447341) by SHIMA Tatsuya (eitsupi):*\nIt seems related to ARROW-8813.\r\ntidyr::unnest in R works very well, and it would be great to have this feature available in Arrow."
+        },
+        {
+            "created_at": "2022-05-23T22:20:01.826Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12099?focusedCommentId=17541192) by Guido Muscioni (muscionig):*\n(sorry for continuing this old thread, I can open a new issue if necessary)\r\n\r\nI was working on `[~jorisvandenbossche]` \u00a0implementation and noticed that it skips the null values. I slightly modified the code to handle missing values in a list:\r\n```python\n\r\ndef explode_table_include_null(table, column):\r\n    other_columns = list(table.schema.names)\r\n    other_columns.remove(column)\r\n    indices = pc.list_parent_indices(pc.fill_null(table[column], [None]))\r\n    result = table.select(other_columns).take(indices)\r\n    result = result.append_column(\r\n        pa.field(column, table.schema.field(column).type.value_type),\r\n        pc.list_flatten(pc.fill_null(table[column], [None])),\r\n    )\r\n    return result\r\n```\r\nFor example, given this table:\r\n```python\n\r\ntable = pa.table({'a': range(3), 'b': [[1,2], None, [1,2,3]]})\r\n```\r\npandas in this case will leave the line with the None value:\r\n```python\n\r\nIn [14]: table.to_pandas().explode('b')\r\nOut[14]: \r\n   a     b\r\n0  0     1\r\n0  0     2\r\n1  1  None\r\n2  2     1\r\n2  2     2\r\n2  2     3\r\n```\r\n`[~jorisvandenbossche]` implementation will not return the None row:\r\n```python\n\r\nIn [16]: explode_table(table, 'b').to_pandas()\r\nOut[16]: \r\n   a  b\r\n0  0  1\r\n1  0  2\r\n2  2  1\r\n3  2  2\r\n4  2  3\r\n```\r\nUsing the function above:\r\n```python\n\r\nIn [18]: explode_table_include_null(table, 'b').to_pandas()\r\nOut[18]: \r\n   a    b\r\n0  0  1.0\r\n1  0  2.0\r\n2  1  NaN\r\n3  2  1.0\r\n4  2  2.0\r\n5  2  3.0\r\n```\r\nI am not sure if filling the value with a blind empty list is correct, it seems to work well given multiple examples (I am referring to the requirements of the pc.fill_null function about typing):\r\n```python\n\r\nIn [19]: table = pa.table({'a': range(3), 'b': [['1','2'],None, ['1','2','3']]})\r\n\r\nIn [20]: explode_table_include_null(table, 'b').to_pandas()\r\nOut[20]: \r\n   a     b\r\n0  0     1\r\n1  0     2\r\n2  1  None\r\n3  2     1\r\n4  2     2\r\n5  2     3\r\n\r\nIn [22]: table = pa.table({'a': range(3), 'b': [[{'a':1}],None, [{'a':1}]]})\r\n\r\nIn [23]: explode_table_include_null(table, 'b').to_pandas()\r\nOut[23]: \r\n   a           b\r\n0  0  {'a': 1.0}\r\n1  1        None\r\n2  2  {'a': 1.0}\r\n```\r\nI did a very small benchmarking of this function against pandas and the speedup is remarkable:\r\n```java\n\r\ndf = pd.DataFrame({'a':list(range(10000)),'b':[['a','b','c'] for i in range(10000)]})\r\ntable = pa.Table.from_pandas(df)\r\n\r\nIn [25]: %timeit explode_table_include_null(table, 'b')\r\n131 \u00b5s \u00b1 1.9 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 10,000 loops each)\r\nIn [26]: %timeit df.explode('b')\r\n3.78 ms \u00b1 69.1 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 100 loops each)\n```"
+        },
+        {
+            "created_at": "2022-06-17T00:12:03.483Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12099?focusedCommentId=17555329) by Nick Crews (NickCrews):*\nSmall tweak to Guido's implementation (thank you for this!): If the table only has the one ListArray or MapArray column, then it crashes.\r\n\r\nThis handles that case:\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.compute as pc\r\ndef explode_table(table, column):\r\n    null_filled = pc.fill_null(table[column], [None])\r\n    flattened = pc.list_flatten(null_filled)\r\n    other_columns = list(table.schema.names)\r\n    other_columns.remove(column)\r\n    if len(other_columns) == 0:\r\n        return pa.table({column: flattened})\r\n    else:\r\n        indices = pc.list_parent_indices(null_filled)\r\n        result = table.select(other_columns).take(indices)\r\n        result = result.append_column(\r\n            pa.field(column, table.schema.field(column).type.value_type),\r\n            flattened,\r\n        )\r\n        return result \n```"
+        }
+    ]
+}

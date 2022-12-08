@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[Python] pyarrow 3.0 issues with turbodbc",
+        "body": "***Note**: This issue was originally created as [ARROW-11390](https://issues.apache.org/jira/browse/ARROW-11390). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis is more of a turbodbc issue I think, but perhaps someone here would have some idea of what changed to cause potential issues.\u00a0\r\n```java\n\r\ncursor = connection.cursor()\r\ncursor.execute(\"select top 10 * from dbo.tickets\")\r\ntable = cursor.fetchallarrow()\n```\r\nI am able to run table.num_rows and it will print out 10.\r\n\r\nIf I run table.to_pandas() or table.schema or try to write the table to a dataset, my kernel dies with no explanation. I reverted back to pyarrow 2.0 and the same code works again.\r\n\r\n<https://github.com/blue-yonder/turbodbc/issues/289>\r\n\r\n\u00a0",
+        "created_at": "2021-01-26T15:49:38.000Z",
+        "updated_at": "2021-01-27T23:43:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-01-27T23:43:03.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-01-26T16:21:03.622Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11390?focusedCommentId=17272204) by Uwe Korn (uwe):*\nDid you recompile `turbodbc` from source after you installed the new Arrow version?"
+        },
+        {
+            "created_at": "2021-01-26T17:25:15.346Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11390?focusedCommentId=17272269) by Wes McKinney (wesm):*\nIt seems like turbodbc should refuse to run if there is a compiled-version-runtime-version mismatch (this should in theory be possible to check at runtime)?"
+        },
+        {
+            "created_at": "2021-01-26T17:29:29.392Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11390?focusedCommentId=17272271) by Lance Dacey (ldacey):*\nActually, turbodbc would have been installed before pyarrow since version 3.0 was not on conda-forge so I moved it down to the pip section. Do I need to reverse this installation process?\r\n\r\n\r\n```java\n\r\n    && /opt/conda/bin/conda install -c conda-forge -yq \\\r\n    pandas \\\r\n    numpy \\\r\n    pyodbc \\\r\n    pybind11 \\\r\n    turbodbc \\\r\n    azure-storage-blob \\\r\n    azure-storage-common \\\r\n    xlrd \\\r\n    openpyxl \\\r\n    mysql-connector-python \\ \r\n    zeep \\\r\n    xmltodict \\\r\n    dask \\\r\n    dask-labextension \\\r\n    pymssql=2.1 \\\r\n    sqlalchemy-redshift \\\r\n    python-snappy \\\r\n    seaborn \\\r\n    python-gitlab \\\r\n    pyxlsb \\\r\n    humanfriendly \\\r\n    jupyterlab \\\r\n    notebook=6.1.4 \\\r\n    pip \\\r\n    && /opt/conda/bin/pip install --no-cache-dir --upgrade pip \\\r\n                                            smartsheet-python-sdk \\\r\n                                            duo-client \\\r\n                                            adlfs \\\r\n                                            pyarrow \\\r\n                                            \"apache-airflow[postgres,redis,celery,crypto,ssh,password]==$AIRFLOW_VERSION\" \\\r\n```\r\n\r\n\r\nI have not been able to get turbodbc to work with pip which is why I am using conda right now. Actually I was just trying to get it to work again using a CFLAGS argument \"-D_GLIBCXX_USE_CXX11_ABI=0\", but had no luck. I will attempt some more and perhaps raise an issue on the turbodbc project though.\r\n\r\nLet me know if there is a proper way to install these libraries! (ideally with just plain pip, since my base image is from Airflow which does not use conda by default)\r\n\r\n\r\n\r\n\r\n\r\n"
+        },
+        {
+            "created_at": "2021-01-27T07:43:13.434Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11390?focusedCommentId=17272635) by Joris Van den Bossche (jorisvandenbossche):*\npyarrow 3.0 is on conda-forge now, if you could try that? \r\n\r\nThe way you installed above would mean that you had pyarrow 2.0 and arrow-cpp 2.0 installed in the conda environment, and then added pyarrow 3.0 through pip (which includes arrow-cpp in the wheel), meaning you have multiple arrow's installed in the same environment."
+        },
+        {
+            "created_at": "2021-01-27T09:33:14.961Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11390?focusedCommentId=17272708) by Lance Dacey (ldacey):*\nThat makes sense. I checked further and the base image I was using is this:\r\n\r\nhttps://github.com/jupyter/docker-stacks/blob/master/pyspark-notebook/Dockerfile\r\n\r\nWhich pins pyarrow at 2.0:\r\n```java\n\r\nRUN conda install --quiet --yes --satisfied-skip-solve \\\r\n    'pyarrow=2.0.*' && \\\r\n```\r\n\r\nI'll try again now that 3.0 is on conda-forge\r\n"
+        },
+        {
+            "created_at": "2021-01-27T12:03:23.305Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11390?focusedCommentId=17272806) by Uwe Korn (uwe):*\nYou should use `pyarrow` and `turbodbc`\u00a0both from conda-forge. That is the most reliable way. When you install `turbodbc` with `pip` it is built and then the build is cached on your system. If you change your `pyarrow`, you need to uninstall `turbodbc`, delete the caches and build it from source again, conda on the other side takes care of all that.\r\n\r\n`turbodbc` has not yet been rebuilt on conda-forge for the new Arrow version, probably will be available in 3-4h, just wait until then before doing new tests."
+        },
+        {
+            "created_at": "2021-01-27T23:41:29.336Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11390?focusedCommentId=17273199) by Lance Dacey (ldacey):*\nEverything seems to be all set now, thanks!\r\n\r\npyarrow 3.0.0\r\nfsspec 0.8.4\r\nadlfs v0.5.9\r\npandas 1.2.1\r\nnumpy 1.19.5\r\nturbodbc 4.1.1"
+        },
+        {
+            "created_at": "2021-01-27T23:43:03.412Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11390?focusedCommentId=17273200) by Lance Dacey (ldacey):*\nI reorganized my Dockerfile to ensure that pyarrow 3.0 was installed before turbodbc (there was a base image which was installing 2.0), and I believe that conda-forge was updated for turbodbc as well"
+        }
+    ]
+}

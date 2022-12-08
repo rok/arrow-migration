@@ -1,0 +1,22 @@
+{
+    "issue": {
+        "title": "[Go] Memory leak in pqarrow.NewColumnWriter with nested structures",
+        "body": "***Note**: This issue was originally created as [ARROW-15946](https://issues.apache.org/jira/browse/ARROW-15946). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThere seems to be a memory leak (well, using the default allocator, it would just be an accounting error?) when writing nested structures using pqarrow.FileWriter\r\n\r\nRepro:\r\n```go\n\r\npackage main\r\n\r\nimport (\r\n\t\"bytes\"\r\n\t\"fmt\"\r\n\r\n\t\"github.com/apache/arrow/go/v7/arrow\"\r\n\t\"github.com/apache/arrow/go/v7/arrow/array\"\r\n\t\"github.com/apache/arrow/go/v7/arrow/memory\"\r\n\t\"github.com/apache/arrow/go/v7/parquet\"\r\n\t\"github.com/apache/arrow/go/v7/parquet/compress\"\r\n\t\"github.com/apache/arrow/go/v7/parquet/pqarrow\"\r\n)\r\n\r\nfunc main() {\r\n\tallocator := memory.NewCheckedAllocator(memory.DefaultAllocator)\r\n\tsc := arrow.NewSchema([]arrow.Field{\r\n\t\t{Name: \"f32\", Type: arrow.PrimitiveTypes.Float32, Nullable: true},\r\n\t\t{Name: \"i32\", Type: arrow.PrimitiveTypes.Int32, Nullable: true},\r\n\t\t{Name: \"struct_i64_f64\", Type: arrow.StructOf(\r\n\t\t\tarrow.Field{Name: \"i64\", Type: arrow.PrimitiveTypes.Int64, Nullable: true},\r\n\t\t\tarrow.Field{Name: \"f64\", Type: arrow.PrimitiveTypes.Float64, Nullable: true})},\r\n\t}, nil)\r\n\r\n\tbld := array.NewRecordBuilder(allocator, sc)\r\n\tbld.Field(0).(*array.Float32Builder).Append(1.0)\r\n\tbld.Field(1).(*array.Int32Builder).Append(1)\r\n\tsbld := bld.Field(2).(*array.StructBuilder)\r\n\tsbld.Append(true)\r\n\tsbld.FieldBuilder(0).(*array.Int64Builder).Append(1)\r\n\tsbld.FieldBuilder(1).(*array.Float64Builder).Append(1.0)\r\n\r\n\trec := bld.NewRecord()\r\n\tbld.Release()\r\n\r\n\tvar buf bytes.Buffer\r\n\twr, err := pqarrow.NewFileWriter(sc, &buf,\r\n\t\tparquet.NewWriterProperties(parquet.WithCompression(compress.Codecs.Snappy)),\r\n\t\tpqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(allocator)))\r\n\tif err != nil {\r\n\t\tpanic(err)\r\n\t}\r\n\r\n\terr = wr.Write(rec)\r\n\tif err != nil {\r\n\t\tpanic(err)\r\n\t}\r\n\trec.Release()\r\n\twr.Close()\r\n\r\n\tif allocator.CurrentAlloc() != 0 {\r\n\t\tfmt.Printf(\"remaining allocation size: %d\\n\", allocator.CurrentAlloc())\r\n\t}\r\n}\r\n```",
+        "created_at": "2022-03-15T20:44:40.000Z",
+        "updated_at": "2022-04-19T13:00:41.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Go",
+            "Component: Parquet",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-03-17T19:04:10.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-17T19:04:10.914Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15946?focusedCommentId=17508385) by Matthew Topol (zeroshade):*\nIssue resolved by pull request 12641\n<https://github.com/apache/arrow/pull/12641>"
+        }
+    ]
+}

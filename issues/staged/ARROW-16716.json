@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Benchmarks] Create Projection benchmark for Acero",
+        "body": "***Note**: This issue was originally created as [ARROW-16716](https://issues.apache.org/jira/browse/ARROW-16716). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n",
+        "created_at": "2022-06-01T18:30:43.000Z",
+        "updated_at": "2022-06-16T21:51:58.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Benchmarking",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-06-10T17:14:09.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-01T18:32:42.877Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16716?focusedCommentId=17545087) by Li Jin (icexelloss):*\n`[~ichauster]` is an intern that is going to work on Acero benchmarks. I talked to @Weston Pace offline and seems Projection is a good place to start.\r\n\r\nPasting `[~westonpace]` 's comments on this \"\r\n\u00a0\\* Presumably, for a complex expression, with a large enough batch\r\nsize, the majority of time will be spent in the kernel functions.\r\n\u00a0 \u00a0 \\* How far can you shrink the exec batch before the overhead of the\r\nnode impacts runtime?\r\n\u00a0 \u00a0 \\* How complex does the expression need to be?\r\n\u00a0\\* I expect the results to be very similar to\r\nExecuteScalarExpressionOverhead in expression_benchmark.cc.\u00a0 Is it?\r\nIf not, what is the difference?\r\n\u00a0\\* What is the data rate of the project node (in bytes/second) for all\r\nof the above?\r\n\u00a0\\* For all of the above run with both 1 thread and 1 thread per core\r\n\r\nThe ExecuteScalarExpressionOverhead benchmarks would be a good\r\nexisting example that should be pretty similar to how we benchmark\r\nproject node.\r\n![https://ssl.gstatic.com/ui/v1/icons/mail/images/cleardot.gif](https://ssl.gstatic.com/ui/v1/icons/mail/images/cleardot.gif)\r\n\""
+        },
+        {
+            "created_at": "2022-06-03T15:52:32.296Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16716?focusedCommentId=17546060) by Ivan Chau (ichauster):*\nHi `[~westonpace]`, it's nice to meet you!\r\n\r\nI've got a first draft of the benchmarks and have some clarification questions for you!\r\n\r\nI am working on pushing the code soon, but the current benchmark right now is processing 1e6 elements with varying batch size. The pipeline includes a source node, a projection node which contains a field_ref and an expression (we carry over the same expressions used in ExecuteScalarExpressionOverhead and vary them per run), and then a basic sink (no agg or ordering).\r\n\r\nI am currently using rows_per_second to measure performance, and I have found that they are not exactly the same as the ExecuteScalarExpressionOverhead, although the relative performance (comparing complex_expression vs simple_expression\u00a0 for a 2x speedup, for example), is very similar. This other overhead could be from the other `field_ref` operation I have in the projection, or the source/sink portions (I am not sure how hefty these are).\r\n\r\nHere are some of my follow-ups as I tune these benchmarks:\r\n \\* How do we isolate and find the performance of _only_ the project node rather than source/project/sink\r\n \\* How to measure the data rate, since it seems we are measuring in rows / batches.\r\n \\* I saw some examples of controlling the threads used in ExecuteScalarExpressionOverhead, how can we control threads per core?\r\n\r\nThank you! I will have the code up shortly.\r\n\r\n[out](out)\r\n\r\n<sup>[out_expression](out_expression)</sup>"
+        },
+        {
+            "created_at": "2022-06-03T16:05:28.481Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16716?focusedCommentId=17546086) by Ivan Chau (ichauster):*\nHere is the code! [https://github.com/apache/arrow/compare/master...iChauster:projection_benchmark?expand=1](http://example.com)"
+        },
+        {
+            "created_at": "2022-06-06T20:35:04.747Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16716?focusedCommentId=17550653) by Ivan Chau (ichauster):*\nHi `[~icexelloss]` , I wrote this part of the code corresponding to Weston's review and have been running into some segfaults, I think pertaining to the `ExecNode\\* input` parameter. Do you see any smells / errors in logic here?\r\n\r\n**This is fixed now, just requires the addition of a sink.**\r\n```java\n\r\nASSERT_OK_AND_ASSIGN(auto sn, MakeExecNode(\"source\", plan.get(), {}, SourceNodeOptions\r\n{data.schema, data.gen(/*parallel=*/true, /*slow=*/false)}\r\n)); // does source node need input? \r\nASSERT_OK_AND_ASSIGN(auto pn, MakeExecNode(\"project\", plan.get(), {sn}, ProjectNodeOptions{{\r\nexpr,\r\n}})); // {sn}, as the input is the source node\r\nstate.ResumeTiming();\r\npn->InputFinished(sn, num_batches); // segfault occurs on this line\r\nfor (auto b : data.batches)\r\n{ pn->InputReceived(sn, b); } // segfault occurs on this line, if the other faulting line is removed.\r\npn->finished();\r\n```"
+        },
+        {
+            "created_at": "2022-06-10T17:14:09.630Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16716?focusedCommentId=17552870) by Weston Pace (westonpace):*\nIssue resolved by pull request 13314\n<https://github.com/apache/arrow/pull/13314>"
+        }
+    ]
+}

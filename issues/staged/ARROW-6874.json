@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Python] Memory leak in Table.to_pandas() when conversion to object dtype",
+        "body": "***Note**: This issue was originally created as [ARROW-6874](https://issues.apache.org/jira/browse/ARROW-6874). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI upgraded from pyarrow 0.14.1 to 0.15.0 and during some testing my python interpreter\u00a0ran out of memory.\r\n\r\nI narrowed the issue down to the pyarrow.Table.to_pandas() call, which appears to have a memory leak in the latest version. See details below to reproduce this issue.\r\n\r\n\u00a0\r\n```java\n\r\nimport numpy as np\r\nimport pandas as pd\r\nimport pyarrow as pa\r\n\r\n# create a table with one nested array column\r\nnested_array = pa.array([np.random.rand(1000) for i in range(500)])\r\nnested_array.type  # ListType(list<item: double>)\r\ntable = pa.Table.from_arrays(arrays=[nested_array], names=['my_arrays'])\r\n\r\n# convert it to a pandas DataFrame in a loop to monitor memory consumption\r\nnum_iterations = 10000\r\n# pyarrow v0.14.1: Memory allocation does not grow during loop execution\r\n# pyarrow v0.15.0: ~550 Mb is added to RAM, never garbage collected\r\nfor i in range(num_iterations):\r\n    df = pa.Table.to_pandas(table)\r\n\r\n\r\n# When the table column is not nested, no memory leak is observed\r\narray = pa.array(np.random.rand(500 * 1000))\r\ntable = pa.Table.from_arrays(arrays=[array], names=['numbers'])\r\n# no memory leak:\r\nfor i in range(num_iterations):\r\n    df = pa.Table.to_pandas(table)\n```",
+        "created_at": "2019-10-14T15:10:01.000Z",
+        "updated_at": "2020-08-07T14:52:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-10-16T18:42:47.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-14T16:48:51.564Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6874?focusedCommentId=16951148) by Joris Van den Bossche (jorisvandenbossche):*\nThanks for the report! \r\n\r\nEDIT:  ~~tried to reproduce this, but don't see the issue with pyarrow 0.15 (installed with conda) or master on py 3.7 on Linux (ubuntu)~~ I can indeed reproduce this\r\n\r\n"
+        },
+        {
+            "created_at": "2019-10-14T20:09:54.261Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6874?focusedCommentId=16951314) by Joris Van den Bossche (jorisvandenbossche):*\nThis seems to be caused by ARROW-6570 (https://github.com/apache/arrow/commit/19545f878d17f99a07e51e818eddc8c77f38f56b). The problem comes up for object-dtype arrays (so for list, struct, string dtype)"
+        },
+        {
+            "created_at": "2019-10-16T18:10:23.006Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6874?focusedCommentId=16953065) by Antoine Pitrou (apitrou):*\n`[~jorisvandenbossche]` You were right. Attached PR is a bit more careful when using Arrow to allocate Numpy data."
+        },
+        {
+            "created_at": "2019-10-16T18:42:47.381Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6874?focusedCommentId=16953097) by Wes McKinney (wesm):*\nIssue resolved by pull request 5674\n<https://github.com/apache/arrow/pull/5674>"
+        },
+        {
+            "created_at": "2020-08-05T02:23:01.768Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6874?focusedCommentId=17171226) by jesse ventura (jesse_ventura):*\nwhy so many related issues been closed? this problem keeping its existence in 0.17 and 1.0.0 !!!\r\n\r\nhere my code , especially in multiprocessing :\r\n```java\n\r\n// code placeholder\r\n# ==========================================\r\n#!/usr/bin/env python\r\n# coding: utf-8\r\nfrom memory_profiler import profile\r\nfrom concurrent.futures import ProcessPoolExecutor, as_completed\r\nimport os,sys\r\nimport pandas as pd\r\nfrom progressbar import ProgressBar\r\n\r\npd.set_option('expand_frame_repr', False)\r\npd.set_option('display.max_rows', 10)\r\n\r\ndef get_all_df_dict():\r\n return pd.read_parquet('xx.parquet',\r\n# engine='fastparquet'   fastpq does NOT have memory leak PROBLEM\r\n                        )\r\n\r\nalldf_dict = get_all_df_dict()\r\n@profile\r\ndef parse_single_tday(tday_str, ):\r\n df = pd.read_parquet('{}.parquet'.format(tday_str),\r\n# engine='fastparquet'\r\n )\r\n print(df.head())\r\n\r\n@profile\r\ndef main():\r\n# yyyymmdd.parquet\r\n datdir = '/everydat_data/'\r\ntday_strs = [item.split('.parquet')[0] for item in os.listdir(datdir)]\r\nwkn = 3\r\nwith ProcessPoolExecutor(max_workers=wkn, ) as exe:\r\n plist = [exe.submit( parse_single_tday, tday, ) for tday in tday_strs]\r\n res = [task.result() for task in ProgressBar(max_value=len(plist))(as_completed(plist))]\r\nmain()\r\n```\r\n\u00a0\r\n\r\nwhen subprocess finished , parquet dataframe loaded by pyarrow couldn't release memory..\r\n\r\n![Screenshot_2020-08-05_10-11-45.png](https://issues.apache.org/jira/secure/attachment/13009067/Screenshot_2020-08-05_10-11-45.png)"
+        },
+        {
+            "created_at": "2020-08-07T14:50:41.518Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6874?focusedCommentId=17173182) by Joris Van den Bossche (jorisvandenbossche):*\n> why so many related issues been closed?\r\n\r\nBecause the specific case that was reported was fixed. That doesn't mean there are other situations with a problem, of course. So please open a new JIRA if that is the case."
+        },
+        {
+            "created_at": "2020-08-07T14:52:55.539Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6874?focusedCommentId=17173183) by Joris Van den Bossche (jorisvandenbossche):*\nAlso, can you try to make your example reproducible? Eg we don't have `'/everydat_data/'` (instead eg write some dummy data in the script first to create the dataset that is then read)"
+        }
+    ]
+}

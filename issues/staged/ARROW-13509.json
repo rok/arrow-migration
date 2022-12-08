@@ -1,0 +1,26 @@
+{
+    "issue": {
+        "title": "[C++] Take compute function should pass through ChunkedArray type to handle empty input arrays",
+        "body": "***Note**: This issue was originally created as [ARROW-13509](https://issues.apache.org/jira/browse/ARROW-13509). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI'm trying to explode a table (in the pandas sense: <https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.explode.html)>\r\n\r\nAs it's not yet supported, I've writen some code to do it using a mix of list_flatten and list_parent_indices. It works well, excepted it crashed when for empty tables where it crashes.\r\n```python\n\r\nWARNING: Logging before InitGoogleLogging() is written to STDERR\r\nF0730 15:16:05.164858 13612 chunked_array.cc:48]  Check failed: (chunks_.size()) > (0) cannot construct ChunkedArray from empty vector and omitted type\r\n*** Check failure stack trace: ***Process finished with exit code 134 (interrupted by signal 6: SIGABRT)\r\n\r\n```\r\n\r\nHere's a reproducable example:\r\n\r\n```python\n\r\n\r\nimport sys\r\n\r\nimport pyarrow as pa\r\nfrom pyarrow import compute\r\nimport pandas as pd\r\n\r\ntable = pa.Table.from_arrays(\r\n    [\r\n        pa.array([101, 102, 103], pa.int32()),\r\n        pa.array([['a'], ['a', 'b'], ['a', 'b', 'c']], pa.list_(pa.string()))\r\n    ],\r\n    names=['key', 'list']\r\n)\r\n\r\n\r\ndef explode(table) -> pd.DataFrame:\r\n    exploded_list = compute.list_flatten(table['list'])\r\n\r\n    indices = compute.list_parent_indices(table['list'])\r\n    assert indices.type == pa.int32()\r\n    keys = compute.take(table['key'], indices)  # <--- Crashes here\r\n    return pa.Table.from_arrays(\r\n        [keys, exploded_list],\r\n        names=['key', 'list_element']\r\n    )\r\n\r\n\r\nexplode(table).to_pandas().to_markdown(sys.stdout)\r\nexplode(table.slice(0, 0)).to_pandas().to_markdown(sys.stdout) # <--- doesn't work\r\n```\r\n\u00a0\r\nI've narrowed it down to the following: \r\n\r\nwhen list_parent_indices is called on an empty table it returns this empty chunk array:\r\n```Java\n\r\npa.chunked_array([], pa.int32())\r\n```\r\nInstead of this chunked array with 1 empty chunk:\r\n```Java\n\r\npa.chunked_array([pa.array([], pa.int32())])\r\n```\r\n\r\nIn turn take doesn't work with the empty chunked aray:\r\n```python\n\r\ncompute.take(pa.chunked_array([pa.array([], pa.int32())]),\r\n             pa.chunked_array([], pa.int32())) # Bad\r\ncompute.take(pa.chunked_array([pa.array([], pa.int32())]),\r\n             pa.chunked_array([pa.array([], pa.int32())])) # Good\r\n```\r\n\r\n\r\nNow in terms of how to fix it there's two solutions:\r\n- take could accept empty chunked array\n- list_parent_indices could return a chunked array with an empty chunk\n  \n  PS: the error message isn't accurate. It says \"cannot construct ChunkedArray from empty vector and omitted type\". But the array being passed has got a type (int32) but no chunk. It makes me suspect that something in take strip the type of the empty chunked array.\n  \n  \n  \n  \n  \n  \n  \u00a0",
+        "created_at": "2021-07-30T14:35:18.000Z",
+        "updated_at": "2021-09-15T21:06:09.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-08-05T21:22:21.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-02T13:04:11.105Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13509?focusedCommentId=17391579) by David Li (lidavidm):*\nThanks for the report. The error is most likely because the Take kernel implementation omits the type when constructing the chunked array, but it could and should pass through the type from the input arrays. See [TakeCC](https://github.com/apache/arrow/blob/c51e4a179379628578a69f536ffca80a844efcd2/cpp/src/arrow/compute/kernels/vector_selection.cc#L2038). Additionally I can confirm this still affects 5.0.0.\u00a0"
+        },
+        {
+            "created_at": "2021-08-05T21:22:21.313Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13509?focusedCommentId=17394309) by David Li (lidavidm):*\nIssue resolved by pull request 10880\n<https://github.com/apache/arrow/pull/10880>"
+        }
+    ]
+}

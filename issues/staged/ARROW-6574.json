@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[JS] TypeError with utf8 and JSONVectorLoader.readData",
+        "body": "***Note**: This issue was originally created as [ARROW-6574](https://issues.apache.org/jira/browse/ARROW-6574). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nMinimal repro:\r\n\r\n\u00a0\r\n```javascript\n\r\nconst fields = [\r\n  {\r\n    name: 'first_name',\r\n    type: {name: 'utf8'},\r\n    nullable: false,\r\n    children: [],\r\n  },\r\n];\r\n\r\nTable.from({\r\n  schema: {fields},\r\n  batches: [{\r\n    count: 1,\r\n    columns: [{\r\n      name: 'first_name',\r\n      count: 1,\r\n      VALIDITY: [],\r\n      DATA: ['Fred']\r\n    }]\r\n  }]\r\n});\n```\r\n\u00a0\r\n\r\nOutput:\r\n```java\n\r\n/[snip]/node_modules/apache-arrow/visitor/vectorloader.js:92\r\n    readData(type, { offset } = this.nextBufferRange()) {\r\n                     ^TypeError: Cannot destructure property `offset` of 'undefined' or 'null'.\r\n    at JSONVectorLoader.readData (/[snip]/node_modules/apache-arrow/visitor/vectorloader.js:92:38)\r\n    at JSONVectorLoader.visitUtf8 (/[snip]/node_modules/apache-arrow/visitor/vectorloader.js:46:188)\r\n    at JSONVectorLoader.visit (/[snip]/node_modules/apache-arrow/visitor.js:28:48)\r\n    at JSONVectorLoader.visit (/[snip]/node_modules/apache-arrow/visitor/vectorloader.js:40:22)\r\n    at nodes.map (/[snip]/node_modules/apache-arrow/visitor.js:25:44)\r\n    at Array.map (<anonymous>)\r\n    at JSONVectorLoader.visitMany (/[snip]/node_modules/apache-arrow/visitor.js:25:22)\r\n    at RecordBatchJSONReaderImpl._loadVectors (/[snip]/node_modules/apache-arrow/ipc/reader.js:523:107)\r\n    at RecordBatchJSONReaderImpl._loadRecordBatch (/[snip]/node_modules/apache-arrow/ipc/reader.js:209:79)\r\n    at RecordBatchJSONReaderImpl.next (/[snip]/node_modules/apache-arrow/ipc/reader.js:280:42)\n```\r\n\u00a0\r\n\r\n\u00a0\r\n\r\nLooks like the `nextBufferRange` call is returning `undefined`, due to an out-of-bounds\u00a0`buffersIndex`.\r\n\r\n\u00a0\r\n\r\nHappy to provide more info if needed. Seems to only affect utf8 types and nothing else.\r\n\r\n\u00a0",
+        "created_at": "2019-09-16T23:01:11.000Z",
+        "updated_at": "2019-09-21T04:33:18.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: JavaScript",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-09-17T02:56:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-09-17T02:55:57.175Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6574?focusedCommentId=16931029) by Adam M Krebs (akre54):*\nAh. Looks like I need to add an `OFFSET` array.\r\n\r\nIs there documentation on this spec? Or a preferred way to turn JS objects into arrow?"
+        },
+        {
+            "created_at": "2019-09-21T04:33:18.521Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6574?focusedCommentId=16934903) by Paul Taylor (paul.e.taylor):*\n`[~akre54]` This is the JSON IPC format which is only suitable for integration tests between the different Arrow implementations.\r\n\r\nYou can use the Vector [Builders](https://github.com/apache/arrow/blob/b2785d38a110c8fd8a3d7c957cd78d8911607a5e/js/src/builder.ts#L54) to encode to arbitrary JS objects into Arrow Vectors and Tables.\r\n\r\nThe raw Builder APIs allow you to control every aspect of the chunking and flushing behavior, but as a consequence are relatively low-level. There are higher-level APIs for transforming values from iterables, async iterables, node streams, or DOM streams. You can see examples of usage [in the tests here](https://github.com/apache/arrow/blob/b2785d38a110c8fd8a3d7c957cd78d8911607a5e/js/test/unit/builders/builder-tests.ts#L261), or see [this example](https://github.com/trxcllnt/csv-to-arrow-js) converting a CSV row stream to Arrow.\r\n\r\nLastly if your values are already in memory, you can call `Vector.from()` with an Arrow type and an iterable (or async-iterable) of JS values, and it'll use the Builders to return a Vector of the specified type:\r\n\r\n\r\n```javascript\n\r\n\r\n// create from a list of numbers or a Float32Array (zero-copy) -- all values will be valid\r\nconst f32 = Float32Vector.from([1.1, 2.5, 3.7]);\r\n\r\n// or a different style, handy if inferring the types at runtime\r\n// values in the `nullValues` array will be treated as NULL, and written in the validity bitmap\r\nconst f32 = Vector.from({\r\n  nullValues: [-1, NaN],\r\n  type: new Arrow.Float32(),\r\n  values: [1.1, -1, 2.5, 3.7, NaN],\r\n});\r\n// ^ result: [1.1, null, 2.5, 3.7, null]\r\n\r\n// or with values from an AsyncIterator\r\nconst f32 = await Vector.from({\r\n  type: new Arrow.Float32(),\r\n  values: (async function*() { yield* [1.1, 2.5, 3.7]; }())\r\n});\r\n\r\n```\r\n\r\n"
+        }
+    ]
+}

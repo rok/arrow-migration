@@ -1,0 +1,48 @@
+{
+    "issue": {
+        "title": "[C++][Parquet] Error when writing empty struct to Parquet",
+        "body": "***Note**: This issue was originally created as [ARROW-10928](https://issues.apache.org/jira/browse/ARROW-10928). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI was trying to write some dataframes to parquet using\u00a0`snappy`\u00a0with the command\r\n\r\n\u00a0\r\n```java\n\r\ndf2.to_parquet('my-parquet', compression='snappy')\u00a0\n```\r\n\u00a0\r\n\r\nBut I got the following error\r\n Unknown error: data type leaf_count != builder_leaf_count9 8\r\n By manually sampling with columns, I found out that a column that is a list of dicts was causing the issue\r\n\r\nA toy example is shown below which enables one to reproduce the error\r\n\r\n\u00a0\r\n```java\n\r\ndf2 = pd.DataFrame(\r\n [[\r\n [{'my_field_1': {},\r\n 'my_field_2':\r\n{'my_field_21': 'value_21', 'my_field_22': 1, 'my_field_23': 1, 'my_field_24': 1.0}\r\n,\r\n 'my_field_3': {'my_field_31': 'value_31',\r\n 'my_field_32': 1,\r\n 'my_field_33': 1,\r\n 'my_field_34': 1}},\r\n {'my_field_1': {},\r\n 'my_field_2':\r\n{'my_field_21': 'value_21', 'my_field_22': 1, 'my_field_23': 1, 'my_field_24': 1.0}\r\n,\r\n 'my_field_3': {'my_field_31': 'value_31',\r\n 'my_field_32': 1,\r\n 'my_field_33': 1,\r\n 'my_field_34': 1}}]\r\n ]], columns = ['my_column'])\r\n df2['toy_column_1'] = 1\r\n df2['toy_column_2'] = 'ab'\r\n```\r\nCurrent configuration of my pandas is\r\n```java\n\r\nINSTALLED VERSIONS\r\n ------------------\r\n commit : 67a3d4241ab84419856b84fc3ebc9abcbe66c6b3\r\n python : 3.6.9.final.0\r\n python-bits : 64\r\n OS : Linux\r\n OS-release : 4.15.0-126-generic\r\n Version : #129-Ubuntu SMP Mon Nov 23 18:53:38 UTC 2020\r\n machine : x86_64\r\n processor : x86_64\r\n byteorder : little\r\n LC_ALL : None\r\n LANG : en_US.UTF-8\r\n LOCALE : pt_BR.UTF-8pandas : 1.1.4\r\n numpy : 1.19.1\r\n pytz : 2020.1\r\n dateutil : 2.8.1\r\n pip : 20.3\r\n setuptools : 41.2.0\r\n Cython : None\r\n pytest : 5.1.1\r\n hypothesis : None\r\n sphinx : None\r\n blosc : None\r\n feather : None\r\n xlsxwriter : None\r\n lxml.etree : None\r\n html5lib : None\r\n pymysql : 0.10.1\r\n psycopg2 : 2.8.2 (dt dec pq3 ext lo64)\r\n jinja2 : 2.11.2\r\n IPython : 7.16.1\r\n pandas_datareader: None\r\n bs4 : None\r\n bottleneck : None\r\n fsspec : None\r\n fastparquet : 0.4.1\r\n gcsfs : None\r\n matplotlib : 3.3.2\r\n numexpr : None\r\n odfpy : None\r\n openpyxl : None\r\n pandas_gbq : 0.10.0\r\n pyarrow : 2.0.0\r\n pytables : None\r\n pyxlsb : None\r\n s3fs : None\r\n scipy : 1.5.2\r\n sqlalchemy : 1.3.18\r\n tables : None\r\n tabulate : 0.8.7\r\n xarray : None\r\n xlrd : None\r\n xlwt : None\r\n numba : 0.52.0\r\n```\r\n\u00a0\r\n\r\n\u00a0\r\n I have found this issue within pandas (<https://github.com/pandas-dev/pandas/issues/34643>) that at first seemed to me be the same root cause, but I've noticed that was already using the same version of the issue and that the example in the original issue worked fine to me.\r\n Could someone ,please, help me ?",
+        "created_at": "2020-12-15T19:52:57.000Z",
+        "updated_at": "2020-12-16T19:28:51.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-12-16T08:34:37.604Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10928?focusedCommentId=17250167) by Joris Van den Bossche (jorisvandenbossche):*\n`[~lsabreu96]` thanks for the report!\r\n\r\nI made a slightly simplified example (with 2 values in the column):\r\n\r\n```python\n\r\ndf = pd.DataFrame({\"column\": \r\n    [\r\n        [{'my_field_1': {},\r\n          'my_field_2': {'my_field_21': 'value_211', 'my_field_22': 1}\r\n         },\r\n         {'my_field_1': {},\r\n          'my_field_2': {'my_field_21': 'value_212', 'my_field_22': 2}\r\n         }\r\n        ],\r\n        [{'my_field_1': {},\r\n          'my_field_2': {'my_field_21': 'value_211', 'my_field_22': 1}\r\n         },\r\n         {'my_field_1': {},\r\n          'my_field_2': {'my_field_21': 'value_212', 'my_field_22': 2}\r\n         }\r\n        ]\r\n    ]\r\n})\r\n\r\ndf.to_parquet(\"test.parquet\")\r\n```\r\n\r\nAs a possible pointer to find the bug, it's the empty struct that causes the issue:\r\n\r\n```python\n\r\nIn [19]: pa.table(df)\r\nOut[19]: \r\npyarrow.Table\r\ncolumn: list<item: struct<my_field_1: struct<>, my_field_2: struct<my_field_21: string, my_field_22: int64>>>\r\n  child 0, item: struct<my_field_1: struct<>, my_field_2: struct<my_field_21: string, my_field_22: int64>>\r\n      child 0, my_field_1: struct<>     # <--------------------- empty struct field\r\n      child 1, my_field_2: struct<my_field_21: string, my_field_22: int64>\r\n          child 0, my_field_21: string\r\n          child 1, my_field_22: int64\r\n```\r\n\r\nIf I add a value to this empty dict for the first occurrence, then it works fine:\r\n\r\n```python\n\r\ndf = pd.DataFrame({\"column\": \r\n    [\r\n        [{'my_field_1': {'my_field_11': 'value_111'},  # <----- no longer an empty dict\r\n          'my_field_2': {'my_field_21': 'value_211', 'my_field_22': 1}\r\n         },\r\n         {'my_field_1': {},\r\n          'my_field_2': {'my_field_21': 'value_212', 'my_field_22': 2}\r\n         }\r\n        ]\r\n    ]\r\n})\r\n\r\ndf.to_parquet(\"test.parquet\")\r\n```\r\n\r\ncc `[~emkornfield]` `[~apitrou]`\r\n"
+        },
+        {
+            "created_at": "2020-12-16T13:33:43.215Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10928?focusedCommentId=17250315) by Lucas da Silva Abreu (lsabreu96):*\nHi, `[~jorisvandenbossche]`, glad to help !\r\nIf I can help you in anyway, let me know"
+        },
+        {
+            "created_at": "2020-12-16T15:04:40.308Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10928?focusedCommentId=17250375) by Antoine Pitrou (apitrou):*\nNote there are two different errors possible:\r\n```python\n\r\n>>> tab = pa.table({'structs': [{}], 'ints': [0]})\r\n>>> pq.write_table(tab, '/tmp/foo.pq')\r\nTraceback (most recent call last):\r\n[...]\r\nArrowException: Unknown error: data type leaf_count != builder_leaf_count1 0\r\n```\r\n\r\n```python\n\r\n>>> tab = pa.table({'structs': [{}]})\r\n>>> pq.write_table(tab, '/tmp/foo.pq')\r\nTraceback (most recent call last):\r\n[...]\r\nArrowKeyError: Column index 0 not found in schema manifest, may be malformed\r\n```"
+        },
+        {
+            "created_at": "2020-12-16T16:24:17.853Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10928?focusedCommentId=17250431) by Antoine Pitrou (apitrou):*\nThis problem will be tricky to fix, as not having a child field in the struct type means Parquet will not be able to encode nulls, or even the number of values (possibly?)."
+        },
+        {
+            "created_at": "2020-12-16T16:30:36.175Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10928?focusedCommentId=17250435) by Antoine Pitrou (apitrou):*\nThe PR I submitted doesn't fix the issue, but it makes a much\u00a0 nicer error message so that the user is informed and knows how to workaround (in this case, add a dummy field to the struct)."
+        },
+        {
+            "created_at": "2020-12-16T16:49:00.213Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10928?focusedCommentId=17250446) by Joris Van den Bossche (jorisvandenbossche):*\n+1 on a good error message on the short term"
+        },
+        {
+            "created_at": "2020-12-16T19:27:41.793Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10928?focusedCommentId=17250565) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 8939\n<https://github.com/apache/arrow/pull/8939>"
+        },
+        {
+            "created_at": "2020-12-16T19:28:32.891Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10928?focusedCommentId=17250567) by Antoine Pitrou (apitrou):*\nThe merged PR doesn't fix the issue, just makes a nice error message."
+        }
+    ]
+}

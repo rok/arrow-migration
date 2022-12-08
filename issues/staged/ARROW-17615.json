@@ -1,0 +1,40 @@
+{
+    "issue": {
+        "title": "[CI][Packaging] arrow-cpp on conda nightlies fail finding Arrow package",
+        "body": "***Note**: This issue was originally created as [ARROW-17615](https://issues.apache.org/jira/browse/ARROW-17615). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nTrying to find arrow package using our current nightly arrow-cpp packange on conda raises the following:\r\n```java\n\r\n$ cmake . -DCMAKE_BUILD_TYPE=Release\r\n-- The C compiler identification is GNU 10.4.0\r\n-- The CXX compiler identification is GNU 10.4.0\r\n-- Detecting C compiler ABI info\r\n-- Detecting C compiler ABI info - done\r\n-- Check for working C compiler: /home/raulcd/miniconda3/envs/cookbook-cpp-dev/bin/x86_64-conda-linux-gnu-cc - skipped\r\n-- Detecting C compile features\r\n-- Detecting C compile features - done\r\n-- Detecting CXX compiler ABI info\r\n-- Detecting CXX compiler ABI info - done\r\n-- Check for working CXX compiler: /home/raulcd/miniconda3/envs/cookbook-cpp-dev/bin/x86_64-conda-linux-gnu-c++ - skipped\r\n-- Detecting CXX compile features\r\n-- Detecting CXX compile features - done\r\nCMake Error at CMakeLists.txt:10 (find_package):\r\n\u00a0 Found package configuration file:\u00a0 \u00a0 /home/raulcd/miniconda3/envs/cookbook-cpp-dev/lib/cmake/Arrow/ArrowConfig.cmake\u00a0 but it set Arrow_FOUND to FALSE so package \"Arrow\" is considered to be NOT\r\n\u00a0 FOUND.\r\n-- Configuring incomplete, errors occurred!\r\nSee also \"/home/raulcd/code/my-cpp-test/CMakeFiles/CMakeOutput.log\".\r\n```\r\nThe CMakeLists.txt file to reproduce is:\r\n```java\n\r\ncmake_minimum_required(VERSION 3.19)\r\nproject(arrow-test)\r\nset(CMAKE_CXX_STANDARD 17)\r\nif (CMAKE_CXX_COMPILER_ID STREQUAL \"Clang\")\r\n\u00a0 \u00a0 set(CMAKE_CXX_FLAGS \"${CMAKE_CXX_FLAGS} -stdlib=libstdc++\")\r\nendif()\r\n# Add Arrow\r\nfind_package(Arrow REQUIRED COMPONENTS dataset flight parquet) \n```\r\nThe conda package was created with the following environment:\r\n```java\n\r\nname: cookbook-cpp-dev\r\nchannels:\r\n\u00a0 - arrow-nightlies\r\n\u00a0 - conda-forge\r\ndependencies:\r\n\u00a0 - python=3.9\r\n\u00a0 - compilers\r\n\u00a0 - arrow-nightlies::arrow-cpp >9\r\n\u00a0 - sphinx\r\n\u00a0 - gtest\r\n\u00a0 - gmock\r\n\u00a0 - arrow-nightlies::pyarrow >9\r\n\u00a0 - clang-tools\r\n```\r\nThe compilation is successful when using arrow-cpp 9.0.0 from conda-forge instead of using the arrow-nightlies channel.",
+        "created_at": "2022-09-05T09:45:01.000Z",
+        "updated_at": "2022-09-06T09:14:22.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-09-06T09:14:22.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-05T09:46:37.790Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17615?focusedCommentId=17600301) by Ra\u00fal Cumplido (raulcd):*\ncc ~ `[~jorisvandenbossche]` `[~alenka]` \u00a0"
+        },
+        {
+            "created_at": "2022-09-05T11:41:09.179Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17615?focusedCommentId=17600340) by Ra\u00fal Cumplido (raulcd):*\n`[~kou]` I am not entirely sure why CMake is not setting `Arrow_FOUND` to true on this case, the ArrowConfig.cmake file is found and it tries to find Arrow, I was doing some more debugging and libarrow is there:\r\n```java\n\r\n-- _RELEASE - ARROW_SHARED_LIB: /home/raulcd/miniconda3/envs/cookbook-cpp-dev/lib/libarrow.so.1000.0.0 \n```\r\nExpected target seems to be Arrow::arrow_shared.\r\n\r\nIt is also not able to find any of the other components:\r\n```java\n\r\n-- Searching Component Arrow_dataset\r\n-- Component Arrow_dataset NOT FOUND\r\n-- Searching Component Arrow_flight\r\n-- Component Arrow_flight NOT FOUND\r\n-- Searching Component Arrow_parquet\r\n-- Component Arrow_parquet NOT FOUND\r\n```\r\nI suspect there is an issue that was introduced by: ARROW-12175: [C++] Fix CMake packages"
+        },
+        {
+            "created_at": "2022-09-05T14:27:39.283Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17615?focusedCommentId=17600452) by Ra\u00fal Cumplido (raulcd):*\nAs an update I've manually added to ArrowConfig.cmake:\r\n```java\n\r\nset(Arrow_FOUND TRUE) \n```\r\nand updated links from `arrow_shared` to `Arrow::arrow_shared` on the cookbooks and everything works so it seems we are missing to set the variable `Arrow_FOUND` on the new CMake changes."
+        },
+        {
+            "created_at": "2022-09-05T20:32:15.503Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17615?focusedCommentId=17600520) by Kouhei Sutou (kou):*\n> ```\n> find_package(Arrow REQUIRED COMPONENTS dataset flight parquet) \n> ```\r\n\r\nWhy is `COMPONENTS ...` specified here?\r\n\r\nCould you rewrite it like the following?\r\n\r\n```\n\r\nfind_package(Arrow REQUIRED)\r\nfind_package(ArrowDataset REQUIRED)\r\nfind_package(ArrowFlight REQUIRED)\r\nfind_package(Parquet REQUIRED)\r\n```\r\n\r\nFYI: Both of our old and the current CMake package don't support `COMPONENTS`."
+        },
+        {
+            "created_at": "2022-09-06T08:38:02.027Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17615?focusedCommentId=17600670) by Ra\u00fal Cumplido (raulcd):*\nI was using components as I was replicating what we have on the Cookbooks. I've pushed a PR on the cookbooks to add the ability to build against Nightlies and have modified our build there to be compatible with both 9.0.0 and the current Nightlies. We probably can close this ticket as it seems using COMPONENTS was never supported (even though in the past the build did not fail if they were used). Thanks for your support Kou!\r\n\r\nHere the cookbooks PR in case you want to take a look:\r\nhttps://github.com/apache/arrow-cookbook/pull/252/files"
+        },
+        {
+            "created_at": "2022-09-06T09:14:22.076Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17615?focusedCommentId=17600688) by Kouhei Sutou (kou):*\nThis is an usage issue. (We can't use `find_package(COMPONETNS)` for our CMake packages.)"
+        }
+    ]
+}

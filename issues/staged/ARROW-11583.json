@@ -1,0 +1,24 @@
+{
+    "issue": {
+        "title": "[C++] Filesystem aware disk scheduling",
+        "body": "***Note**: This issue was originally created as [ARROW-11583](https://issues.apache.org/jira/browse/ARROW-11583). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nDifferent filesystems have different ideal access strategies.\u00a0 For example:\r\n\r\nAWS: Unlimited parallelism?, no penalty for random?\r\nAWS EBS: Depends\r\nSSD: Bounded parallelism (# of hw contexts), penalty for random within context.\r\nHDD: Very limited parallelism (1 usually), penalty for random access\r\n\r\nCurrently, Arrow does not factor these access strategies into I/O scheduling.\u00a0 For example, when reading a dataset of 100 files then it will start reading X files at once (where X is the parallelism of the thread pool).\u00a0 For AWS this is ideal.\u00a0 For an HDD this is not.\r\n\r\nThe OS does have a scheduler which attempts to mitigate this.\u00a0 It does not know the scope of the I/O and the dependencies amongt the I/O (e.g. in the above dataset read example it's better to read X quickly and then Y quickly than it is to read X and Y slowly at the same time).\u00a0 I've run some experiments (see comment) which show the OS scheduler fails to achieve ideal performance in fairly typical cases.",
+        "created_at": "2021-02-10T04:14:35.000Z",
+        "updated_at": "2021-02-10T09:05:46.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-02-10T04:32:34.400Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11583?focusedCommentId=17282218) by Weston Pace (westonpace):*\nI ran some experiments to see how effective the OS disk scheduling policies were.\u00a0 My test was run on an Ubuntu 20.04 machine against an HDD and an SSD.\r\n\r\nMethodology:\r\n \u00a0\\* Theoretical max performance was measured using Gnome disks benchmark, this # was verified with `pv` of a large file.\r\n \u00a0\\* % of sequential reads was measured using blktrace/blkparse\r\n \u00a0\\* Reads were always never cached in the O/S thanks to judicious use of posix_fadvise\r\n \u00a0\\* On this system the only OS scheduler available was mq-deadline, with a default read_expire of 500ms\r\n \u00a0\\* \"Read serially\" with more than 1 thread used pipeline parallelism, but only ever one file at a time\r\n \u00a0\\* \"NOT read serially\" read all files at once, pipeline parallelism was theoretically possible but likely unused\r\n \u00a0\\* 10 files, 10MB per file, 10 iterations averaged together\r\n \u00a0\\* All reads were done using block stream readers read with background readahead\r\n\r\nParameters:\r\n \u00a0\\* use_ssd - Which disk to use, 0 means the HDD\r\n \u00a0\\* serial - If true, read one file at a time\r\n \u00a0\\* io_threads - How many threads to use for I/O\r\n\r\nResults\r\n\n|SSD/HDD|Serial/Parallel|Num. I/O Threads|% Max Performance|\r|\n|-|-|-|-|-|\n|SSD|Serial|1|89%|\r|\n|SSD|Parallel|1|76%|\r|\n|SSD|Serial|8|87%|\r|\n|SSD|Parallel|8|97%|\r|\n|HDD|Serial|1|78%|\r|\n|HDD|Parallel|1|55%|\r|\n|HDD|Serial|8|99.8%|\r|\n|HDD|Parallel|8|83%|\r<br>\r<br>Conclusion:\r<br>\r<br>If Arrow simply tries to read everything in parallel, and allocates multiple threads for I/O then we are probably good in most cases but we will under perform by about 15% if run on an HDD.\r<br>\r<br>I need to run my experiments on AWS to see how S3 and EBS perform under this load.\u00a0 Some EBS drives are backed by an HDD and these may underperform.\u00a0 For S3 we would likely need even more extensive experiments to see how many files we can truly read at once and it may depend on how S3 is actually doing replication.|\n"
+        },
+        {
+            "created_at": "2021-02-10T09:05:46.543Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11583?focusedCommentId=17282321) by Antoine Pitrou (apitrou):*\nNote that S3 may be a non-Amazon service such as Minio (or perhaps even GCS)."
+        }
+    ]
+}

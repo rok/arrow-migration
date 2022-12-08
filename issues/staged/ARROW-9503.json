@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Rust] Comparison sliced arrays is wrong",
+        "body": "***Note**: This issue was originally created as [ARROW-9503](https://issues.apache.org/jira/browse/ARROW-9503). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nComparison of arrow arrays where one is sliced is dependent on the order of comparison, and doesn't always yield correct results.\r\n\r\nThe following minimal example shows the differing results.\r\n\r\n```rust\n\r\n        use arrow::{\r\n            datatypes::Int32Type,\r\n            compute,\r\n            array::{\r\n                Array,\r\n                PrimitiveBuilder,\r\n                PrimitiveArray\r\n            }\r\n        };\r\n        let mut builder = PrimitiveBuilder::new(10);\r\n        for v in 0..10 {\r\n            builder.append_value(v).unwrap()\r\n        }\r\n        let a: PrimitiveArray<Int32Type> = builder.finish();\r\n\r\n        let mut builder = PrimitiveBuilder::new(10);\r\n        for v in 5..10 {\r\n            builder.append_value(v).unwrap()\r\n        }\r\n        let b: PrimitiveArray<Int32Type> = builder.finish();\r\n        // returns Array trait\r\n        let sliced_a = a.slice(5, 5);\r\n        // Downcast to PrimitiveArray\r\n        let sliced_a = sliced_a.as_any().downcast_ref().unwrap();\r\n\r\n        println!(\"{:?}\", a.slice(5, 5));\r\n        println!(\"{:?}\", b);\r\n        println!(\"{:?}\", compute::eq(sliced_a, &b));\r\n        println!(\"{:?}\", compute::eq(&b, sliced_a))\r\n```\r\n\r\nThis prints:\r\n\r\n```text\n\r\nPrimitiveArray<Int32>\r\n[\r\n  5,\r\n  6,\r\n  7,\r\n  8,\r\n  9,\r\n]\r\nPrimitiveArray<Int32>\r\n[\r\n  5,\r\n  6,\r\n  7,\r\n  8,\r\n  9,\r\n]\r\nOk(PrimitiveArray<Boolean>\r\n[\r\n  false,\r\n  false,\r\n  false,\r\n  false,\r\n  false,\r\n])\r\nOk(PrimitiveArray<Boolean>\r\n[\r\n  true,\r\n  true,\r\n  true,\r\n  true,\r\n  true,\r\n])\r\n```\r\n\r\nI would expect both comparison arrays to evaluate to true. This same effect is also occurring with utf8arrays.\r\n\r\n",
+        "created_at": "2020-07-16T06:53:26.000Z",
+        "updated_at": "2020-07-17T05:08:34.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-07-17T05:08:23.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-07-16T11:40:32.020Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9503?focusedCommentId=17159145) by Chao Sun (csun):*\nI think its because [`comparison.rs`](https://github.com/apache/arrow/blob/master/rust/arrow/src/compute/kernels/comparison.rs#L61) uses the offset of the input slice as the result array offset:\r\n\r\n```Java\n\r\n/// Helper function to perform boolean lambda function on values from two arrays, this\r\n/// version does not attempt to use SIMD.\r\nmacro_rules! compare_op {\r\n    ($left: expr, $right:expr, $op:expr) => {{\r\n        if $left.len() != $right.len() {\r\n            return Err(ArrowError::ComputeError(\r\n                \"Cannot perform comparison operation on arrays of different length\"\r\n                    .to_string(),\r\n            ));\r\n        }\r\n\r\n        let null_bit_buffer = apply_bin_op_to_option_bitmap(\r\n            $left.data().null_bitmap(),\r\n            $right.data().null_bitmap(),\r\n            |a, b| a & b,\r\n        )?;\r\n\r\n        let mut result = BooleanBufferBuilder::new($left.len());\r\n        for i in 0..$left.len() {\r\n            result.append($op($left.value(i), $right.value(i)))?;\r\n        }\r\n\r\n        let data = ArrayData::new(\r\n            DataType::Boolean,\r\n            $left.len(),\r\n            None,\r\n            null_bit_buffer,\r\n            $left.offset(),\r\n            vec![result.finish()],\r\n            vec![],\r\n        );\r\n        Ok(PrimitiveArray::<BooleanType>::from(Arc::new(data)))\r\n    }};\r\n}\r\n```\r\n\r\nSeems it should always use 0 as result array offset, as it constructs a new boolean array and return it here. "
+        },
+        {
+            "created_at": "2020-07-16T11:45:11.432Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9503?focusedCommentId=17159148) by Chao Sun (csun):*\ncc `[~paddyhoran]`, [~nevi_me]"
+        },
+        {
+            "created_at": "2020-07-17T05:08:24.003Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9503?focusedCommentId=17159680) by Chao Sun (csun):*\nIssue resolved by pull request 7788\n<https://github.com/apache/arrow/pull/7788>"
+        }
+    ]
+}

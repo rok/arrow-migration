@@ -1,0 +1,64 @@
+{
+    "issue": {
+        "title": "[C++] RFC: standardize ArrayBuilder subclasses",
+        "body": "***Note**: This issue was originally created as [ARROW-4067](https://issues.apache.org/jira/browse/ARROW-4067). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nEach builder supports different and frequently differently named methods for appending. It should be possible to establish a more consistent convention, which would alleviate dev confusion and simplify generics.\r\n\r\n\r\n\r\nFor example, let all Builders be required to define at minimum:\r\n \\* `Reserve(int64_t)`\r\n \\* a nested type named `Scalar`, which is the canonical scalar appended to this builder. Append other types may be supported for convenience.\r\n \\* `UnsafeAppend(Scalar)`\r\n \\* `UnsafeAppendNull()`\r\n\r\nThe other methods described below can be overridden if an optimization is available or left defaulted (a CRTP helper can contain the default implementations, for example `Append(Scalar)` would simply be a call to Reserve then UnsafeAppend.\r\n\r\nIn addition to their unsafe equivalents, `Append(Scalar)` and `AppendNull()` should be available for appending without manual capacity maintenance.\r\n\r\nIt is not necessary for the rest of this RFC, but it would simplify builders further if scalar append methods always had a single argument. For example, this would mean abolishing `BinaryBuilder::Append(const uint8_t*, int32_t)` in favor of `BinaryBuilder::Append(basic_string_view<uint8_t>)`. There's no runtime overhead involved in this change, and developers who have a pointer and a length instead of a view can just construct one without boilerplate using brace initialization: ```Java\nb->Append({pointer, length});\n```\r\n\r\nUnsafe and safe methods should be provided for appending multiple values as well. The default implementation will be a trivial loop but if optimizations are available then this could be overridden (for example instead of copying bits one by one into a BooleanBuilder, bytes could be memcpy'd). Append methods for multiple values should accept two arguments, the first of which contains values and the second of which defines validity. The canonical multiple append method has signature `Status(array_view<Scalar> values, const uint8_t* valid_bytes)`, but other overloads and helpers could be provided as well:\r\n\r\n```Java\n\r\nb->Append({{1, 3, 4}}, all_valid); // append values with no nulls\r\nb->Append({{1, 3, 4}}, bool_vector); // use the elements of a vector<bool> for validity\r\nb->Append({{1, 3, 4}}, bits(ptr)); // interpret ptr as a buffer of valid bits, rather than valid bytes\r\n```\r\n\r\nBuilders of nested types currently require developers to write boilerplate wrangling the child builders. This could be alleviated by letting nested builders' append methods return a helper as an output argument:\r\n\r\n```Java\n\r\nListBuilder::List<Int32Type> lst;\r\nRETURN_NOT_OK(list_builder.Append(&lst)); // ListBuilder::Scalar == ListBuilder::ListBase*\r\nRETURN_NOT_OK(lst->Append(3));\r\nRETURN_NOT_OK(lst->Append(4));\r\n\r\nStructBuilder::Struct strct;\r\nRETURN_NOT_OK(struct_builder.Append(&strct));\r\nRETURN_NOT_OK(strct.Set<StringType>(0, \"uuid\"));\r\nRETURN_NOT_OK(strct.Set<Int32Type>(2, 47));\r\nRETURN_NOT_OK(strct->Finish()); // appends null to unspecified fields\r\n```",
+        "created_at": "2018-12-18T16:34:17.000Z",
+        "updated_at": "2021-08-04T14:02:44.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2018-12-18T16:39:21.421Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4067?focusedCommentId=16724232) by Ben Kietzman (bkietz):*\nRelated: It would be useful to add `VisitBuilderInline` to visit_inline.h"
+        },
+        {
+            "created_at": "2018-12-18T16:46:02.378Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4067?focusedCommentId=16724244) by Wes McKinney (wesm):*\nNo objections to adding builder visitor tools. \r\n\r\nHaving helper classes for building elements in nested types sounds pretty useful. "
+        },
+        {
+            "created_at": "2018-12-18T17:51:03.061Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4067?focusedCommentId=16724296) by Antoine Pitrou (apitrou):*\n+1 on the general idea of making the Builder interface more regular. We probably want to deprecate old methods before removing them.\r\n\r\nAs for nested types, your proposal only works if the exact types are known at compile-time, AFAICT. That can be the case in application code, but rarely in Arrow core libraries.\r\n"
+        },
+        {
+            "created_at": "2018-12-18T18:07:28.077Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4067?focusedCommentId=16724313) by Ben Kietzman (bkietz):*\nIn many cases we do know the exact types at compile time, and for those we shouldn't have to suffer boilerplate. In general you are correct and we'd have to fallback to boilerplate or use visitors to accommodate unknown types\r\n\r\n```Java\n\r\nRETURN_NOT_OK(list_builder.Append(nullptr)); // unknown type\r\nRETURN_NOT_OK(VisitBuilder(list_builder.value_builder(), [](auto *b) {\r\n  return b->AppendNull();\r\n}));\r\n```"
+        },
+        {
+            "created_at": "2018-12-18T18:09:02.762Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4067?focusedCommentId=16724314) by Ben Kietzman (bkietz):*\nTODO address multiple append of nested type"
+        },
+        {
+            "created_at": "2019-01-02T18:02:22.582Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4067?focusedCommentId=16732262) by Ben Kietzman (bkietz):*\n`[~wesmckinn]`\r\n\r\nBufferBuilders and ArrayBuilders have very similarly named methods with different semantics:\r\n\r\n\n|Method|BufferBuilder|ArrayBuilder|Comments|\r|\n|-|-|-|-|-|\n|Resize|set capacity, optionally shrinking to fit|set capacity, attempting to shrink is an error|Users might expect a method named 'resize' to modify the built container's length (as in the STL), but this is not the case here.|\r|\n|Reserve|expand capacity|expand capacity, use growth factor|BufferBuilders use a growth factor only inside Append methods.|\r<br>\r<br>We could simplify this in several ways. My preference would be to remove Resize and add an optional parameter `bool use_growth_factor` to Reserve() in both ArrayBuilder and BufferBuilder. To replace Resize in BufferBuilder, I'd add SetCapacity (which would always shrink to fit). Finally, Reserve will accept an absolute capacity instead of an additional element count|\n"
+        },
+        {
+            "created_at": "2019-01-08T17:53:02.664Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4067?focusedCommentId=16737336) by Wes McKinney (wesm):*\nI'm in favor of these changes in principle, so long as we are careful to examine benchmarks while the changes are being made (to ascertain confidently that we are not creating performance regressions). Adding affordances for nested builders sounds like a good idea.\r\n\r\nSounds like a number of functions will have to undergo a deprecation cycle as a result of this. It would not be the first time. Given the invasiveness of this change to some developers, and since our CI scripts will require us to fix all the deprecated API uses, we'll probably want to have a test file like `arrow-deprecated-test.cc` where we suppress `-Wdeprecated`"
+        },
+        {
+            "created_at": "2020-06-03T01:34:38.728Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4067?focusedCommentId=17124509) by Wes McKinney (wesm):*\nI removed this from any milestone since it does not seem to be doing much harm to us at the moment. "
+        },
+        {
+            "created_at": "2021-08-04T10:17:43.001Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4067?focusedCommentId=17392986) by Antoine Pitrou (apitrou):*\nI would be ok with removing `ArrayBuilder::Resize`. `[~bkietz]` Are you still willing to work on this?"
+        },
+        {
+            "created_at": "2021-08-04T12:35:29.272Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4067?focusedCommentId=17393102) by Neal Richardson (npr):*\n`[~kszucs]` did you already do this, or am I confusing builders?"
+        },
+        {
+            "created_at": "2021-08-04T13:36:14.176Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4067?focusedCommentId=17393162) by Antoine Pitrou (apitrou):*\n`[~npr]` I think you're confusing builders and converters?"
+        },
+        {
+            "created_at": "2021-08-04T14:02:44.738Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4067?focusedCommentId=17393188) by Ben Kietzman (bkietz):*\n`[~apitrou]` I'm willing to work on it but I'm not sure when I'll get to it"
+        }
+    ]
+}

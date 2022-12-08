@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[C++] arrow::json::DecimalConverter should rescale values based on the explicit_schema",
+        "body": "***Note**: This issue was originally created as [ARROW-17995](https://issues.apache.org/jira/browse/ARROW-17995). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe C++ lib doesn't read JSON decimal values correctly based on the explicit_schema. This can be reproduced by this helloworld program: <https://github.com/stiga-huang/arrow-helloworld/tree/d267862>\r\n\r\nThe input JSON file has the following rows:\r\n```json\n\r\n{\"id\":1,\"str\":\"Some\",\"price\":\"30.04\"}\r\n{\"id\":2,\"str\":\"data\",\"price\":\"1.234\"} \n```\r\n\r\nIf we read the price column using decimal128(9, 2), the values are\r\n```\n\r\n      30.04,\r\n      12.34\r\n```\r\nIf we use decimal128(9, 3) instead, the values are\r\n```\n\r\n      3.004,\r\n      1.234\r\n```\r\nThe decimal type in the explicit_schema is set here: https://github.com/stiga-huang/arrow-helloworld/blob/d26786270e87d9ab847658ead96a96190461b98f/json_decimal_example.cc#L38\r\n\r\nThe cause is `arrow::json::DecimalConverter` doesn't rescale the value based on the out_type_:\r\n```cpp\n\r\n  Status Convert(const std::shared_ptr<Array>& in, std::shared_ptr<Array>* out) override {\r\n    if (in->type_id() == Type::NA) {\r\n      return MakeArrayOfNull(out_type_, in->length(), pool_).Value(out);\r\n    }\r\n    const auto& dict_array = GetDictionaryArray(in);\r\n\r\n    using Builder = typename TypeTraits<T>::BuilderType;\r\n    Builder builder(out_type_, pool_);\r\n    RETURN_NOT_OK(builder.Resize(dict_array.indices()->length()));\r\n\r\n    auto visit_valid = [&builder](string_view repr) {\r\n      ARROW_ASSIGN_OR_RAISE(value_type value,\r\n                            TypeTraits<T>::BuilderType::ValueType::FromString(repr));\r\n      //////////// Should rescale the value based on out_type_ here\r\n      builder.UnsafeAppend(value);\r\n      return Status::OK();\r\n    };\r\n\r\n    auto visit_null = [&builder]() {\r\n      builder.UnsafeAppendNull();\r\n      return Status::OK();\r\n    };\r\n\r\n    RETURN_NOT_OK(VisitDictionaryEntries(dict_array, visit_valid, visit_null));\r\n    return builder.Finish(out);\r\n  }\r\n```\r\nhttps://github.com/apache/arrow/blob/cdd0fdf39033b9cf132a5cfc9caa5ed60713845a/cpp/src/arrow/json/converter.cc#L171-L173",
+        "created_at": "2022-10-12T00:32:06.000Z",
+        "updated_at": "2022-10-18T07:56:45.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-15T10:06:21.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-15T10:06:21.861Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17995?focusedCommentId=17618048) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 14380\n<https://github.com/apache/arrow/pull/14380>"
+        },
+        {
+            "created_at": "2022-10-17T23:27:09.435Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17995?focusedCommentId=17619147) by Quanlong Huang (stigahuang):*\n`[~apitrou]` Can we back port this to older branches like 8.0.2 and 9.0.1 ? I think it's a clean cherry-pick."
+        },
+        {
+            "created_at": "2022-10-18T07:56:40.347Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17995?focusedCommentId=17619317) by Antoine Pitrou (apitrou):*\nWe're unlikely to do a 9.0.1 as 10.0.0 is entering the release phase very soon. Sorry!"
+        }
+    ]
+}

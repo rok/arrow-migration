@@ -1,0 +1,52 @@
+{
+    "issue": {
+        "title": "[Python] Exceptions swallowed in ParquetManifest._visit_directories",
+        "body": "***Note**: This issue was originally created as [ARROW-5825](https://issues.apache.org/jira/browse/ARROW-5825). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n`ParquetManifest._visit_directories` uses a\u00a0`ThreadPoolExecutor` to visit partitioned parquet datasets concurrently, it waits for them to finish but doesn't check if the respective futures have failed or not. This is quite tricky to detect and debug as an exception is either raised later as a a side-effect or (perhaps worse) it passes silently.\r\n\r\nObserved on 0.12.1 but appears to be on latest master too.",
+        "created_at": "2019-07-02T19:51:59.000Z",
+        "updated_at": "2021-08-05T15:30:32.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2019-07-04T15:57:33.349Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5825?focusedCommentId=16878763) by Joris Van den Bossche (jorisvandenbossche):*\n`[~gsakkis]` do you have a reproducible example? You need a parquet dataset with eg an invalid file that raises an error when reading the metadata?"
+        },
+        {
+            "created_at": "2019-07-05T06:07:04.451Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5825?focusedCommentId=16878991) by George Sakkis (gsakkis):*\nYes, in my case it was [\"Found files in an intermediate directory\"](https://github.com/apache/arrow/blob/master/python/pyarrow/parquet.py#L835) two or three levels deep in the partitioned directory tree.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-08-19T19:33:58.192Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5825?focusedCommentId=16910684) by Wes McKinney (wesm):*\nPRs welcome \u2013 note that the C++ Datasets project is getting going so we should limit the amount of time invested in maintaining this existing code. "
+        },
+        {
+            "created_at": "2021-08-05T14:29:24.776Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5825?focusedCommentId=17394060) by Antoine Pitrou (apitrou):*\nThe offending code is still there. It should also be pretty easy to fix."
+        },
+        {
+            "created_at": "2021-08-05T14:29:31.267Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5825?focusedCommentId=17394061) by Antoine Pitrou (apitrou):*\ncc `[~jorisvandenbossche]`"
+        },
+        {
+            "created_at": "2021-08-05T15:03:39.113Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5825?focusedCommentId=17394099) by Joris Van den Bossche (jorisvandenbossche):*\nSince this is in the legacy implementation, I would say it's no priority to fix. But if it's easy to fix, maybe we should just do it. I am not super familiar with concurrent.futures, but is the first answer in https://stackoverflow.com/questions/35711160/detect-failed-tasks-in-concurrent-futures the way to go? (replacing the `wait` call with `for fut in futures.as_completed(fs): fut.result()`)"
+        },
+        {
+            "created_at": "2021-08-05T15:22:48.777Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5825?focusedCommentId=17394114) by Antoine Pitrou (apitrou):*\nIt depends what the intent is. If we still want to wait for all futures (instead of exiting on the first error), you would use:\r\n```python\n\r\n        if futures_list:\r\n            futures.wait(futures_list)\r\n            for fut in futures:\r\n                fut.result()\r\n```"
+        },
+        {
+            "created_at": "2021-08-05T15:26:56.075Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5825?focusedCommentId=17394118) by Joris Van den Bossche (jorisvandenbossche):*\nI _suppose_ erroring on first exception is fine, as there should be no errors at all in a normal (successful) call to this."
+        },
+        {
+            "created_at": "2021-08-05T15:30:32.153Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5825?focusedCommentId=17394121) by Antoine Pitrou (apitrou):*\nThe distinction I was making was between waiting for all futures to finish or not."
+        }
+    ]
+}

@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[Release] R libarrow binaries have the wrong version number",
+        "body": "***Note**: This issue was originally created as [ARROW-17353](https://issues.apache.org/jira/browse/ARROW-17353). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe libarrow binaries that are uploaded during the release process have the wrong version number. This is an issue with the submit binaries script/r-binary-packages job. The arrow version should be picked up by the job even if not passed explicitly as a custom param.",
+        "created_at": "2022-08-09T11:28:03.000Z",
+        "updated_at": "2022-10-19T04:36:32.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Developer Tools",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-19T04:36:32.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-20T14:14:05.470Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17353?focusedCommentId=17607232) by Jacob Wujciak-Jens (assignUser):*\n`[~kou]` this needs to be changed in the ruby scripts right?"
+        },
+        {
+            "created_at": "2022-09-21T00:49:56.030Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17353?focusedCommentId=17607442) by Kouhei Sutou (kou):*\nCould you show us a sample wrong URL and correct URL for it?\r\n\r\nhttps://apache.jfrog.io/ui/native/arrow/r/9.0.0/libarrow/bin/ubuntu-22.04/\r\n\r\nWe  should remove \".20220729\"' from \".asc\" and \".sha512\", right?"
+        },
+        {
+            "created_at": "2022-09-21T00:54:21.544Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17353?focusedCommentId=17607443) by Kouhei Sutou (kou):*\nAh, did you rename `arrow-9.0.0.20220729.zip` to `arrow-9.0.0.zip` manually?"
+        },
+        {
+            "created_at": "2022-09-21T01:02:58.098Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17353?focusedCommentId=17607446) by Kouhei Sutou (kou):*\nhttps://github.com/ursacomputing/crossbow/releases/tag/release-9.0.0-rc2-0-github-r-binary-packages\r\n\r\nIt seems that built packages for 9.0.0-rc2 already have \".20220729\". Is it intentional? I think that we should use \"9.0.0\" not \"9.0.0.20220719\" here."
+        },
+        {
+            "created_at": "2022-09-21T09:42:42.157Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17353?focusedCommentId=17607643) by Neal Richardson (npr):*\nI renamed them manually after the 9.0.0 release happened, yes."
+        },
+        {
+            "created_at": "2022-09-21T10:38:18.090Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17353?focusedCommentId=17607673) by Jacob Wujciak-Jens (assignUser):*\nYes all of the files should be named with only the release version and not with the added date component as you said. While it might be possible to change the r-binary-packages job to use a different version (it is possible via param but this was intended for R only patch releases and such) I think it is safer to integrate the checking/renaming into the actual ruby release script."
+        },
+        {
+            "created_at": "2022-09-22T04:58:30.689Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17353?focusedCommentId=17608076) by Kouhei Sutou (kou):*\nWe can check names of uploaded artifacts by Crossbow: https://github.com/apache/arrow/blob/master/dev/tasks/tasks.yml#L958-L970\r\n\r\nCan we use `\\{no_rc_version\\`} or something instead of `[0-9\\.]+` there?"
+        },
+        {
+            "created_at": "2022-09-30T20:23:46.566Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17353?focusedCommentId=17611748) by Jacob Wujciak-Jens (assignUser):*\nNo, as the r nightly versions don't conform to the X.Y.Z.devXXX format so it would only work for the release script but not for the nightly build upload. But that regex works for a normal X.Y.Z format so adding the param `-p custom_version=10.0.0` to the crossbow submit call should work? "
+        },
+        {
+            "created_at": "2022-10-01T21:44:52.477Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17353?focusedCommentId=17611990) by Kouhei Sutou (kou):*\nHow about defining a version for nightly and use it in `dev/tasks/` instead of replacing version in `dev/tasks/r/github.packages.yml` something like the following?\r\n\r\n```\n\r\ndiff --git a/dev/archery/archery/crossbow/core.py b/dev/archery/archery/crossbow/core.py\r\nindex 560a9f1e19..bacc751a22 100644\r\n--- a/dev/archery/archery/crossbow/core.py\r\n+++ b/dev/archery/archery/crossbow/core.py\r\n@@ -770,6 +770,14 @@ class Target(Serializable):\r\n# '10.0.0-SNAPSHOT'\r\n         self.no_rc_snapshot_version = re.sub(\r\n             r'\\.(dev\\d+)$', '-SNAPSHOT', self.no_rc_version)\r\n+        # Substitute dev version with today\r\n+        #\r\n+        # Example:\r\n+        #\r\n+        # '10.0.0.dev235' ->\r\n+        # '10.0.0.20221002'\r\n+        self.no_rc_today_version = re.sub(\r\n+            r'\\.(dev\\d+)\\Z', date.today().strftime('.%Y%m%d'), self.no_rc_version)\r\n \r\n     @classmethod\r\n     def from_repo(cls, repo, head=None, branch=None, remote=None, version=None,\r\ndiff --git a/dev/tasks/macros.jinja b/dev/tasks/macros.jinja\r\nindex f68aa15d54..1b676b5ccf 100644\r\n--- a/dev/tasks/macros.jinja\r\n+++ b/dev/tasks/macros.jinja\r\n@@ -269,7 +269,7 @@ on:\r\n       rm -f apache-arrow*.rb.bak\r\n {% endmacro %}\r\n \r\n-{%- macro github_change_r_pkg_version(is_fork, version = '\\\\2.\\'\\\"$(date +%Y%m%d)\\\"\\'' ) -%}\r\n+{%- macro github_change_r_pkg_version(is_fork, version) -%}\r\n   - name: Modify version\r\n     shell: bash\r\n     run: |\r\ndiff --git a/dev/tasks/r/github.packages.yml b/dev/tasks/r/github.packages.yml\r\nindex b5b9548d59..ac721b4f60 100644\r\n--- a/dev/tasks/r/github.packages.yml\r\n+++ b/dev/tasks/r/github.packages.yml\r\n@@ -17,10 +17,6 @@\r\n \r\n {% import 'macros.jinja' as macros with context %}\r\n \r\n-# This allows us to set a custom version via param:\r\n-# crossbow submit --param custom_version=8.5.3 r-binary-packages\r\n-# if the param is unset defaults to the usual Ymd naming scheme\r\n-{% set package_version = custom_version|replace(\"Unset\", \"\\\\2.\\'\\\"$(date +%Y%m%d)\\\"\\'\") %}\r\n {% set is_fork = macros.is_fork %}\r\n \r\n {{ macros.github_header() }}\r\n@@ -35,7 +31,7 @@ jobs:\r\n       pkg_version: {{ '${{ steps.save-version.outputs.pkg_version }}' }}\r\n     steps:\r\n       {{ macros.github_checkout_arrow()|indent }}\r\n-      {{ macros.github_change_r_pkg_version(is_fork, package_version)|indent }}\r\n+      {{ macros.github_change_r_pkg_version(is_fork, arrow.no_rc_today_version)|indent }}\r\n       - name: Save Version\r\n         id: save-version\r\n         shell: bash\r\ndiff --git a/dev/tasks/tasks.yml b/dev/tasks/tasks.yml\r\nindex 2cd6c259ec..ccd3eeeea8 100644\r\n--- a/dev/tasks/tasks.yml\r\n+++ b/dev/tasks/tasks.yml\r\n@@ -953,19 +953,19 @@ tasks:\r\n     params:\r\n       custom_version: Unset\r\n     artifacts:\r\n-      - r-lib__libarrow__bin__windows__arrow-[0-9\\.]+\\.zip\r\n+      - r-lib__libarrow__bin__windows__arrow-{no_rc_today_version}\\.zip\r\n# The centos job is currently disabled due to the\r\n# change to C++ 17\r\n-      #- r-lib__libarrow__bin__centos-7__arrow-[0-9\\.]+\\.zip\r\n-      - r-lib__libarrow__bin__ubuntu-18.04__arrow-[0-9\\.]+\\.zip\r\n-      - r-lib__libarrow__bin__ubuntu-22.04__arrow-[0-9\\.]+\\.zip\r\n-      - r-pkg__bin__windows__contrib__4.1__arrow_[0-9\\.]+\\.zip\r\n-      - r-pkg__bin__windows__contrib__4.2__arrow_[0-9\\.]+\\.zip\r\n-      - r-pkg__bin__macosx__contrib__4.1__arrow_[0-9\\.]+\\.tgz\r\n-      - r-pkg__bin__macosx__contrib__4.2__arrow_[0-9\\.]+\\.tgz\r\n-      - r-pkg__bin__macosx__big-sur-arm64__contrib__4.1__arrow_[0-9\\.]+\\.tgz\r\n-      - r-pkg__bin__macosx__big-sur-arm64__contrib__4.2__arrow_[0-9\\.]+\\.tgz\r\n-      - r-pkg__src__contrib__arrow_[0-9\\.]+\\.tar\\.gz\r\n+      #- r-lib__libarrow__bin__centos-7__arrow-{no_rc_today_version}\\.zip\r\n+      - r-lib__libarrow__bin__ubuntu-18.04__arrow-{no_rc_today_version}\\.zip\r\n+      - r-lib__libarrow__bin__ubuntu-22.04__arrow-{no_rc_today_version}\\.zip\r\n+      - r-pkg__bin__windows__contrib__4.1__arrow_{no_rc_today_version}\\.zip\r\n+      - r-pkg__bin__windows__contrib__4.2__arrow_{no_rc_today_version}\\.zip\r\n+      - r-pkg__bin__macosx__contrib__4.1__arrow_{no_rc_today_version}\\.tgz\r\n+      - r-pkg__bin__macosx__contrib__4.2__arrow_{no_rc_today_version}\\.tgz\r\n+      - r-pkg__bin__macosx__big-sur-arm64__contrib__4.1__arrow_{no_rc_today_version}\\.tgz\r\n+      - r-pkg__bin__macosx__big-sur-arm64__contrib__4.2__arrow_{no_rc_today_version}\\.tgz\r\n+      - r-pkg__src__contrib__arrow_{no_rc_today_version}\\.tar\\.gz\r\n \r\n \r\n########################### Release verification ############################\r\n```\r\n\r\nThis will generate \"r-pkg_\\*.10.0.0.zip\" not \"r-pkg_\\*10.0.0.202210XX.zip\" for \"10.0.0-rc1\" because \"10.0.0-rc1\" doesn't have \".devXXX\". "
+        },
+        {
+            "created_at": "2022-10-19T04:36:32.989Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17353?focusedCommentId=17619989) by Kouhei Sutou (kou):*\nIssue resolved by pull request 14396\n<https://github.com/apache/arrow/pull/14396>"
+        }
+    ]
+}

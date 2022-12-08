@@ -1,0 +1,42 @@
+{
+    "issue": {
+        "title": "[Python][R] ChunkedArray's cast() method combine multiple arrays into one",
+        "body": "***Note**: This issue was originally created as [ARROW-15828](https://issues.apache.org/jira/browse/ARROW-15828). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIt appears that if I try to cast to int or float, the array will be one.\r\n\r\n```r\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\n#> See arrow_info() for available features\r\nchunked_array(1:2, 3:4, 5:6)$cast(string())\r\n#> ChunkedArray\r\n#> [\r\n#>   [\r\n#>     \"1\",\r\n#>     \"2\"\r\n#>   ],\r\n#>   [\r\n#>     \"3\",\r\n#>     \"4\"\r\n#>   ],\r\n#>   [\r\n#>     \"5\",\r\n#>     \"6\"\r\n#>   ]\r\n#> ]\r\nchunked_array(1:2, 3:4, 5:6)$cast(float64())\r\n#> ChunkedArray\r\n#> [\r\n#>   [\r\n#>     1,\r\n#>     2,\r\n#>     3,\r\n#>     4,\r\n#>     5,\r\n#>     6\r\n#>   ]\r\n#> ]\r\nchunked_array(1:2, 3:4, 5:6)$cast(int64())\r\n#> ChunkedArray\r\n#> [\r\n#>   [\r\n#>     1,\r\n#>     2,\r\n#>     3,\r\n#>     4,\r\n#>     5,\r\n#>     6\r\n#>   ]\r\n#> ]\r\nchunked_array(1:2, 3:4, 5:6)$cast(date32())\r\n#> ChunkedArray\r\n#> [\r\n#>   [\r\n#>     1970-01-02,\r\n#>     1970-01-03\r\n#>   ],\r\n#>   [\r\n#>     1970-01-04,\r\n#>     1970-01-05\r\n#>   ],\r\n#>   [\r\n#>     1970-01-06,\r\n#>     1970-01-07\r\n#>   ]\r\n#> ]\r\n```",
+        "created_at": "2022-03-02T14:16:59.000Z",
+        "updated_at": "2022-03-07T19:41:07.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-03-07T19:41:07.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-03T16:03:58.932Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15828?focusedCommentId=17500850) by SHIMA Tatsuya (eitsupi):*\nI noticed that this is reproduced in Python as well.\r\nIs this the intended behavior?\r\n\r\n```python\n\r\n>>> import pyarrow as pa\r\n>>> pa.chunked_array([pa.array([1,2]),pa.array([3,4])]).cast(pa.float64())\r\n<pyarrow.lib.ChunkedArray object at 0x7f16c0de06d0>\r\n[\r\n  [\r\n    1,\r\n    2,\r\n    3,\r\n    4\r\n  ]\r\n]\r\n>>> pa.chunked_array([pa.array([1,2]),pa.array([3,4])]).cast(pa.utf8())\r\n<pyarrow.lib.ChunkedArray object at 0x7f16c102b290>\r\n[\r\n  [\r\n    \"1\",\r\n    \"2\"\r\n  ],\r\n  [\r\n    \"3\",\r\n    \"4\"\r\n  ]\r\n```\r\n\u00a0\r\n\u00a0\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-03-07T08:20:46.877Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15828?focusedCommentId=17502126) by Nicola Crane (thisisnic):*\nThanks for reporting this!  My best guess is that a ChunkedArrray is typically created by reading in data in chunks (i.e. smaller Arrays) which are not stored in contiguous sections of memory and so this is represented in the chunking.  When the values are cast to a new data type, a new data structure is created and it's all in contiguous sections of memory, i.e. a single Array.  I think this is likely intentional behaviour - is this change from ChunkedArray to Array causing you any particular issues?  "
+        },
+        {
+            "created_at": "2022-03-07T09:30:24.581Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15828?focusedCommentId=17502168) by SHIMA Tatsuya (eitsupi):*\nThanks for the reply.\r\nMy question was whether it is normal for the chunks to behave differently depending on the cast destination, whether they remain split into chunks or become one continuous chunk.\r\nDoes your guess explain that the chunks are only contiguous if the type of the cast destination is numeric?\r\n\r\nI simply found this behavior while playing around and would appreciate it if you could close this if this is the intended behavior."
+        },
+        {
+            "created_at": "2022-03-07T14:24:34.155Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15828?focusedCommentId=17502301) by Nicola Crane (thisisnic):*\nCC `[~apitrou]` - I don't suppose you could explain this any better than my attempt above?"
+        },
+        {
+            "created_at": "2022-03-07T14:29:01.730Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15828?focusedCommentId=17502308) by Antoine Pitrou (apitrou):*\nI don't think that is intentional per se; I mean that nowhere did we explicitly decide that casting to certain types would return less chunks than for other types. It's simply a byproduct of how some cast operations are implemented: in some cases, a single output chunk is allocated, in other cases there are distinct output chunks. But you should consider this an implementation detail, and not rely on the number of output chunk - it may well change in the future.\r\n\r\ncc `[~lidavidm]` as well."
+        },
+        {
+            "created_at": "2022-03-07T14:46:47.778Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15828?focusedCommentId=17502319) by David Li (lidavidm):*\nYes, I think the only guarantee (for cast/scalar functions) is that the output has the same number of rows as the input. But depending on kernel execution settings and the kernel implementation, you may get a single chunk or multiple chunks. (In particular here the relevant parameter is probably can_write_into_slices and I believe this doesn't apply when the output type is not fixed-width.)"
+        }
+    ]
+}

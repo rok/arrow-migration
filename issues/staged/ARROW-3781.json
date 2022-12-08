@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[C++] Configure buffer size in arrow::io::BufferedOutputStream",
+        "body": "***Note**: This issue was originally created as [ARROW-3781](https://issues.apache.org/jira/browse/ARROW-3781). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis is hard-coded to 4096 right now. For higher latency file systems it may be desirable to use a larger buffer. See also ARROW-3777 about performance testing for high latency files",
+        "created_at": "2018-11-13T20:44:46.000Z",
+        "updated_at": "2018-11-16T20:30:49.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2018-11-16T20:30:49.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-11-13T20:48:33.424Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3781?focusedCommentId=16685727) by Antoine Pitrou (apitrou):*\nI don't think it's dependent on filesystem latency. Unless the filesystem implementation is broken, writing should be asynchronous (i.e. the `Write` call returns before the OS actually flushed the buffer to disk or to the network). The point of the buffer is to avoid paying the cost of a system call (and userspace/kernel transition) for every tiny write.\r\n\r\nBut we can make the buffer size configurable regardless."
+        },
+        {
+            "created_at": "2018-11-13T21:50:49.114Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3781?focusedCommentId=16685779) by Wes McKinney (wesm):*\nI'm thinking about the \"file systems\" HDFS, AWS S3, Google Cloud Storage, and Azure Blob Storage, all of which can be pretty high latency for writes"
+        },
+        {
+            "created_at": "2018-11-13T21:52:40.178Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3781?focusedCommentId=16685784) by Wes McKinney (wesm):*\nFor cloud stores, at some point we might want to consider asynchronous flushing also, to mitigate latency when a flush triggers (so the writer thread can begin to buffer the next chunk)"
+        },
+        {
+            "created_at": "2018-11-13T21:59:41.697Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3781?focusedCommentId=16685791) by Antoine Pitrou (apitrou):*\nAre you thinking about the `Flush` method? It's as asynchronous as `Write` is."
+        },
+        {
+            "created_at": "2018-11-13T22:04:56.253Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3781?focusedCommentId=16685809) by Wes McKinney (wesm):*\nSorry, I'm using file systems here again proverbially. TensorFlow and other projects call their integrations with other file storage systems \"file systems\", e.g.\r\n\r\nhttps://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/platform/s3/s3_file_system.h#L25\r\n\r\nI am not sure a Write or Flush into S3 is necessarily going to be asynchronous. The implementation in TensorFlow of Flush blocks until the PutRequest is completed\r\n\r\nhttps://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/platform/s3/s3_file_system.cc#L238"
+        },
+        {
+            "created_at": "2018-11-13T22:06:41.334Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3781?focusedCommentId=16685812) by Wes McKinney (wesm):*\nWhat I mean is that if I call `out->Flush()` it may not be safe to continue to call `out->Write(...)` until the flush completes. So my proposal was to think about devising a buffered output stream where a writer thread can continue writing while a Flush is in progress. The current `BufferedOutputStream` holds a mutex while Flush so further writes are not possible"
+        },
+        {
+            "created_at": "2018-11-13T22:09:10.137Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3781?focusedCommentId=16685817) by Antoine Pitrou (apitrou):*\nWe may want to think about flushing in a separate thread, then."
+        },
+        {
+            "created_at": "2018-11-14T00:47:25.033Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3781?focusedCommentId=16685945) by Wes McKinney (wesm):*\nIt would definitely require some design work. In https://github.com/apache/arrow/blob/master/cpp/src/arrow/io/buffered.cc#L104, you would need to use a buffer pool of some kind so that if Flush is holding a temporary buffer, that Write can write to a new buffer. In any case, it's out of scope for this issue. Once we have file system implementations for one or more cloud services we can use benchmarks to drive the development. In the meantime, a mock remote file system with configurable write latency could help with throughput tests"
+        },
+        {
+            "created_at": "2018-11-16T20:30:49.584Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3781?focusedCommentId=16689970) by Wes McKinney (wesm):*\nIssue resolved by pull request 2976\n<https://github.com/apache/arrow/pull/2976>"
+        }
+    ]
+}

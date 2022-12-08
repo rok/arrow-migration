@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[Python] from_pandas fails when converting decimals if have None values",
+        "body": "***Note**: This issue was originally created as [ARROW-2432](https://issues.apache.org/jira/browse/ARROW-2432). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nUsing from_pandas to convert decimals fails if encounters a value of `None`. For example:\r\n```java\n\r\nIn [1]: import pyarrow as pa\r\n...: import pandas as pd\r\n...: from decimal import Decimal\r\n...:\r\n\r\nIn [2]: s_dec = pd.Series([Decimal('3.14'), None])\r\n\r\nIn [3]: pa.Array.from_pandas(s_dec, type=pa.decimal128(3, 2))\r\n---------------------------------------------------------------------------\r\nArrowInvalid Traceback (most recent call last)\r\n<ipython-input-3-2da56007a0da> in <module>()\r\n----> 1 pa.Array.from_pandas(s_dec, type=pa.decimal128(3, 2))\r\n\r\narray.pxi in pyarrow.lib.Array.from_pandas()\r\n\r\narray.pxi in pyarrow.lib.array()\r\n\r\nerror.pxi in pyarrow.lib.check_status()\r\n\r\nerror.pxi in pyarrow.lib.check_status()\r\n\r\nArrowInvalid: Error converting from Python objects to Decimal: Got Python object of type NoneType but can only handle these types: decimal.Decimal\r\n```\r\nThe above error is raised when specifying decimal type. When no type is specified, a seg fault happens.\r\n\r\nThis previously worked in 0.8.0.",
+        "created_at": "2018-04-09T20:54:23.000Z",
+        "updated_at": "2018-04-12T17:04:12.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-04-12T11:57:57.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-04-09T20:54:56.255Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2432?focusedCommentId=16431276) by Bryan Cutler (bryanc):*\nI can work on this"
+        },
+        {
+            "created_at": "2018-04-09T21:36:34.467Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2432?focusedCommentId=16431331) by Antoine Pitrou (apitrou):*\nOw. For some reason it seems we have various code conversion paths depend on which API is called :-/\r\n\r\n```python\n\r\n>>> data = [decimal.Decimal('3.14'), None]\r\n>>> pa.array(data, type=pa.decimal128(12, 4))\r\n<pyarrow.lib.Decimal128Array object at 0x7fcb67a3fbd8>\r\n[\r\n  Decimal('3.1400'),\r\n  NA\r\n]\r\n>>> pa.array(data, type=pa.decimal128(12, 4), from_pandas=True)\r\n<pyarrow.lib.Decimal128Array object at 0x7fcb67a3fb38>\r\n[\r\n  Decimal('3.1400'),\r\n  NA\r\n]\r\n>>> pa.Array.from_pandas(data, type=pa.decimal128(12, 4))\r\n<pyarrow.lib.Decimal128Array object at 0x7fcb67a3f818>\r\n[\r\n  Decimal('3.1400'),\r\n  NA\r\n]\r\n>>> pa.Array.from_pandas(pd.Series(data), type=pa.decimal128(12, 4))\r\nTraceback (most recent call last):\r\n  File \"<ipython-input-10-1bf1dadbec70>\", line 1, in <module>\r\n    pa.Array.from_pandas(pd.Series(data), type=pa.decimal128(12, 4))\r\n  File \"array.pxi\", line 383, in pyarrow.lib.Array.from_pandas\r\n  File \"array.pxi\", line 177, in pyarrow.lib.array\r\n  File \"error.pxi\", line 77, in pyarrow.lib.check_status\r\n  File \"error.pxi\", line 77, in pyarrow.lib.check_status\r\nArrowInvalid: /home/antoine/arrow/cpp/src/arrow/python/numpy_to_arrow.cc:1702 code: converter.Convert()\r\nError converting from Python objects to Decimal: Got Python object of type NoneType but can only handle these types: decimal.Decimal\r\n\r\n```"
+        },
+        {
+            "created_at": "2018-04-09T21:46:10.029Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2432?focusedCommentId=16431341) by Bryan Cutler (bryanc):*\nWe really need to get the integration testing running regularly, or at least before a release"
+        },
+        {
+            "created_at": "2018-04-09T22:20:24.261Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2432?focusedCommentId=16431398) by Phillip Cloud (cpcloud):*\n`[~pitrou]` FWIW, the code conversion paths are not specific to decimal types and have been around since before decimals existed. `[~bryanc]` If you're not already working on this, then I can probably get it fixed up pretty quickly."
+        },
+        {
+            "created_at": "2018-04-09T22:36:24.375Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2432?focusedCommentId=16431438) by Bryan Cutler (bryanc):*\nIt should be possible to share code paths when converting objects right?\u00a0 I'd like to keep this with the minimum fix, lets look at possible refactoring after.\u00a0 Thanks `[~cpcloud]`, I already made the fix, just going to add tests."
+        },
+        {
+            "created_at": "2018-04-09T22:45:27.473Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2432?focusedCommentId=16431450) by Phillip Cloud (cpcloud):*\n`[~bryanc]` Awesome, thanks."
+        },
+        {
+            "created_at": "2018-04-10T20:35:28.650Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2432?focusedCommentId=16432923) by Bryan Cutler (bryanc):*\nBTW, it looks like `pa.array(data, type=pa.decimal128(12, 4), from_pandas=True)` has the same code path that causes the error, as long as `data` is a pandas.Series\r\n\r\n```\n\r\nIn [5]: pa.array(pd.Series([Decimal('3.14'), None]), from_pandas=True, type=pa.decimal128(12, 4))\r\n---------------------------------------------------------------------------\r\nArrowInvalid                              Traceback (most recent call last)\r\n<ipython-input-5-9494a5149101> in <module>()\r\n----> 1 pa.array(pd.Series([Decimal('3.14'), None]), from_pandas=True, type=pa.decimal128(12, 4))\r\n\r\nArrowInvalid: Error converting from Python objects to Decimal: Got Python object of type NoneType but can only handle these types: decimal.Decimal\r\n```"
+        },
+        {
+            "created_at": "2018-04-12T11:57:57.933Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2432?focusedCommentId=16435417) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 1878\n<https://github.com/apache/arrow/pull/1878>"
+        }
+    ]
+}

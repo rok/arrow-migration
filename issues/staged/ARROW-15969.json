@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[C++][Python] Add conversion from RecordBatchFileReader to RecordBatchReader",
+        "body": "***Note**: This issue was originally created as [ARROW-15969](https://issues.apache.org/jira/browse/ARROW-15969). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe suggested improvement is to introduce a conversion/adapter so that all batches from RecordBatchFileReader can be read one-by-one using RecordBatchReader.\r\n\r\nPerhaps a new instance method RecordBatchFileReader.to_reader()? This would follow the suit of for instance the pyarrow.flight.MetadataRecordBatchReader which also has to_reader().\r\n\r\n**Motivation**\r\n\r\nRecord Batches serialized into IPC file format can be read using RecordBatchFileReader. The interface of this reader is incompatible with RecordBatchReader.\r\n\r\nThis impacts for instance the Flight RPC DoGet, where it is not possible to efficiently (e.g. fully in C++) send out all data by using pyarrow.flight.RecordBatchStream. However, there may be other use cases where client code wants to read data batch-by-batch transparently, without caring about the serialization format.\r\n\r\nFurther background is here: <https://lists.apache.org/thread/b9jwk103fgxfo4kct12t00ymdft7bklb>\r\n\r\n\u00a0",
+        "created_at": "2022-03-18T13:21:34.000Z",
+        "updated_at": "2022-03-24T14:35:32.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-19T13:31:17.309Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15969?focusedCommentId=17509268) by Lubo Slivka (lupko):*\nHi `[~lidavidm]` ,\r\n\r\nI took a stab at this; since i'm very new to Arrow, I'm unsure whether it is the right way to do it so want to run it by you before creating PR if you don't mind.\u00a0\r\n\r\nAfter some poking around in C++ code, it seemed like a good idea to add GetRecordBatchReader() method to the RecordBatchFileReader; there is already GetRecordBatchGenerator() so getting the batch reader in a similar way looked like a good fit to me: <https://github.com/lupko/arrow/commit/ff56b44f881fd6069b73d9a432f6528d7ff11bb2>\r\n\r\nAs a disclaimer, since I have not followed/used C++ for more than a decade, I have pieced the implementation based on other things I've seen in reader.cc :)\u00a0\r\n\r\n\u2014\r\n\r\nThe Python part is then straightforward. Added RecordBatchFileReader.to_reader() that calls this new method and wraps the result into RecordBatchReader. <https://github.com/lupko/arrow/commit/72240813ef4fff337c0ecb44c715febf7bc3d2fc>\r\n\r\n\u2014\r\n\r\nDoes this make sense? Shall I create PR?\u00a0\r\n\r\nRegards,\r\n\r\nLubo"
+        },
+        {
+            "created_at": "2022-03-20T17:08:51.697Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15969?focusedCommentId=17509477) by David Li (lidavidm):*\nThanks `[~lupko]`. That looks reasonable, please submit a PR!"
+        },
+        {
+            "created_at": "2022-03-20T17:10:31.045Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15969?focusedCommentId=17509478) by David Li (lidavidm):*\n(I've also granted you the ability to assign Jira tickets to yourself)"
+        },
+        {
+            "created_at": "2022-03-21T10:37:02.384Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15969?focusedCommentId=17509757) by Alessandro Molina (amol-):*\nThe class hierarchy seems curios by the way. We have `RecordBatchStreamReader` inheriting from `RecordBatchReader` but `RecordBatchFileReader` does not? Both should support nearly the same features for two slightly different formats, so I would expect both inherit from `RecordBatchReader`"
+        },
+        {
+            "created_at": "2022-03-21T11:43:55.797Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15969?focusedCommentId=17509792) by Lubo Slivka (lupko):*\nHi `[~amol-]` ,\r\n\r\nthanks for input. I suspect the key difference here could be that:\r\n \\* RecordBatchStreamReader allows going through all batches in the stream file, one-by-one, once\r\n \\* RecordBatchFileReader allows for repeated, random access; one can have the file reader open all the time and read from it as needed. even read all the batches as needed, multiple times\r\n\r\nThe RecordBatchStreamReader naturally \"IS A\" RecordBatchReader (it even says in doc it 'reads a stream of batches').\u00a0 The file reader is not. Imho due to this difference, implementing RBR on the file reader would lead to 'awkwardness' down the road - what if user wants to consume contents of the file using RBR multiple times?\u00a0\r\n\r\nAnyway, that's how I understand it with my limited knowledge of the codebase :]. Please let me know if i'm missing something.\r\n\r\nThanks,\r\n\r\n--L"
+        },
+        {
+            "created_at": "2022-03-21T12:12:08.517Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15969?focusedCommentId=17509807) by Lubo Slivka (lupko):*\n`[~lidavidm]` thank you. I have to process some paperwork due to this on my end first; then will proceed with the PR."
+        },
+        {
+            "created_at": "2022-03-24T09:31:05.721Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15969?focusedCommentId=17511724) by Alessandro Molina (amol-):*\n> Imho due to this difference, implementing RBR on the file reader would lead to 'awkwardness' down the road - what if user wants to consume contents of the file using RBR multiple times?\r\nI wasn't suggesting that `RecordBatchReader` should be implemented on top of `{}RecordBatchFileReader{`}, I was mostly wondering if it wasn't the case for the opposite. A random access reader should be able to reproduce all the features of a stream reader, plus some additional capabilities like seeking.\u00a0\r\n\r\nThe reason I was wondering is that if we exposed a class hierarchy like\r\n```java\n\r\n             RecordBatchReader\r\n                 /.        \\\r\n                /           \\\r\nRecordBatchStreamReader    RecordBatchFileReader\n```\r\nWe wouldn't have to deal with \"converting\" file readers, they could be used directly wherever a \\`RecordBatchReader` was needed\r\n\r\nIn the end, I don't see a reason why `RecordBatchFileReader` can't have a `get_next_batch` method, when reading a file you have a current position for the current ongoing read."
+        },
+        {
+            "created_at": "2022-03-24T11:07:03.070Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15969?focusedCommentId=17511786) by Lubo Slivka (lupko):*\nSorry for confusion - I have not expressed myself properly - I meant the exact thing as you drawn :)\r\n\r\nThe reason I see for not doing the class hierarchy as you propose is repeated streaming.\r\n\r\nAs I gather - and please correct me if I'm wrong, I'm very new to Arrow, and may be basing my argument on wrong assumption: one can get RecordBatchFileReader open as long as feasible and read from it at will. Keeping the file open cuts down on IO overhead, so it is a good idea to reuse it.\r\n\r\nHaving RecordBatchFileReader extend RecordBatchReader and implementing the necessary methods means client can stream the file once. To stream again, a new instance of RecordBatchFileReader has to be created.. or it is necessary to add some kind of Reset() function to allow streaming the whole file again. imho the adapter on top of RecordBatchFileReader is cleaner way that 'naturally' allows for repeated streaming."
+        },
+        {
+            "created_at": "2022-03-24T14:35:32.690Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15969?focusedCommentId=17511883) by Alessandro Molina (amol-):*\n> or it is necessary to add some kind of Reset() function to allow streaming the whole file again.\r\nUhm, I'm not sure why that would be so strange, `seek` is a fairly common capability for file readers.\r\n\r\nI do see how making a separate continuous reader for the file might be considered more \"pure\", but I can't refrain from wondering if we are making things harder to use and reason about just to enforce a principle of single responsibility. I mean \"you have to create a reader out of the reader to actually be able to read it\" doesn't same exactly practical from a user point of view."
+        }
+    ]
+}

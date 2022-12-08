@@ -1,0 +1,30 @@
+{
+    "issue": {
+        "title": "[Python] Addition of option to allow empty Parquet row groups",
+        "body": "***Note**: This issue was originally created as [ARROW-3020](https://issues.apache.org/jira/browse/ARROW-3020). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhile our use case is not common, I was able to find one related request from roughly a year ago. Could this be added as a feature?\r\n\r\nhttps://issues.apache.org/jira/browse/PARQUET-1047\r\n\r\n**Motivation**\r\n\r\nWe have an application where each row is associated with one of N contexts, though a minority of contexts may have no associated rows. When encountering the Nth context, we will wish to retrieve all the associated rows. Row groups would provide a natural way to index the data, as the nth context could naturally relate to the nth row group.\r\n\r\nUnfortunately, this is not possible at the present time, as pyarrow does not support writing empty row groups. If one writes a pyarrow.Table containing zero rows using pyarrow.parquet.ParquetWriter, it is omitted from the final file, and this distorts the indexing.",
+        "created_at": "2018-08-08T07:35:45.000Z",
+        "updated_at": "2018-12-28T14:57:43.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2018-12-28T14:57:43.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-09-15T14:51:53.736Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3020?focusedCommentId=16616336) by Wes McKinney (wesm):*\nPatches welcome"
+        },
+        {
+            "created_at": "2018-12-21T00:30:52.544Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3020?focusedCommentId=16726349) by Tanya Schlusser (tanya):*\nI looked into this and do not believe the Parquet code permits this at the moment despite the comment in the OP's hyperlink saying they thought it did. pyarrow's `ParquetWriter` eventually uses this `FileWriter` class, and here's the current code (also [linked here](https://github.com/apache/parquet-cpp/blob/642da055adf009652689b20e68a198cffb857651/src/parquet/arrow/writer.cc#L1110-L1129)). If `table.num_rows()` is zero, nothing will ever happen.\r\n\r\n```Java\n\r\nStatus FileWriter::WriteTable(const Table& table, int64_t chunk_size) {\r\n  if (chunk_size <= 0) {\r\n    return Status::Invalid(\"chunk size per row_group must be greater than 0\");\r\n  } else if (chunk_size > impl_->properties().max_row_group_length()) {\r\n    chunk_size = impl_->properties().max_row_group_length();\r\n  }\r\n\r\n\r\n  for (int chunk = 0; chunk * chunk_size < table.num_rows(); chunk++) {\r\n    int64_t offset = chunk * chunk_size;\r\n    int64_t size = std::min(chunk_size, table.num_rows() - offset);\r\n\r\n\r\n    RETURN_NOT_OK_ELSE(NewRowGroup(size), PARQUET_IGNORE_NOT_OK(Close()));\r\n    for (int i = 0; i < table.num_columns(); i++) {\r\n      auto chunked_data = table.column(i)->data();\r\n      RETURN_NOT_OK_ELSE(WriteColumnChunk(chunked_data, offset, size),\r\n                         PARQUET_IGNORE_NOT_OK(Close()));\r\n    }\r\n  }\r\n  return Status::OK();\r\n}\r\n```"
+        },
+        {
+            "created_at": "2018-12-28T14:57:43.263Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3020?focusedCommentId=16730305) by Uwe Korn (uwe):*\nIssue resolved by pull request 3269\n<https://github.com/apache/arrow/pull/3269>"
+        }
+    ]
+}

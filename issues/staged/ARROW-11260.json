@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[C++][Dataset] Don't require dictionaries for reading dataset with schema-based Partitioning",
+        "body": "***Note**: This issue was originally created as [ARROW-11260](https://issues.apache.org/jira/browse/ARROW-11260). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAs a follow-up on ARROW-10247 (see also https://github.com/apache/arrow/pull/9130#issuecomment-760801124). We currently require the user to pass manually specified dictionary values when reading a dataset with a Partitioning based on a schema with dictionary typed fields. \r\n\r\nIn practice that means that the user for example needs to parse the file paths to get all the possible values the partition field can take, while Arrow will then afterwards again do the same to construct the dataset object. \r\n_Naively_, it seems that it should be possible to let Arrow infer the dictionary _values_, even when providing an explicit schema with a dictionary field for the Partitioning (i.e. so when not letting the partitioning schema itself be inferred from the file paths).\r\n\r\nAn example use case is when you have a Partitioning schema with both dictionary and non-dictionary fields. When discovering the schema, you can only have all or nothing (all dictionary fields or no dictionary fields).\r\n\r\ncc `[~bkietz]`",
+        "created_at": "2021-01-15T11:24:45.000Z",
+        "updated_at": "2021-03-15T15:33:07.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-03-15T15:33:03.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-01-15T11:28:44.966Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11260?focusedCommentId=17265942) by Joris Van den Bossche (jorisvandenbossche):*\nSidenote: this actually also worked for a short time in pyarrow 0.17.0 (and I added a test about that in the PR fixing it (https://github.com/apache/arrow/pull/6641#issuecomment-600746259), but that got apparently lost in a rebase ;)), but I suppose this was changed in pyarrow 1.0.0 after ensuring that the dictionary-typed partition fields \"know\" the full dictionary of all possible values the dataset (https://github.com/apache/arrow/pull/7536#issuecomment-649500017). \r\n\r\nThe test that worked at that time we forgot to include:\r\n\r\n```python\n\r\n@pytest.mark.pandas\r\ndef test_partitioning_dictionary_key(mockfs):\r\n# ARROW-8088 specifying partition key as dictionary type\r\n    schema = pa.schema([\r\n        pa.field('group', pa.dictionary(pa.int8(), pa.int32())),\r\n        pa.field('key', pa.dictionary(pa.int8(), pa.string()))\r\n    ])\r\n    part = ds.DirectoryPartitioning(schema)\r\n\r\n    dataset = ds.dataset(\r\n        \"subdir\", format=\"parquet\", filesystem=mockfs, partitioning=part\r\n    )\r\n    table = dataset.to_table()\r\n\r\n    assert table.column('group').type.equals(schema.types[0])\r\n    assert table.column('group').to_pylist() == [1] * 5 + [2] * 5\r\n    assert table.column('key').type.equals(schema.types[1])\r\n    assert table.column('key').to_pylist() == ['xxx'] * 5 + ['yyy'] * 5\r\n```\r\n\r\n(but note that this doesn't check that each chunk of the ChunkedArray for the partition columns have all dictionary values, which is the feature that was added later)"
+        },
+        {
+            "created_at": "2021-03-15T15:33:03.095Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11260?focusedCommentId=17301711) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 9677\n<https://github.com/apache/arrow/pull/9677>"
+        }
+    ]
+}

@@ -1,0 +1,92 @@
+{
+    "issue": {
+        "title": "[C++] Support nested data conversions for chunked array",
+        "body": "***Note**: This issue was originally created as [ARROW-17459](https://issues.apache.org/jira/browse/ARROW-17459). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n`FileReaderImpl::ReadRowGroup` fails with \"Nested data conversions not implemented for chunked array outputs\". It fails on [ChunksToSingle](<https://github.com/apache/arrow/blob/7f6b074b84b1ca519b7c5fc7da318e8d47d44278/cpp/src/parquet/arrow/reader.cc#L95>)\r\n\r\nData schema is:\u00a0\r\n```java\n\r\n\u00a0 optional group fields_map (MAP) = 217 {\r\n\u00a0 \u00a0 repeated group key_value {\r\n\u00a0 \u00a0 \u00a0 required binary key (STRING) = 218;\r\n\u00a0 \u00a0 \u00a0 optional binary value (STRING) = 219;\r\n\u00a0 \u00a0 }\r\n\u00a0 }\r\nfields_map.key_value.value-> Size In Bytes: 13243589 Size In Ratio: 0.20541047\r\nfields_map.key_value.key-> Size In Bytes: 3008860 Size In Ratio: 0.046667963\r\n```\r\nIs there a way to work around this issue in the cpp lib?\r\n\r\nIn any case, I am willing to implement this, but I need some guidance. I am very new to parquet (as in started reading about it yesterday).\r\n\r\n\u00a0\r\n\r\nProbably related to: https://issues.apache.org/jira/browse/ARROW-10958",
+        "created_at": "2022-08-18T12:24:20.000Z",
+        "updated_at": "2022-11-04T21:00:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-08-18T19:26:36.790Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17581502) by Will Jones (willjones127):*\nI haven't tried this, but perhaps `GetRecordBatchReader` instead will work <https://github.com/wjones127/arrow/blob/895e2da93c0af3a1525c8c75ec8d612d96c28647/cpp/src/parquet/arrow/reader.h#L165>\r\n\r\nIt sounds like there are some code paths that do work and some that don't."
+        },
+        {
+            "created_at": "2022-08-22T11:26:22.685Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17582918) by Arthur Passos (arthurpassos):*\n`[~willjones127]` at a first glance, it seems to be working. The client code I had was something like the below:\r\n\r\n\r\n```java\n\r\nstd::shared_ptr<arrow::Table> table;\r\narrow::Status read_status = file_reader->ReadRowGroup(row_group_current, column_indices, &table);\r\nif (!read_status.ok())\r\n\u00a0 \u00a0 throw ParsingException{\"Error while reading Parquet data: \" + read_status.ToString(), ErrorCodes::CANNOT_READ_ALL_DATA};\r\n++row_group_current;\r\n```\r\n\u00a0\r\n\r\nNow it's the below:\r\n```java\n\r\nstd::shared_ptr<arrow::Table> table;\r\n\r\nstd::unique_ptr<::arrow::RecordBatchReader> rbr;\r\nstd::vector<int> row_group_indices { row_group_current };\r\narrow::Status get_batch_reader_status = file_reader->GetRecordBatchReader(row_group_indices, column_indices, &rbr);\r\n\r\nif (!get_batch_reader_status.ok())\r\nthrow ParsingException{\"Error while reading Parquet data: \" + get_batch_reader_status.ToString(), ErrorCodes::CANNOT_READ_ALL_DATA};\r\n\r\narrow::Status read_status = rbr->ReadAll(&table);\r\n\r\nif (!read_status.ok())\r\nthrow ParsingException{\"Error while reading Parquet data: \" + read_status.ToString(), ErrorCodes::CANNOT_READ_ALL_DATA};\r\n\r\n++row_group_current;\n```\r\n\u00a0\r\n\r\n**Question: Should I expect any regressions or different behaviour by changing the code path to the latter?**\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-08-25T12:17:07.299Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17584808) by Arthur Passos (arthurpassos):*\nI am also trying to write test to cover this case, but failing to do so. For some reason, the files I generate with the very same schema and size don't get chunked while reading it. The original file was provided by a customer and it's confidential data, so it can't be used.\r\n\r\n\u00a0\r\n\r\nAll the files I generated contain the above mentioned schema. The differences are in the data length. Some had maps of 50~300 elements with keys of random strings of 20~50 characters and values of random strings of 50~5000 characters. I also tried a low cardinality example and a large string example (2^30 characters).\r\n\r\n\u00a0\r\n\r\nI'd be very thankful if someone could give me some tips on how to generate a file that will trigger the exception."
+        },
+        {
+            "created_at": "2022-08-29T20:53:08.164Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17597392) by Will Jones (willjones127):*\nHi Arthur,\r\n\r\nHere's a simple repro I created in Python:\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\narr = pa.array([[(\"a\" * 2**30, 1)]], type = pa.map_(pa.string(), pa.int32()))\r\narr = pa.chunked_array([arr, arr])\r\ntab = pa.table({ \"arr\": arr })\r\n\r\npq.write_table(tab, \"test.parquet\")\r\n\r\npq.read_table(\"test.parquet\")\r\n#Traceback (most recent call last):\r\n#  File \"<stdin>\", line 1, in <module>\r\n#  File \"/Users/willjones/mambaforge/envs/notebooks/lib/python3.10/site-#packages/pyarrow/parquet/__init__.py\", line 2827, in read_table\r\n#    return dataset.read(columns=columns, use_threads=use_threads,\r\n#  File \"/Users/willjones/mambaforge/envs/notebooks/lib/python3.10/site-#packages/pyarrow/parquet/__init__.py\", line 2473, in read\r\n#    table = self._dataset.to_table(\r\n#  File \"pyarrow/_dataset.pyx\", line 331, in pyarrow._dataset.Dataset.to_table\r\n#  File \"pyarrow/_dataset.pyx\", line 2577, in pyarrow._dataset.Scanner.to_table\r\n#  File \"pyarrow/error.pxi\", line 144, in pyarrow.lib.pyarrow_internal_check_status\r\n#  File \"pyarrow/error.pxi\", line 121, in pyarrow.lib.check_status\r\n#pyarrow.lib.ArrowNotImplementedError: Nested data conversions not implemented for chunked array outputs\r\n```"
+        },
+        {
+            "created_at": "2022-08-30T12:35:45.892Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17597846) by Arthur Passos (arthurpassos):*\n`[~willjones127]` Thank you for sharing this!\r\n\r\n\u00a0\r\n\r\nWhile your `GetRecordBatchReader` suggestion works for the use case I shared, it won't work for this one. Are there any docs I could read to understand the internals of arrow lib in order to implement it? Any tips would be appreciated.. The only thing that comes to mind right now is to somehow build a giant array with all the chunks, but it certainly has a set of implications."
+        },
+        {
+            "created_at": "2022-08-30T14:56:25.331Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17597915) by Will Jones (willjones127):*\nWe have a section of our docs devoted to [developer setup and guidelines](https://arrow.apache.org/docs/developers/contributing.html). And we have documentation describing the [Arrow in-memory format](https://arrow.apache.org/docs/format/Columnar.html) (it may be worth reviewing the structure of nested arrays, for example). For the internals of the Parquet arrow code, it's best to read through the source headers at `{}cpp/src/parquet/arrow/{`}."
+        },
+        {
+            "created_at": "2022-08-30T19:00:08.027Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17598019) by Arthur Passos (arthurpassos):*\nHi `[~emkornfield]`. I see you are one of the authors of [https://github.com/apache/arrow/pull/8177](https://github.com/apache/arrow/pull/8177.). I see the following snippet was introduced on that PR:\r\n\r\n\r\n```java\n\r\n\u00a0 \u00a0 \u00a0 // ARROW-3762(wesm): If item reader yields a chunked array, we reject as\r\n\u00a0 \u00a0 \u00a0 // this is not yet implemented\r\n\u00a0 \u00a0 \u00a0 return Status::NotImplemented(\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \"Nested data conversions not implemented for chunked array outputs\");\n```\r\nI wonder why this wasn't implemented. Is there a techinical limitation or the approach wasn't very well defined?\r\n\r\nI am pretty new to Parquet and to `arrow` library, so it's very hard to me to reason about all of these concepts and code. From the top of my head, I got a couple of silly ideas:\r\n1. Find a way to convert a ChunkedArray into a single Array. That requires a processing step that allocates a contiguous chunk of memory big enough to hold all chunks. Plus, there is no clear interface to do so.\n1. Create a new ChunkedArray class that can hold ChunkedArrays. As of now, it can only hold raw Arrays. That would require a LOT of changes in other\u00a0`arrow`\u00a0 classes and, of course, it's not guaranteed to work.\n1. Make the chunk memory limit configurable (not sure it's feasible)\n   \n   Do you see any of these as a path forward? If not, what would be the path forward?"
+        },
+        {
+            "created_at": "2022-08-30T19:52:48.528Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17598038) by Micah Kornfield (emkornfield):*\n1.  ChunkedArrays have a Flatten method that will do this but I don't think it will help in this case.  IIRC the challenge in this case is that parquet only yields chunked arrays if the underlying column data cannot fit into the right arrow structure.  In this case for Utf8 arrays it means the sum of bytes across all strings has to be less then INT_MAX length.  Otherwise it would need to flatten to LargeUtf8 which has implications for schema conversion.  Structs and lists always expected Arrays as their inner element types and not chunked arrays.\r\n2.  doesn't necessarily seem like the right approach.  \r\n3.  Per 1, this isn't really the issue I think.  The approach here that could work (I don't remember all the code paths) is to vary the number of rows read back if not all rows are huge).\r\n\r\nOne way forward here could be to add an option for reading back arrays to always use the Large\\* variant (or maybe on a per column basis) to avoid chunking."
+        },
+        {
+            "created_at": "2022-08-30T20:18:20.494Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17598050) by Arthur Passos (arthurpassos):*\n`[~emkornfield]` thank you for your answer. Can you clarify what you mean by \"read back arrays to always use the Large\\* variant\"? I don't know what \"back array\" and \"large variant\" refer to, tho I can especulate what the latter means."
+        },
+        {
+            "created_at": "2022-08-30T20:33:19.231Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17598058) by Micah Kornfield (emkornfield):*\ni.e. LargeBinary, LargeString, LargeList these are distinct types that use int64s to represent offsets instead of int32"
+        },
+        {
+            "created_at": "2022-08-31T13:29:46.026Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17598383) by Arthur Passos (arthurpassos):*\n`[~emkornfield]` if I understand correctly, this could help with the original case I shared. In the case `[~willjones127]` shared, where he creates a ChunkedArray and then serializes it, it wouldn't help. Is that correct?\r\n\r\nI am stating this based on my current understanding of the inner workings of `arrow`: The ChunkedArray data structure will be used in two or more situations:\u00a0\r\n1. The data in a row group exceeds the limit of INT_MAX (Case I initially shared)\r\n2. The serialized data/ table is a chunked array, thus it makes sense to use a chunked array.\r\n\r\n\u00a0\r\n\r\nedit:\r\n\r\nI have just tested the snippet shared by Will Jones using `type = pa.map_(pa.large_string(), pa.int64())` instead of `type = pa.map_(pa.string(), pa.int32())` and the issue persists.\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-08-31T16:48:16.686Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17598501) by Micah Kornfield (emkornfield):*\nYes, I think there are some code changes, we hard-code non large [BinaryBuilder](https://github.com/apache/arrow/blob/master/cpp/src/parquet/column_reader.cc#L1693) for accumulating chunks and then used when [decoding arrow](https://github.com/apache/arrow/blob/master/cpp/src/parquet/encoding.cc#L1392).\r\n\r\nTo answer your questions, I don't think the second case applies.  As far as I know Parquet C++ does its own chunking and doesn't try to read back the exact chunking that the values are written with."
+        },
+        {
+            "created_at": "2022-08-31T19:20:12.368Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17598581) by Arthur Passos (arthurpassos):*\nI am a bit lost rn. I have made some changes to use LargeBinaryBuilder, but there is always an incosistency that throws an exception. Are you aware of any place in the code where instead of taking the String path it would take the LargeString path? I went all the way back to where it reads the schema in the hope of finding a place I could change the DataType from STRING to LARGE_STRING. Couldn't do so."
+        },
+        {
+            "created_at": "2022-09-01T05:09:28.863Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17598742) by Micah Kornfield (emkornfield):*\nYou would have to follow this up the stack from the previous comments.  Without seeing the stack trace it is a bit hard to give guidance, but i'd guess there are few places that always expected BinaryArray/BinaryBuilder in the linked code and might down_cast, these would need to be adjusted accordingly."
+        },
+        {
+            "created_at": "2022-09-01T14:24:30.296Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17598993) by Arthur Passos (arthurpassos):*\n`[~emkornfield]` I have changed a few places to use LargeBinary/LargeString and also commented out [this type assertion](https://github.com/apache/arrow/blob/master/cpp/src/arrow/array/validate.cc#L301). After that, I am able to read the parquet file. Would a PR that forces the use of LargeBinary/LargeString by default be acceptable? Plus, if you have any tips on how to work around that assertion without commenting it out, that would be great."
+        },
+        {
+            "created_at": "2022-09-01T16:10:25.326Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17599053) by Micah Kornfield (emkornfield):*\n`[~arthurpassos]` awesome, nice work.  IMO, I don't think we can change the default to LargeBinary/LargeString, as you can see based on the assertion there is an expectation that types produced match the schema.   Also for most use-cases they aren't necessary, and require extra memory (and might be less well supported in other implementations).\r\n\r\nI think the right way of approach this is to have an option users can set (maybe one for each type) that will work on two levels:\r\n1.  Translate any non-large types in the schema to their large variants.\r\n2.  Make the changes at the decoder level that you have already done.\r\n\r\nSo we keep the assertion but if users run into this issue we can provide guidance on how to set this."
+        },
+        {
+            "created_at": "2022-09-01T17:13:02.250Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17599082) by Arthur Passos (arthurpassos):*\nI see. That seems like a long journey for a non arrow developer / parquet expert to go through. Given the timeline I am working on, in the short term, I think I'll resort to the first suggestion by `[~willjones127]`. While it doesn't fix the second case, it fixes the one I originally shared. Which makes me curious, why does that fix the Map<String, String> but doesn't fix the one generated by the above script?"
+        },
+        {
+            "created_at": "2022-09-01T18:47:34.127Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17599111) by Micah Kornfield (emkornfield):*\nIts probably a case of different batch sizes.\r\n\r\nsuppose you have 100 rows that take have 3GB of string evenly distributed.  If you try to read all 100 rows it will overflow and create a ChunkedArray.  If you read 50 rows at a time it would be an issue because chunking wouldn't be necessary."
+        },
+        {
+            "created_at": "2022-11-04T21:00:25.137Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17459?focusedCommentId=17629192) by Arthur Passos (arthurpassos):*\nHi `[~willjones127]` . I have implemented your suggestion of GetRecordBatchReader and, at first, things seemed to work as expected. Recently, an issue regarding parquet data has been reported and reverting it to the ReadRowGroup solution seems to address this. This might be a misuse of the arrow library on my side, even though I have read the API docs and it looks correct.\r\n\r\n\u00a0\r\n\r\nMy question is pretty much: should there be difference in the output when using the two APIs?"
+        }
+    ]
+}

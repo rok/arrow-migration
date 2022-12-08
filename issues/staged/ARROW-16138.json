@@ -1,0 +1,44 @@
+{
+    "issue": {
+        "title": "[C++] Improve performance of ExecuteScalarExpression",
+        "body": "***Note**: This issue was originally created as [ARROW-16138](https://issues.apache.org/jira/browse/ARROW-16138). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nOne of the things we want to be able to do in the streaming execution engine is process data in small L2 sized batches.  Based on literature we might like to use batches somewhere in the range of 1k to 16k rows.  In ARROW-16014 we created a benchmark to measure the performance of ExecuteScalarExpression as the size of our batches got smaller.  There are two things we observed:\r\n\r\n \\* Something is causing thread contention.  We should be able to get pretty close to perfect linear speedup when we are evaluating scalar expressions and the batch size fits entirely into L2.  We are not seeing that.\r\n \\* The overhead of ExecuteScalarExpression is too high when processing small batches.  Even when the expression is doing real work (e.g. copies, comparisons) the execution time starts to be dominated by overhead when we have 10k sized batches.",
+        "created_at": "2022-04-07T07:55:32.000Z",
+        "updated_at": "2022-07-12T14:04:28.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-04-07T08:00:00.527Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16138?focusedCommentId=17518666) by Weston Pace (westonpace):*\nSome suggestions I have heard:\r\n\r\n \\* We could separate dispatch from execution, allowing us to \"prepare\" an expression (do all the dispatch work) and then execute the expression many times.\r\n \\* We could avoid allocation for temporary buffers created during scalar execution.  For example, if the expression is x > 0 && x < 20 then we know we will need two boolean temporary arrays in addition to the input array (x) and the output array (boolean).  If we defined a \"max batch size\" then we could preallocate these two temporary arrays once and reuse them for every execution.\r\n \\* In the execution engine we may be able to preallocate the output buffer in some cases.  For example, if we have filter => project then we know the output buffer is only ever going to be used as input to the project.  This means, at plan creation time, we could allocate this filter=>project buffer once (per thread) and then reuse it for every execution.  This would mean we would need some way to pass a preallocated output array to ExecuteScalarExpression."
+        },
+        {
+            "created_at": "2022-04-07T11:58:57.562Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16138?focusedCommentId=17518830) by David Li (lidavidm):*\nHave we profiled to see where the overhead is? (Though I suppose it may not matter, if we just want to get rid of it all.)\r\n\r\nWe may need to do some work to enable more kernels to be able to take advantage of preallocated buffers. Not all currently do and it's not necessarily clear which are which (so even if you could preallocate the output array in ExecuteScalarExpression, the kernel might discard it anyways).\r\n\r\nFor the first suggestion: what is dispatch referring to here? Resolving the kernel? I _thought_ binding an expression also resolved the kernel, I may be wrong"
+        },
+        {
+            "created_at": "2022-04-07T18:21:09.255Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16138?focusedCommentId=17519080) by Weston Pace (westonpace):*\n> Have we profiled to see where the overhead is? (Though I suppose it may not matter, if we just want to get rid of it all.)\r\n\r\nNo, but I do think profiling would be a good idea.  Even if we find the bottleneck is in some \"dispatch\" phase that we can get rid of it would be good to prove that first before we start throwing solutions at it.  Mostly I was jotting these ideas down before I forget them.  `[~zagto]` is planning on looking into this further.\r\n\r\n> We may need to do some work to enable more kernels to be able to take advantage of preallocated buffers.\r\n> Not all currently do and it's not necessarily clear which are which (so even if you could preallocate the output\r\n> array in ExecuteScalarExpression, the kernel might discard it anyways).\r\n\r\nGood point.  Some kernels will never support preallocation I think too.  For example, if we are dealing with any variable length arrays like strings we won't necessarily know a \"max buffer size\" even if we know a \"max batch size\".\r\n\r\n> For the first suggestion: what is dispatch referring to here? Resolving the kernel? I thought binding an expression also resolved the kernel, I may be wrong\r\n\r\nThe benchmark was running a bound expression.  However, I will admit that I have almost no idea how this process works :).  It's possible that there is nothing wrong with the dispatch mechanism itself and something related to the individual kernel execution.  We did try several different expressions in the benchmark.\r\n\r\n"
+        },
+        {
+            "created_at": "2022-04-08T22:54:45.073Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16138?focusedCommentId=17519837) by Tobias Zagorni (zagto):*\nThe thread contention in small batch sizes are largely caused by copying/destructing shared pointers to DataType. Different threads constantly changing the refcount of the Int64 DataType seems to causes a lot of inter-core syncronization\r\n\r\n![Flamegraph.png](https://issues.apache.org/jira/secure/attachment/13042181/Flamegraph.png)"
+        },
+        {
+            "created_at": "2022-04-09T03:17:30.892Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16138?focusedCommentId=17519865) by Weston Pace (westonpace):*\nAh, I suppose that makes sense.  Might be a bit of an interesting one to fix up.  I'll create a sub-task to address this issue (maybe it will be the only issue, who knows)"
+        },
+        {
+            "created_at": "2022-04-09T03:26:30.780Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16138?focusedCommentId=17519866) by Weston Pace (westonpace):*\nI've created ARROW-16161 to discuss the shared_ptr copy overhead issue."
+        },
+        {
+            "created_at": "2022-07-12T14:04:28.942Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16138?focusedCommentId=17565644) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

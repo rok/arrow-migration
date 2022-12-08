@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[C++][Dataset] Refactor WritePlan to decouple from Fragment/Scan/Partition classes ",
+        "body": "***Note**: This issue was originally created as [ARROW-8382](https://issues.apache.org/jira/browse/ARROW-8382). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWritePlan should look like the following.\r\n```c++\n\r\nclass ARROW_DS_EXPORT WritePlan {\r\n public:\r\n  /// Execute the WritePlan and return a FileSystemDataset as a result.\r\n Result<FileSystemDataset> Execute(FileSystemDatasetFactory factory);\r\n\r\n protected:\r\n  /// The schema of the Dataset which will be written\r\n  std::shared_ptr<Schema> schema;\r\n\r\n  /// The format into which fragments will be written\r\n  std::shared_ptr<FileFormat> format;\r\n \r\n  using SourceAndReader = std::pair<FIleSource, RecordBatchReader>;\r\n  /// Files to write\r\n  std::vector<SourceAndReader> outputs;\r\n};\r\n```\r\n \\* Refactor FileFormat::Write(FileSource destination, RecordBatchReader), not sure if it should take the output schema, or the RecordBatchReader should be already of the right schema.\r\n \\* Add a class/function that constructs SourceAndReader from Fragments, Partitioning and base path.\r\n \\* Move Write() out FIleSystemDataset into WritePlan. It could take a FileSystemDatasetFactory to recreate the FileSystemDataset. This is a bonus, not a requirement.\r\n \\* Simplify writing routine to avoid the PathTree directory structure, it shouldn't be more complex than `for task in write_tasks: task()`. Not path construction should be there.\r\n \\* Move the logic of dropping columns or any filtering into a custom RecordBatchReader.\r\n\r\nThe effects are:\r\n \\* Simplified WritePlan execution, abstracted away from path construction, and can write to multiple FileSystem and/or Buffers since it doesn't construct the FileSource.\r\n \\* By the virtue of using RecordBatchReader instead of Fragment, it isn't tied to writing from Fragment, it can take any construct that yields a RecordBatchReader. It also means that WritePlan doesn't have to know about any Scan related classes.\r\n \\* Writing can be done with or without partitioning, this logic is given to whomever generates the SourceAndReader list.\r\n \\* Should be simpler to test.",
+        "created_at": "2020-04-09T14:04:48.000Z",
+        "updated_at": "2021-07-26T14:20:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-07-26T14:20:40.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-04-09T22:03:40.767Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8382?focusedCommentId=17080021) by Ben Kietzman (bkietz):*\nDecoupling paths and partition information seems worthwhile but IIUC this design would require that partition expressions be serialized to the FileSource then re-parsed by the FileDatasetFactory before constructing the final FileDataset in Execute(). Roundtripping through strings like this seems questionable and represents unnecessary work.\r\n"
+        },
+        {
+            "created_at": "2020-04-11T03:51:06.885Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8382?focusedCommentId=17081130) by Francois Saint-Jacques (fsaintjacques):*\nThe end goal of this is to write data to disk to re-use it afterward, very likely in a different process. The act of transcoding one dataset to another (either for a format or shape) is a rare event, it will be done once per dataset. When the data is transcoded to a new format (say parquet or ipc), the new dataset is always used. In cases of data analysis, this often means creating a new process and thus the DatasetFactory will be used to open/read. \r\n\r\nWe should use DatasetFactory because that's what the user is going to use once the data is written to disk.  Parsing strings is negligible and I'll gladly take that if it means a simpler API that will reflect the user experience.\r\n\r\nAnd finally, this is only relevant if the data is partitioned with some logic. When the dataset is the result of a query, the written data is just partitioned for sharding/balancing where rows are randomly and uniformly assigned to partition just to \"shard\" the data. In such cases, the partition is almost never going to be added as a column since it doesn't yield any semantic value. The writer should definitively be optimized for this case."
+        }
+    ]
+}

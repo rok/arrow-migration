@@ -1,0 +1,46 @@
+{
+    "issue": {
+        "title": "[C++][Parquet][Python] List<scalar type> columns read broken with 0.15.0",
+        "body": "***Note**: This issue was originally created as [ARROW-6844](https://issues.apache.org/jira/browse/ARROW-6844). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nColumns of type `array<primitive type>` (such as `array<int32>`, `array<int64>`...) are not readable anymore using `pyarrow == 0.15.0` (but were with `pyarrow == 0.14.1`) when the original writer of the parquet file is `parquet-mr 1.9.1`.\r\n\r\n```Java\n\r\nimport pyarrow.parquet as pq\r\n\r\npf = pq.ParquetFile('sample.gz.parquet')\r\n\r\nprint(pf.read(columns=['profile_ids']))\r\n```\r\n\r\nwith 0.14.1:\r\n\r\n```Java\n\r\npyarrow.Table\r\nprofile_ids: list<element: int64>\r\n child 0, element: int64\r\n\r\n...\r\n```\r\n\r\nwith 0.15.0:\r\n\r\n```Java\n\r\nTraceback (most recent call last):\r\n File \"<string>\", line 1, in <module>\r\n File \"/Library/Frameworks/Python.framework/Versions/3.6/lib/python3.6/site-packages/pyarrow/parquet.py\", line 253, in read\r\n use_threads=use_threads)\r\n File \"pyarrow/_parquet.pyx\", line 1131, in pyarrow._parquet.ParquetReader.read_all\r\n File \"pyarrow/error.pxi\", line 78, in pyarrow.lib.check_status\r\npyarrow.lib.ArrowInvalid: Column data for field 0 with type list<item: int64> is inconsistent with schema list<element: int64>\r\n```\r\n\r\nI've tested parquet files coming from multiple tables (with various schemas) created with `parquet-mr`, couldn't read any `array<primitive type>` column anymore.\r\n\r\n\u00a0\r\n\r\nI _think_ the bug was introduced with\u00a0[this commit\\|[https://github.com/apache/arrow/commit/06fd2da5e8e71b660e6eea4b7702ca175e31f3f5]].\r\n\r\nI think the root of the issue comes from the fact that `parquet-mr` writes the inner struct name as `\"element\"` by default (see [here\\|[https://github.com/apache/parquet-mr/blob/b4198be200e7e2df82bc9a18d54c8cd16aa156ac/parquet-column/src/main/java/org/apache/parquet/schema/ConversionPatterns.java#L33]]), whereas `parquet-cpp` (or `pyarrow`?) assumes `\"item\"` (see for example [this test\\|[https://github.com/apache/arrow/blob/c805b5fadb548925c915e0e130d6ed03c95d1398/python/pyarrow/tests/test_schema.py#L74]]). The round-tripping tests write/read in pyarrow only obviously won't catch this.\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2019-10-10T04:44:23.000Z",
+        "updated_at": "2019-10-18T22:10:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-10-15T17:19:34.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-10T14:41:51.189Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6844?focusedCommentId=16948665) by Joris Van den Bossche (jorisvandenbossche):*\nThanks for reporting the issue! That seems a correct analysis.\r\nCould you provide a small sample file for testing?\r\n\r\ncc `[~wesm]`"
+        },
+        {
+            "created_at": "2019-10-10T15:07:06.797Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6844?focusedCommentId=16948680) by Benoit Rostykus (brostykus):*\nSure. Here is a sample parquet file, generated with `parquet-mr` through Spark the following way:\r\n\r\n```Java\n\r\n\r\nval data = Seq(\r\n\u00a0 Row(Array(null, 2.3f, 1.5f, 8.8f, 13.3f), Array(10.0f, null)),\r\n\u00a0 Row(Array(null, null, 3.0f, 4.1f, 2.2f), Array(null, 0.0f)),\r\n\u00a0 Row(Array(-2.5f, null, 1.3f, 5.7f, 0.8f), Array(2.2f, null, 7.8f))\r\n)\r\n\r\nval schema = StructType(\r\n\u00a0 StructField(\"foo\", ArrayType(FloatType, containsNull = true), true) ::\r\n\u00a0 StructField(\"bar\", ArrayType(FloatType, containsNull = true), true) :: Nil\r\n)\r\n\r\nval df = spark.createDataFrame(\r\n\u00a0 spark.sparkContext.parallelize(data),\r\n schema)\r\n\r\n```\r\n\r\n[dbg_sample.gz.parquet](dbg_sample.gz.parquet)"
+        },
+        {
+            "created_at": "2019-10-10T15:29:39.482Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6844?focusedCommentId=16948692) by Benoit Rostykus (brostykus):*\nSorry, I had a bad implicit type cast in the previous example.\r\n\r\nHere is a correct one\u00a0[dbg_sample2.gz.parquet](dbg_sample2.gz.parquet)\r\n```java\n\r\n val someData = Seq(\r\n   Row(Array(null, 1, 2, 3), Array(10.0f, null)),\r\n   Row(Array(null, null, 4), Array(null, 0.0f)),\r\n   Row(Array(-7, null, 1), Array(2.2f, null, 7.8f))\r\n)\r\n\r\nval schema = StructType(\r\n   StructField(\"foo\", ArrayType(IntegerType, containsNull = true), true) ::\r\n   StructField(\"bar\", ArrayType(FloatType, containsNull = true), true) :: Nil\r\n)\r\n\r\nval df = spark.createDataFrame(\r\n spark.sparkContext.parallelize(someData),\r\n schema)\n```\r\n\u00a0\r\n\r\nWith `0.14.1`:\r\n```java\n\r\n pyarrow.Table\r\nfoo: list<element: int32>\r\n\u00a0 child 0, element: int32\r\nbar: list<element: float>\r\n\u00a0 child 0, element: float\n```"
+        },
+        {
+            "created_at": "2019-10-10T20:25:12.694Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6844?focusedCommentId=16948924) by Benoit Rostykus (brostykus):*\nThe\u00a0**parquet-reader**\u00a0tool compiled against current **master**\u00a0has no issue with the file:\r\n```java\n\r\n./parquet-reader dbg_sample2.gz.parquet\r\nFile Name: dbg_sample2.gz.parquet\r\nVersion: 1.0\r\nCreated By: parquet-mr version 1.9.1-nflx-22 (build ca1a5e0e4cfb2a4ebf4d083493b950bf9557ef3b)\r\nTotal rows: 3\r\nNumber of RowGroups: 1\r\nNumber of Real Columns: 2\r\nNumber of Columns: 2\r\nNumber of Selected Columns: 2\r\nColumn 0: foo.list.element (INT32)\r\nColumn 1: bar.list.element (FLOAT)\r\n--- Row Group: 0 ---\r\n--- Total Bytes: 159 ---\r\n--- Rows: 3 ---\r\nColumn 0\r\n  Values: 10, Null Values: 4, Distinct Values: 0\r\n  Max: 4, Min: -7\r\n  Compression: GZIP, Encodings: PLAIN RLE\r\n  Uncompressed Size: 85, Compressed Size: 95\r\nColumn 1\r\n  Values: 7, Null Values: 3, Distinct Values: 0\r\n  Max: 10, Min: 0\r\n  Compression: GZIP, Encodings: PLAIN RLE\r\n  Uncompressed Size: 74, Compressed Size: 89\r\n--- Values ---\r\nelement                       |element                       |\r\n-7                            |2.200000                      |\r\nNULL                          |NULL                          |\r\n1                             |7.800000                      |\r\nNULL                          |NULL                          |\r\nNULL                          |0.000000                      |\r\n4                             |10.000000                     |\r\nNULL                          |NULL                          |\r\n1                             |\r\n2                             |\r\n3                             |\n```\r\nSo the issue might be in **pyarrow**"
+        },
+        {
+            "created_at": "2019-10-10T22:12:06.807Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6844?focusedCommentId=16948972) by Wes McKinney (wesm):*\nThanks for the test file. Should be adequate to help resolve the issue"
+        },
+        {
+            "created_at": "2019-10-15T17:19:34.283Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6844?focusedCommentId=16952135) by Wes McKinney (wesm):*\nIssue resolved by pull request 5658\n<https://github.com/apache/arrow/pull/5658>"
+        },
+        {
+            "created_at": "2019-10-15T19:48:21.664Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6844?focusedCommentId=16952248) by Benoit Rostykus (brostykus):*\nThank you for the quick fix!"
+        }
+    ]
+}

@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[R] Implement bindings for lubridate calculation functions",
+        "body": "***Note**: This issue was originally created as [ARROW-14820](https://issues.apache.org/jira/browse/ARROW-14820). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n",
+        "created_at": "2021-11-24T12:14:04.000Z",
+        "updated_at": "2022-06-16T13:47:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-06-16T13:47:54.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-11T16:12:35.643Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14820?focusedCommentId=17491015) by SHIMA Tatsuya (eitsupi):*\nHi, I was wondering if it was possible to convert timestamp to date in Arrow's dplyr pipeline.\r\n\r\nCurrently, the following seems to work the same `as.Date` and `as_date`, but it does not be able to set a timezone.\r\nIt would be great if bindings for these functions could be provided.\r\n\r\n<https://lubridate.tidyverse.org/reference/as_date.html>\r\n```r\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\nlibrary(lubridate)\r\n#>\r\n#> Attaching package: 'lubridate'\r\n#> The following objects are masked from 'package:base':\r\n#>\r\n#> \u00a0 \u00a0 date, intersect, setdiff, union\r\n\r\ndf <- tibble::tibble(\r\n\u00a0 col1 = lubridate::as_datetime(\"2010-08-03 00:50:50\", tz = \"Europe/London\"),\r\n)\r\n\r\ndf |>\r\n\u00a0 arrow_table() |>\r\n\u00a0 mutate(\r\n\u00a0 \u00a0 col2 = cast(cast(col1, arrow::timestamp()), arrow::date32()), # lubridate::as_date()\r\n\u00a0 \u00a0 col3 = cast(col1, arrow::date32()) # as.Date()\r\n\u00a0 ) |>\r\n\u00a0 collect()\r\n#> # A tibble: 1 \u00d7 3\r\n#> \u00a0 col1 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0col2 \u00a0 \u00a0 \u00a0 col3\r\n#> \u00a0 <dttm> \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0<date> \u00a0 \u00a0 <date>\r\n#> 1 2010-08-03 00:50:50 2010-08-02 2010-08-03\r\n```"
+        },
+        {
+            "created_at": "2022-02-25T09:51:23.218Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14820?focusedCommentId=17498015) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nHi `[~eitsupi]`,\r\n\r\nThanks for filing the ticket. Once [PR 12433](https://github.com/apache/arrow/pull/12433) is merged you will be able to use `date()` to extract the date component of a timestamp. We aim to cover\u00a0`as.Date()` as part of the \u00a0same pull request.\r\n\r\nThe snippet of code below should work once we merge the PR. Please note `base::as.Date()` by default assumes you want the date in UTC :\r\n```r\n\r\nlibrary(dplyr)\r\nlibrary(lubridate)\r\nlibrary(arrow)\r\n\r\ndf <- tibble::tibble(\r\n  col1 = lubridate::as_datetime(\"2010-08-03 00:50:50\", tz = \"Europe/London\"),\r\n)\r\n\r\n# lubridate\r\ndf %>% \r\n  mutate(x = date(col1),\r\n         y = as.Date(col1))\r\n#> # A tibble: 1 \u00d7 3\r\n#>   col1                x          y         \r\n#>   <dttm>              <date>     <date>    \r\n#> 1 2010-08-03 00:50:50 2010-08-03 2010-08-02\r\n\r\n# arrow\r\ndf %>% \r\n  arrow_table() %>% \r\n  mutate(x = date(col1),\r\n         y = as.Date(col1)) %>% \r\n  collect()\r\n#> # A tibble: 1 \u00d7 3\r\n#>   col1                x          y         \r\n#>   <dttm>              <date>     <date>    \r\n#> 1 2010-08-03 00:50:50 2010-08-03 2010-08-02\r\n```"
+        },
+        {
+            "created_at": "2022-02-26T15:57:04.971Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14820?focusedCommentId=17498465) by SHIMA Tatsuya (eitsupi):*\nThank you for working on this, I wasn't aware of the function `date()`, but I think this could satisfy a lot of use cases once it is implemented.\r\n\r\nI also think that if the usage of `cast()` is documented as I have written, users will be able to use `cast()` to achieve more complex cases."
+        },
+        {
+            "created_at": "2022-03-01T13:08:59.388Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14820?focusedCommentId=17499522) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\n`[~eitsupi]` \u00a0I opened a separate ticket (ARROW-15814) to improve the documentation for `{}cast(){`}. I would also like to encourage you to contribute if you think that's something you might want to do.\u00a0\r\nOn the timezone aspect, that is slightly trickier, Arrow currently transforms the timestamp into UTC and any timezone is store as metadata only. As such, casting with a different timezone (as the base R behaviour) is not immediately possible. There are several\u00a0tickets (for example, ARROW-15806) looking into this and hopefully this will be solved sometime in the near(ish) future."
+        }
+    ]
+}

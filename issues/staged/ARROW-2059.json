@@ -1,0 +1,81 @@
+{
+    "issue": {
+        "title": "[Python] Possible performance regression in Feather read/write path",
+        "body": "***Note**: This issue was originally created as [ARROW-2059](https://issues.apache.org/jira/browse/ARROW-2059). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSee discussion in https://github.com/wesm/feather/issues/329. Needs to be investigated",
+        "created_at": "2018-01-30T19:58:08.000Z",
+        "updated_at": "2018-08-19T09:24:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-07-27T01:45:55.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-02-05T04:07:11.105Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2059?focusedCommentId=16352023) by Jingyuan Wang (alphalfalfa):*\nHere is what I've done. I simple repeated the 1M rows and created a 30M and 100M testing csv files and try to repeat the process of reading from csv, writing as feather and reading from feather and time each part. I also repeated the measurement 10 times for the four combination of (python-2.7, python-3.6) x (feather-format-0.3.1, feather-format-0.4.0).\r\n\r\nProcessing 100M rows files all failed on my laptop (16GB memory) except for the version of python2.7 and feather-format-0.3.1.\r\n\r\nThe measurement of 1M rows is as following:\u00a0\r\n\n|python version|feather version|1. rows|write feather|read feather|\r|\n|-|-|-|-|-|-|\n|2.7|0.3.1|1M|0.06216781139|0.05903599262|\r|\n|2.7|0.4.0|1M|0.1335380793|0.04576666355|\r|\n|3.6|0.3.1|1M|0.07768514156|0.09041910172|\r|\n|3.6|0.4.0|1M|0.08690385818|0.05801310539|\r<br>\r<br>The measuremnt of 30M rows is as following:\r|\n|python version|feather version|1. rows|write feather|read feather|\r|\n|2.7|0.3.1|30M|1.747310066|2.35606482|\r|\n|2.7|0.4.0|30M|3.5653723|1.934461188|\r|\n|3.6|0.3.1|30M|2.407458949|2.811572456|\r|\n|3.6|0.4.0|30M|2.925034189|1.852504301|\r<br>\r<br>From both tables, performance of writing to feather did degrade from 0.3.1 to 0.4.0 with python2 being more dramatically. Reading feather files were actually faster with the newer feather version.\r<br>\r<br>One other thing, I noticed that feather-format-0.3.1 does not even depend on Arrow. So the performance difference is more than the Arrow's version upgrade. And I do think we need some thorough benchmarks for Arrow or do we already have them?|\n"
+        },
+        {
+            "created_at": "2018-02-05T04:09:12.660Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2059?focusedCommentId=16352024) by Jingyuan Wang (alphalfalfa):*\nStack trace of the failure when processing 100M-row data (feather-0.4.0):\r\n\r\n```none\n\r\nTraceback (most recent call last):\r\n  File \"test.py\", line 44, in <module>\r\n    elapsed_ts.append(test(df, i))\r\n  File \"test.py\", line 18, in test\r\n    feather.write_dataframe(df, fthfilename)\r\n  File \"/home/jingyuan/anaconda3/envs/arrow-2059-feather-0.4.0/lib/python3.6/site-packages/pyarrow/feather.py\", line 100, in write_feather\r\n    writer.write(df)\r\n  File \"/home/jingyuan/anaconda3/envs/arrow-2059-feather-0.4.0/lib/python3.6/site-packages/pyarrow/feather.py\", line 80, in write\r\n    batch = RecordBatch.from_pandas(df, preserve_index=False)\r\n  File \"table.pxi\", line 705, in pyarrow.lib.RecordBatch.from_pandas\r\n  File \"table.pxi\", line 739, in pyarrow.lib.RecordBatch.from_arrays\r\nTypeError: Cannot convert pyarrow.lib.ChunkedArray to pyarrow.lib.Array\r\n```\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-02-05T04:10:41.080Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2059?focusedCommentId=16352025) by Jingyuan Wang (alphalfalfa):*\nStack trace of the failure when processing 100M-row data (feather-0.3.1):\r\n\r\n```none\n\r\nUnicodeDecodeError: 'utf-8' codec can't decode byte 0xe1 in position 9: invalid continuation byte\r\n\r\nThe above exception was the direct cause of the following exception:\r\n\r\nTraceback (most recent call last):\r\n  File \"test.py\", line 44, in <module>\r\n    elapsed_ts.append(test(df, i))\r\n  File \"test.py\", line 20, in test\r\n    df = feather.read_dataframe(fthfilename)\r\n  File \"/home/jingyuan/anaconda3/envs/arrow-2059-feather-0.3.1/lib/python3.6/site-packages/feather/api.py\", line 93, in read_dataframe\r\n    arr = col.read()\r\nSystemError: <built-in method read of feather.ext.Column object at 0x7f5fdc958a40> returned a result with an error set\r\n```"
+        },
+        {
+            "created_at": "2018-02-05T16:55:36.401Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2059?focusedCommentId=16352638) by Wes McKinney (wesm):*\nThanks `[~alphalfalfa]` \u2013 this suggests that we need to optimize the string handling path (since strings are different in py2 vs py3 this explains why the performance is a lot different). The write failure with the 100M table can't be fixed at the moment (see ARROW-1907) \u2013 as soon as we have R bindings for Arrow (and thus the current iteration of the feather format code) we can fix. "
+        },
+        {
+            "created_at": "2018-07-12T16:25:56.514Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2059?focusedCommentId=16541898) by Antoine Pitrou (apitrou):*\nHere is a profile tree got by exercising the write path on Python 3.6:\r\n```Java\n\r\n   - arrow::py::NumPyConverter::ConvertObjectStrings()\r\n      - 80,27% arrow::py::AppendObjectStrings(tagPyArrayObject*, tagPyArrayObject*, long, bool, arrow::StringBuilder*, long*, bool*)\r\n         - 50,74% arrow::py::internal::BuilderAppend(arrow::StringBuilder*, _object*, bool, bool*)\r\n            - 24,95% arrow::BinaryBuilder::Append(unsigned char const*, int)\r\n                 7,43% arrow::BinaryBuilder::AppendNextOffset()\r\n               + 6,28% arrow::BufferBuilder::Resize(long, bool)\r\n                 2,30% __memcpy_avx_unaligned\r\n                 0,71% arrow::ArrayBuilder::Reserve(long)\r\n              6,16% PyUnicode_AsUTF8AndSize\r\n            + 4,37% PyErr_Occurred\r\n         - 16,70% arrow::py::internal::PandasObjectIsNull(_object*)\r\n            - 8,29% arrow::py::internal::PyDecimal_Check(_object*)\r\n                 PyType_IsSubtype\r\n            - 4,59% arrow::py::internal::PyFloat_IsNaN(_object*)\r\n                 PyType_IsSubtype\r\n           2,51% PyArray_MultiplyList\r\n           2,41% PyType_IsSubtype\r\n      + 1,57% arrow::ArrayBuilder::Finish(std::shared_ptr<arrow::Array>*)\r\n```\r\n"
+        },
+        {
+            "created_at": "2018-07-12T16:37:41.882Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2059?focusedCommentId=16541910) by Wes McKinney (wesm):*\nThanks `[~pitrou]`, do you have some tricks for creating profiles like that (I have made FlameGraphs but not much more)?"
+        },
+        {
+            "created_at": "2018-07-12T16:45:33.660Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2059?focusedCommentId=16541928) by Antoine Pitrou (apitrou):*\nI use Linux \"perf\" on a benchmark script than ran \"perf report\" to get call trees and then manually fed some paste of that into \"c++filt\".\r\n\r\nThe most accessible resource I've found about the \"perf\" utility is http://www.brendangregg.com/perf.html"
+        },
+        {
+            "created_at": "2018-07-16T16:10:17.343Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2059?focusedCommentId=16545417) by Antoine Pitrou (apitrou):*\nThere doesn't seem to be anything obvious left to do here. Most of the time taken here is converting strings around (in Python 3, that means bytes to unicode, or the reverse). There's probably some overhead elsewhere, but nothing seems to stand out."
+        },
+        {
+            "created_at": "2018-07-16T17:00:04.573Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2059?focusedCommentId=16545484) by Wes McKinney (wesm):*\nThanks `[~pitrou]` for investigating. I agree there doesn't seem much more to do. I'll review the patch you opened and then resolve this once that's merged (I will quickly check the write perf to see what things look like on my end after that)."
+        },
+        {
+            "created_at": "2018-07-16T17:02:33.429Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2059?focusedCommentId=16545492) by Antoine Pitrou (apitrou):*\nThe patch was already merged actually (see <https://github.com/apache/arrow/pull/2258> )."
+        },
+        {
+            "created_at": "2018-07-16T17:07:09.561Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2059?focusedCommentId=16545499) by Wes McKinney (wesm):*\nOh great, thanks =) Well I'll run some perf tests locally, post the results here if anything interesting, and then resolve"
+        },
+        {
+            "created_at": "2018-07-27T01:45:55.853Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2059?focusedCommentId=16559132) by Wes McKinney (wesm):*\nI ran some benchmarks locally (quad-core Xeon E3-1535M, Ubuntu 14.04). There is still a slight ~5-10% write performance regression, but reading is faster.\r\n\r\nFeather 0.3.1:\r\n\r\n```Java\n\r\n# WRITE\r\n$ python bench.py\r\nElapsed: 15.497231721878052 seconds\r\nAverage: 1.549723172187805\r\n\r\n# READ\r\n$ python bench.py \r\nElapsed: 9.88158106803894 seconds\r\nAverage: 0.988158106803894\r\n```\r\n\r\nFeather 0.4.0\r\n\r\n```Java\n\r\n# WRITE\r\n$ python bench.py\r\nElapsed: 16.36524486541748 seconds\r\nAverage: 1.636524486541748\r\n\r\n# READ\r\n$ python bench.py \r\nElapsed: 7.4859395027160645 seconds\r\nAverage: 0.7485939502716065\r\n```\r\n\r\nHere's the benchmarking script so people can run their own experiments. It would be useful to look at the perf output more closely and see what else we can do to make things faster:\r\n\r\n```Java\n\r\nimport io\r\nimport pickle\r\nimport time\r\n\r\nimport feather\r\nimport pandas as pd\r\n\r\n\r\ndef generate_example():\r\n    buf = io.StringIO(\"\"\"07300003030539,42198997,-1,2016-10-03T13:14:22.326Z\r\n    41130003053286,42224636,-1,2016-09-20T19:31:51.196Z\r\n    \"\"\")\r\n\r\n    table = pd.read_csv(buf, header=None)\r\n    table = pd.concat([table] * 5000, axis=0, ignore_index=True)\r\n    table = pd.concat([table] * 1000, axis=0, ignore_index=True)\r\n\r\n    with open('example.pkl', 'wb') as f:\r\n        pickle.dump(table, f)\r\n\r\n\r\ndef _get_time():\r\n    return time.clock_gettime(time.CLOCK_REALTIME)\r\n\r\n\r\nclass Timer:\r\n\r\n    def __init__(self, iterations):\r\n        self.start_time = _get_time()\r\n        self.iterations = iterations\r\n\r\n    def __enter__(self):\r\n        return self\r\n\r\n    def __exit__(self, exc_type, exc_value, tb):\r\n        elapsed = _get_time() - self.start_time\r\n        print(\"Elapsed: {0} seconds\\nAverage: {1}\"\r\n              .format(elapsed, elapsed / self.iterations))\r\n\r\n\r\ndef feather_write_bench(iterations=10):\r\n    with open('example.pkl', 'rb') as f:\r\n        data = pickle.load(f)\r\n\r\n    with Timer(iterations):\r\n        for i in range(iterations):\r\n            feather.write_dataframe(data, 'example.fth')\r\n\r\n\r\ndef feather_read_bench(iterations=10):\r\n    import gc\r\n    gc.disable()\r\n    with Timer(iterations):\r\n        for i in range(iterations):\r\n            feather.read_dataframe('example.fth')\r\n    gc.enable()\r\n\r\n\r\n# generate_example()\r\n# feather_write_bench()\r\n# feather_read_bench()\r\n\r\n```\r\n\r\nTo use\r\n\r\n- Run with generate_example() to make the data file\n- Run write benchmarks with feather_write_bench\n- Run read benchmarks with feather_read_bench"
+        },
+        {
+            "created_at": "2018-08-03T19:30:18.769Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2059?focusedCommentId=16568657) by Wes McKinney (wesm):*\nI just attached a FlameGraph (perf.svg) created after the work in ARROW-2814. \r\n\r\nSome notes:\r\n\r\n- Buffer trimming in BinaryBuilder::FinishInternal is taking up a good amount of time\n- perf isn't recording what symbols are under the libpthread calls; that would be interesting to know. "
+        },
+        {
+            "created_at": "2018-08-06T09:26:13.790Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2059?focusedCommentId=16569934) by Antoine Pitrou (apitrou):*\nIf you get a lot of unknown symbols in the call stacks, my experience is that you may try to change the way call stacks are recorded by \"`perf record`\". On my machine, for example, only \"`--call-graph=dwarf`\" gives good results."
+        },
+        {
+            "created_at": "2018-08-06T23:15:26.225Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2059?focusedCommentId=16570906) by Wes McKinney (wesm):*\nAh great, I will try that out"
+        },
+        {
+            "created_at": "2018-08-19T09:24:25.348Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2059?focusedCommentId=16585094) by Uwe Korn (uwe):*\nAlso adding `-fno-omit-frame-pointer` makes the stacks much more clearer. But this sadly comes at a bit of overhead, so one needs to be careful to make final measurements without this flag again."
+        }
+    ]
+}

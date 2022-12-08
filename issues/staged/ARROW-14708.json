@@ -1,0 +1,27 @@
+{
+    "issue": {
+        "title": "[C++] Can't link to installed arrow_flight_static due to missing symbols in libarrow_bundled_dependencies",
+        "body": "***Note**: This issue was originally created as [ARROW-14708](https://issues.apache.org/jira/browse/ARROW-14708). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nReported by Radu on the [mailing list](https://lists.apache.org/thread/6os2v92h6msvxqtd4f9bpb3kdgovmklm).\r\n\r\nI can reproduce the symptoms on Ubuntu 16.04, using the system compiler (GCC 7.5.0). CMake command:\r\n```\n\r\ncmake ../cpp -DClangTools_PATH=/home/lidavidm/Code/clang/bin -DCMAKE_BUILD_TYPE=Debug -GNinja -DCMAKE_INSTALL_PREFIX=(pwd)/../install -DCMAKE_INSTALL_LIBDIR=lib -DARROW_USE_GLOG=ON -DARROW_PARQUET=ON -DARROW_WITH_SNAPPY=ON -DARROW_DATASET=ON -DARROW_CSV=ON -DARROW_JSON=ON -DARROW_PYTHON=ON -DARROW_WITH_LZ4=ON -DARROW_FLIGHT=ON -DARROW_DEPENDENCY_SOURCE=BUNDLED \n```\r\nCMakeLists.txt:\r\n```\n\r\ncmake_minimum_required(VERSION 3.18)\r\n\r\nproject(ArrowMinimalExample)\r\n\r\nfind_package(Arrow REQUIRED)\r\nfind_package(ArrowFlight REQUIRED)\r\n\r\nset(CMAKE_CXX_STANDARD 11)\r\nset(CMAKE_BUILD_TYPE Release)\r\n\r\nmessage(STATUS \"Arrow version: ${ARROW_VERSION}\")\r\nmessage(STATUS \"Arrow SO version: ${ARROW_FULL_SO_VERSION}\")\r\n\r\nadd_executable(arrow_example example.cc)\r\n\r\nset(THREADS_PREFER_PTHREAD_FLAG ON)\r\nfind_package(Threads REQUIRED)\r\ntarget_link_libraries(arrow_example PRIVATE arrow_static arrow_flight_static Threads::Threads)\n```\r\n\u00a0\r\nexample.cc:\r\n```cpp\n\r\n#include <arrow/flight/api.h>\r\n#include <arrow/status.h>\r\n\r\n#include <iostream>\r\n\r\nnamespace flight = ::arrow::flight;\r\n\r\nusing arrow::Status;\r\n\r\nnamespace {\r\n\r\n// Flight service\r\nclass SimpleFlightServer : public flight::FlightServerBase {};\r\n\r\nStatus RunMain(int argc, char** argv) {\r\n  std::unique_ptr<flight::FlightServerBase> server;\r\n  server.reset(new SimpleFlightServer());\r\n\r\n  flight::Location bind_location;\r\n  ARROW_RETURN_NOT_OK(flight::Location::ForGrpcTcp(\"0.0.0.0\", 3003, &bind_location));\r\n  flight::FlightServerOptions options(bind_location);\r\n\r\n  ARROW_RETURN_NOT_OK(server->Init(options));\r\n  ARROW_RETURN_NOT_OK(server->SetShutdownOnSignals({SIGTERM}));\r\n  ARROW_RETURN_NOT_OK(server->Serve());\r\n\r\n  return Status::OK();\r\n}\r\n\r\n}  // namespace\r\n\r\nint main(int argc, char** argv) {\r\n  Status st = RunMain(argc, argv);\r\n  if (!st.ok()) {\r\n    std::cerr << st << std::endl;\r\n    return 1;\r\n  }\r\n  return 0;\r\n}\r\n```\r\nWhen building, this results in a long string of linker errors.\r\n\r\nLink command:\r\n```\n\r\n/usr/bin/c++ -O3 -DNDEBUG \u00a0CMakeFiles/arrow_example.dir/example.cc.o -o arrow_example \u00a0/home/lidavidm/Code/upstream/arrow-deps/install/lib/libarrow.a \u00a0/home/lidavidm/Code/upstream/arrow-deps/install/lib/libarrow_flight.a \u00a0-pthread \u00a0/usr/lib/x86_64-linux-gnu/libssl.so \u00a0/usr/lib/x86_64-linux-gnu/libcrypto.so \u00a0-lrt \u00a0/home/lidavidm/Code/upstream/arrow-deps/install/lib/libarrow_bundled_dependencies.a \n```\r\nAt first glance:\r\n \\* Some Abseil libraries aren't bundled, e.g. str_format_internal\r\n \\* Even when bundled, they don't actually make it into the final static archive! (confirmed with nm) Playing around with ar myself, it works fine if I just combine a subset of the libraries, but with all the libraries, we end up with undefined symbols.\r\n \\* The dependencies aren't ordered correctly - OpenSSL needs to come after `libarrow_bundled_dependencies.a` not before.",
+        "created_at": "2021-11-13T19:54:52.000Z",
+        "updated_at": "2022-07-27T23:53:35.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: FlightRPC",
+            "Component: Packaging",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-03-08T23:26:03.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-12-08T11:37:02.688Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14708?focusedCommentId=17455183) by Rok Mihevc (rokm):*\n`[~coryan]` Is there a \"right way\" to discover missing abseil dependencies given our setup?"
+        },
+        {
+            "created_at": "2022-03-08T23:26:03.505Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14708?focusedCommentId=17503223) by Kouhei Sutou (kou):*\nIssue resolved by pull request 11889\n<https://github.com/apache/arrow/pull/11889>"
+        }
+    ]
+}

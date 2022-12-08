@@ -1,0 +1,81 @@
+{
+    "issue": {
+        "title": "[C++] Bundled external project for openssl",
+        "body": "***Note**: This issue was originally created as [ARROW-10138](https://issues.apache.org/jira/browse/ARROW-10138). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\naws-sdk-cpp requires it and it seems easy enough to build. Arguably you **should** manage openssl as a system package but that's not always feasible for all of our packages, and the manylinux wheel scripts already build and bundle openssl.",
+        "created_at": "2020-09-29T21:50:52.000Z",
+        "updated_at": "2022-04-08T13:13:28.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Packaging",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-30T11:58:32.297Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10138?focusedCommentId=17204665) by Antoine Pitrou (apitrou):*\nThat sounds frankly like a very bad idea for two reasons:\r\n1) OpenSSL is security-critical and we are not equipped to ship upgrades properly currently\r\n2) OpenSSL can be used by the application and/or different parts of Arrow (e.g. through gRPC, as a dynamic library), and then we can get symbol clashes or ABI clashes between different versions of OpenSSL\r\n\r\nSo my vote is strongly -1 on this unless the two points above are adressed. And I expect point 1) to be non-trivial to solve given our current community structure and versioning strategy.\r\n\r\ncc `[~kou]`"
+        },
+        {
+            "created_at": "2020-09-30T15:23:27.613Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10138?focusedCommentId=17204806) by Neal Richardson (npr):*\nAll reasonable concerns `[~apitrou]`, but as you yourself [point out](https://github.com/apache/arrow/pull/8243#issuecomment-697352808), we already do build and bundle openssl in the Python wheels. I'm not proposing that we add bundled openssl to any binary packages we currently ship--I'm proposing that we add a `build_openssl` macro to our cmake so that if (1) you are building the C++ library with some configuration that requires openssl, (2) you don't have openssl on your system, and (3) you have ARROW_DEPENDENCY_SOURCE=AUTO, the build falls back to the bundled openssl build and doesn't fail.\r\n\r\nAs long as that is the purpose, IIUC I don't think your concern #2 is an issue: we won't have symbol clashes because we're only building openssl if openssl isn't found on the system. And if we aren't adding bundled openssl to any of our packages, we don't have upgrades to ship (concern #1). Moreover, if the externalproject always installs latest openssl, not a pinned version, then even a local Arrow build from source with bundled openssl is upgraded by just rebuilding Arrow."
+        },
+        {
+            "created_at": "2020-09-30T15:43:37.026Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10138?focusedCommentId=17204828) by Antoine Pitrou (apitrou):*\nMy concern is that we don't want to encourage this. Naive users who are not aware of the issues may be hurt quite hard. Forcing people to build it externally themselves is a good way to enforce this."
+        },
+        {
+            "created_at": "2020-09-30T22:26:52.781Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10138?focusedCommentId=17205070) by Kouhei Sutou (kou):*\n`[~npr]` What platforms do you expect to use this feature? R on CentOS?\r\n\r\nI think that we should recommend that users install OpenSSL by package manager instead of building OpenSSL by this feature. If there is no package manager (what platform?), users will use this feature.\r\n\r\nI also think that auto OpenSSL build by `ARROW_DEPENDENCY_SOURCE=AUTO` is dangerous as `[~apitrou]` said. How about reporting how to install OpenSSL by package manager such as `dnf install -y openssl-devel` on CentOS 8 instead of building OpenSSL automatically with `ARROW_DEPENDENCY_SOURCE=AUTO`?"
+        },
+        {
+            "created_at": "2020-09-30T22:30:21.645Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10138?focusedCommentId=17205074) by Wes McKinney (wesm):*\nIt probably makes sense to handle bundled OpenSSL with different default options than the other dependencies \u2013 e.g. if it gets built by the Arrow build system it needs to be something that users really want it to do rather than something that was automatically triggered because openssl wasn't resolved on the system"
+        },
+        {
+            "created_at": "2020-09-30T22:36:30.445Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10138?focusedCommentId=17205077) by Neal Richardson (npr):*\nIt's ok if we don't want dependency source AUTO to build openssl (though that's not really AUTO anymore) but I would at least like the ability to direct cmake to build it bundled. ARROW_DEPENDENCY_SOURCE=BUNDLED or OPENSSL_SOURCE=BUNDLED should be sufficient for that, right?"
+        },
+        {
+            "created_at": "2020-09-30T22:37:49.626Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10138?focusedCommentId=17205079) by Antoine Pitrou (apitrou):*\nWhy is it necessary exactly? How many use cases are there that would benefit from it?"
+        },
+        {
+            "created_at": "2020-09-30T22:50:57.054Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10138?focusedCommentId=17205089) by Neal Richardson (npr):*\nI'm working to enable S3 support in the R package in the 2.0 release. It's essential that it work on Linux. I am literally fighting with this problem right now, where I'm doing a bundled build anyway, have tried to install openssl on the system to work around this, and cmake is still failing to find it: https://github.com/apache/arrow/pull/8304#issuecomment-701675803. I'm already bundling every other dependency, so why must this be an exception?\r\n\r\nWe've worked hard to make our build system \"just work\" for non-Arrow developers without having to fuss around with package managers, and this adds an easily avoidable hurdle. \r\n\r\nWe're already doing this in the pyarrow wheel build scripts, just outside of cmake, so I'm struggling to see why that's ok but this isn't."
+        },
+        {
+            "created_at": "2020-09-30T23:04:42.791Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10138?focusedCommentId=17205096) by Antoine Pitrou (apitrou):*\nAre you linking for a static library version of OpenSSL? The package provides dynamic libraries:\r\nhttps://centos.pkgs.org/7/centos-x86_64/openssl-devel-1.0.2k-19.el7.x86_64.rpm.html\r\n"
+        },
+        {
+            "created_at": "2020-09-30T23:12:07.847Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10138?focusedCommentId=17205124) by Antoine Pitrou (apitrou):*\nSee also:\r\nhttps://centos.pkgs.org/7/centos-x86_64/openssl-static-1.0.2k-19.el7.x86_64.rpm.html"
+        },
+        {
+            "created_at": "2020-09-30T23:13:57.479Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10138?focusedCommentId=17205125) by Neal Richardson (npr):*\nGood questions--exactly the kinds of questions I want to avoid having to ask our R users by offering a bundled solution."
+        },
+        {
+            "created_at": "2020-10-01T21:10:15.034Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10138?focusedCommentId=17205829) by Uwe Korn (uwe):*\nAn interesting view on bundling / not bundling OpemSSL is to look at what happened with the psycopg2 Python package. They did stop building wheels as they contain OpenSSL and advised people to build themselves. As a workaround, they provided the psycopg2-binary package as a renaming.on PyPI to still provide wheels. Nowadays some packages, most prominently Airflow https://github.com/apache/airflow/blob/c74b3ac79a276d8e9fb2b7668762f027c12d0e30/setup.py#L361, depend on exactly this package as user frustration was so large with the one without wheels."
+        },
+        {
+            "created_at": "2020-10-01T22:03:49.944Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10138?focusedCommentId=17205849) by Neal Richardson (npr):*\nI'll also note that the centos 7 system package version, 1.0.2k, is far from latest, and in fact reached end of life at the end of 2019: https://en.wikipedia.org/wiki/OpenSSL\r\n\r\nSo bundling latest openssl sounds like a **more** secure approach to me."
+        },
+        {
+            "created_at": "2020-10-01T22:38:23.370Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10138?focusedCommentId=17205863) by Antoine Pitrou (apitrou):*\nIf CentOS 7 is still maintained, then you can probably trust the packagers to backport desired security patches.\r\nIf CentOS 7 is not maintained anymore, then this is a valid concern.\r\nThat said, what's being opposed here is mainly to expose it in the CMake process."
+        },
+        {
+            "created_at": "2021-03-22T16:32:44.485Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10138?focusedCommentId=17306353) by Antoine Pitrou (apitrou):*\nIs there still a need for this?"
+        },
+        {
+            "created_at": "2021-03-22T16:34:03.627Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10138?focusedCommentId=17306355) by Neal Richardson (npr):*\nI still think it would be nice but it's not a priority."
+        }
+    ]
+}

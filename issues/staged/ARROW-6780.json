@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[C++][Parquet] Support DurationType in writing/reading parquet",
+        "body": "***Note**: This issue was originally created as [ARROW-6780](https://issues.apache.org/jira/browse/ARROW-6780). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently this is not supported:\r\n\r\n```Java\n\r\nIn [37]: table = pa.table({'a': pa.array([1, 2], pa.duration('s'))}) \r\n\r\nIn [39]: table\r\nOut[39]: \r\npyarrow.Table\r\na: duration[s]\r\n\r\nIn [41]: pq.write_table(table, 'test_duration.parquet')\r\n...\r\nArrowNotImplementedError: Unhandled type for Arrow to Parquet schema conversion: duration[s]\r\n```\r\n\r\nThere is no direct mapping to Parquet logical types. There is an INTERVAL type, but this more matches Arrow's  ( YEAR_MONTH or DAY_TIME) interval type. \r\n\r\nBut, those duration values could be stored as just integers, and based on the serialized arrow schema, it could be restored when reading back in.",
+        "created_at": "2019-10-03T13:51:11.000Z",
+        "updated_at": "2022-02-17T23:22:05.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-02-17T15:30:10.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-12-19T15:52:24.575Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6780?focusedCommentId=17252207) by Neville Dipale (nevi_me):*\nHi `[~jorisvandenbossche]`, I'm having a similar issue/dilemma on the Rust side.\r\n\r\nGiven that we serialize the Arrow schema and store it in the Parquet metadata, it becomes easier to write intervals as FixedLenBinary. On the read side, we take guidance from the Arrow schema on which IntervalUnit to use.\r\n\r\nThe problem comes if we read an interval without an Arrow schema. I think it'd be the same with the Duration type.\r\n\r\nI've looked at various JIRAs here, and saw that Pandas stores Intervals as an extension array with nested storage (https://issues.apache.org/jira/browse/ARROW-9078).\r\n\r\nGiven that the Duration type is not composite, how about we store it as an INT32 or INT64 depending on the resolution, then rely on `ARROW::schema` to roundtrip it correctly? CC `[~emkornfield]` \u00a0as you've recently worked on this part of the C++ impl."
+        },
+        {
+            "created_at": "2021-03-01T05:15:28.981Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6780?focusedCommentId=17292621) by Micah Kornfield (emkornfield):*\nFor duration I like int64 + arrow schema for round tripping.\u00a0 we might want to add some extra metadata to indicate it is a duration separately (I need to review the parquet specification to see what is allowed in this area)."
+        },
+        {
+            "created_at": "2021-06-29T18:41:53.397Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6780?focusedCommentId=17371577) by Jorge Leit\u00e3o (jorgecarleitao):*\nI do not think extra metadata is needed: store them as i64, and load them using the arrow schema seems reasonable: the schema contains the time unit, which is sufficient to guarantee a roundtrip."
+        },
+        {
+            "created_at": "2022-01-07T19:18:45.535Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6780?focusedCommentId=17470840) by P (pbotros1234):*\n\u00a0 `[~jorisvandenbossche]` / `[~jorgecarleitao]` / `[~emkornfield]` : any planned movement on this issue? Coming from the Pandas side, it's quite inconvenient having to special-case types handled by Pandas but not by Arrow/Parquet."
+        },
+        {
+            "created_at": "2022-02-17T15:30:10.895Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6780?focusedCommentId=17494012) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 12449\n<https://github.com/apache/arrow/pull/12449>"
+        }
+    ]
+}

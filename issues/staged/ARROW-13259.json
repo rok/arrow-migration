@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[C++] Enable slicing to end of string using \"utf8_slice_codeunits\" when string length unknown or different lengths ",
+        "body": "***Note**: This issue was originally created as [ARROW-13259](https://issues.apache.org/jira/browse/ARROW-13259). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe're currently trying to write bindings from the C++ function \"utf8_slice_codeunits\" to R, specifically trying to replicate the behaviour of R's string::str_sub\r\n\r\nIn both the R and C++ implementations, I can use negative indices to count back from the end of a string (show below in R, but the latter directly invokes the C++ implementation):\r\n\r\n\u00a0\r\n```java\n\r\n# stringr version\r\n> stringr::str_sub(\"Apache Arrow\", -5, -2)\r\n[1] \"Arro\"\r\n\r\n# C++ version\r\n> call_function(\"utf8_slice_codeunits\", Scalar$create(\"Apache Arrow\"), options = list(start=-5L, stop=-1L))\r\nScalar\r\nArro\n```\r\nNote that in the C++ implementation, I have to add 1 to the stop value as the final value is non-inclusive.\r\n\r\nThe problem is when I'm trying to use negative indices to refer to the final values in a string:\r\n\r\n\u00a0\r\n```java\n\r\nstringr version\r\n> stringr::str_sub(\"Apache Arrow\", -5, -1)\r\n[1] \"Arrow\"\r\n\r\n# C++ version\r\n> call_function(\"utf8_slice_codeunits\", Scalar$create(\"Apache Arrow\"), options = list(start=-5L, stop=0L))\r\nScalar\r\n```\r\nThe result is blank as the 'stop' value 0 refers to the start of the string, effective walking backwards, which isn't possible (except via the step argument which I can't get working but I don't think is what I want anyway).\r\n\r\nI've tried to get around this by attempting to write some code that calculates the length of the string and supply that to the stop argument, but it didn't work.\r\n\r\nI do have a possible workaround that involves reversing the string, extracting the substring using inverted values of swapped stop/start values, and then reversing the result, but before I go down that path, I was wondering if there is anything that can (and should! the answer may be a simple \"nope!\") be changed in the C++ code to make it possible to do this a different way?\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2021-07-05T15:04:08.000Z",
+        "updated_at": "2021-07-08T10:39:11.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-07-08T10:39:11.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-07-05T15:12:44.033Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13259?focusedCommentId=17374890) by Maarten Breddels (maartenbreddels):*\nDoes my comment <https://github.com/apache/arrow/pull/9000#issue-544990164>\u00a0help you out?"
+        },
+        {
+            "created_at": "2021-07-05T15:41:55.589Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13259?focusedCommentId=17374907) by Joris Van den Bossche (jorisvandenbossche):*\nTo copy over the practical example:\r\n\r\n```Java\n\r\nIn [24]: import sys\r\n\r\nIn [25]: string = \"Apache Arrow\"\r\n\r\nIn [26]: pc.utf8_slice_codeunits(string, start=-5, stop=sys.maxsize)\r\nOut[26]: <pyarrow.StringScalar: 'Arrow'>\r\n\r\nIn [27]: pc.utf8_slice_codeunits(string, start=-5, stop=-1)\r\nOut[27]: <pyarrow.StringScalar: 'Arro'>\r\n```\r\n\r\nSo \"a large integer\" can be used to indicate \"slice until the end\" (I suppose because you can never have a scalar string with a longer length than that value?). \r\nIn Python this is `sys.maxsize`, in C++ it's `std::numeric_limits<int64_t>::max()`."
+        },
+        {
+            "created_at": "2021-07-05T15:43:53.058Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13259?focusedCommentId=17374908) by David Li (lidavidm):*\nMaybe we could add a SliceOptions::kEnd constant just to make it clear what to do? (Not sure that'd help R?)"
+        },
+        {
+            "created_at": "2021-07-05T16:25:10.468Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13259?focusedCommentId=17374924) by Nicola Crane (thisisnic):*\nThanks very much `[~maartenbreddels]` and `[~jorisvandenbossche]` !\u00a0\r\n\r\n`[~lidavidm]` - nah, it's fine, I can just copy from the Python implementation and chuck in some R code like\r\n```java\n\r\nif(stop==-1)stop = .Machine$integer.max\n```\r\nCC `[~pachamaltese]`"
+        },
+        {
+            "created_at": "2021-07-05T17:16:21.933Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13259?focusedCommentId=17374939) by Mauricio 'Pach\u00e1' Vargas Sep\u00falveda (pachamaltese):*\nthanks a lot, I've edited my PR\r\nsince I'm on 21.04, I'm considering doing my work on a virtual machine until the build is fixed"
+        },
+        {
+            "created_at": "2021-07-08T08:11:46.933Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13259?focusedCommentId=17377194) by Eduardo Ponce (edponce):*\n[In C++ by default `SliceOptions` has the `stop` option set to `std::numeric_limits<int64_t>::max()`](https://github.com/apache/arrow/blob/master/cpp/src/arrow/compute/api_scalar.h#L205-L206). Therefore, if you want to slice to end of string simply omit a value for `stop` or set it to a value >= len(string).\r\n```c++\n\r\n// start=-5, stop=std::numeric_limits<int64_t>::max(), step=1\r\nSliceOptions opts(-5);\r\nauto result = CallFunction(\"utf8_slice_codeunits\", {Datum(\"Apache Arrow\")}, &opts);\r\nif (result.ok()) {\r\n    Datum slice = std::move(result).ValueOrDie();\r\n    // Prints \"Arrow\"\r\n    std::cout << slice.scalar()->ToString() << std::endl;\r\n} else {\r\n    ARROW_LOG(ERROR) << result.status();\r\n}\r\n```\r\n\u00a0\r\n\r\nIn R you should be able to do the following,\r\n```r\n\r\n# C++ version\r\n> call_function(\"utf8_slice_codeunits\", Scalar$create(\"Apache Arrow\"), options = list(start=-5L))\r\n[1] \"Arrow\"\r\n```\r\n\u00a0\r\n\r\n`[~jorisvandenbossche]`\r\n The issue in PyArrow arises because the [interface for `SliceOptions` does not sets the default value for `stop` option (only for `step` option)](https://github.com/apache/arrow/blob/master/python/pyarrow/_compute.pyx#L798).\r\n Therefore, these are required arguments.\r\n```python\n\r\n>>> string = 'Apache Arrow'\r\n>>> pc.utf8_slice_codeunits(string, start=-5, stop=len(string))\r\n<pyarrow.StringScalar: 'Arrow'>\r\n```\r\n\u00a0\r\n\r\n[By providing `sys.maxsize` as default `stop` option](https://github.com/edponce/arrow/blob/ARROW-13259-Enable-slicing-to-end-of-string-using-ut/python/pyarrow/_compute.pyx#L800-L802), we can do the following:\r\n```python\n\r\n>>> string = 'Apache Arrow'\r\n>>> pc.utf8_slice_codeunits(string, start=-5)\r\n<pyarrow.StringScalar: 'Arrow'>\r\n```\r\n\u00a0\r\n\r\nThe question that naturally follows from this JIRA is: **Are all the default options in PyArrow and R bindings consistent with C++ defaults?**"
+        },
+        {
+            "created_at": "2021-07-08T08:48:40.570Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13259?focusedCommentId=17377220) by Eduardo Ponce (edponce):*\nCreated [ARROW-13288](https://issues.apache.org/jira/browse/ARROW-13288) to verify inconsistencies between the C++ and Python kernel options."
+        },
+        {
+            "created_at": "2021-07-08T09:21:56.292Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13259?focusedCommentId=17377248) by Nicola Crane (thisisnic):*\n`[~edponce]` Thanks for highlighting that, I'd totally missed it!\r\n\r\n`[~pachamaltese]` - totally missed this in my initial review of the code, but the thing that actually needs changing is the bindings for \"utf8_slice_codeunits\" in `compute.cpp` - here, start and stop have been set to 1 and -1 respectively, but instead need to reflect the default values from here: <https://github.com/apache/arrow/blob/7eea2f53a1002552bbb87db5611e75c15b88b504/cpp/src/arrow/compute/api_scalar.h#L203-L210>\r\n\r\nI think that the `step` argument also needs implementing too.\r\n\r\nWe really should write this up (I can add it to my to-do list!) as it's neither obvious nor trivial to work out the various steps required here.\r\n\r\n\u00a0"
+        }
+    ]
+}

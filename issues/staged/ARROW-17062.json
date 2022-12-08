@@ -1,0 +1,22 @@
+{
+    "issue": {
+        "title": "[C#] Support compression in IPC format",
+        "body": "***Note**: This issue was originally created as [ARROW-17062](https://issues.apache.org/jira/browse/ARROW-17062). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHello world between write_feather() and ArrowFileReader.ReadNextRecordBatch() fails with default settings. This is specific to compressed files (see workaround below) and it looks like what happens is C# correctly decompresses the batches but provides the caller with the compressed versions of the data arrays instead of the uncompressed ones. While all of the various Length properties are set correctly in C#, the data arrays are too short to contain all of the values in the file, the bytes do not match what the decompressed bytes should be, and basic data accessors like PrimitiveArray<T>.Values can't be used because they throw ArgumentOutOfRangeException. Looking through the C# classes in the github repo it doesn't appear there's a way for the caller to request decompression. So I'm guessing decompression is supposed to be automatic but, for some reason, isn't.\r\n\r\n\u00a0\r\n\r\nWhile functionally successful, the workaround of using uncompressed feather isn't great as the uncompressed files are bigger than .csv. In my application the resulting disk space penalty is hundreds of megabytes compared to the footprint of using compressed feather.\r\n\r\n\u00a0\r\n\r\nSimple single field repex:\r\n\r\nIn R (arrow 8.0.0):\r\n`write_feather(tibble(value = seq(0, 1, length.out = 21)), \"test lz4.feather\")`\r\n\r\nIn C# (Apache.Arrow 8.0.0):\r\n\r\n`using Apache.Arrow;`\r\n`using Apache.Arrow.Ipc;`\r\n`using System.IO;`\r\n`using System.Runtime.InteropServices;`\r\n\r\n`\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 using FileStream stream = new(\"test lz4.feather\", FileMode.Open, FileAccess.Read, FileShare.Read);`\r\n\r\n`\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 using ArrowFileReader arrowFile = new(stream);`\r\n\r\n`\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 for (RecordBatch batch = arrowFile.ReadNextRecordBatch(); batch != null; batch = arrowFile.ReadNextRecordBatch())`\r\n`\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 {`\r\n\r\n`\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 IArrowArray[] fields = batch.Arrays.ToArray();`\r\n\r\n`\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 ReadOnlySpan<double> test = MemoryMarshal.Cast<byte, double>(((DoubleArray)fields[0]).ValueBuffer.Span); // 15 incorrect values instead of 21 correctly incrementing ones (0, 0.05, 0.10, ..., 1)`\r\n\r\n`\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 `}\r\n\r\nWorkaround in R:\r\n\r\n`write_feather(tibble(value = seq(0, 1, length.out = 21)), \"test.feather\", compression = \"uncompressed\")`\r\n\r\n\u00a0\r\n\r\nApologies if this is a known issue. I didn't find anything on a Jira search and this isn't included in the [known issues list on github](http://example.com/).",
+        "created_at": "2022-07-13T02:05:35.000Z",
+        "updated_at": "2022-10-03T15:32:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C#",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-07-26T12:16:42.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-07-13T12:43:07.138Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17062?focusedCommentId=17566301) by Neal Richardson (npr):*\nIt looks like the C# implementation does not yet support compression: https://arrow.apache.org/docs/status.html#ipc-format"
+        }
+    ]
+}

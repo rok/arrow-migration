@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Python] pyarrow.csv.read_csv, memory consumed much larger than raw pandas.read_csv",
+        "body": "***Note**: This issue was originally created as [ARROW-7043](https://issues.apache.org/jira/browse/ARROW-7043). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi, thanks great for building Arrow firstly, I find this project from wes's post :\u00a0<https://wesmckinney.com/blog/apache-arrow-pandas-internals/>\r\n\r\nhis ambition on building arrow for fixing problems in pandas really attract my eyes.\r\n\r\nbellow is my problems:\r\n\r\nbackground:\r\n \\* Our team's analytic work deeply rely on pandas, we often read large csv files into memory and do kinds of analytic work.\r\n \\* We have faced problems which mentioned in wes's post, espcially `pandas rule of thumb: have 5 to 10 times as much RAM as the size of your dataset`\r\n \\* We are looking for some technics which can help us on load our csv(or other format, like msgpack, parquet, or something else), using as little as memory.\r\n\r\n\u00a0\r\n\r\nexperiment:\r\n \\* luckily I find arrow, and I did a simple test.\r\n \\* input file: a 1.5GB csv file, around 6 million records, 15 columns;\r\n \\* using pandas bellow, which will consume about **1GB memory**,\r\n \\* \r\n```java\n\r\nimport pandas as pd\r\ndf = pd.read_csv(filename)\n```\r\n\r\n \\* using pyarrow bellow, which will consume about **3.6GB memory,** which really makes me confused.\r\n \\* \r\n```java\n\r\nimport pyarrow\r\nimport pyarrow.csv\r\ntable = pyarrow.csv.read_csv(filename)\n```\r\n\u00a0\r\n\r\nproblems:\r\n \\* why pyarrow will need so much memory for reading just 1.5GB csv data, it really disappoints me.\r\n \\* and when pyarrow is reading the file, my 8 Core CPU is full used.\r\n\r\n\u00a0\r\n\r\nenvironments:\r\n \\* ubuntu 16\r\n \\* python 3.5, ipython 6.5\r\n \\* pandas, 0.20\r\n \\* pyarrow, 0.15\r\n \\* server 8 core, 16 GB\r\n\r\n\u00a0\r\n\r\nTest File:\r\n \\* <https://drive.google.com/file/d/1WmUd_NJUIES58bO8mDNd77nf2JVsEu_r/view?usp=sharing>\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\ngreat thanks again.\r\n\r\nif needed, I can upload my 1.5GB file later.",
+        "created_at": "2019-11-01T09:43:04.000Z",
+        "updated_at": "2019-12-19T01:12:56.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-12-19T01:12:56.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-11-01T20:55:31.327Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7043?focusedCommentId=16965089) by Antoine Pitrou (apitrou):*\nYes, can you upload the file?"
+        },
+        {
+            "created_at": "2019-11-02T03:56:00.299Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7043?focusedCommentId=16965218) by taotao li (taotao):*\n`[~apitrou]` \u00a0thanks, Antonie, I've update a google driver link.\r\n\r\n\u00a0\r\n \\* <https://drive.google.com/file/d/1WmUd_NJUIES58bO8mDNd77nf2JVsEu_r/view?usp=sharing>"
+        },
+        {
+            "created_at": "2019-11-04T14:04:29.635Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7043?focusedCommentId=16966682) by Antoine Pitrou (apitrou):*\nI've tried to reproduce using pyarrow 0.15.1, compiled from source (Ubuntu 18.04, x86-64):\r\n\r\n```Java\n\r\n>>> import pandas as pd                                                                                                                                                         \r\n>>> %time df = pd.read_csv('../../data/2010_2019_stk.csv')                                                                                                                      \r\nCPU times: user 11.2 s, sys: 604 ms, total: 11.8 s\r\nWall time: 11.8 s\r\n>>> import pandas as pd                                                                                                                                                         \r\n>>> %time df = pd.read_csv('../../data/2010_2019_stk.csv')                                                                                                                      \r\nCPU times: user 11.2 s, sys: 438 ms, total: 11.7 s\r\nWall time: 11.7 s\r\n```\r\n(RSS is around 1 GB)\r\n\r\n```Java\n\r\n>>> %time tab = csv.read_csv('../../data/2010_2019_stk.csv')                                                                                                                    \r\nCPU times: user 17.3 s, sys: 1.7 s, total: 19 s\r\nWall time: 1.27 s\r\n>>> %time tab = csv.read_csv('../../data/2010_2019_stk.csv')                                                                                                                    \r\nCPU times: user 17.4 s, sys: 1.83 s, total: 19.2 s\r\nWall time: 1.33 s\r\n```\r\n(RSS is around 1.1 GB)\r\n\r\nSo with pyarrow 0.15.1 I'm not seeing much of a difference between Pandas and Arrow in terms of memory consumption. However, Arrow is much faster as it uses all CPU cores to parse and convert the CSV data.\r\n"
+        },
+        {
+            "created_at": "2019-11-04T16:04:00.679Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7043?focusedCommentId=16966785) by Wes McKinney (wesm):*\nThe jemalloc changes in 0.15.1 could be a factor here"
+        },
+        {
+            "created_at": "2019-11-09T03:37:05.342Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7043?focusedCommentId=16970704) by taotao li (taotao):*\nthanks `[~wesm]` \u00a0and `[~apitrou]` \u00a0for your detailed test, let me try on 0.15.1 and update if there still exists some problems. will close this issue if everything works fine as I wanted.\r\n\r\n\u00a0\r\n\r\nthanks again."
+        },
+        {
+            "created_at": "2019-12-18T11:25:37.747Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7043?focusedCommentId=16999054) by Antoine Pitrou (apitrou):*\n`[~taotao]` Could you give an update here?"
+        },
+        {
+            "created_at": "2019-12-19T01:12:10.991Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7043?focusedCommentId=16999645) by taotao li (taotao):*\n`[~apitrou]` \u00a0 Hi, Antonie, sorry for updating this issue so late, currently it works good for me. let me just close this issue and re-open it if we still meet kinds of this problem in the future. thanks a lot.\u00a0"
+        }
+    ]
+}

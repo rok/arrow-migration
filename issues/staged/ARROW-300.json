@@ -1,0 +1,97 @@
+{
+    "issue": {
+        "title": "[Format] Add body buffer compression option to IPC message protocol using LZ4 or ZSTD",
+        "body": "***Note**: This issue was originally created as [ARROW-300](https://issues.apache.org/jira/browse/ARROW-300). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIt may be useful if data is to be sent over the wire to compress the data buffers themselves as their being written in the file layout.\n\nI would propose that we keep this extremely simple with a global buffer compression setting in the file Footer. Probably only two compressors worth supporting out of the box would be zlib (higher compression ratios) and lz4 (better performance).\n\nWhat does everyone think?",
+        "created_at": "2016-09-21T20:29:10.000Z",
+        "updated_at": "2022-08-14T07:07:21.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Format",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-05-01T00:41:12.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2016-10-26T15:23:46.742Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=15608768) by Wes McKinney (wesm):*\nIt may make sense to limit to compressors designed for fast decompression performance: snappy, zstd, lz4. High compression ratios might be less interesting, but I'm interested in more feedback on use cases. "
+        },
+        {
+            "created_at": "2016-10-26T15:35:58.710Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=15608798) by Uwe Korn (uwe):*\n+1 Compression makes sense to me and also the list of initial algorithms. High compression ratios probably only make sense once you have cross-datacenter traffic."
+        },
+        {
+            "created_at": "2016-10-26T16:18:40.511Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=15608905) by Julien Le Dem (julienledem):*\nI'm thinking that we don't really need to compress each buffer independently and compression could be just an encapsulation at the transport level. It sounds like we don't want to exchange compressed buffers in memory (without sending them on the wire/disk).\n\nIn Parquet, columns can be decompressed independently because they can be retrieved independently. In Arrow, the entire RecordBatch corresponds to a request and will be entirely compressed and decompressed every-time. Which means we can just have the entire batch compressed together.\n\nFor simplicity I'd vote to not have compression in the Schema metadata.\nhttps://github.com/apache/arrow/blob/2f84493371bd8fae30b8e042984c9d6ba5419c5f/format/Message.fbs#L186\nThat's one less thing to worry about for implementors.\n\nWe can have compression in transport level (RPC, file format, ...)\nAs for the supported compressors I would vote for SNAPPY and GZIP (zlib) to start with as they provide the 2 options you describe (higher comp or higher throughput) and SNAPPY is easier to use from Java than LZO (lz4)."
+        },
+        {
+            "created_at": "2016-11-15T18:33:28.867Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=15667895) by Wes McKinney (wesm):*\nOne issue with doing compression only at the transport level is if people use the Arrow memory layout and metadata to create file formats for storing larger amounts of data. For example, I would like to deprecate the Feather metadata https://github.com/wesm/feather/blob/master/cpp/src/feather/metadata.fbs and use only the Arrow metadata. Unless you support column/buffer-level compression, then it would be expensive to read only a subset of the file. You could argue that such data should be stored as Parquet instead, but it does offer a flexibility that's really appealing (particularly since random access on memory-mapped Arrow-like data would be possible). "
+        },
+        {
+            "created_at": "2016-11-15T19:15:52.410Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=15667983) by Uwe Korn (uwe):*\nI'm not so sure about the benefit of a compressed arrow file format. For me the main distinction is that Parquet provides efficient storage (with the tradeoff of not being to randomly access a single row) and Arrow random access, both for columnar data.\n\nThe one point where I see an Arrow file format as beneficial is where you need random access to its data but cannot load it fully into RAM but instead use a memory mapped file. If you add compression (either column-wise or whole-file level), you cannot memorymap it anymore.\n\nThe only point where I can see that having columnar compression for Arrow batches is better than on the whole batch layer is that it actually produces better compression behaviour. This means that doing compression on a per-column basis can be parallelised independently of the underyling algorithm thus leading to better CPU usage. Furthermore the compression may be better if done on a column level (with a sufficient number of rows) as the data inside a column is very similar thus leading to smaller compression dictionaries and better compresssion ratios at the end. Both things mentioned are just assumptions that should be tested before being implemented."
+        },
+        {
+            "created_at": "2017-01-24T00:34:48.276Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=15835437) by Wes McKinney (wesm):*\nI'd like to add very simple LZ4/ZSTD compression support (at the buffer level only) in the stream and file binary formats. I can make a proposal, but want to see if anyone has any more opinions before I do? "
+        },
+        {
+            "created_at": "2017-04-11T02:29:43.670Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=15963751) by Kazuaki Ishizaki (kiszk):*\nCurrent Apache Spark supports [the following compression schemes](https://github.com/apache/spark/blob/master/sql/core/src/main/scala/org/apache/spark/sql/execution/columnar/compression/CompressionScheme.scala#L66) for in-memory columnar storage. Currently, compressed in-memory columnar storage is used when DataFrame.cache or Dataset.cache method is executed.\nWould it be possible to support these schemes in addition to LZ4/(current)DictonaryEncoding?\n\n- RunLengthEncoding: Generic run-length encoding (e.g. 1,1,1,2,2,2,2 -> [3, 1], [4, 2])\n- IntDelta: Represent a sequence using a base value with byte deltas from previous one. (e.g. 1,3,5,7,10 -> [1, 2, 2, 2, 3])\n- LongDelta: Represent a sequence using a base value with byte deltas from previous one. (e.g. 1,3,5,7,10 -> [1, 2, 2, 2, 3])\n"
+        },
+        {
+            "created_at": "2017-04-13T11:37:53.554Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=15967452) by Uwe Korn (uwe):*\nAdding methods like RLE- or Delta-encoding brings us very much in the space of Parquet. Given that some of these methods are really fast, it might make sense to support them for IPC. But then I fear that we will get very much in a region where there is no clear distinction between Arrow and Parquet anymore."
+        },
+        {
+            "created_at": "2017-04-13T13:57:10.500Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=15967616) by Wes McKinney (wesm):*\n`[~kiszk]` I agree that having in-memory compression schemes like in Spark is a good idea, in addition to simpler snappy/lz4/zlib buffer compression. Would you like to make a proposal for improvements to the Arrow metadata to support these compression schemes? We should indicate that Arrow implementations are not required to implement these in general, so for now they can be marked as experimental and optional for implementations (e.g. we wouldn't necessarily integration test them). For scan-based in-memory columnar workloads, these encodings can yield better scan throughput because of better cache efficiency, and many column-oriented databases rely on this to be able to achieve high performance, so having it natively in the Arrow libraries seems useful. "
+        },
+        {
+            "created_at": "2017-04-19T18:53:08.004Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=15975288) by Kazuaki Ishizaki (kiszk):*\n`[~wesmckinn]` Thank you for your kindly and positive comment. I will work for preparing a proposal (It would take some time since I have to prepare a presentation for GTC, too).\n`[~xhochy]` IIUC, Parquet is used for a persistent file. Arrow is used for in-memory format.\n\nWhat level of proposal do you expect? For example,\n- What we want to do (e.g. RLE, Delta-encoding)\n- New meta data format to support new compression schemes (new .fbs file)\n- Data format for new compression schemes\n- Prototype implementation\n- others\n\nAlso, will that proposal be posted into another JIRA entry or a comment in this JIRA entry?\n\n\n"
+        },
+        {
+            "created_at": "2017-05-06T22:10:30.388Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=15999611) by Wes McKinney (wesm):*\nI'm sorry for the delay. With the 0.3 Arrow release done, it would be good to make a push on compression and encoding. \n\nHow about we start a Google Document that supports public comments and you can give edit support to whomever you like? Once we agree on the design, one of us can make a pull request containing the Flatbuffer metadata for the compression / encoding details. Does that sound good?"
+        },
+        {
+            "created_at": "2017-05-12T16:09:54.483Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=16008315) by Kazuaki Ishizaki (kiszk):*\nThank you for your response. I was also busy for preparing materials for GTC. It is good time to make a document, now.\n\nIt sounds good to prepare a Google document for collecting public comments. I will start creating a document for purpose, scope, and design."
+        },
+        {
+            "created_at": "2017-09-22T18:59:09.056Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=16176938) by Wes McKinney (wesm):*\nWe have had all of the pieces in place in C++ that we need to do this since 0.6.0. I will propose metadata extensions to support compressed record batches and a trial implementation "
+        },
+        {
+            "created_at": "2017-10-20T17:26:56.765Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=16212918) by Wes McKinney (wesm):*\nMoving to 0.9.0. I don't think I can get to this in the next 2 weeks. Help would be appreciated"
+        },
+        {
+            "created_at": "2018-03-08T23:46:06.778Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=16392124) by Lawrence Chan (llchan):*\nWhat did we decide with this? Imho there's still a use case for compressed arrow files due to the limited storage types in parquet. I don't really\u00a0love\u00a0the\u00a0idea of storing 8-bit or 16-bit\u00a0ints\u00a0in an INT32 and hand waving it away with compression. I tried to hack it up with FixedLenByteArray but there are a slew of complications with that, not to mention alignment concerns etc.\r\n\r\nAnyways I'm happy to help on this, but I'm not familiar enough with the code base to place it in the right spot. If we make a branch with some TODOs/placeholders I can probably plug in more easily."
+        },
+        {
+            "created_at": "2018-03-09T02:02:27.389Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=16392262) by Wes McKinney (wesm):*\nWe haven't done any work on this yet. I think the first step would be to propose additional metadata (in the Flatbuffers files) for record batches to indicate the style of compression. "
+        },
+        {
+            "created_at": "2018-09-17T17:41:55.966Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=16617883) by Wes McKinney (wesm):*\nMoving this to 0.12. I will make a proposal for compressed record batches after the 0.11 release goes out.\r\n\r\nMy gut instinct on this would be to create a `CompressedBuffer` metadata type and a `CompressedRecordBatch` message. Some reasons:\r\n\r\n- Does not complicate or bloat the existing RecordBatch message type\n- Support buffer-level compression (each buffer can be compressed or not)\n  \n  Readers can choose to materialize right away or on demand \u2013 in C++, we can create a `arrow::CompressedRecordBatch` class if we want that does late materialization.\n  \n  This does not necessarily accommodate other kinds of type-specific compression, like RLE-encoding, or it might be that RLE can be used on the values buffer of primitive types, e.g.\n  \n  ```Java\n  \n  CompressedBuffer {\n    CompressionType type;\n    int64 offset;\n    int64 compressed_size;\n    int64 uncompressed_size;\n  }\n  ```\n  \n  So if we wanted to use the Parquet RLE_BITPACKED_HYBRID compression style for integers, say, we could do that.\n  \n  Another question here is how to handle compressions which may have additional parameters. `CompressionType` or `Compression` could be a union, but that would make the message sizes larger (but maybe that's OK)"
+        },
+        {
+            "created_at": "2019-10-25T08:34:12.190Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=16959552) by Yuan Zhou (yuanzhou):*\nHi `[~wesm]`, thanks for providing the general idea, I'm quite interested in this feature. Do you happen to have some updates on the detail proposal?   \r\n\r\nCheers, -yuan"
+        },
+        {
+            "created_at": "2019-10-25T14:54:06.349Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=16959827) by Wes McKinney (wesm):*\nThere are some discussions on going at https://lists.apache.org/thread.html/a99124e57c14c3c9ef9d98f3c80cfe1dd25496bf3ff7046778add937@%3Cdev.arrow.apache.org%3E"
+        },
+        {
+            "created_at": "2020-05-01T00:41:12.770Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-300?focusedCommentId=17097076) by Wes McKinney (wesm):*\nIssue resolved by pull request 6707\n<https://github.com/apache/arrow/pull/6707>"
+        }
+    ]
+}

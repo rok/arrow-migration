@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[R] arrow::filter() crashes (aborts R session)",
+        "body": "***Note**: This issue was originally created as [ARROW-13761](https://issues.apache.org/jira/browse/ARROW-13761). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nArrow crashes (aborts R session) when attempting to evaluate `filter` with a `collect()` command, e.g. following arrow's dplyr vignette: https://cran.r-project.org/web/packages/arrow/vignettes/dataset.html\r\n\r\n\r\n```r\r\nlibrary(arrow)\r\nlibrary(dplyr)\r\n\r\n\r\nds <- open_dataset(\"nyc-taxi\", partitioning = c(\"year\", \"month\"))\r\nx <- ds %>%\r\n  filter(total_amount > 100, year == 2015)\r\nx %>% collect() # crashes R\r\n\r\n```\r\n\r\n(Note for simplicity I downloaded only years 2009 and 2010 using the R loop you provide in the Vignette.\r\n\r\nI observe this behavior in a RStudio server instance on a Ubuntu 20.04 Linux server with 128 cores and 256 GB RAM.  \r\n\r\n\r\nHere's my sessionInfo():\r\n\r\n```r\r\n sessionInfo()\r\nR version 4.1.0 (2021-05-18)\r\nPlatform: x86_64-pc-linux-gnu (64-bit)\r\nRunning under: Ubuntu 20.04.2 LTS\r\n\r\nMatrix products: default\r\nBLAS/LAPACK: /usr/lib/x86_64-linux-gnu/openblas-pthread/libopenblasp-r0.3.8.so\r\n\r\nlocale:\r\n [1] LC_CTYPE=en_US.UTF-8       LC_NUMERIC=C              \r\n [3] LC_TIME=en_US.UTF-8        LC_COLLATE=en_US.UTF-8    \r\n [5] LC_MONETARY=en_US.UTF-8    LC_MESSAGES=C             \r\n [7] LC_PAPER=en_US.UTF-8       LC_NAME=C                 \r\n [9] LC_ADDRESS=C               LC_TELEPHONE=C            \r\n[11] LC_MEASUREMENT=en_US.UTF-8 LC_IDENTIFICATION=C       \r\n\r\nattached base packages:\r\n[1] stats     graphics  grDevices utils     datasets  methods   base     \r\n\r\nother attached packages:\r\n[1] dplyr_1.0.7 arrow_5.0.0\r\n\r\nloaded via a namespace (and not attached):\r\n [1] fansi_0.5.0      crayon_1.4.1     utf8_1.2.2       assertthat_0.2.1\r\n [5] R6_2.5.1         DBI_1.1.1        lifecycle_1.0.0  magrittr_2.0.1  \r\n [9] pillar_1.6.2     rlang_0.4.11     vctrs_0.3.8      generics_0.1.0  \r\n[13] ellipsis_0.3.2   tools_4.1.0      bit64_4.0.5      glue_1.4.2      \r\n[17] purrr_0.3.4      bit_4.0.4        compiler_4.1.0   pkgconfig_2.0.3 \r\n[21] tidyselect_1.1.1 tibble_3.1.3   \r\n```\r\n\r\n",
+        "created_at": "2021-08-25T23:29:04.000Z",
+        "updated_at": "2021-12-20T16:34:06.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-09-01T18:49:06.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-25T23:39:11.900Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13761?focusedCommentId=17404782) by Carl Boettiger (cboettig):*\nI noticed that falling back to arrow 4.0.1 resolves this on the above dataset.  However, I experience the same crash when attempting to do a very similar filter on my own data (created by arrow from a tsv file):\r\n\r\n\r\n```r\r\n\r\nlibrary(arrow)\r\nlibrary(dplyr)\r\n\r\nfile <- \"data.parquet\"\r\ndownload.file(\"https://minio.cirrus.carlboettiger.info/shared-data/birddb/parquet/part-0.parquet\", file)\r\nds <- open_dataset(file, format = \"parquet\")\r\nsubset <- ds %>% filter(COUNTRY == \"Mexico\", `COMMON NAME`==\"Wood thrush\") %>% collect()\r\nhead(subset)\r\n```\r\n\r\neven on 4.0.1"
+        },
+        {
+            "created_at": "2021-08-26T01:03:24.222Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13761?focusedCommentId=17404816) by Weston Pace (westonpace):*\nI can reproduce.  I get the segfault in Converter_Timestamp (in array_to_vector.cpp).  I don't have the line number but my guess it is here: https://github.com/apache/arrow/blob/38b34045d1e3bce4c7517ad6718b4ecf03e88fc7/r/src/array_to_vector.cpp#L878\r\n\r\nSince you only have years 2009/2010 the filter year == 2015 will eliminate all data.  My guess is that is resulting in a chunked array with 0 chunks and \"this->chunked_array_->chunk(0).get()\" is not valid.\r\n\r\n`[~romainfrancois]`"
+        },
+        {
+            "created_at": "2021-08-26T14:28:07.073Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13761?focusedCommentId=17405261) by Neal Richardson (npr):*\nInterestingly, this doesn't crash on an in-memory dataset, so something is different about what a multi-file backed dataset returns from the scan. \r\n\r\n```Java\n\r\n# Drop into r/tests/test-dataset.R\r\ntest_that(\"debugging\", {\r\n# On a single Table, it successfully returns a table with 0 rows\r\n  df1 %>%\r\n    Table$create() %>%\r\n    filter(int < 0) %>%\r\n    collect() %>%\r\n    print()\r\n# But this one crashes\r\n  ds <- open_dataset(dataset_dir, partitioning = schema(part = uint8()))\r\n  ds %>%\r\n    filter(int < 0) %>%\r\n    collect() %>%\r\n    print()\r\n})\r\n```"
+        },
+        {
+            "created_at": "2021-08-26T18:34:39.386Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13761?focusedCommentId=17405411) by Weston Pace (westonpace):*\nAn empty table can be represented as a chunked array with 1 chunk which has 0 elements (ChunkedArray[[]]) and also as a chunked array with 0 chunks (ChunkedArray[]).  We had round-tripping problems with pandas at one point because the converters were setup to handle one case (the one empty chunk case I think) but not the other (the zero chunk case).  I wonder if that could be part of the issue.  Although I don't know R manipulation enough to create a chunked array with zero chunks."
+        },
+        {
+            "created_at": "2021-08-26T19:27:49.669Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13761?focusedCommentId=17405434) by Neal Richardson (npr):*\nYep, that's the difference: in the first case, we get a chunked arrays with 1 length-0 chunk, and in the second case we get chunked arrays with 0 chunks. I wonder why this is different? (And this sounds oddly familiar.)"
+        },
+        {
+            "created_at": "2021-08-26T23:12:47.633Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13761?focusedCommentId=17405506) by Carl Boettiger (cboettig):*\nThanks all for the explanations.  I can confirm that if I request a non-empty query on the taxi data, I do not get the crash.\r\n\r\n \r\n\r\nAs noted above, when attempting the same simple filters on my own local parquet file though, (which I created using arrow originally), arrow quickly consumes over 40 GB of RAM and crashes the R client.  Should I open a separate issue for that one? \r\n\r\n \r\n\r\nI think this should reproduce it. apologies for the ~150 GB example file, haven't figured out how to reproduce this with smaller data (which naturally don't trigger the  OOM)\r\n\r\n \r\n\r\n```r\n\r\n\r\nlibrary(arrow)\r\nlibrary(dplyr)\r\nfile <- \"part-0.parquet\"\r\ndownload.file(\"https://minio.cirrus.carlboettiger.info/shared-data/birddb/parquet/part-0.parquet\", file)\r\nds <- open_dataset(file, format = \"parquet\")\r\nds %>% filter(COUNTRY == \"Mexico\", `COMMON NAME`==\"Wood thrush\") %>% compute()\r\n\r\n \r\n\r\n```\r\n\r\n"
+        },
+        {
+            "created_at": "2021-08-26T23:25:37.782Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13761?focusedCommentId=17405511) by Weston Pace (westonpace):*\nI suspect the memory issue is ARROW-13611 which is regrettably a regression all the way back to 3.0 (as in, it last worked in 3.0).  This should be fixed (and proper regression tests in place) by 6.0."
+        },
+        {
+            "created_at": "2021-08-27T03:41:33.900Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13761?focusedCommentId=17405566) by Carl Boettiger (cboettig):*\nThanks Weston, that's great to hear!\u00a0 Thanks for the cross-reference and looking forward to the 6.0 release \u2013 do you have a rough target timeline for 6.0?"
+        },
+        {
+            "created_at": "2021-08-27T16:03:28.966Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13761?focusedCommentId=17405900) by Neal Richardson (npr):*\nNext release is scheduled for October. Releases are quarterly (January, April, July, October)"
+        },
+        {
+            "created_at": "2021-09-01T18:49:06.060Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13761?focusedCommentId=17408327) by Neal Richardson (npr):*\nIssue resolved by pull request 11033\n<https://github.com/apache/arrow/pull/11033>"
+        }
+    ]
+}

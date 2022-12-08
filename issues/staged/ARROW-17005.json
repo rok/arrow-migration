@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[Java] Incorrect results from JDBC Adapter from Postgres of non-nullable column through left join",
+        "body": "***Note**: This issue was originally created as [ARROW-17005](https://issues.apache.org/jira/browse/ARROW-17005). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nUnsure to consider this a bug or wish, but the JDBC to Arrow Adapter produces incorrect results when wrapping the postgres driver in certain cases.\u00a0\r\n\r\nIf you left join a non-nullable column, the column becomes nullable (if the join condition does not match any columns). However the postgres ResultSetMetaData lies to you and still indicates that the column is still non-nullable.\u00a0\r\n\r\nWhen iterating through the data, results come back as null (isNull will return true).\u00a0\r\n\r\nHowever, because of the way that the JDBCConsumer is created, it creates a non-nullable consumer and will not check the nullability of these results.\u00a0\r\n\r\nUnfortunately, this results in incorrect data or errors depending on the data types returned.\u00a0\r\n\r\nThe postgres JDBC team has closed a ticket about this indicating that it would be impossible for them to return the correct data nullability data to the JDBC driver. see: <https://github.com/pgjdbc/pgjdbc/issues/2079>\r\n\r\nAn example:\u00a0\r\n\r\nTable:\u00a0\r\n\n|t1.id|\r|\n|-|-|\n|2|\r|\n|3|\r<br>```java<br>\r<br>CREATE TABLE t1 (id integer NOT NULL);\r<br>INSERT INTO t1 VALUES (2), (3);\r<br>```\r<br>Query\r<br>```java<br>\r<br>WITH t2 AS (SELECT 1 AS id UNION SELECT 2)\r<br>SELECT \r<br>  t1.id \r<br>FROM t2 \r<br>LEFT JOIN t1 on t1.id = t2.id;<br>```\r<br>This returns the result set:\r|\n|id|\r|\n|2|\r|\n|null|\r<br>\r<br>The ResultSetMetaData indicates that the column is non-nullable (as t1.id is non-nullable) but there is null data in the result.\u00a0\r<br>\r<br>The Arrow Vector that is present after the result set is consumed, looks like this:\u00a0\r|\n|id|\r|\n|2|\r|\n|0|\r<br>\r<br>ResultSet.getInt(1) will return 0 when the source data is null, with an expectation that you check isNull.\u00a0\r<br>\r<br>The data is incorrect and silently fails potentially leading to clients / consumers getting bad data.\u00a0\r<br>\r<br>\u00a0\r<br>\r<br>In other cases, such as UUID (mapped to UTF-8 vectors) the value will fail to load into arrow due to expecting null data and throwing a NPE when deserializing / converting to bytearrays.\u00a0\r<br>\r<br>\u00a0\r<br>\r<br>I was able to work around this problem by wrapping the postgres JDBC ResultSetMetadata and always forcing the nullability to nullable (or nullability unknown).\u00a0\r<br>\r<br>Unfortunately I don't think there is a great way to solve this, but perhaps some way to configure / override the JDBCConsumer creation would allow for users of this library to override this behavior, however the silent failure and incorrect data might lead to users not noticing.\u00a0|\n",
+        "created_at": "2022-07-07T16:11:49.000Z",
+        "updated_at": "2022-07-12T21:01:41.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-07-12T21:01:41.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-07-07T17:04:11.662Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17005?focusedCommentId=17563886) by David Li (lidavidm):*\nThere's already JdbcFieldInfo, maybe we should add nullability there.\r\n\r\nI was also thinking we should extend it to let us do things like choosing the output arrow type independently of the actual type/providing a custom conversion for a custom type but that will be a separate Jira (if that is a useful thing to have)\r\n\r\nAlso cc `[~ljw1001]` \u00a0"
+        },
+        {
+            "created_at": "2022-07-07T17:13:03.287Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17005?focusedCommentId=17563896) by Jonathan Swenson (jswenson):*\nIt's possible to override arrow output type currently (using setJdbcToArrowTypeConverter) but it seems like what you are describing would be a generalization that would allow for writing a custom JDBCConsumer (or am I misinterpreting \"custom conversion for a custom type\")\u00a0\r\n\r\nI think that would also generalize some of the work that @toddfarmer has done to help with the BigDecimal issues I've run into:\u00a0\r\n\r\nhttps://issues.apache.org/jira/browse/ARROW-16600\r\n\r\nhttps://issues.apache.org/jira/browse/ARROW-16427\r\n\r\nThe postgres driver has really been a bit of a pain for me \ud83e\udd26\ud83c\udffc\u200d\u2642\ufe0f"
+        },
+        {
+            "created_at": "2022-07-07T17:22:28.635Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17005?focusedCommentId=17563898) by David Li (lidavidm):*\nAh, yes, basically I would like to be able to make this fully general. Possibly even be able to override per-column instead of per-type (not sure if that granularity is useful)"
+        },
+        {
+            "created_at": "2022-07-07T17:22:47.744Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17005?focusedCommentId=17563899) by David Li (lidavidm):*\nAlso gosh, I keep pinging the wrong person, thanks for linking the related Jiras"
+        },
+        {
+            "created_at": "2022-07-07T20:05:34.490Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17005?focusedCommentId=17563943) by Larry White (ljw1001):*\nI think forcing the result set to be nullable (or nullability unknown) is a reasonable workaround in this situation, or at least less-bad than returning the incorrect nullability status."
+        },
+        {
+            "created_at": "2022-07-07T21:00:33.560Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17005?focusedCommentId=17563976) by David Li (lidavidm):*\nI'm rooting around here now so I'll pick this up"
+        },
+        {
+            "created_at": "2022-07-11T13:01:14.727Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17005?focusedCommentId=17564992) by David Li (lidavidm):*\n`[~jswenson]` the [linked PR](https://github.com/apache/arrow/pull/13558) lets you explicitly set nullability now when configuring things; hopefully this resolves your use case. \r\n\r\nAnother thought: should we set up integration tests with the Postgres driver, and possibly other drivers? It'll require some CI work\u2026"
+        },
+        {
+            "created_at": "2022-07-12T16:55:49.149Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17005?focusedCommentId=17565931) by Jonathan Swenson (jswenson):*\nExcellent, I'll play with removing my workaround and moving to this in the near future.\u00a0\r\n\r\nOn another note, the Redshift JDBC driver also seems to exhibit this same problem (likely because it is very close to the postgres JDBC driver / implementation).\u00a0"
+        },
+        {
+            "created_at": "2022-07-12T21:01:41.605Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17005?focusedCommentId=17566014) by David Li (lidavidm):*\nIssue resolved by pull request 13558\n<https://github.com/apache/arrow/pull/13558>"
+        }
+    ]
+}

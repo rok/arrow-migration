@@ -1,0 +1,77 @@
+{
+    "issue": {
+        "title": "[C++] Unify dictionaries when writing IPC file in a single shot",
+        "body": "***Note**: This issue was originally created as [ARROW-10406](https://issues.apache.org/jira/browse/ARROW-10406). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI read a big (taxi) csv file and specified that I wanted to dictionary-encode some columns. The resulting Table has ChunkedArrays with 1604 chunks. When I go to write this Table to the IPC file format (write_feather), I get an error: \r\n\r\n```Java\n\r\n  Invalid: Dictionary replacement detected when writing IPC file format. Arrow IPC files only support a single dictionary for a given field accross all batches.\r\n```\r\n\r\nI can write this to Parquet and read it back in, and the roundtrip of the data is correct. We should be able to do this in IPC too.",
+        "created_at": "2020-10-27T19:10:07.000Z",
+        "updated_at": "2021-02-09T17:50:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-02-09T17:50:51.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-10-27T19:12:07.963Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10406?focusedCommentId=17221676) by Antoine Pitrou (apitrou):*\ncc `[~wesm]`"
+        },
+        {
+            "created_at": "2020-10-27T20:49:38.260Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10406?focusedCommentId=17221742) by Wes McKinney (wesm):*\nI thought that we could support deltas, or is that not yet an option? "
+        },
+        {
+            "created_at": "2020-10-27T20:54:26.529Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10406?focusedCommentId=17221744) by Neal Richardson (npr):*\nJust reporting the error I hit. Haven't tried to reduce it to a minimal reproducible example yet."
+        },
+        {
+            "created_at": "2020-10-27T20:56:47.731Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10406?focusedCommentId=17221748) by Antoine Pitrou (apitrou):*\nThe file format spec allows deltas, I just don't think we implement them.\r\n\r\n`[~npr]`: no need for an example, this is a format implementation question."
+        },
+        {
+            "created_at": "2021-01-05T18:43:10.824Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10406?focusedCommentId=17259128) by Antoine Pitrou (apitrou):*\nI think this was done in ARROW-6883 (including unit tests). `[~npr]` Can you confirm this is ok for you?"
+        },
+        {
+            "created_at": "2021-01-05T19:09:13.079Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10406?focusedCommentId=17259145) by Neal Richardson (npr):*\nShame on the reporter for not providing steps to reproduce. \r\n\r\nI still see the error message in the code, so I don't think this is resolved: https://github.com/apache/arrow/blob/master/cpp/src/arrow/ipc/writer.cc#L1055-L1060"
+        },
+        {
+            "created_at": "2021-01-05T21:21:55.613Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10406?focusedCommentId=17259213) by Antoine Pitrou (apitrou):*\nAh! I thought you were talking about \"IPC files\" in the general case (i.e. IPC streams saved in a file) :-)\r\nWell, the problem is, the IPC file format doesn't support dictionary replacement because it's meant to be readable in random order.\r\nI'm not sure there's an incentive to change it. `[~wesm]`"
+        },
+        {
+            "created_at": "2021-01-05T21:33:04.266Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10406?focusedCommentId=17259222) by Neal Richardson (npr):*\nThe problem here was that, due to the way the chunked CSV reading handles dictionary encoding, I couldn't read a CSV and write it to Feather/Parquet, which seems like a critical failing."
+        },
+        {
+            "created_at": "2021-01-05T21:50:10.468Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10406?focusedCommentId=17259231) by Neal Richardson (npr):*\nI'm not sure I agree with the reclassification of this as a Format issue, though I guess that's one way to solve it. I contend that, if the format doesn't support this, then the C++ CSV reader has a bug/misfeature because it shouldn't read data that we can't write.\r\n\r\nHere's a trivial way to reproduce it from R, using a tiny CSV and setting a small block size in the read options:\r\n\r\n```Java\n\r\n> library(arrow)\r\n> df <- data.frame(chr=c(rep(\"a\", 3), rep(\"b\", 3)), int=1:6)\r\n> write.csv(df, \"test.csv\", row.names=FALSE)\r\n> system(\"cat test.csv\")\r\n\"chr\",\"int\"\r\n\"a\",1\r\n\"a\",2\r\n\"a\",3\r\n\"b\",4\r\n\"b\",5\r\n\"b\",6\r\n> tab <- read_csv_arrow(\"test.csv\", read_options=CsvReadOptions$create(block_size=16L), as_data_frame=FALSE, schema=schema(chr=dictionary(), int=int32()))\r\n> tab\r\nTable\r\n6 rows x 2 columns\r\n$chr <dictionary<values=string, indices=int32>>\r\n$int <int32>\r\n> tab$chr\r\nChunkedArray\r\n[\r\n\r\n  -- dictionary:\r\n    []\r\n  -- indices:\r\n    [],\r\n\r\n  -- dictionary:\r\n    [\r\n      \"a\"\r\n    ]\r\n  -- indices:\r\n    [\r\n      0,\r\n      0,\r\n      0\r\n    ],\r\n\r\n  -- dictionary:\r\n    [\r\n      \"b\"\r\n    ]\r\n  -- indices:\r\n    [\r\n      0,\r\n      0,\r\n      0\r\n    ]\r\n]\r\n> write_feather(tab, tempfile())\r\nError: Invalid: Dictionary replacement detected when writing IPC file format. Arrow IPC files only support a single dictionary for a given field across all batches.\r\nIn /Users/enpiar/Documents/ursa/arrow/cpp/src/arrow/ipc/writer.cc, line 983, code: WriteDictionaries(batch)\r\nIn /Users/enpiar/Documents/ursa/arrow/cpp/src/arrow/ipc/writer.cc, line 939, code: WriteRecordBatch(*batch)\r\nIn /Users/enpiar/Documents/ursa/arrow/cpp/src/arrow/ipc/feather.cc, line 804, code: writer->WriteTable(table, properties.chunksize)\r\n```"
+        },
+        {
+            "created_at": "2021-01-05T22:35:58.491Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10406?focusedCommentId=17259261) by Antoine Pitrou (apitrou):*\nHmm, what does this have to do with the CSV reader? You can perfectly well write that data to an IPC stream (even as an on-disk file in the more general meaning) or to a Parquet file. You just can't write it to an IPC file (as in \"IPC file format\").\r\n\r\nIMO, it's an issue with how dictionary mapping has been defined in the IPC protocol. If each dictionary batch had its own unique id (instead of putting dictionary ids in the schema), it would probably be easy."
+        },
+        {
+            "created_at": "2021-01-05T22:45:52.709Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10406?focusedCommentId=17259269) by Neal Richardson (npr):*\nAs a user, it's appears to be a bug that the library generates data that can't be saved to its own file format. If it's valid data everywhere else, then sure, it's not a problem in the CSV reader, but the IPC file writer should be able to write it, even if that means it has to combine/recode the dictionaries to be valid."
+        },
+        {
+            "created_at": "2021-01-05T22:51:45.705Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10406?focusedCommentId=17259271) by Antoine Pitrou (apitrou):*\nAh, unifying the dictionaries would be doable... at least if you write the whole table at once (which I suppose is a common case, especially from R or Python). It would also waste some space and CPU time, however.\r\n\r\n`[~wesm]` Can you give an opinion on this?"
+        },
+        {
+            "created_at": "2021-01-06T11:05:34.015Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10406?focusedCommentId=17259609) by Joris Van den Bossche (jorisvandenbossche):*\nI agree with `[~npr]` that this is a typical use case that should work out of the box. If the IPC file format does not support different dictionaries, I would expect that we unify the dictionaries before writing. \r\n\r\n(that's also what we eg do on conversion to pandas in `to_pandas()`, and probably in R as well when converting to a DataFrame with factors?)\r\n\r\n"
+        },
+        {
+            "created_at": "2021-01-08T20:35:37.976Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10406?focusedCommentId=17261574) by Wes McKinney (wesm):*\nI think it's reasonable for it to fail when writing the file format in a streaming fashion, but when we have the entire table up front, it seems reasonable (though certainly tedious...) to scan the dictionaries in each chunk and if there are any differences, to do a unification. I reckon there would be some refactoring necessary, but if it is not too gory this seems like it would be worth doing in the coming months. "
+        },
+        {
+            "created_at": "2021-02-09T17:50:51.812Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10406?focusedCommentId=17281921) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 9348\n<https://github.com/apache/arrow/pull/9348>"
+        }
+    ]
+}

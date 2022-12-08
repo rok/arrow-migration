@@ -1,0 +1,42 @@
+{
+    "issue": {
+        "title": "[C++] [Python] Proposal for several Array utility functions",
+        "body": "***Note**: This issue was originally created as [ARROW-6775](https://issues.apache.org/jira/browse/ARROW-6775). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi,\r\n\r\nWe developed several utilities that computes / accesses certain properties of Arrays and wonder if they make sense to get them into the upstream (into both the C++ API and pyarrow) and assuming yes, where is the best place to put them?\r\n\r\nMaybe I have overlooked existing APIs that already do the same.. in that case please point out.\r\n\r\n\u00a0\r\n\r\n1/ ListLengthFromListArray(ListArray&)\r\n\r\nReturns lengths of lists in a ListArray, as a Int32Array (or Int64Array for large lists). For example:\r\n\r\n[[1, 2, 3], [], None] => [3, 0, 0] (or [3, 0, None], but we hope the returned array can be converted to numpy)\r\n\r\n\u00a0\r\n\r\n2/ GetBinaryArrayTotalByteSize(BinaryArray&)\r\n\r\nReturns the total byte size of a BinaryArray (basically offset[len - 1] - offset[0]).\r\n\r\nAlternatively, a BinaryArray::Flatten() -> Uint8Array would work.\r\n\r\n\u00a0\r\n\r\n3/ GetArrayNullBitmapAsByteArray(Array&)\r\n\r\nReturns the array's null bitmap as a UInt8Array (which can be efficiently converted to a bool numpy array)\r\n\r\n\u00a0\r\n\r\n4/ GetFlattenedArrayParentIndices(ListArray&)\r\n\r\nMakes a int32 array of the same length as the flattened ListArray. returned_array[i] == j means i-th element in the flattened ListArray came from j-th list in the ListArray.\r\n\r\n\r\nFor example [[1,2,3], [], None, [4,5]] => [0, 0, 0, 3, 3]\r\n\r\n\u00a0",
+        "created_at": "2019-10-02T22:42:07.000Z",
+        "updated_at": "2020-07-08T21:12:48.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-07-07T11:23:48.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-12-10T14:35:55.270Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6775?focusedCommentId=16992607) by Joris Van den Bossche (jorisvandenbossche):*\n`[~brillsp]` thanks for opening the issue, and sorry for the slow reply.\r\n\r\nI would recommend to open specific issues for the different items you mention (or after some more feedback, if we think they would be good to add).\r\n\r\n> 1/ ListLengthFromListArray(ListArray&): Returns lengths of lists in a ListArray, as a Int32Array (or Int64Array for large lists). For example:\r\n\r\nThis can relatively easy be calculated from the offsets, I think? (and the offsets are now exposed in python)\r\n\r\n> 3/ GetArrayNullBitmapAsByteArray(Array&): Returns the array's null bitmap as a UInt8Array (which can be efficiently converted to a bool numpy array)\r\n\r\nI think this is certainly something we want to add somehow. This also related to exposing a \"IsNull\" that returns a BooleaArray from the bitmap, see ARROW-971 and discussion in the PR. \r\nMaybe an utility to convert the bitmap to BooleanArray is more general, as the conversion for bitmap BooleanArray to bool/int8 numpy array is already implemented.\r\n\r\n> 4/ GetFlattenedArrayParentIndices(ListArray&)\n> \n> Makes a int32 array of the same length as the flattened ListArray. returned_array[i] == j means i-th element in the flattened ListArray came from j-th list in the ListArray.\n> \n> For example [[1,2,3], [], None, [4,5]] => [0, 0, 0, 3, 3]\r\n\r\nCan you explain this one a bit more?"
+        },
+        {
+            "created_at": "2020-05-23T03:45:03.227Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6775?focusedCommentId=17114510) by Wes McKinney (wesm):*\nI think these can all be implemented as kernels with the new compute framework after ARROW-8792. I have linked the issue"
+        },
+        {
+            "created_at": "2020-06-27T15:54:18.522Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6775?focusedCommentId=17147018) by Wes McKinney (wesm):*\nNote, #2 has been implemented in ARROW-9116"
+        },
+        {
+            "created_at": "2020-06-27T15:56:52.306Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6775?focusedCommentId=17147019) by Wes McKinney (wesm):*\n#3 can be computed using a combination of the `is_null` function and Cast, so I think this is done\r\n\r\n```Java\n\r\nIn [1]: arr = pa.array([1, 2, 3, None, None, 6, 7, None])                                                         \r\n\r\nIn [2]: arr.is_null()                                                                                             \r\nOut[2]: \r\n<pyarrow.lib.BooleanArray object at 0x7f783a397e88>\r\n[\r\n  false,\r\n  false,\r\n  false,\r\n  true,\r\n  true,\r\n  false,\r\n  false,\r\n  true\r\n]\r\n\r\nIn [3]: arr.is_null().cast('uint8')                                                                               \r\nOut[3]: \r\n<pyarrow.lib.UInt8Array object at 0x7f7839cb6f48>\r\n[\r\n  0,\r\n  0,\r\n  0,\r\n  1,\r\n  1,\r\n  0,\r\n  0,\r\n  1\r\n]\r\n```\r\n\r\n#1 and #4 will need patches. #1 is pretty easy so I'll write a patch for that soon hopefully"
+        },
+        {
+            "created_at": "2020-06-27T16:03:11.486Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6775?focusedCommentId=17147021) by Wes McKinney (wesm):*\nI ticketed everything, see the linked JIRA issues"
+        },
+        {
+            "created_at": "2020-07-07T11:23:48.275Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6775?focusedCommentId=17152666) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 7632\n<https://github.com/apache/arrow/pull/7632>"
+        }
+    ]
+}

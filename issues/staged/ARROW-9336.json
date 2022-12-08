@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Ruby] Creating RecordBatch with structs missing keys results in a malformed table",
+        "body": "***Note**: This issue was originally created as [ARROW-9336](https://issues.apache.org/jira/browse/ARROW-9336). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nUsing `::Arrow::RecordBatch.new(schema, data)` (which uses the `RecordBatchBuilder`) appears to handle when a record is missing an entry for a top level column, but it doesn't handle when a record is missing an entry within a struct column. For example, I'd expect the following code to print out `true` for each `puts`, but 2 of them are `false`:\r\n```ruby\n\r\nrequire 'parquet'\r\nrequire 'arrow'\r\n\r\nschema = [\r\n  {name: \"a\", type: \"string\"},\r\n  {name: \"b\", type: \"struct\", fields: [\r\n     {name: \"c\", type: \"string\"},\r\n     {name: \"d\", type: \"string\"},\r\n   ]\r\n  },\r\n]\r\n\r\narrow_schema = ::Arrow::Schema.new(schema)\r\n\r\nrecord_batch = ::Arrow::RecordBatch.new(\r\n  arrow_schema,\r\n  [\r\n    {\"a\" => \"a\", \"b\" => {\"c\" => \"c\",           }},\r\n    {            \"b\" => {\"c\" => \"c\",           }},\r\n    {            \"b\" => {            \"d\" => \"d\"}},\r\n  ]\r\n)\r\ntable = record_batch.to_table\r\n\r\nputs(table['a'][0] == 'a')\r\nputs(table['a'][1].nil?)\r\nputs(table['a'][2].nil?)\r\n\r\nputs(table['b'][0].key?('c'))\r\nputs(table['b'][0]['c'] == 'c')\r\nputs(table['b'][0].key?('d'))\r\nputs(table['b'][0]['d'].nil?) # False ?\r\nputs(!table['b'][0].key?('e'))\r\n\r\nputs(table['b'][1].key?('c'))\r\nputs(table['b'][1]['c'] == 'c')\r\nputs(table['b'][1].key?('d'))\r\nputs(table['b'][1]['d'].nil?)\r\nputs(!table['b'][1].key?('e'))\r\n\r\nputs(table['b'][2].key?('c'))\r\nputs(table['b'][2]['c'].nil?)\r\nputs(table['b'][2].key?('d'))\r\nputs(table['b'][2]['d'] == 'd') # False ?\r\nputs(!table['b'][2].key?('e'))\r\n```\r\nI'd expect `puts(table)` to print this representation:\r\n```\n\r\n\ta\tb\r\n0\ta\t{\"c\"=>\"c\", \"d\"=>nil}\r\n1\t \t{\"c\"=>\"c\", \"d\"=>nil}\r\n2\t \t{\"c\"=>nil, \"d\"=>\"d\"}\r\n```\r\nBut it prints this instead:\r\n```\n\r\n\ta\tb\r\n0\ta\t{\"c\"=>\"c\", \"d\"=>\"d\"}\r\n1\t \t{\"c\"=>\"c\", \"d\"=>nil}\r\n2\t \t{\"c\"=>nil, \"d\"=>nil}\r\n```\r\n\r\n\u00a0Furthermore, trying to write that table out to a parquet file results in the following error:\r\n\r\n```\n\r\nTraceback (most recent call last):\r\n\t7: from arrow_parquet2.rb:53:in `<main>'\r\n\t6: from /usr/local/lib/ruby/gems/2.6.0/gems/red-arrow-0.17.1/lib/arrow/block-closable.rb:25:in `open'\r\n\t5: from arrow_parquet2.rb:54:in `block in <main>'\r\n\t4: from /usr/local/lib/ruby/gems/2.6.0/gems/red-arrow-0.17.1/lib/arrow/block-closable.rb:25:in `open'\r\n\t3: from arrow_parquet2.rb:56:in `block (2 levels) in <main>'\r\n\t2: from /usr/local/lib/ruby/gems/2.6.0/gems/gobject-introspection-3.4.3/lib/gobject-introspection/loader.rb:514:in `block in define_method'\r\n\t1: from /usr/local/lib/ruby/gems/2.6.0/gems/gobject-introspection-3.4.3/lib/gobject-introspection/loader.rb:600:in `invoke'\r\n/usr/local/lib/ruby/gems/2.6.0/gems/gobject-introspection-3.4.3/lib/gobject-introspection/loader.rb:600:in `invoke': [parquet][arrow][file-writer][write-table]: Invalid: Column 1: In chunk 0: Invalid: Struct child array #0 has length different from struct array (2 != 3) (Arrow::Error::Invalid)\r\n \n```\r\n",
+        "created_at": "2020-07-06T17:32:31.000Z",
+        "updated_at": "2020-07-07T20:19:05.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Ruby",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-07-07T20:19:05.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-07-06T17:37:59.082Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9336?focusedCommentId=17152202) by Steven Willis (stevenwillis):*\nIt looks like the python library has a `pyarrow.json.read_json(data)`, which creates a table properly even when a record is missing an entry in a struct. I didn't see an equivalent method for ruby, but having one that behaved the same as this python function would solve my issue."
+        },
+        {
+            "created_at": "2020-07-06T17:40:16.720Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9336?focusedCommentId=17152207) by Antoine Pitrou (apitrou):*\ncc `[~kou]`"
+        },
+        {
+            "created_at": "2020-07-07T20:19:05.591Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9336?focusedCommentId=17153071) by Kouhei Sutou (kou):*\nIssue resolved by pull request 7649\n<https://github.com/apache/arrow/pull/7649>"
+        }
+    ]
+}

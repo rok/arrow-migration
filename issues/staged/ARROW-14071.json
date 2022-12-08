@@ -1,0 +1,36 @@
+{
+    "issue": {
+        "title": "[R] Try to arrow_eval user-defined functions",
+        "body": "***Note**: This issue was originally created as [ARROW-14071](https://issues.apache.org/jira/browse/ARROW-14071). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n**Proposed approach**:\r\n- Investigate simple injection with `!!`\n- Investigate injection with `rlang::inject()`\n- Investigate the data mask levels approach\n- investigate other (undefined) approaches\n  \n**Original description**:\r\nThe first test passes but the second one fails, even though they're equivalent. The user's function isn't being evaluated in the nse_funcs environment.\r\n\r\n```Java\n\r\n  expect_dplyr_equal(\r\n    input %>%\r\n      select(-fct) %>%\r\n      filter(nchar(padded_strings) < 10) %>%\r\n      collect(),\r\n    tbl\r\n  )\r\n  isShortString <- function(x) nchar(x) < 10\r\n  expect_dplyr_equal(\r\n    input %>%\r\n      select(-fct) %>%\r\n      filter(isShortString(padded_strings)) %>%\r\n      collect(),\r\n    tbl\r\n  )\r\n```",
+        "created_at": "2021-09-22T14:53:59.000Z",
+        "updated_at": "2022-10-13T14:11:27.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-03T12:34:10.084Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14071?focusedCommentId=17438024) by Dewey Dunnington (paleolimbot):*\nReprex:\u00a0\r\n\r\n\u00a0\r\n```java\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\nnchar2 <- function(x) {\r\n  nchar(x)\r\n}\r\nRecordBatch$create(my_string = \"1234\") %>%\r\n  mutate(nchar(my_string), nchar2(my_string)) %>%\r\n  collect()\r\n#> Warning: Expression nchar2(my_string) not supported in Arrow; pulling data into\r\n#> R\r\n#> # A tibble: 1 \u00d7 3\r\n#>   my_string `nchar(my_string)` `nchar2(my_string)`\r\n#>   <chr>                  <int>               <int>\r\n#> 1 1234                       4                   4\n```\r\n\u00a0I'm not sure if this works with the rlang data mask, but you could do this by setting `environment(fun)` to an environment that inherits the original `environment(fun)`. You probably don't want the data mask anyway because you don't want field references to interfere with the internal function variable names. (With apologies if you've done this already and I missed it):\r\n```\n\r\nmasked_function <- function(fun, env) {\r\n# probably want to (shallow) copy `env` because we'd need to modify it\r\n# and it's passed by reference\r\n  env2 <- new.env(parent = environment(fun))\r\n  for (name in names(env)) {\r\n    env2[[name]] <- env[[name]]\r\n  }\r\n  \r\n  environment(fun) <- env2\r\n  fun\r\n}\r\n\r\nsome_var <- 45\r\nmy_function <- function() {\r\n  some_var + 5\r\n}\r\n\r\nmy_function()\r\n#> [1] 50\r\nmasked_function(my_function, as.environment(list(some_var = 1)))()\r\n#> [1] 6\n```"
+        },
+        {
+            "created_at": "2021-11-03T13:49:55.929Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14071?focusedCommentId=17438074) by Jonathan Keane (jonkeane):*\nYeah, it's not quite the same thing as described in the top/bottom of data mask docs, but similar (and we could maybe use this stacking to get what we want here? Though I haven't looked at this deeply in a while)\r\n\r\nhttps://rlang.r-lib.org/reference/as_data_mask.html#top-and-bottom-of-data-mask\r\n\r\nIn case you haven't yet found it, our masking happens at https://github.com/apache/arrow/blob/16af17c3327cfe624038913a7a808656082f69e0/r/R/dplyr-eval.R#L78-L111"
+        },
+        {
+            "created_at": "2021-11-03T15:36:43.377Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14071?focusedCommentId=17438152) by Neal Richardson (npr):*\nYou could try copying the function into the data_mask and setting its env. Question is whether you should require a user to first register their function (i.e. do this explicitly) or whether to somehow detect functions and pull them automatically. "
+        },
+        {
+            "created_at": "2022-08-23T11:14:59.736Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14071?focusedCommentId=17583523) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nMaybe a silly question, but do we want to allow user defined functions inside `summarise()` too (i.e. translate aggregating functions too; or a mixture of aggregating and non-aggregating functions)? `[~npr]` `[~jonkeane]` `[~paleolimbot]` \u00a0"
+        },
+        {
+            "created_at": "2022-08-23T16:50:21.403Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14071?focusedCommentId=17583752) by Weston Pace (westonpace):*\nAggregation (summarise) operations are a little trickier and some C++ work will probably need to be done to formalize things a bit but it is not a huge lift from where we are.  In Acero, aggregate operations are stateful and are actually represented by three different functions: consume (process a batch and update state), merge (combine two states into one), and finalize (turn a state into record batches).  So, for example, the min operation is:\r\n\r\nconsume - find the minimum value in a batch and, if smaller than state.min, update state.min\r\nmerge - compare two state.min and update with the smaller of the two\r\nfinalize - turn state.min into an int64 scalar\r\n\r\nWhen writing UDFs we would probably need to follow the same structure and provide three R functions for each aggregate operation."
+        }
+    ]
+}

@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Parquet] Free more internal resources when writing multiple row groups",
+        "body": "***Note**: This issue was originally created as [ARROW-3324](https://issues.apache.org/jira/browse/ARROW-3324). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSee:\r\n\r\n- https://github.com/apache/arrow/issues/2614\n- https://github.com/apache/arrow/issues/2624\n  \n",
+        "created_at": "2018-09-25T11:11:02.000Z",
+        "updated_at": "2018-12-27T04:38:57.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-12-27T04:38:09.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-10-26T22:40:53.131Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3324?focusedCommentId=16665729) by Wes McKinney (wesm):*\nHere's another memory leak report\r\n\r\n```Java\n\r\nimport resource\r\nimport random\r\nimport string\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nimport pandas as pd\r\n\r\n\r\ndef id_generator(size=6, chars=string.ascii_uppercase + string.digits):\r\n    return ''.join(random.choice(chars) for _ in range(size))\r\n\r\nschema = pa.schema([\r\n                        pa.field('test', pa.string()),\r\n                    ])\r\n\r\nresource.setrlimit(resource.RLIMIT_NOFILE, (1000000, 1000000))\r\nnumber_files = 10000\r\nnumber_rows_increment = 1000\r\nnumber_iterations = 100\r\n\r\nwriters = [pq.ParquetWriter('test_'+id_generator()+'.parquet', schema) for i in range(number_files)]\r\n\r\nfor i in range(number_iterations):\r\n    for writer in writers:\r\n        table_to_write = pa.Table.from_pandas(\r\n                            pd.DataFrame({'test': [id_generator() for i in range(number_rows_increment)]}),\r\n                            preserve_index=False,\r\n                            schema = schema,\r\n                            nthreads = 1)\r\n        table_to_write = table_to_write.replace_schema_metadata(None)\r\n        writer.write_table(table_to_write)\r\n    print(i)\r\n\r\nfor writer in writers:\r\n    writer.close()\r\n```\r\n\r\nhttps://stackoverflow.com/questions/53016802/memory-leak-from-pyarrow"
+        },
+        {
+            "created_at": "2018-12-25T21:59:53.238Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3324?focusedCommentId=16728819) by Tanya Schlusser (tanya):*\nI could not reproduce either of the two GitHub issues above, but could identify a leak using `memory_profiler` on the stackoverflow code (copied [this](https://github.com/apache/arrow/blob/master/python/scripts/test_leak.py))\r\n\r\nI observed that `FileSerializer.properties_.use_count()` increments more than expected whenever `FileSerializer.AppendRowGroup` is called. The offending line is `FileSerializer.metadata_->AppendRowGroup()`. I believe that the count should only go up once per new row group, instead of once per column plus once per row group.\r\n\r\nI think the root cause is that in `RowGroupMetaDataBuilder::RowGroupMetaDataBuilderImpl.Finish`, the vector of `column_builders_` ought to be reset and cleared each time before it is repopulated. I hope to submit a pull request for this even though it may not address all of the issues stated here. Since the GitHub issues were about memory leaks on \"read\", and the fix is related only to \"write\", this observation certainly doesn't address everything in this JIRA issue.\r\n\r\nEven after the fix I'll post, my memory_profiler code still shows an increase in memory use upon additional calls to `pq.ParquetWriter.write_table`, which I think is OK because the row group is incrementing with each write too. So I may be wrong or have still missed something. Regardless, I hope\u00a0these notes\u00a0are\u00a0useful to someone."
+        },
+        {
+            "created_at": "2018-12-26T18:30:52.285Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3324?focusedCommentId=16729131) by Tanya Schlusser (tanya):*\nThe file [arrow_3324_leak_on_write.py](https://issues.apache.org/jira/secure/attachment/12953078/arrow_3324_leak_on_write.py) contains a modified version of the stackoverflow post in Wes's comment above, with `memory_profiler` to show the memory use. The memory use does increase as the code cycles through multiple calls to `write_table`."
+        },
+        {
+            "created_at": "2018-12-27T04:38:09.240Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3324?focusedCommentId=16729320) by Wes McKinney (wesm):*\nIssue resolved by pull request 3261\n<https://github.com/apache/arrow/pull/3261>"
+        }
+    ]
+}

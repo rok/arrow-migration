@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "[pyarrow] ParquetFile does not recognize GCS cloud path as a string",
+        "body": "***Note**: This issue was originally created as [ARROW-18272](https://issues.apache.org/jira/browse/ARROW-18272). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI have a Parquet file at\r\n\r\n\u00a0\r\n\r\npath = 'gs://mybucket/abc/d.parquet'\r\n\r\n\u00a0\r\n\r\n`pyarrow.parquet.read_metadata(path)` works fine.\r\n\r\n\u00a0\r\n\r\n`pyarrow.parquet.ParquetFile(path)` raises \"Failed to open local file 'gs://mybucket/abc/d.parquet'.\r\n\r\n\u00a0\r\n\r\nLooks like ParquetFile misses the path resolution logic found in `read_metadata`",
+        "created_at": "2022-11-07T19:36:27.000Z",
+        "updated_at": "2022-11-11T08:03:48.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-11-10T15:27:23.941Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18272?focusedCommentId=17631708) by Miles Granger (milesgranger):*\nJust noting that this works for `read_metadata` because, while it takes an optional `filesystem`, it calls [_resolve_filesystem_and_path \\| https://github.com/apache/arrow/blob/18326f96834169b4573f3d4f1c0d46f1e8499295/python/pyarrow/parquet/core.py#L3476] while `ParquetFile` does not.\r\n\r\nIf you want to make it work right now, one could do something like:\r\n```python\n\r\npath = 'mybucket/abc/d.parquet'\r\nuri = f'gs://{path}'\r\nfilesystem = pyarrow.fs.FileSystem.from_uri(uri)\r\nwith filesystem.open_input_stream(path) as f:\r\n    parquet_file = pq.ParquetFile(f)\r\n```\r\n\r\ncc `[~apitrou]` as part of this, I could add a similar `_resolve_filesystem_and_path` inside of `ParquetFile`?"
+        },
+        {
+            "created_at": "2022-11-10T15:28:35.755Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18272?focusedCommentId=17631711) by Antoine Pitrou (apitrou):*\n`[~jorisvandenbossche]` probably has a better opinion than me on this :-)"
+        },
+        {
+            "created_at": "2022-11-11T08:03:48.755Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18272?focusedCommentId=17632147) by Zepu Zhang (zpz):*\nYes, I'm making it work that way for now. Actually I have a case where I don't want the convenience of passing a str to it, because I'm processing a large number of files, and I don't want it to do the default credential inference for each file. So I do this:\r\n\r\n\u00a0\r\n\r\n```\r\n\r\ngcs = pyarrow.fs.GcsFileSystem(token=..., credential_token_expiration=...)\r\n\r\nparquet_file = pyarrow.parquet.ParquetFile(gcs.open_input_file('mybucket/abc/d.parquet'))\r\n\r\n```\r\n\r\n\u00a0\r\n\r\nHowever, API consistency and function signatures suggest `ParquetFile` and `read_metadata` should accept the same types of `where`."
+        }
+    ]
+}

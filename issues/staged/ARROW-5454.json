@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[C++] Implement Take on ChunkedArray for DataFrame use",
+        "body": "***Note**: This issue was originally created as [ARROW-5454](https://issues.apache.org/jira/browse/ARROW-5454). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFollow up to ARROW-2667",
+        "created_at": "2019-05-31T00:46:40.000Z",
+        "updated_at": "2019-11-02T14:52:07.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-11-02T14:52:07.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-08-21T20:57:17.559Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5454?focusedCommentId=16912675) by Artem KOZHEVNIKOV (ArtemK):*\nif it were in pure python, we could do something like below (relying on `pa.array.take`)\r\n```python\n\r\nimport numpy as np\r\nimport pyarrow as pa\r\nfrom pandas.core.sorting import get_group_index_sorter\r\n\r\ndef take_on_chunked_array(charr, indices):\r\n    indices = np.array(indices, dtype=np.int)\r\n    if indices.max() > len(charr):\r\n        raise IndexError()\r\n\r\n    indices[indices < 0] += len(charr)\r\n\r\n    if indices.min() < 0:\r\n        raise IndexError()\r\n\r\n    lengths = np.fromiter(map(len, charr.chunks), dtype=np.int64)\r\n    cum_lengths = lengths.cumsum()\r\n\r\n    bins = np.searchsorted(cum_lengths, indices, side=\"right\")\r\n    limits_idx = np.concatenate([[0], np.bincount(bins).cumsum()])\r\n\r\n    sort_idx = get_group_index_sorter(bins, len(cum_lengths))\r\n    del bins\r\n\r\n    indices = indices[sort_idx]\r\n    sort_idx = np.argsort(sort_idx, kind=\"merge\")  # inverse sort indices\r\n\r\n    cum_lengths -= lengths\r\n    res_array = pa.concat_arrays([charr.chunks[i].take(pa.array(indices[limits_idx[i]:limits_idx[i + 1]] - cum_length))\r\n                                  for i, cum_length in enumerate(cum_lengths)])\r\n    return res_array.take(pa.array(sort_idx))\r\n\r\n\r\ncharr = pa.chunked_array([pa.array([0, 1]), pa.array([2, 3, 4]), pa.array([5, 6, 7, 8])])\r\ntake_on_chunked_array(charr, np.array([6, 0, 3])).to_numpy()\r\npa.concat_arrays(charr.chunks).take(pa.array([6, 0, 3])).to_numpy()\r\n```\r\n\r\nDo we want something similar in C++ ? Should we reuse `cpp:Array:Take` method and concat_arrays (or we want to avoid an extra copy) ? if we don't reuse `array.take` we can of cause avoid sorting indices back and forth.\r\n"
+        },
+        {
+            "created_at": "2019-08-22T14:28:18.505Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5454?focusedCommentId=16913368) by Wes McKinney (wesm):*\nA C++ implementation would be useful. It makes most sense in the context of the \"Data Frame\" project \r\n\r\nhttps://docs.google.com/document/d/1XHe_j87n2VHGzEbnLe786GHbbcbrzbjgG8D0IXWAeHg/edit?usp=sharing\r\n\r\nI plan to dig into this finally after Labor Day"
+        },
+        {
+            "created_at": "2019-10-15T08:09:13.563Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5454?focusedCommentId=16951704) by Artem KOZHEVNIKOV (ArtemK):*\n`[~wesm]`, could you have a look on this ? apart a arrow:DataFrame project, in meanwhile this feature can be very useful to work with pyarrow data structures via pandas.ExtenensionArray."
+        },
+        {
+            "created_at": "2019-10-15T17:07:26.462Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5454?focusedCommentId=16952121) by Wes McKinney (wesm):*\nYou're welcome to contribute an implementation. It does not have to wait for the data frame project work to begin"
+        },
+        {
+            "created_at": "2019-10-16T13:26:26.761Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5454?focusedCommentId=16952823) by Neal Richardson (npr):*\nSee also ARROW-6784"
+        }
+    ]
+}

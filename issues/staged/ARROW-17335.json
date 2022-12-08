@@ -1,0 +1,84 @@
+{
+    "issue": {
+        "title": "[Python] Type checking support",
+        "body": "***Note**: This issue was originally created as [ARROW-17335](https://issues.apache.org/jira/browse/ARROW-17335). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n# mypy and static type checking\r\n\r\nAs of Python3.6, it has been possible to introduce typing information in the code. This became immensely popular in a short period of time. Shortly after, the tool `mypy` arrived and this has become the industry standard for static type checking inside Python. It is able to check very quickly for invalid types which makes it possible to serve as a pre-commit. It has raised many bugs that I did not see myself and has been a very valuable tool.\r\n## Now what does this mean for PyArrow?\r\n\r\nWhen we run mypy on code that uses PyArrow, you will get error message as follows:\r\n\r\n```\r\nsome_util_using_pyarrow/hdfs_utils.py:5: error: Skipping analyzing \"pyarrow\": module is installed, but missing library stubs or py.typed marker\r\nsome_util_using_pyarrow/hdfs_utils.py:9: error: Skipping analyzing \"pyarrow\": module is installed, but missing library stubs or py.typed marker\r\nsome_util_using_pyarrow/hdfs_utils.py:11: error: Skipping analyzing \"pyarrow.fs\": module is installed, but missing library stubs or py.typed marker\r\n```\r\n\r\nMore information is available here: <https://mypy.readthedocs.io/en/stable/running_mypy.html#missing-library-stubs-or-py-typed-marker>\r\n## You can solve this in three ways:\r\n1. Ignore the message. This, however, will put all types from PyArrow to `Any`, making it unable to find user errors with the PyArrow library\n1. Create a Python stub file. This is what previously used to be the standard, however, it no longer a popular option. This is because stubs are extra, next to the source code, while you can also inline the code with type hints, which brings me to our third option.\n1. Create a `py.typed` file and use inline type hints. This is the most popular option today because it requires no extra files (except for the py.typed file), allows all the type hints to be with the code (like now in the documentation) and not only provides your users but also the developers of the library themselves with type hints (and hinting of issues inside your IDE).\n   \n   \u00a0\n   \n   My personal opinion already shines through the options, it is 3 as this has shortly become the industry standard since the introduction.\n   ## What should we do?\n   \n   I'd very much like to work on this, however, I don't feel like wasting time. Therefore, I am raising this ticket to see if this had been considered before or if we just didn't get to this yet.\n   \n   I'd like to open the discussion here:\n1. Do you agree with number #3 as type hints.\n1. Should we remove the documentation annotations for the type hints given they will be inside the functions? Or should we keep it and specify it in the code? Which would make it double.\n   \n   \u00a0",
+        "created_at": "2022-08-08T05:35:38.000Z",
+        "updated_at": "2022-08-17T08:56:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-08-08T07:56:13.592Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17335?focusedCommentId=17576609) by Antoine Pitrou (apitrou):*\nMuch of our code is in Cython. If you put the type annotations inline, any change or addition to typing info will require a recompile.\r\n\r\n(also I'm assuming that Cython is compatible with type annotations, but I'm not 100% sure)"
+        },
+        {
+            "created_at": "2022-08-08T07:56:38.895Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17335?focusedCommentId=17576610) by Antoine Pitrou (apitrou):*\ncc `[~uwe]` `[~jorisvandenbossche]`"
+        },
+        {
+            "created_at": "2022-08-08T08:21:42.108Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17335?focusedCommentId=17576627) by Jorrick Sleijster (jorricks):*\nHi `[~apitrou]`,\r\n\r\nThanks for reaching out. I checked out the code indeed and I have to say, it's super clean and I was overwhelmed.\r\n\r\nI have no worked with Cython code bases before but if we just changed the `\\*.py` files with type annotations, that would that also require a recompilation?\r\n\r\n\u00a0\r\n\r\nLet's take this line for example: <https://github.com/apache/arrow/blob/939195183657daa2060970b6fcd1938eab53d44b/python/pyarrow/hdfs.py#L96>\r\n```python\n\r\ndef ls(self, path, detail=False):\n```\r\nThat would become\r\n```python\n\r\ndef ls(self, path: str, detail: bool = False) -> List[Dict[str, Any]]:\n```\r\nWould that change require recompilation?"
+        },
+        {
+            "created_at": "2022-08-08T10:52:06.763Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17335?focusedCommentId=17576708) by Antoine Pitrou (apitrou):*\nNo, that wouldn't require recompilation, but some APIs are implemented in Cython."
+        },
+        {
+            "created_at": "2022-08-08T11:33:40.100Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17335?focusedCommentId=17576717) by David Li (lidavidm):*\nArguably also duplicates ARROW-8175"
+        },
+        {
+            "created_at": "2022-08-08T11:34:36.506Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17335?focusedCommentId=17576718) by David Li (lidavidm):*\nAnd https://github.com/cython/cython/pull/3818 is relevant"
+        },
+        {
+            "created_at": "2022-08-08T16:27:21.024Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17335?focusedCommentId=17576882) by Jorrick Sleijster (jorricks):*\nWell it's not really a duplicate of ARROW-8175.\r\n\r\nThe difference lies in the fact that that ticket is focused perform type checking on the PyArrow code base and ensuring all the types are valid inside the library.\r\n\r\nMy ticket is about using the PyArrow code base as a library and ensuring we can type check projects that are using PyArrow by using type annotations on functions specified inside the PyArrow codebase.\r\n\r\n\u00a0\r\n\r\nI think PySpark 3.2.2 was a nice example of having stubs: <https://github.com/apache/spark/tree/v3.2.2/python/pyspark>\r\n\r\nI'm pretty sure they created them manually though (and note: this is a Java bindings and not C, but I don't think that's a lot of difference in terms of stubs).\r\n\r\nHowever, they changed it in their latest version to ditch the pyi files. I think this is because they have a lot more percentage of the code in Python compared to Java."
+        },
+        {
+            "created_at": "2022-08-08T16:27:53.320Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17335?focusedCommentId=17576883) by Jorrick Sleijster (jorricks):*\nI suppose we can just give it a start and see how far we get?"
+        },
+        {
+            "created_at": "2022-08-08T16:32:49.346Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17335?focusedCommentId=17576887) by Antoine Pitrou (apitrou):*\nYes, we can probably give it a start. Probably start with the most basic utilities, for example in `memory.pxi`."
+        },
+        {
+            "created_at": "2022-08-09T09:42:21.005Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17335?focusedCommentId=17577308) by Joris Van den Bossche (jorisvandenbossche):*\nAFAIK it is not (yet) possible to do inline type annotations in cython code (for type checking purposes, see the links in https://github.com/apache/arrow/pull/6676 as well), so I think that basically means we need to use the stub file approach? \r\n\r\n(but I certainly agree it's fine to give this a go with a small subset, see how that looks, and discuss further from there)"
+        },
+        {
+            "created_at": "2022-08-09T09:47:37.126Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17335?focusedCommentId=17577314) by Joris Van den Bossche (jorisvandenbossche):*\n> Well it's not really a duplicate of ARROW-8175.\n> \n> The difference lies in the fact that that ticket is focused perform type checking on the PyArrow code base and ensuring all the types are valid inside the library.\n> \n> My ticket is about using the PyArrow code base as a library and ensuring we can type check projects that are using PyArrow by using type annotations on functions specified inside the PyArrow codebase.\r\n\r\nIt's indeed not exactly the same. But _in practice_, I think both aspects are very much related and we could (should?) do those at the same time. If we start adding type annotations so that pyarrow can used by other projects that are type-checked, it would be good that at the same time we also _check_ that those type annotations we are adding are correct (although, based on my limited experience with this, just running mypy on the code base is always a bit limited I suppose, as it doesn't guarantee the type checks are actually correct? (it only might find some incorrect ones))\r\n\r\n "
+        },
+        {
+            "created_at": "2022-08-09T12:31:42.988Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17335?focusedCommentId=17577392) by Jorrick Sleijster (jorricks):*\nI think you make a good point Joris but as you mention, I don't think we can use inline type annotations :'(. Therefore, we'd have to use generated stubs, which we can't use for checking whether the underlying code actually has the right types.\r\n\r\nI think we will therefore have to wait (or take action ourselves upstream) until mypy or cython implements decent support for Python stub generation.\r\n\r\nHence, I think it's better to threat them separate for now and start of with stub generation, which can then later be replaced by a better implementation once available."
+        },
+        {
+            "created_at": "2022-08-09T17:56:28.556Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17335?focusedCommentId=17577564) by Joris Van den Bossche (jorisvandenbossche):*\nMypy doesn't use pyi files when eg doing `mypy pyarrow`?"
+        },
+        {
+            "created_at": "2022-08-10T06:24:22.567Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17335?focusedCommentId=17577796) by Jorrick Sleijster (jorricks):*\nIt does, in fact, the pyi files are the python-interfaces / python stubs as mentioned here: <https://mypy.readthedocs.io/en/stable/stubs.html.>\r\n\r\nAs far as I can see from this page, these are only used for external project checking it's types against this project and not for internal project checking."
+        },
+        {
+            "created_at": "2022-08-10T18:14:41.470Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17335?focusedCommentId=17578099) by Uwe Korn (uwe):*\nMy initial efforts with regards to typing the code base stopped as the inline type annotations (and their automatic extraction into pyi) is the crucial component here. All the important data structures of pyarrow are implemented in Cython, only a very small fraction of the externally visible API is in plain Python. Thus as long as the referenced Cython issue isn't solved, I don't think it makes sense to progress on the Arrow side."
+        },
+        {
+            "created_at": "2022-08-10T19:15:45.397Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17335?focusedCommentId=17578122) by Jorrick Sleijster (jorricks):*\nYes I guess it will also be a lot of work to keep it up to date over time if we do major refactors.\r\n\r\nLooker at other projects, this seems like a very cumbersome and tedious thing to work on.\r\n\r\nFor example, this one took a very long time to get right as well; <https://github.com/pysam-developers/pysam/pull/1008>\r\n\r\nI suppose the best it to postpone until <https://github.com/python/mypy/issues/7542> is implemented then."
+        },
+        {
+            "created_at": "2022-08-17T08:56:03.934Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17335?focusedCommentId=17580681) by Joris Van den Bossche (jorisvandenbossche):*\nFYI pandas does use pyi files next to cython files that have to be kept updated manually if the cython file changes. But, in pandas the cython code is mostly for internal functionality, not for public facing classes and methods. "
+        }
+    ]
+}

@@ -1,0 +1,21 @@
+{
+    "issue": {
+        "title": "[C++] Flight client may crash due to improper Result/Status conversion",
+        "body": "***Note**: This issue was originally created as [ARROW-18320](https://issues.apache.org/jira/browse/ARROW-18320). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nReported on user@ https://lists.apache.org/thread/84z329t1djhnbr5bq936v4hr8cyngj2l \r\n\r\n```\n\r\nI have an issue on my project, we have a query execution engine that\r\nreturns result data as a flight stream and c++ client that receives the\r\nstream. In case a query has no results but the result schema implies\r\ndictionary encoded fields in results we have client app crushed.\r\n\r\nThe cause is in cpp/src/arrow/flight/client.cc:461:\r\n\r\n::arrow::Result<std::unique_ptr<ipc::Message>> ReadNextMessage() override {\r\nif (stream_finished_) {\r\nreturn nullptr;\r\n}\r\ninternal::FlightData* data;\r\n{\r\nauto guard = read_mutex_ ? std::unique_lock<std::mutex>(*read_mutex_)\r\n: std::unique_lock<std::mutex>();\r\npeekable_reader_->Next(&data);\r\n}\r\nif (!data) {\r\nstream_finished_ = true;\r\nreturn stream_->Finish(Status::OK()); // Here the issue\r\n}\r\n// Validate IPC message\r\nauto result = data->OpenMessage();\r\nif (!result.ok()) {\r\nreturn stream_->Finish(std::move(result).status());\r\n}\r\n*app_metadata_ = std::move(data->app_metadata);\r\nreturn result;\r\n}\r\n\r\nThe method returns Result object while stream_Finish(..) returns a Status.\r\nSo there is an implicit conversion from Status to Result that causes\r\nResult(Status) constructor to be called, but the constructor expects only\r\nerror statuses which in turn causes the app to be failed:\r\n\r\n/// Constructs a Result object with the given non-OK Status object. All\r\n/// calls to ValueOrDie() on this object will abort. The given `status` must\r\n/// not be an OK status, otherwise this constructor will abort.\r\n///\r\n/// This constructor is not declared explicit so that a function with a\r\nreturn\r\n/// type of `Result<T>` can return a Status object, and the status will be\r\n/// implicitly converted to the appropriate return type as a matter of\r\n/// convenience.\r\n///\r\n/// \\param status The non-OK Status object to initialize to.\r\nResult(const Status& status) noexcept // NOLINT(runtime/explicit)\r\n: status_(status) {\r\nif (ARROW_PREDICT_FALSE(status.ok())) {\r\ninternal::DieWithMessage(std::string(\"Constructed with a non-error status: \")\r\n+\r\nstatus.ToString());\r\n}\r\n}\r\n\r\nIs there a way to workaround or fix it? We use Arrow 6.0.0, but it seems\r\nthat the issue exists in all future versions.\r\n```",
+        "created_at": "2022-11-14T14:54:30.000Z",
+        "updated_at": "2022-11-14T14:54:53.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: FlightRPC",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-11-14T14:54:53.117Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18320?focusedCommentId=17633847) by David Li (lidavidm):*\nI couldn't reproduce it with a quick try in PyArrow 10, but regardless we should fix the underlying issue"
+        }
+    ]
+}

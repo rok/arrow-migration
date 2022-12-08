@@ -1,0 +1,20 @@
+{
+    "issue": {
+        "title": "[Format] Mitigating the cost of random access in \"wide\" record batches",
+        "body": "***Note**: This issue was originally created as [ARROW-645](https://issues.apache.org/jira/browse/ARROW-645). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn very large schemas, due of the way we are flattening the field and buffer metadata in the RecordBatch:\n\nhttps://github.com/apache/arrow/blob/master/format/Message.fbs#L271\n\nThe cost to reconstruct / load a single array from a RecordBatch can be arbitrarily high. \n\nAs an example, let's consider a schema:\n\n```Java\nf0: int32\nf1: string\n...  omitting 999996 duplicate\nf999998: int32\nf999999: string\n```\n\nHere, a record batch has 1 million fields, and in total 2.5 million buffers. The problem with this is: to select a single field out of a record batch, we have to inspect all types leading up to the field of interest to know how many `FieldNode` and `Buffer` metadata values will have occurred in the serialized metadata before that field's metadata appears.\n\nSolving this is a little bit tricky. One way would be to add optional \"field position\" and \"buffer position\" attributes to the `Field` table:\n\nhttps://github.com/apache/arrow/blob/master/format/Message.fbs#L188\n\nSo here, we would know that for the `f1` field, the field index is 1 and the buffer index is 2. Because a string has 3 buffers associated with it, we would know to select buffers in slots 2, 3, 4 to reconstruct the vector container. \n\nLet me know if the problem is not clear, and any other ideas about solutions",
+        "created_at": "2017-03-17T04:03:41.000Z",
+        "updated_at": "2021-06-21T22:40:44.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Format",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-02-17T15:51:30.684Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-645?focusedCommentId=17285901) by Antoine Pitrou (apitrou):*\nIt's not obvious to me we want to add that kind of complication to the IPC format. This threatens to turn the IPC format to a Parquet-like spec with niche optional features that just fragment the ecosystem and makes it difficult to predict whether two endpoints will be compatible with each other.\r\n\r\nDo people actually have such mega-wide schemas? What is the use case for having 1e6 fields in a schema?"
+        }
+    ]
+}

@@ -1,0 +1,65 @@
+{
+    "issue": {
+        "title": "[Python] [Plasma] Huge pages test failure",
+        "body": "***Note**: This issue was originally created as [ARROW-2237](https://issues.apache.org/jira/browse/ARROW-2237). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis is a new failure here (Ubuntu 16.04, x86-64):\r\n```Java\n\r\n_____________________________ test_use_huge_pages _____________________________\r\nTraceback (most recent call last):\r\n  File \"/home/antoine/arrow/python/pyarrow/tests/test_plasma.py\", line 779, in test_use_huge_pages\r\n    create_object(plasma_client, 100000000)\r\n  File \"/home/antoine/arrow/python/pyarrow/tests/test_plasma.py\", line 80, in create_object\r\n    seal=seal)\r\n  File \"/home/antoine/arrow/python/pyarrow/tests/test_plasma.py\", line 69, in create_object_with_id\r\n    memory_buffer = client.create(object_id, data_size, metadata)\r\n  File \"plasma.pyx\", line 302, in pyarrow.plasma.PlasmaClient.create\r\n  File \"error.pxi\", line 79, in pyarrow.lib.check_status\r\npyarrow.lib.ArrowIOError: /home/antoine/arrow/cpp/src/plasma/client.cc:192 code: PlasmaReceive(store_conn_, MessageType_PlasmaCreateReply, &buffer)\r\n/home/antoine/arrow/cpp/src/plasma/protocol.cc:46 code: ReadMessage(sock, &type, buffer)\r\nEncountered unexpected EOF\r\n---------------------------- Captured stderr call -----------------------------\r\nAllowing the Plasma store to use up to 0.1GB of memory.\r\nStarting object store with directory /mnt/hugepages and huge page support enabled\r\ncreate_buffer failed to open file /mnt/hugepages/plasmapSNc0X\r\n```",
+        "created_at": "2018-03-01T09:53:09.000Z",
+        "updated_at": "2019-09-20T00:59:24.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-09-18T15:46:58.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-03-01T09:55:28.306Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2237?focusedCommentId=16381767) by Antoine Pitrou (apitrou):*\n`[~pcmoritz]`"
+        },
+        {
+            "created_at": "2018-03-01T22:39:43.892Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2237?focusedCommentId=16382793) by Philipp Moritz (pcmoritz):*\nWas this on Travis or on your local machine?"
+        },
+        {
+            "created_at": "2018-03-01T23:27:48.594Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2237?focusedCommentId=16382860) by Wes McKinney (wesm):*\nThis looks like a local failure"
+        },
+        {
+            "created_at": "2018-03-01T23:31:57.316Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2237?focusedCommentId=16382868) by Robert Nishihara (robertnishihara):*\nInteresting, does `/mnt/hugepages` exist locally? If not, the test should be skipped. If yes, then maybe there is some permission error or something."
+        },
+        {
+            "created_at": "2018-03-01T23:35:25.401Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2237?focusedCommentId=16382875) by Philipp Moritz (pcmoritz):*\nWhich commands did you use to create\u00a0\u00a0/mnt/hugepages? (The test is skipped if it doesn't exist)\r\n\r\nI can try to reproduce this on a fresh image, but steps how to reproduce on say an Ubuntu image would be appreciated!"
+        },
+        {
+            "created_at": "2018-03-02T01:31:33.785Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2237?focusedCommentId=16382974) by Philipp Moritz (pcmoritz):*\nCreating the /mnt/hugepages with\r\n\r\n```\r\n\r\nsudo mkdir -p /mnt/hugepages\r\n sudo mount -t hugetlbfs -o uid=`id -u` -o gid=`id -g` none /mnt/hugepages\r\n sudo bash -c \"echo `id -g` > /proc/sys/vm/hugetlb_shm_group\"\r\n sudo bash -c \"echo 20000 > /proc/sys/vm/nr_hugepages\"\r\n\r\n```\r\n\r\nI can't reproduce the test failure on Ubuntu."
+        },
+        {
+            "created_at": "2018-03-02T07:54:09.473Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2237?focusedCommentId=16383311) by Antoine Pitrou (apitrou):*\n`/mnt/hugepages` exists by default here. Though there's something weird: it's `/dev/hugepages` that's mounted if I understand correctly:\r\n\r\n```bash\n\r\n$ mount | \\grep hugepages\r\nhugetlbfs on /dev/hugepages type hugetlbfs (rw,relatime,pagesize=2M)\r\n```"
+        },
+        {
+            "created_at": "2018-03-02T08:09:49.004Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2237?focusedCommentId=16383324) by Antoine Pitrou (apitrou):*\nBy the way, setting up 20000 huge pages seems excessive. Here, `echo 20000 > /proc/sys/vm/nr_hugepages` swaps wildly as it seems to evict existing normal pages to make place for huge pages (am I analyzing this right?). This is using a `4.13.0` kernel on a 16GB RAM machine.\r\n\r\nOtherwise, yes, configuring `/proc/sys/vm/hugetlb_shm_group` and `/proc/sys/vm/nr_hugepages` and fixing the test to use `/dev/hugepages` makes it pass here. I wonder if there's a way to skip it or otherwise give better directions if hugepages support isn't usable on the system."
+        },
+        {
+            "created_at": "2018-03-02T08:12:55.455Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2237?focusedCommentId=16383326) by Antoine Pitrou (apitrou):*\n(I understand plasma is using huge pages by creating files directly inside the mount point, instead of using the MAP_HUGETLB flag to mmap()? out of curiosity, is there a rationale for that?)"
+        },
+        {
+            "created_at": "2019-02-27T18:20:39.147Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2237?focusedCommentId=16779606) by Wes McKinney (wesm):*\nIs this still occurring ever?"
+        },
+        {
+            "created_at": "2019-02-27T18:31:02.794Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2237?focusedCommentId=16779615) by Antoine Pitrou (apitrou):*\nI don't know, it's marked xfail :)"
+        },
+        {
+            "created_at": "2019-09-18T15:46:58.895Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2237?focusedCommentId=16932579) by Antoine Pitrou (apitrou):*\nSince noone is actively working on it, and it is pretty minor, closing."
+        }
+    ]
+}

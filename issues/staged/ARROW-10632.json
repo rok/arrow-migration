@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[R] export make_readable_file",
+        "body": "***Note**: This issue was originally created as [ARROW-10632](https://issues.apache.org/jira/browse/ARROW-10632). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn the R package will you please export make_readable_file() ?\u00a0\r\n\r\nWe want to interact with Feather files in our R package and are using arrow::FeatherReader$create(), which requires as input an Arrow file connection object. We thought we would follow the lead in read_feather() and use make_readable_file() like\r\n```java\n\r\nf <- function(file) {\r\n  file <- make_readable_file(file)\r\n  on.exit(file$close())\r\n  reader <- FeatherReader$create(file)\r\n# do stuff ...\r\n}\r\n```\r\nbut make_readable_file is not exported by arrow, so this approach might not satisfy CRAN requirements.\r\n\r\nCan you export make_readable_file? Or is there some other preferred way to go from a .feather file to the required inputstream for FeatherReader$create?\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2020-11-17T18:29:50.000Z",
+        "updated_at": "2020-11-17T20:23:44.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-11-17T19:35:30.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-11-17T18:46:21.669Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10632?focusedCommentId=17233823) by Neal Richardson (npr):*\n`make_readable_file` does a bunch of things in different cases, but if you're reading a local Feather file, you're calling one of two functions (which are already exported), depending on whether you want to memory map or not: https://github.com/apache/arrow/blob/master/r/R/io.R#L250-L252\r\n\r\nI'm curious: what are you trying to accomplish with a `FeatherReader`? There's not much it can do other than read the data into a Table."
+        },
+        {
+            "created_at": "2020-11-17T19:35:15.671Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10632?focusedCommentId=17233884) by Ben Zipperer (benzipperer):*\nAh, yes, those two functions work for me. Thank you!\r\n\r\nWe were just trying to have a non-exported function in our package that is basically read_feather with tidy select syntax\r\n```java\n\r\nread_feather_tidyselect <- function(.data, ...) {\r\n  .data <- arrow::mmap_open(.data)\r\n  on.exit(.data$close())\r\n  reader <- arrow::FeatherReader$create(.data)  \r\n  col_select <- rlang::enquos(...)\r\n  columns <- if (length(col_select) != 0) {\r\n    tidyselect::vars_select(names(reader), !!!col_select)\r\n  }  \r\n  out <- reader$Read(columns) %>% as.data.frame()  \r\n  out\r\n}\r\n```\r\nso one could do something like read_feather_tidyselect(file, var1, var2, matches(\"something\")).\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-11-17T19:41:47.853Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10632?focusedCommentId=17233891) by Neal Richardson (npr):*\nBut `read_feather()` already supports tidyselect in the `col_select` argument: https://github.com/apache/arrow/blob/master/r/R/feather.R#L144-L162\r\n\r\nSo, assuming you worked out the right number of rlang !s and {s to pass the `...` to that argument, you could just wrap `read_feather()` and not mess with the lower level stuff at all"
+        },
+        {
+            "created_at": "2020-11-17T20:23:44.812Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10632?focusedCommentId=17233940) by Ben Zipperer (benzipperer):*\nThank, yes, I agree that would be much better.\r\n\r\nI don't understand how to do that yet (sorry, I'm new to this), and that's why I went back to the lower level functions along with tidyselect::vars_select().\u00a0\r\n\r\nMy goal is to have the same output from\r\n\r\n\u00a0\r\n```java\n\r\nmyfunction(\"mtcars.feather\", mpg, starts_with(\"d\"), hp)\r\nread_feather(\"mtcars.feather\", col_select = c(\"mpg\", starts_with(\"d\"), \"hp\"))\r\n```\r\n\u00a0\r\n\r\nI'll do my best to actually understand the rlang operators you suggested."
+        }
+    ]
+}

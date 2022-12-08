@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Python] Allow creating ExtensionArray through pa.array(..) constructor",
+        "body": "***Note**: This issue was originally created as [ARROW-17834](https://issues.apache.org/jira/browse/ARROW-17834). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently, creating an ExtensionArray from a python sequence (or numpy array, ..) requires the following:\r\n\r\n```python\n\r\nfrom pyarrow.tests.test_extension_type import IntegerType\r\n\r\nstorage_array = pa.array([1, 2, 3])\r\next_arr = pa.ExtensionArray.from_storage(IntegerType(), storage_array)\r\n```\r\n\r\nWhile doing this directly in `pa.array(..)` doesn't work:\r\n\r\n```python\n\r\n>>> pa.array([1, 2, 3], type=IntegerType())\r\nArrowNotImplementedError: extension\r\n```\r\n\r\nI think it should be possible to basically to the ExtensionArray.from_storage under the hood in `pa.array(..)` when the specified type is an extension type?\r\n\r\nI think this should also enable converting from a pandas DataFrame (with a column with matching storage values) to a Table with a specified schema that includes an extension type. Like:\r\n\r\n```Java\n\r\ndf = pd.DataFrame({'a': [1, 2, 3]})\r\npa.table(df, schema=pa.schema([('a', IntegerType())]))\r\n```",
+        "created_at": "2022-09-23T16:49:23.000Z",
+        "updated_at": "2022-10-05T16:48:42.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-05T08:00:21.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-26T17:28:28.692Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17834?focusedCommentId=17609607) by Chang She (changhiskhan):*\nOne additional tricky thing here is what if the storage array also need additional arguments. \r\nMost open-source datasets in computer vision has a predetermined dictionary, so often-times you'd want read in a CSV data dictionary and pass in the class names in the right order to construct the storage DictionaryArray."
+        },
+        {
+            "created_at": "2022-09-27T10:12:22.689Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17834?focusedCommentId=17609948) by Joris Van den Bossche (jorisvandenbossche):*\n> One additional tricky thing here is what if the storage array also need additional arguments. \r\n\r\nHmm, such a case wouldn't be solved by this simple solution. \r\n\r\nI was thinking that one possible solution for this would be to encode this dictionary in the actual extension type (eg that you need or can pass it to the type constructor, like `LabelType(dictionary=...)`), and then the cast could take care of that. However, in arrow the dictionary is part of the data, not the type, so casting to an extension type (under the hood casting to the storage type) won't actually do any checking of dictionary values. \r\n\r\nFor such a use case, you would still have to manually create the storage array first (and in this case actually manually create the DictionaryArray with passing the indices and dictionary manually, to ensure you use a certain dictionary array), before converting to an extension array. \r\n\r\nThe only way I can think of to enable control over this for the extension array author, would be to add a method like `\\_\\_arrow_construct_storage_array\\_\\_` to the extension type, so that we can call this instead of doing a `pa.array(data, type=ext_type.storage_type)`. But I am not fully sure this is useful enough in general to warrant adding such a method (a more general mechanism that might be interesting to add is to enable to register custom cast methods).\r\n"
+        },
+        {
+            "created_at": "2022-10-05T08:00:21.660Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17834?focusedCommentId=17612883) by Joris Van den Bossche (jorisvandenbossche):*\nIssue resolved by pull request 14253\n<https://github.com/apache/arrow/pull/14253>"
+        },
+        {
+            "created_at": "2022-10-05T16:48:42.274Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17834?focusedCommentId=17613071) by Chang She (changhiskhan):*\nw00t"
+        }
+    ]
+}

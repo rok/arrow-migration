@@ -1,0 +1,34 @@
+{
+    "issue": {
+        "title": "[C++][Flight] Auth handler tests fragile on Windows",
+        "body": "***Note**: This issue was originally created as [ARROW-7583](https://issues.apache.org/jira/browse/ARROW-7583). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis occurs often on AppVeyor:\r\n```Java\n\r\n[----------] 3 tests from TestAuthHandler\r\n[ RUN      ] TestAuthHandler.PassAuthenticatedCalls\r\n[       OK ] TestAuthHandler.PassAuthenticatedCalls (4 ms)\r\n[ RUN      ] TestAuthHandler.FailUnauthenticatedCalls\r\n..\\src\\arrow\\flight\\flight_test.cc(1126): error: Value of: status.message()\r\nExpected: has substring \"Invalid token\"\r\n  Actual: \"Could not write record batch to stream: \"\r\n[  FAILED  ] TestAuthHandler.FailUnauthenticatedCalls (3 ms)\r\n[ RUN      ] TestAuthHandler.CheckPeerIdentity\r\n[       OK ] TestAuthHandler.CheckPeerIdentity (2 ms)\r\n[----------] 3 tests from TestAuthHandler (10 ms total)\r\n[----------] 3 tests from TestBasicAuthHandler\r\n[ RUN      ] TestBasicAuthHandler.PassAuthenticatedCalls\r\n[       OK ] TestBasicAuthHandler.PassAuthenticatedCalls (4 ms)\r\n[ RUN      ] TestBasicAuthHandler.FailUnauthenticatedCalls\r\n..\\src\\arrow\\flight\\flight_test.cc(1224): error: Value of: status.message()\r\nExpected: has substring \"Invalid token\"\r\n  Actual: \"Could not write record batch to stream: \"\r\n[  FAILED  ] TestBasicAuthHandler.FailUnauthenticatedCalls (4 ms)\r\n[ RUN      ] TestBasicAuthHandler.CheckPeerIdentity\r\n[       OK ] TestBasicAuthHandler.CheckPeerIdentity (3 ms)\r\n[----------] 3 tests from TestBasicAuthHandler (11 ms total)\r\n```\r\n\r\nSee e.g. https://ci.appveyor.com/project/ApacheSoftwareFoundation/arrow/builds/30110376/job/vbtd22813g5hlgfl#L2252",
+        "created_at": "2020-01-15T10:39:03.000Z",
+        "updated_at": "2020-01-22T18:11:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: FlightRPC",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-01-22T18:11:53.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-01-15T11:37:34.569Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7583?focusedCommentId=17015867) by Antoine Pitrou (apitrou):*\ncc `[~lidavidm]`. This seems to be when testing an unauthenticated Put call."
+        },
+        {
+            "created_at": "2020-01-15T13:37:47.261Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7583?focusedCommentId=17015984) by David Li (lidavidm):*\nInteresting. It seems an error from a path where gRPC gives a boolean success result (rather than a full error message) is masking the actual, intended error later on.\r\n\r\nMy guess is that this happens:\r\n1. We start the DoPut, but this does not actually write any data.\n1. We close the writer right away. `RecordBatchPayloadWriter::Close` calls `CheckStarted` first, which tries to write the schema.\n1. If the test server responds quickly enough, the write fails. gRPC reports errors in this path as a boolean, so we report a generic error instead of the actual error message.\n   \n   If the test server doesn't respond quickly enough, then the write appears to succeed (IIRC gRPC does some sort of buffering?) and then we actually close the stream, at which point we get the intended error message.\n   \n   The solution might be to bypass RecordBatchPayloadWriter's close and go directly to our implementation."
+        },
+        {
+            "created_at": "2020-01-15T14:39:03.461Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7583?focusedCommentId=17016039) by Antoine Pitrou (apitrou):*\nOr perhaps we can relax the test, along with an explanatory comment?"
+        },
+        {
+            "created_at": "2020-01-22T18:11:53.341Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7583?focusedCommentId=17021341) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 6255\n<https://github.com/apache/arrow/pull/6255>"
+        }
+    ]
+}

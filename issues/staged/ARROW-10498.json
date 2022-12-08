@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "pyarrow.Table.from_* methods appear to cut off binary data after an embedded zero byte",
+        "body": "***Note**: This issue was originally created as [ARROW-10498](https://issues.apache.org/jira/browse/ARROW-10498). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe pyarrow.Table.from_\\* methods appear to cut off binary data after an embedded zero byte.\r\n\r\n```Java\n\r\n>>> import numpy as np\r\n>>> import pyarrow as pa\r\n>>>\r\n>>> data = np.array([b'', b'', b'', b'Foo!!', b'Bar!!',\r\n...        b'\\x00Baz!', b'half\\x00baked', b''], dtype='|S13')\r\n>>> t = pa.Table.from_pydict({'data':data})\r\n>>> t.to_pandas()\r\n       data\r\n0       b''\r\n1       b''\r\n2       b''\r\n3  b'Foo!!'\r\n4  b'Bar!!'\r\n5       b''\r\n6   b'half'\r\n7       b''\r\n>>> import pandas as pd\r\n>>> pd.DataFrame(data)\r\n                  0\r\n0               b''\r\n1               b''\r\n2               b''\r\n3          b'Foo!!'\r\n4          b'Bar!!'\r\n5       b'\\x00Baz!'\r\n6  b'half\\x00baked'\r\n7               b''\r\n```\r\n\r\nAnother test case (perhaps it's in the pyarrow.Table -> to_pandas() conversion step?):\r\n```Java\n\r\nimport numpy as np\r\nimport pyarrow as pa\r\nimport pandas as pd\r\n\r\nprint('PyArrow version: %s' % pa.__version__)\r\n\r\ndata = np.array([b'', b'', b'', b'Foo!!', b'Bar!!',\r\n                 b'\\x00Baz!', b'half\\x00baked', b''], dtype='|S13')\r\n\r\ndf1 = pd.DataFrame(data, columns=['data'])\r\nprint('\\ndf1:\\n', df1)\r\n\r\npqfile = '10498.pq'\r\ndf1.to_parquet(pqfile)\r\n                 \r\ntables = {'from_pydict': pa.Table.from_pydict({'data':data}),\r\n          'from_arrays': pa.Table.from_arrays([data],['data']),\r\n          'from_pandas': pa.Table.from_pandas(df1),\r\n          'read_table':  pa.parquet.read_table(pqfile)\r\n         }\r\nfor k,v in tables.items():\r\n    print(\"\\ntables['%s'].to_pandas():\\n\" % k,\r\n          v.to_pandas())\r\n          \r\nprint('Pandas from parquet file:\\n', pd.read_parquet(pqfile))\r\n\r\nfor k,v in tables.items():\r\n    print(\"tables['%s']['data'][6]=%s\" % (k,v['data'][6]))\r\n\r\n```\r\n\r\nwhich prints on my machine\r\n\r\n```\n\r\n>python arrow10498.py\r\nPyArrow version: 2.0.0\r\n\r\ndf1:\r\n                data\r\n0               b''\r\n1               b''\r\n2               b''\r\n3          b'Foo!!'\r\n4          b'Bar!!'\r\n5       b'\\x00Baz!'\r\n6  b'half\\x00baked'\r\n7               b''\r\n\r\ntables['from_pydict'].to_pandas():\r\n        data\r\n0       b''\r\n1       b''\r\n2       b''\r\n3  b'Foo!!'\r\n4  b'Bar!!'\r\n5       b''\r\n6   b'half'\r\n7       b''\r\n\r\ntables['from_arrays'].to_pandas():\r\n        data\r\n0       b''\r\n1       b''\r\n2       b''\r\n3  b'Foo!!'\r\n4  b'Bar!!'\r\n5       b''\r\n6   b'half'\r\n7       b''\r\n\r\ntables['from_pandas'].to_pandas():\r\n        data\r\n0       b''\r\n1       b''\r\n2       b''\r\n3  b'Foo!!'\r\n4  b'Bar!!'\r\n5       b''\r\n6   b'half'\r\n7       b''\r\n\r\ntables['read_table'].to_pandas():\r\n        data\r\n0       b''\r\n1       b''\r\n2       b''\r\n3  b'Foo!!'\r\n4  b'Bar!!'\r\n5       b''\r\n6   b'half'\r\n7       b''\r\nPandas from parquet file:\r\n        data\r\n0       b''\r\n1       b''\r\n2       b''\r\n3  b'Foo!!'\r\n4  b'Bar!!'\r\n5       b''\r\n6   b'half'\r\n7       b''\r\ntables['from_pydict']['data'][6]=b'half'\r\ntables['from_arrays']['data'][6]=b'half'\r\ntables['from_pandas']['data'][6]=b'half'\r\ntables['read_table']['data'][6]=b'half'\r\n```\r\n",
+        "created_at": "2020-11-04T23:20:50.000Z",
+        "updated_at": "2020-11-05T01:39:17.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-11-05T01:16:24.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-11-04T23:35:38.917Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10498?focusedCommentId=17226429) by Jason Sachs (jason_s):*\nat the risk of overestimating importance, I have raised to Critical... not sure I see a workaround."
+        },
+        {
+            "created_at": "2020-11-04T23:48:56.589Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10498?focusedCommentId=17226430) by Krisztian Szucs (kszucs):*\nAfter taking a quick look it happens when converting from a numpy array. \r\n\r\n```python\n\r\nIn [21]: data = [b'', b'', b'', b'Foo!!', b'Bar!!', b'\\x00Baz!', b'half\\x00baked', b'']\r\n\r\nIn [22]: pa.array(data).to_pylist()\r\nOut[22]: [b'', b'', b'', b'Foo!!', b'Bar!!', b'\\x00Baz!', b'half\\x00baked', b'']\r\n\r\nIn [23]: pa.array(np.array(data)).to_pylist()\r\nOut[23]: [b'', b'', b'', b'Foo!!', b'Bar!!', b'', b'half', b'']\r\n```\r\n\r\nThe issue is present in 1.0.1 as well."
+        },
+        {
+            "created_at": "2020-11-04T23:51:49.313Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10498?focusedCommentId=17226431) by Jason Sachs (jason_s):*\nSo it looks like the semantics of [numpy type code \"S\" are zero-terminated bytes](https://numpy.org/doc/stable/reference/arrays.dtypes.html). Not sure why anyone would want to use zero-terminated bytes (I understand zero-terminated character strings, but if you have binary data, it is never safe to assume it ends in a zero).\r\n\r\nI might be screwed here by the behavior of numpy. How is one supposed to store variable-length binary data in Python?"
+        },
+        {
+            "created_at": "2020-11-05T00:33:04.080Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10498?focusedCommentId=17226437) by Wes McKinney (wesm):*\nI don't think this is a bug. pandas uses object dtype arrays for variable-length binary (containing Python bytes or str objects)"
+        },
+        {
+            "created_at": "2020-11-05T01:16:25.004Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10498?focusedCommentId=17226441) by Wes McKinney (wesm):*\nClosing since we've adopted NumPy's convention that nul-terminator is used to embed smaller strings in a fixed-size-string dtype\r\n\r\nhttps://github.com/apache/arrow/blob/master/cpp/src/arrow/python/numpy_to_arrow.cc#L550"
+        },
+        {
+            "created_at": "2020-11-05T01:30:14.250Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10498?focusedCommentId=17226443) by Jason Sachs (jason_s):*\n> Closing since we've adopted NumPy's convention that nul-terminator is used to embed smaller strings in a fixed-size-string dtype\r\n\r\nWhere is this documented? (both in NumPy which is python-specific, and Arrow, which is not)\r\n\r\nAll I could find is https://github.com/numpy/numpy/issues/2617\r\n\r\nHow is someone supposed to store binary data in an Arrow table?\r\n\r\n> I don't think this is a bug. pandas uses object dtype arrays for variable-length binary (containing Python bytes or str objects)\r\nI'll try that...."
+        },
+        {
+            "created_at": "2020-11-05T01:35:14.916Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10498?focusedCommentId=17226445) by Jason Sachs (jason_s):*\nOK, changing to `dtype='O'` seems to work... ick. Is there a way to find out memory usage of a column? I have a sparse data situation (99% of my data is empty strings) and would like to avoid gross inefficiencies in both memory usage and disk space.\r\n\r\n```Java\n\r\nimport numpy as np\r\nimport pyarrow as pa\r\nimport pandas as pd\r\n\r\nprint('PyArrow version: %s' % pa.__version__)\r\n\r\ndata = np.array([b'', b'', b'', b'Foo!!', b'Bar!!',\r\n                 b'\\x00Baz!', b'half\\x00baked', b''], dtype='O')\r\n\r\ndf1 = pd.DataFrame(data, columns=['data'])\r\nprint('\\ndf1:\\n', df1)\r\n\r\npqfile = '10498.pq'\r\ndf1.to_parquet(pqfile, compression='zstd')\r\n                 \r\ntables = {'from_pydict': pa.Table.from_pydict({'data':data}),\r\n          'from_arrays': pa.Table.from_arrays([data],['data']),\r\n          'from_pandas': pa.Table.from_pandas(df1),\r\n          'read_table':  pa.parquet.read_table(pqfile)\r\n         }\r\nfor k,v in tables.items():\r\n    print(\"\\ntables['%s'].to_pandas():\\n\" % k,\r\n          v.to_pandas())\r\n          \r\nprint('Pandas from parquet file:\\n', pd.read_parquet(pqfile))\r\n\r\nfor k,v in tables.items():\r\n    print(\"tables['%s']['data'][6]=%s\" % (k,v['data'][6]))\r\n```"
+        },
+        {
+            "created_at": "2020-11-05T01:38:08.082Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10498?focusedCommentId=17226447) by Jason Sachs (jason_s):*\nsigh. `dtype=object` poisons a numpy array this for use with numba.njit ... 8-/"
+        },
+        {
+            "created_at": "2020-11-05T01:39:17.536Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10498?focusedCommentId=17226448) by Wes McKinney (wesm):*\nYou can also use Arrow's fixed-size string data types (you have to write down the type explicitly) to circumvent the nul-terminator truncation, so that may be a workaround for you"
+        }
+    ]
+}

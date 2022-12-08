@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[R]\u00a0Cannot convert Dictionary Array to R when values aren't strings",
+        "body": "***Note**: This issue was originally created as [ARROW-7639](https://issues.apache.org/jira/browse/ARROW-7639). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI got an error in R when reading a feather file using arrow::read_feather() prepared in python.\r\n```r\n\r\n#' Error in Table__to_dataframe(x, use_threads = option_use_threads()) :\r\n#' Cannot convert Dictionary Array of type `dictionary<values=double, indices=int8, ordered=0>` to R\n```\r\nI could reproduce the issue with a minimal example:\r\n\r\nIn python:\r\n```python\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\ndf = pd.DataFrame({\"float\": [0.1, .2, 0.5, .001]})\r\ndf[\"category\"] = df[\"float\"].astype('category')\r\ndf.dtypes\r\n#' float float64\r\n#' A object\r\n#' category category\r\n#' dtype: object\r\ndf.to_feather(\"series.feather\")\r\npa.__version__\r\n#'\u00a0'0.15.1'\r\n```\r\nFrom R:\r\n```r\n\r\narrow::read_feather(\"series.feather\")\r\n#' Error in Table__to_dataframe(x, use_threads = option_use_threads()) :\r\n#' Cannot convert Dictionary Array of type `dictionary<values=double, indices=int8, ordered=0>` to R\r\n#' Backtrace:\r\n#' \u2588\r\n#' 1. \u2514\u2500arrow::read_feather(\"series.feather\")\r\n#' 2. \u251c\u2500[ base::as.data.frame(...) ]\r\n#' 3. \u2514\u2500arrow:::as.data.frame.Table(out)\r\n#' 4. \u2514\u2500arrow:::Table__to_dataframe(x, use_threads = option_use_threads())\r\n```\r\n\u00a0The feather file is read correctly back in python\u00a0\r\n```python\n\r\nft = pd.read_feather(\"series.feather\")\r\nft.dtypes\r\n#' float        float64\r\n#' A             object\r\n#' category    category\r\n#' dtype: object\r\n```\r\n\r\n```r\n\r\nsessionInfo()\r\n#' R version 3.5.1 (2018-07-02)\r\n#' Platform: x86_64-conda_cos6-linux-gnu (64-bit)\r\n#' Running under: Ubuntu 16.04.5 LTS\r\n#' \r\n#' Matrix products: default\r\n#' BLAS/LAPACK: /misc/DLshare/home/etbellem/miniconda3/lib/R/lib/libRblas.so\r\n#' \r\n#' locale:\r\n#' [1] LC_CTYPE=en_US.UTF-8 LC_NUMERIC=C\r\n#' [3] LC_TIME=en_US.UTF-8 LC_COLLATE=en_US.UTF-8\r\n#' [5] LC_MONETARY=en_US.UTF-8 LC_MESSAGES=en_US.UTF-8\r\n#' [7] LC_PAPER=en_US.UTF-8 LC_NAME=C\r\n#' [9] LC_ADDRESS=C LC_TELEPHONE=C\r\n#' [11] LC_MEASUREMENT=en_US.UTF-8 LC_IDENTIFICATION=C\r\n#' \r\n#' attached base packages:\r\n#' [1] stats graphics grDevices utils datasets methods base\r\n#' \r\n#' loaded via a namespace (and not attached):\r\n#' [1] Rcpp_1.0.3 arrow_0.15.1 crayon_1.3.4 assertthat_0.2.1\r\n#' [5] R6_2.4.1 magrittr_1.5 rlang_0.4.2 rstudioapi_0.10\r\n#' [9] bit64_0.9-7 glue_1.3.1 purrr_0.3.3 bit_1.1-15.1\r\n#' [13] compiler_3.5.1 tidyselect_0.2.5\n```",
+        "created_at": "2020-01-21T19:16:39.000Z",
+        "updated_at": "2020-01-23T18:09:36.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-01-23T18:09:36.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-01-21T21:49:27.503Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7639?focusedCommentId=17020592) by Etienne Racine (etiennebr):*\nI can read the table with the feather package, though\r\n```java\n\r\nfeather::read_feather(\"series.feather\")\r\n#> # A tibble: 4 x 2\r\n#>   float category\r\n#>   <dbl> <fct>   \r\n#> 1 0.1   0.1     \r\n#> 2 0.2   0.2     \r\n#> 3 0.5   0.5     \r\n#> 4 0.001 0.001\n```"
+        },
+        {
+            "created_at": "2020-01-21T22:01:46.107Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7639?focusedCommentId=17020598) by Neal Richardson (npr):*\nI believe this works in Feather because it coerces dictionary values to R character, as the R factor type requires them to be: https://github.com/wesm/feather/blob/master/R/src/feather-types.cpp#L264\r\n\r\nWhereas in the arrow R package, it errors if the dictionary values aren't strings: https://github.com/apache/arrow/blob/master/r/src/array_to_vector.cpp#L290-L293\r\n\r\nWhile erroring isn't good, I'm not sure that always coercing dictionary values to strings when reading into R (as the feather package does) is desirable. Maybe you have dictionary-encoded data that is better off represented as a non-factor type in R (in this example, a numeric vector might be better, depending on what you're trying to do with the data). Perhaps the behavior should be governed by an option you can set? \r\n\r\n`[~romainfrancois]` thoughts?"
+        },
+        {
+            "created_at": "2020-01-22T19:37:01.983Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7639?focusedCommentId=17021428) by Neal Richardson (npr):*\nI'm going to match the feather behavior for now so that this doesn't error, and I've made ARROW-7657 to follow up with a more complete solution."
+        },
+        {
+            "created_at": "2020-01-23T14:04:12.423Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7639?focusedCommentId=17022128) by Etienne Racine (etiennebr):*\nThanks. I believe coercing to factors is the right choice. By looking at the [doc](https://pandas.pydata.org/pandas-docs/stable/user_guide/categorical.html)\r\n> The categorical data type is useful in the following cases:\n> - A string variable consisting of only a few different values. Converting such a string variable to a categorical variable will save some memory, see [here](https://pandas.pydata.org/pandas-docs/stable/user_guide/categorical.html#categorical-memory)\n> - The lexical order of a variable is not the same as the logical order (\u201cone\u201d, \u201ctwo\u201d, \u201cthree\u201d). By converting to a categorical and specifying an order on the categories, sorting and min/max will use the logical order instead of the lexical order, see [here](https://pandas.pydata.org/pandas-docs/stable/user_guide/categorical.html#categorical-sort)\n> - As a signal to other Python libraries that this column should be treated as a categorical variable (e.g. to use suitable statistical methods or plot types).\r\nEspecially this last point."
+        },
+        {
+            "created_at": "2020-01-23T17:38:05.439Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7639?focusedCommentId=17022298) by Neal Richardson (npr):*\nIssue resolved by pull request 6258\n<https://github.com/apache/arrow/pull/6258>"
+        },
+        {
+            "created_at": "2020-01-23T17:40:54.979Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7639?focusedCommentId=17022302) by Neal Richardson (npr):*\nYes, it may make sense when you're reading data from Pandas, but there are other sources that could create Arrow dictionary types where it wouldn't make sense to coerce to string. So I agree that this is a reasonable default behavior, and we'll see down the road if we need to provide the user control over that behavior. \r\n\r\nMany thanks for the detailed report and research!"
+        }
+    ]
+}

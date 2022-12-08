@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Python] Incomplete CLASSPATH with \"hadoop\" contained in it can fool the classpath setting HDFS logic",
+        "body": "***Note**: This issue was originally created as [ARROW-2113](https://issues.apache.org/jira/browse/ARROW-2113). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSteps to replicate the issue:\r\n\r\nmkdir /tmp/test\r\n cd /tmp/test\r\n mkdir jars\r\n cd jars\r\n touch test1.jar\r\n mkdir -p ../lib/zookeeper\r\n cd ../lib/zookeeper\r\n ln -s ../../jars/test1.jar ./test1.jar\r\n ln -s test1.jar test.jar\r\n mkdir -p ../hadoop/lib\r\n cd ../hadoop/lib\r\n ln -s ../../../lib/zookeeper/test.jar ./test.jar\r\n\r\n(this part depends on your configuration you need those values for pyarrow.hdfs to work: )\r\n\r\n(path to libjvm: )\r\n\r\n(export JAVA_HOME=/usr/java/jdk1.7.0_67-cloudera)\r\n\r\n(path to libhdfs: )\r\n\r\n(export LD_LIBRARY_PATH=/opt/cloudera/parcels/CDH-5.14.0-1.cdh5.14.0.p0.24/lib64/)\r\n\r\nexport CLASSPATH=\"/tmp/test/lib/hadoop/lib/test.jar\"\r\n\r\npython\r\n import pyarrow.hdfs as hdfs;\r\n fs = hdfs.connect(user=\"hdfs\")\r\n\r\n\u00a0\r\n\r\nEnds with error:\r\n\r\n------------\r\n loadFileSystems error:\r\n (unable to get root cause for java.lang.NoClassDefFoundError)\r\n (unable to get stack trace for java.lang.NoClassDefFoundError)\r\n hdfsBuilderConnect(forceNewInstance=0, nn=default, port=0, kerbTicketCachePath=(NULL), userName=pa) error:\r\n (unable to get root cause for java.lang.NoClassDefFoundError)\r\n (unable to get stack trace for java.lang.NoClassDefFoundError)\r\n Traceback (most recent call last): (\r\n File \"<stdin>\", line 1, in <module>\r\n File \"/opt/pa/anaconda2/lib/python2.7/site-packages/pyarrow/hdfs.py\", line 170, in connect\r\n kerb_ticket=kerb_ticket, driver=driver)\r\n File \"/opt/pa/anaconda2/lib/python2.7/site-packages/pyarrow/hdfs.py\", line 37, in __init__\r\n self._connect(host, port, user, kerb_ticket, driver)\r\n File \"pyarrow/io-hdfs.pxi\", line 87, in pyarrow.lib.HadoopFileSystem._connect (/arrow/python/build/temp.linux-x86_64-2.7/lib.cxx:61673)\r\n File \"pyarrow/error.pxi\", line 79, in pyarrow.lib.check_status (/arrow/python/build/temp.linux-x86_64-2.7/lib.cxx:8345)\r\n pyarrow.lib.ArrowIOError: HDFS connection failed\r\n -------------\r\n\r\n\u00a0\r\n\r\nexport CLASSPATH=\"/tmp/test/lib/zookeeper/test.jar\"\r\n python\r\n import pyarrow.hdfs as hdfs;\r\n fs = hdfs.connect(user=\"hdfs\")\r\n\r\n\u00a0\r\n\r\nWorks properly.\r\n\r\n\u00a0\r\n\r\nI can't find reason why first CLASSPATH doesn't work and second one does, because it's path to same .jar, just with extra symlink in it. To me, it looks like pyarrow.lib.check has problem with symlinks defined with many ../.../.. .\r\n\r\nI would expect that pyarrow would work with any definition of path to .jar\r\n\r\nPlease notice that path are not generated at random, it is path copied from Cloudera distribution of Hadoop (original file was zookeeper.jar),\r\n\r\nBecause of this issue, our customer currently can't use pyarrow lib for oozie workflows.",
+        "created_at": "2018-02-08T09:23:55.000Z",
+        "updated_at": "2018-11-16T14:58:35.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-11-16T14:58:25.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-02-08T18:08:31.367Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2113?focusedCommentId=16357337) by Wes McKinney (wesm):*\n[~michal.danko] as far as I understand the issue, this does not have to do with pyarrow in particular, it is a problem with the system configuration for using libhdfs, which is out of our control. \r\n\r\nWe are loading `libjvm` and `libhdfs` at runtime and leaving it to `libhdfs` to initialize the JVM and load the relevant HDFS client JARs, which it is evidently having some trouble with the `CLASSPATH`. You should be able to reproduce the issue from a standalone C program that uses libhdfs to connect to the cluster. \r\n\r\nCould you perhaps seek counsel from the Apache Hadoop community?"
+        },
+        {
+            "created_at": "2018-02-08T18:11:38.822Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2113?focusedCommentId=16357341) by Wes McKinney (wesm):*\nI actually just remembered that we are setting that classpath from the output of `hadoop --classpath`, see:\r\n\r\nhttps://github.com/apache/arrow/blob/master/python/pyarrow/hdfs.py#L116\r\n\r\nSo the reason that this is failing in the first instance is that `hadoop` is in the path, whereas in the second, it is setting the correct classpath. Either way the CLASSPATH you have set does not appear to have the requisite JAR files\r\n\r\nIt seems we should be more specific about detecting that Hadoop JARs are in the path. I will open a new bug report about this"
+        },
+        {
+            "created_at": "2018-02-08T18:13:02.670Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2113?focusedCommentId=16357345) by Wes McKinney (wesm):*\nI renamed this JIRA to reflect the issue. If someone could submit a patch that would be very helpful"
+        },
+        {
+            "created_at": "2018-02-09T08:25:11.972Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2113?focusedCommentId=16358069) by Michal Danko (michal.danko):*\nThank you very much for your support. It seems like the issue with libhdfs.so indeed."
+        },
+        {
+            "created_at": "2018-02-09T08:26:47.476Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2113?focusedCommentId=16358071) by Michal Danko (michal.danko):*\nNot a bug, issue with different component."
+        },
+        {
+            "created_at": "2018-02-09T17:36:13.762Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2113?focusedCommentId=16358748) by Wes McKinney (wesm):*\n[~michal.danko] I reopened as I would like to make the classpath auto-setting-logic more robust for this case"
+        },
+        {
+            "created_at": "2018-11-16T14:58:25.359Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2113?focusedCommentId=16689522) by Wes McKinney (wesm):*\nIssue resolved by pull request 2946\n<https://github.com/apache/arrow/pull/2946>"
+        }
+    ]
+}

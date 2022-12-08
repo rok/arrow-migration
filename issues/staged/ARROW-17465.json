@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Parquet] DELTA_BINARY_PACKED constraint on num_bits is too restrict?",
+        "body": "***Note**: This issue was originally created as [ARROW-17465](https://issues.apache.org/jira/browse/ARROW-17465). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nConsider the sequence of (int32) values\r\n\r\n[863490391,-816295192,1613070492,-1166045478,1856530847]\r\n\r\nThis sequence can be encoded as a single block, single miniblock with a bit_width of 33.\r\n\r\nHowever, we currently require [1] the bit_width of each miniblock to be smaller than the bitwidth of the type it encodes.\r\n\r\nWe could consider lifting this constraint, as, as shown in the example above, the values representation's `bit_width` can be smaller than the delta's representation's `bit_width`.\r\n\r\n[1] https://github.com/apache/arrow/blob/a376968089d7310f4a88d054822fa1eaf96c46f5/cpp/src/parquet/encoding.cc#L2173",
+        "created_at": "2022-08-18T21:05:06.000Z",
+        "updated_at": "2022-08-20T10:21:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Parquet",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-08-18T21:07:48.254Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17465?focusedCommentId=17581539) by Antoine Pitrou (apitrou):*\nIt would be useful to find out what parquet-mr (the Java Parquet implementation) does about this.\r\nIn particular, we don't want to produce files that wouldn't be readable by parquet-mr, I think."
+        },
+        {
+            "created_at": "2022-08-18T21:18:00.445Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17465?focusedCommentId=17581543) by Jorge Leit\u00e3o (jorgecarleitao):*\nAgree. The issue was not very clear - we currently only support reading DELTA_BINARY_PACKED, and it is in the read path that currently bails.\r\n\r\nNote that pyspark can read it. Attached to this comment is a minimal parquet file reproducing the issue. The code example results in \r\n\r\n ```python\n\r\nSetting default log level to \"WARN\".\r\nTo adjust logging level use sc.setLogLevel(newLevel). For SparkR, use setLogLevel(newLevel).\r\n22/08/18 21:14:28 WARN NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable\r\nspark reads it                                                                  \r\nTraceback (most recent call last):\r\n  File \"bla.py\", line 16, in <module>\r\n    table = pyarrow.parquet.read_table(\"test.parquet\")\r\n  File \"/home/azureuser/projects/arrow2/arrow-parquet-integration-testing/venv/lib/python3.8/site-packages/pyarrow/parquet/__init__.py\", line 2827, in read_table\r\n    ...\r\nOSError: delta bit width larger than integer bit width\r\n```\r\n\r\nwhich how I concluded that this is something specific in arrow :)\r\n\r\n```java\n\r\nimport pyarrow.parquet\r\nimport pyspark.sql\r\n\r\n\r\nspark = pyspark.sql.SparkSession.builder.config(\r\n# see https://stackoverflow.com/a/62024670/931303\r\n    \"spark.sql.parquet.enableVectorizedReader\",\r\n    \"false\",\r\n).getOrCreate()\r\n\r\nresult = spark.read.parquet(\"test.parquet\").collect()\r\nassert [r[\"c1\"] for r in result] == [863490391, -816295192, 1613070492, -1166045478, 1856530847]\r\nprint(\"spark reads it\")\r\n\r\ntable = pyarrow.parquet.read_table(\"test.parquet\")\r\nprint(\"pyarrow reads it\")\r\n```\r\n\r\n\r\n [test.parquet](test.parquet) "
+        },
+        {
+            "created_at": "2022-08-20T10:21:33.873Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17465?focusedCommentId=17582181) by Antoine Pitrou (apitrou):*\nHmm, it seems it will be complicated for Parquet C++ to accept this without some rearchitecturing of the decoder.\r\n(roughly, if we decode Int32 values, we first decode the deltas as a buffer of Int32 as well...)\r\n\r\nI would suggest first ask on the Parquet ML whether this is intended to be supported.\r\n\r\n(note that of course for such data, DELTA_BINARY_PACKED should not be used at all, as it produces an expansion... while being more CPU-intensive to decode as well)"
+        },
+        {
+            "created_at": "2022-08-20T10:21:55.303Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17465?focusedCommentId=17582182) by Antoine Pitrou (apitrou):*\nAlso, for Int64 data, it would mean we would have to accept 65-bit deltas."
+        }
+    ]
+}

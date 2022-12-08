@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] Pickled ParquetFileFragment has invalid partition_expresion with dictionary type in pyarrow 2.0",
+        "body": "***Note**: This issue was originally created as [ARROW-11400](https://issues.apache.org/jira/browse/ARROW-11400). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFrom https://github.com/dask/dask/pull/7066#issuecomment-767156623\r\n\r\nSimplified reproducer:\r\n\r\n```python\n\r\nimport pyarrow.parquet as pq\r\nimport pyarrow.dataset as ds\r\n\r\ntable = pa.table({'part': ['A', 'B']*5, 'col': range(10)})\r\npq.write_to_dataset(table, \"test_partitioned_parquet\", partition_cols=[\"part\"])\r\n\r\n# with partitioning_kwargs = {} there is no error\r\npartitioning_kwargs = {\"max_partition_dictionary_size\": -1}\r\ndataset = ds.dataset(\r\n    \"test_partitioned_parquet/\", format=\"parquet\", \r\n    partitioning=ds.HivePartitioning.discover( **partitioning_kwargs)\r\n)\r\n\r\nfrag = list(dataset.get_fragments())[0]\r\n```\r\n\r\nQuerying this fragment works fine, but after serialization/deserialization with pickle, it gives errors (and with the original data example I actually got a segfault as well):\r\n\r\n```Java\n\r\nIn [16]: import pickle\r\n\r\nIn [17]: frag2 = pickle.loads(pickle.dumps(frag))\r\n\r\nIn [19]: frag2.partition_expression\r\n...\r\nUnicodeDecodeError: 'utf-8' codec can't decode byte 0xf1 in position 16: invalid continuation byte\r\n\r\nIn [20]: frag2.to_table(schema=schema, columns=columns)\r\nOut[20]: \r\npyarrow.Table\r\ncol: int64\r\npart: dictionary<values=string, indices=int32, ordered=0>\r\n\r\nIn [21]: frag2.to_table(schema=schema, columns=columns).to_pandas()\r\n...\r\n~/miniconda3/envs/arrow-20/lib/python3.8/site-packages/pyarrow/table.pxi in pyarrow.lib.table_to_blocks()\r\n\r\nArrowException: Unknown error: Wrapping \u027b\ufffd failed\r\n```\r\n\r\nIt seems the issue was specifically with a partition expression with dictionary type. \r\nAlso when using an integer columns as the partition column, you get wrong values (but silently in this case):\r\n\r\n```python\n\r\nIn [42]: frag.partition_expression\r\nOut[42]: \r\n<pyarrow.dataset.Expression (part == [\r\n  1,\r\n  2\r\n][0]:dictionary<values=int32, indices=int32, ordered=0>)>\r\n\r\nIn [43]: frag2.partition_expression\r\nOut[43]: \r\n<pyarrow.dataset.Expression (part == [\r\n  170145232,\r\n  32754\r\n][0]:dictionary<values=int32, indices=int32, ordered=0>)>\r\n```\r\n\r\nNow, it seems this is fixed in master. But since I don't remember it was fixed intentionally ( `[~bkietz]`?), it would be good to add some tests for it.",
+        "created_at": "2021-01-27T14:52:32.000Z",
+        "updated_at": "2021-04-19T12:30:12.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-02-02T14:09:33.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-02-02T14:09:33.769Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11400?focusedCommentId=17277139) by Joris Van den Bossche (jorisvandenbossche):*\nIssue resolved by pull request 9350\n<https://github.com/apache/arrow/pull/9350>"
+        },
+        {
+            "created_at": "2021-02-02T14:10:23.565Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11400?focusedCommentId=17277142) by Joris Van den Bossche (jorisvandenbossche):*\nMarking it as 3.0.0, as it was already fixed in the release, my PR was only adding a test"
+        },
+        {
+            "created_at": "2021-04-19T08:00:49.635Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11400?focusedCommentId=17324815) by Joris Van den Bossche (jorisvandenbossche):*\n`[~kszucs]` is this re-milestoning done automatically? As I moved it back to 3.0.0, since this issue was fixed for 3.0.0 "
+        },
+        {
+            "created_at": "2021-04-19T11:01:42.984Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11400?focusedCommentId=17324943) by Krisztian Szucs (kszucs):*\n`[~jorisvandenbossche]` Semi-automatically. The archery release script reported this issue as wrongly versioned since the patch belongs to the 4.0.0 release. See the merged commit on github's UI https://github.com/apache/arrow/commit/078d9058f77a6b65efc201de53962abc61b49ed5. There is a list of references the patch belongs to: `master`, `apache-arrow-4.0.0`"
+        },
+        {
+            "created_at": "2021-04-19T12:15:16.284Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11400?focusedCommentId=17324981) by Joris Van den Bossche (jorisvandenbossche):*\nOK, I should probably just not care ;) (but so, the issue was not fixed in 4.0.0, it already worked in 3.0.0, so including this in the changelog can be confusing)"
+        },
+        {
+            "created_at": "2021-04-19T12:30:12.260Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11400?focusedCommentId=17324992) by Krisztian Szucs (kszucs):*\nThe issue title and commit title often differ, but we include the jira title in the changelog. We could update it to use the commit titles instead to better describe the nature of the fix."
+        }
+    ]
+}

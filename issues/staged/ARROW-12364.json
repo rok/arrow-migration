@@ -1,0 +1,34 @@
+{
+    "issue": {
+        "title": "[Python] [Dataset] Add metadata_collector option to ds.write_dataset()",
+        "body": "***Note**: This issue was originally created as [ARROW-12364](https://issues.apache.org/jira/browse/ARROW-12364). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe legacy pq.write_to_dataset() has an option to save metadata to a list when writing partitioned data.\r\n```python\n\r\n    collector = []\r\n    pq.write_to_dataset(\r\n        table=table,\r\n        root_path=output_path,\r\n        use_legacy_dataset=True,\r\n        metadata_collector=collector,\r\n    )\r\n    fragments = []\r\n    for piece in collector:\r\n        files.append(filesystem.sep.join([output_path, piece.row_group(0).column(0).file_path]))\r\n```\r\nThis allows me to save a list of the specific parquet files which were created when writing the partitions to storage. I use this when scheduling tasks with Airflow.\r\n\r\nTask A downloads data and partitions it -~~> Task B reads the file fragments which were just saved and transforms it -~~> Task C creates a list of dataset filters from the file fragments I transformed, reads each filter to into a table and then processes the data further (normally dropping duplicates or selecting a subset of the columns) and saves it for visualization\r\n```java\n\r\nfragments = ['dev/date_id=20180111/transform-split-20210301013200-68.parquet', 'dev/date_id=20180114/transform-split-20210301013200-69.parquet', 'dev/date_id=20180128/transform-split-20210301013200-57.parquet', ]\r\n```\r\nI can use this list downstream to do two things:\r\n 1) I can read the list of fragments directly as a new dataset and transform the data\r\n```java\n\r\nds.dataset(fragments)\r\n```\r\n2) I can generate filters from the fragment paths which were saved using ds._get_partition_keys(). This allows me to query the dataset and retrieve all fragments within the partition. For example, if I partition by date and I process data every 30 minutes I might have 48 individual file fragments within a single partition. I need to know to query the **entire** partition instead of reading a single fragment.\r\n```java\n\r\ndef consolidate_filters(fragments):\r\n    \"\"\"Retrieves the partition_expressions from a list of dataset fragments to build a list of unique filters\"\"\"\r\n    filters = []\r\n    for frag in fragments:\r\n        partitions = ds._get_partition_keys(frag.partition_expression)\r\n        filter = [(k, \"==\", v) for k, v in partitions.items()]\r\n        if filter not in filters:\r\n            filters.append(filter)\r\n    return filters\r\n\r\nfilter_expression = pq._filters_to_expression(\r\n                filters=consolidate_filters(fragments=fragments)\r\n            )\r\n```\r\nMy current problem is that when I use ds.write_dataset(), I do not have a convenient method for generating a list of the file fragments I just saved. My only choice is to use basename_template and fs.glob() to find a list of the files based on the basename_template pattern. This is much slower and a waste of listing files on blob storage. [Related stackoverflow question with the basis of the approach I am using now ](https://stackoverflow.com/questions/66252660/pyarrow-identify-the-fragments-written-or-filters-used-when-writing-a-parquet/66266585#66266585)",
+        "created_at": "2021-04-13T13:34:00.000Z",
+        "updated_at": "2021-07-14T19:55:30.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Parquet",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-07-14T19:55:23.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-22T10:29:11.012Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12364?focusedCommentId=17367199) by Lance Dacey (ldacey):*\nHi @jorisvandenbossche, you asked me to create a separate issue for the metadata collector for ds.write_dataset. Just wanted to make sure that you had a chance to take a look.\r\n\r\nI had to switch back to the legacy dataset writer for most projects. Using fs.glob() can be very slow on very large datasets with many thousands of files, and my workflow often depends on knowing which files were written during a previous Airflow task."
+        },
+        {
+            "created_at": "2021-06-22T17:35:50.869Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12364?focusedCommentId=17367552) by Lance Dacey (ldacey):*\nI think this is taken care of by\u00a0ARROW-10440"
+        },
+        {
+            "created_at": "2021-06-22T18:45:51.469Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12364?focusedCommentId=17367612) by Weston Pace (westonpace):*\nARROW-10440 looks like it will be C++ only.\u00a0 I'd suggest we leave this open for the python implementation."
+        },
+        {
+            "created_at": "2021-07-14T19:55:23.273Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12364?focusedCommentId=17380837) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 10628\n<https://github.com/apache/arrow/pull/10628>"
+        }
+    ]
+}

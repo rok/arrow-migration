@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "Possible memory leak in pyarrow read_parquet",
+        "body": "***Note**: This issue was originally created as [ARROW-6976](https://issues.apache.org/jira/browse/ARROW-6976). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n\u00a0\r\n\r\nVersion and repro info in the gist below.\r\n\r\nNot sure if I'm not understanding something from this\u00a0<https://arrow.apache.org/blog/2019/02/05/python-string-memory-0.12/>\r\n\r\nbut there seems to be memory accumulation when that is exacerbated with higher arity objects like strings and dates (not datetimes).\r\n\r\n\u00a0\r\n\r\nI was not able to reproduce the issue on MacOS. Downgrading to 0.14.1 seemed to \"fix\" or lessen the problem.\r\n\r\n\u00a0\r\n\r\n<https://gist.github.com/cottrell/a3f95aa59408d87f925ec606d8783e62>\r\n\r\n\u00a0\r\n\r\nLet me know if this post should go elsewhere.\r\n\r\n![image-2019-10-23-16-17-20-739.png](https://issues.apache.org/jira/secure/attachment/12983846/image-2019-10-23-16-17-20-739.png)\r\n\r\n\u00a0\r\n```java\n\r\n\u00a0\r\n```\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2019-10-23T15:22:02.000Z",
+        "updated_at": "2021-02-04T18:43:33.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-10-25T09:05:02.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-25T08:26:07.388Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6976?focusedCommentId=16959547) by Joris Van den Bossche (jorisvandenbossche):*\n`[~cottrell]` thanks for the report! I _suppose_ this is the same as what was reported in ARROW-6874. That was about the conversion of Arrow tables to pandas involving object dtypes (so not the actual parquet code).  That issue is fixed on master, and will also be shortly released in 0.15.1"
+        },
+        {
+            "created_at": "2019-10-25T09:03:52.919Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6976?focusedCommentId=16959577) by Joris Van den Bossche (jorisvandenbossche):*\nYes, I can confirm it is fixed. Running your script on 0.15.0 vs master:\r\n\r\n![pyarrow_0150.png](https://issues.apache.org/jira/secure/attachment/12984013/pyarrow_0150.png)\r\n\r\n![pyarrow-master.png](https://issues.apache.org/jira/secure/attachment/12984014/pyarrow-master.png)"
+        },
+        {
+            "created_at": "2019-10-26T08:45:11.201Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6976?focusedCommentId=16960292) by david cottrell (cottrell):*\nGreat! I did look around for other memory error reports but unfortunately did not see that one."
+        },
+        {
+            "created_at": "2020-04-21T04:46:02.291Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6976?focusedCommentId=17088288) by Nitesh Mundu (Athlete_369):*\nfor a 50 MB parquet file, it is taking 3.3 GB when converted to pandas dataframe. Is this an acceptable case for parquet files?"
+        },
+        {
+            "created_at": "2020-04-21T04:47:11.093Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6976?focusedCommentId=17088291) by Nitesh Mundu (Athlete_369):*\nadding to the comment i used pyarrow 0.16.0"
+        },
+        {
+            "created_at": "2020-04-21T06:39:27.057Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6976?focusedCommentId=17088344) by Joris Van den Bossche (jorisvandenbossche):*\n[~Athlete_369] that can be possible, depending on your file. Parquet can be highly compressed, so giving a big difference between file size and size in memory for pandas. You can check the memory usage of your resulting pandas DataFrame with `df.info(memory_usage=\"deep\")`. How much does that indicate?"
+        },
+        {
+            "created_at": "2020-08-05T02:12:45.468Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6976?focusedCommentId=17171221) by jesse ventura (jesse_ventura):*\nwhy so many related issues been closed? this problem keeping its existence in 0.17 and 1.0.0 !!!\r\n\r\nhere my code , especially in multiprocessing :\r\n```java\n\r\n// code placeholder\r\n# ==========================================\r\n#!/usr/bin/env python\r\n# coding: utf-8\r\nfrom memory_profiler import profile\r\nfrom concurrent.futures import ProcessPoolExecutor, as_completed\r\nimport os,sys\r\nimport pandas as pd\r\nfrom progressbar import ProgressBar\r\n\r\npd.set_option('expand_frame_repr', False)\r\npd.set_option('display.max_rows', 10)\r\n\r\ndef get_all_df_dict():\r\n return pd.read_parquet('xx.parquet',\r\n# engine='fastparquet'   fastpq does NOT have memory leak PROBLEM\r\n                        )\r\n\r\nalldf_dict = get_all_df_dict()\r\n@profile\r\ndef parse_single_tday(tday_str, ):\r\n df = pd.read_parquet('{}.parquet'.format(tday_str),\r\n# engine='fastparquet'\r\n )\r\n print(df.head())\r\n\r\n@profile\r\ndef main():\r\n# yyyymmdd.parquet\r\n datdir = '/everydat_data/'\r\ntday_strs = [item.split('.parquet')[0] for item in os.listdir(datdir)]\r\nwkn = 3\r\nwith ProcessPoolExecutor(max_workers=wkn, ) as exe:\r\n plist = [exe.submit( parse_single_tday, tday, ) for tday in tday_strs]\r\n res = [task.result() for task in ProgressBar(max_value=len(plist))(as_completed(plist))]\r\nmain()\r\n```\r\n\u00a0\r\n\r\nwhen subprocess finished , parquet dataframe loaded by pyarrow couldn't release memory..\r\n\r\n\u00a0\r\n\r\n![Screenshot_2020-08-05_10-11-45.png](Screenshot_2020-08-05_10-11-45.png)"
+        },
+        {
+            "created_at": "2021-02-04T01:39:37.954Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6976?focusedCommentId=17278463) by shadowdsp (shadowdsp):*\n[~jesse_ventura]\u00a0I have the same problem, do you have any ideas?"
+        },
+        {
+            "created_at": "2021-02-04T18:43:33.780Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6976?focusedCommentId=17279058) by Wes McKinney (wesm):*\nCan you please give more detail about the issue that you're having? Opening a new Jira issue might help"
+        }
+    ]
+}

@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "TestValueVector.testFixedVectorReallocation and testVariableVectorReallocation are flaky",
+        "body": "***Note**: This issue was originally created as [ARROW-260](https://issues.apache.org/jira/browse/ARROW-260). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe Travis-ci build has failled several times on these tests.\nIt looks like they often throw OOME.\nstacktrace bellow:\n```\ntestFixedVectorReallocation(org.apache.arrow.vector.TestValueVector)  Time elapsed: 0.174 sec  <<< ERROR!\njava.lang.Exception: Unexpected exception, expected<org.apache.arrow.vector.util.OversizedAllocationException> but was<org.apache.arrow.memory.OutOfMemoryException>\n\tat java.nio.Bits.reserveMemory(Bits.java:658)\n\tat java.nio.DirectByteBuffer.<init>(DirectByteBuffer.java:123)\n\tat java.nio.ByteBuffer.allocateDirect(ByteBuffer.java:306)\n\tat io.netty.buffer.UnpooledUnsafeDirectByteBuf.allocateDirect(UnpooledUnsafeDirectByteBuf.java:108)\n\tat io.netty.buffer.UnpooledUnsafeDirectByteBuf.<init>(UnpooledUnsafeDirectByteBuf.java:69)\n\tat io.netty.buffer.UnpooledByteBufAllocator.newDirectBuffer(UnpooledByteBufAllocator.java:50)\n\tat io.netty.buffer.AbstractByteBufAllocator.directBuffer(AbstractByteBufAllocator.java:155)\n\tat io.netty.buffer.PooledByteBufAllocatorL$InnerAllocator.newDirectBufferL(PooledByteBufAllocatorL.java:155)\n\tat io.netty.buffer.PooledByteBufAllocatorL$InnerAllocator.directBuffer(PooledByteBufAllocatorL.java:195)\n\tat io.netty.buffer.PooledByteBufAllocatorL.allocate(PooledByteBufAllocatorL.java:62)\n\tat org.apache.arrow.memory.AllocationManager.<init>(AllocationManager.java:79)\n\tat org.apache.arrow.memory.BaseAllocator.bufferWithoutReservation(BaseAllocator.java:238)\n\tat org.apache.arrow.memory.BaseAllocator.buffer(BaseAllocator.java:220)\n\tat org.apache.arrow.memory.BaseAllocator.buffer(BaseAllocator.java:190)\n\tat org.apache.arrow.vector.UInt4Vector.allocateBytes(UInt4Vector.java:189)\n\tat org.apache.arrow.vector.UInt4Vector.allocateNew(UInt4Vector.java:171)\n\tat org.apache.arrow.vector.TestValueVector.testFixedVectorReallocation(TestValueVector.java:106)\ntestVariableVectorReallocation(org.apache.arrow.vector.TestValueVector)  Time elapsed: 0.148 sec  <<< ERROR!\njava.lang.Exception: Unexpected exception, expected<org.apache.arrow.vector.util.OversizedAllocationException> but was<org.apache.arrow.memory.OutOfMemoryException>\n\tat java.nio.Bits.reserveMemory(Bits.java:658)\n\tat java.nio.DirectByteBuffer.<init>(DirectByteBuffer.java:123)\n\tat java.nio.ByteBuffer.allocateDirect(ByteBuffer.java:306)\n\tat io.netty.buffer.UnpooledUnsafeDirectByteBuf.allocateDirect(UnpooledUnsafeDirectByteBuf.java:108)\n\tat io.netty.buffer.UnpooledUnsafeDirectByteBuf.<init>(UnpooledUnsafeDirectByteBuf.java:69)\n\tat io.netty.buffer.UnpooledByteBufAllocator.newDirectBuffer(UnpooledByteBufAllocator.java:50)\n\tat io.netty.buffer.AbstractByteBufAllocator.directBuffer(AbstractByteBufAllocator.java:155)\n\tat io.netty.buffer.PooledByteBufAllocatorL$InnerAllocator.newDirectBufferL(PooledByteBufAllocatorL.java:155)\n\tat io.netty.buffer.PooledByteBufAllocatorL$InnerAllocator.directBuffer(PooledByteBufAllocatorL.java:195)\n\tat io.netty.buffer.PooledByteBufAllocatorL.allocate(PooledByteBufAllocatorL.java:62)\n\tat org.apache.arrow.memory.AllocationManager.<init>(AllocationManager.java:79)\n\tat org.apache.arrow.memory.BaseAllocator.bufferWithoutReservation(BaseAllocator.java:238)\n\tat org.apache.arrow.memory.BaseAllocator.buffer(BaseAllocator.java:220)\n\tat org.apache.arrow.memory.BaseAllocator.buffer(BaseAllocator.java:190)\n\tat org.apache.arrow.vector.VarCharVector.allocateNew(VarCharVector.java:364)\n\tat org.apache.arrow.vector.TestValueVector.testVariableVectorReallocation(TestValueVector.java:163)\nResults :\nTests in error: \n  TestValueVector.testFixedVectorReallocation \u00bb  Unexpected exception, expected<...\n  TestValueVector.testVariableVectorReallocation \u00bb  Unexpected exception, expect...\n```\n",
+        "created_at": "2016-08-12T18:21:21.000Z",
+        "updated_at": "2016-10-04T23:01:10.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: test"
+        ],
+        "closed": true,
+        "closed_at": "2016-08-18T21:58:20.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2016-08-12T18:22:38.178Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-260?focusedCommentId=15419253) by Julien Le Dem (julienledem):*\nfrom jihoonson: https://github.com/apache/arrow/pull/116#issuecomment-239468610\n> I'm also suffering from this error, and found the reason. The BaseValueVector.MAX_ALLOCATION_SIZE value used in TestValueVector is declared as a static variable which means its value is initialized when the BaseValueVector class is loaded. Obviously, changing BaseValueVector.MAX_ALLOCATION_SIZE by setting the \"arrow.vector.max_allocation_bytes\" property in TestValueVector doesn't work. As a result, this test tries to allocate a very large array of the size of Integer.MAX_VALUE, which causes OOM.\n> \n> I think that this test looks fragile, and thus we need to make the allocation size small. However, reducing the allocation size causes another problem. Many tests in TestValueVector expect the OversizedAllocationException when value allocation reaches to MAX_VALUE_ALLOCATION. So, reducing the allocation size makes OversizedAllocation tests difficult.\n> \n> I would like to separate all these OversizedAllocation tests, but not sure this is a right way. Please give me some help."
+        },
+        {
+            "created_at": "2016-08-13T00:44:47.994Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-260?focusedCommentId=15419738) by Jihoon Son (jihoonson):*\n`[~julienledem]`, thanks for creating this ticket.\n\nThe simplest solution is to add a surefire option -Darrow.vector.max_allocation_bytes=1048576 to limit the max allocation size. This will affect to all unit testings, but I think this is a valid solution because we can avoid the allocation of large memory for a vector which can cause OOM in poor test environments.\nAny thoughts on this solution?"
+        },
+        {
+            "created_at": "2016-08-13T18:14:46.301Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-260?focusedCommentId=15420021) by Jacques Nadeau (jnadeau):*\nLet's just move the tests that need this functionality to a separate test class that doesn't match the normal surefire pattern (Test... or ...Test) and then run under a separate surefire execution within maven for that one test class."
+        },
+        {
+            "created_at": "2016-08-13T18:21:27.092Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-260?focusedCommentId=15420024) by Julien Le Dem (julienledem):*\nI'd suggest we do that when we need it to keep things simple for now.\nThat would be needed when we have a unit test that requires to allocate large buffers.\nWhich would probably make that test not a unit test anymore and we would move is to another target."
+        },
+        {
+            "created_at": "2016-08-13T21:11:53.597Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-260?focusedCommentId=15420078) by Jacques Nadeau (jnadeau):*\nI'm fine with setting the surefire option in the default execution for now."
+        },
+        {
+            "created_at": "2016-08-13T21:12:39.637Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-260?focusedCommentId=15420079) by Jacques Nadeau (jnadeau):*\nNote, it is probably still good to move these three tests into a separate class and put a disclaimer at the top about the parameter."
+        },
+        {
+            "created_at": "2016-08-14T00:30:09.293Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-260?focusedCommentId=15420142) by Jihoon Son (jihoonson):*\nThanks. I updated my patch. https://github.com/apache/arrow/pull/118/commits/062e3128f498f8a7f193628880f45dfc14eba722"
+        },
+        {
+            "created_at": "2016-08-18T21:58:21.420Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-260?focusedCommentId=15427242) by Julien Le Dem (julienledem):*\nResolved in:\nhttps://github.com/apache/arrow/commit/e8724f8379324c59d285d2380005577a49290c42"
+        }
+    ]
+}

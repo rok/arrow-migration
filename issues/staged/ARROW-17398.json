@@ -1,0 +1,48 @@
+{
+    "issue": {
+        "title": "[C++] Add support for %Z to strptime ",
+        "body": "***Note**: This issue was originally created as [ARROW-17398](https://issues.apache.org/jira/browse/ARROW-17398). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhile lubridate does not support %Z flag for strptime Arrow could.\r\n\r\nChanges to C++ kernels might be required for support on all platforms, but that shouldn't block implementation as kStrptimeSupportsZone flag can be used, [see proposal](https://github.com/apache/arrow/pull/13854#issuecomment-1212694663).",
+        "created_at": "2022-08-12T15:13:59.000Z",
+        "updated_at": "2022-08-17T12:40:53.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-08-16T08:07:34.902Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17398?focusedCommentId=17580138) by Joris Van den Bossche (jorisvandenbossche):*\nThis is labeled as an R issue, but it is essentially a feature request for the C++ kernel, right?  Because as far as I know, currently it \"recognizes\" the %Z flag (so you can parse strings that have a timezone name in it), but then simply ignores any matching name in the string, based on what I wrote in ARROW-15884"
+        },
+        {
+            "created_at": "2022-08-16T09:57:05.144Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17398?focusedCommentId=17580209) by Rok Mihevc (rokm):*\nRight! Shall we label it as such and keep a note that the R change is needed as well?"
+        },
+        {
+            "created_at": "2022-08-16T10:05:47.621Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17398?focusedCommentId=17580215) by Joris Van den Bossche (jorisvandenbossche):*\nYes, changed the label in the PR title. \r\n\r\nOn the actual topic: do you know to what extent the strptime implementations we use actually support this? \r\n\r\nIn the Python docs, see note number 6) in https://docs.python.org/3/library/datetime.html#technical-detail about the \"%Z\" support, and for example there they say that Python's implementation only supports your local time zone (depending on your computer's locale) + \"UTC\" / \"GMT\""
+        },
+        {
+            "created_at": "2022-08-16T12:27:30.777Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17398?focusedCommentId=17580292) by Rok Mihevc (rokm):*\nWe use [musl strptime](https://github.com/esmil/musl/blob/master/src/time/strptime.c) on windows and [regular strptime](https://man7.org/linux/man-pages/man3/strptime.3.html) elsewhere ([source](https://github.com/apache/arrow/blob/cc8f6c0267680d5f353766a3bafe5822b0ceb88f/cpp/src/arrow/util/value_parsing.h#L781)). My assumption is that all timezone information is currently ignored, simple test (on M1):\r\n```python\n\r\nimport pyarrow.compute as pc\r\nimport pyarrow as pa\r\npc.strptime(pa.array([\"2022-01-01 12:00 CET\"]), format=\"%Y-%m-%d %H:%M %Z\", unit=\"ms\")\r\n```\r\nReturns 2022-01-01 12:00:00.000 with type TimestampType(timestamp[ms])\r\nWhile I would expect 2022-01-01 11:00:00.000 with type TimestampType(timestamp[ms], \"UTC)\r\n\r\ndate.h we vendor [supports timezone parsing](https://github.com/HowardHinnant/date/wiki/Examples-and-Recipes#parse_daylight_transition) but is significantly slower as per [this comment](https://github.com/apache/arrow/blob/cc8f6c0267680d5f353766a3bafe5822b0ceb88f/cpp/src/arrow/util/value_parsing.h#L785).\r\n\r\nI'm not sure how to continue but I expect there is some significant work to be done here."
+        },
+        {
+            "created_at": "2022-08-16T15:08:38.515Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17398?focusedCommentId=17580363) by Joris Van den Bossche (jorisvandenbossche):*\n> My assumption is that all timezone information is currently ignored\r\n\r\nIndeed, see also the examples in the issue I mentioned above: ARROW-15884\r\n\r\n> date.h we vendor supports timezone parsing \r\n\r\nThat's not directly what I understand from that link. It seems to indicate there is a way to support parsing something like \"1999-10-31 00:30:00 US/Pacific PST\", but for this issue I think we actually want to parse \"1999-10-31 00:30:00 PST\"? \r\n\r\nThere might also not be an actual solution for this, without requiring more user input (in general, those time zone abbreviations like PST, EST, CET, etc are not fully unambiguous)"
+        },
+        {
+            "created_at": "2022-08-17T11:39:08.448Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17398?focusedCommentId=17580748) by Rok Mihevc (rokm):*\n> That's not directly what I understand from that link. It seems to indicate there is a way to support parsing something like \"1999-10-31 00:30:00 US/Pacific PST\", but for this issue I think we actually want to parse \"1999-10-31 00:30:00 PST\"?\r\n\r\nYou're right. But [date.h docs](https://howardhinnant.github.io/date/date.html#from_stream_formatting) do state that timezone names and abbreviations can be parsed:\r\n\r\n```\n\r\n%Z\tThe time zone abbreviation or name. A single word is parsed. This word can only contain characters from the basic source character set ([lex.charset] in the C++ standard) that are alphanumeric, or one of '_', '/', '-' or '+'.\r\n```\r\n\r\n> There might also not be an actual solution for this, without requiring more user input (in general, those time zone abbreviations like PST, EST, CET, etc are not fully unambiguous)\r\n\r\nAre you referring to DST jumps or \"name overloading\"? For completeness: [list of timezones including abbreviations](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)."
+        },
+        {
+            "created_at": "2022-08-17T11:52:24.556Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17398?focusedCommentId=17580752) by Joris Van den Bossche (jorisvandenbossche):*\nI think I am referring to name overloading (although I am mostly just repeating what I hear others say ;)). For example CST can be both China Standard Time as Central Standard Time.\r\n\r\n> You're right. But date.h docs do state that timezone names and abbreviations can be parsed:\r\n\r\nInteresting (though in the source code I don't directly find support for that), so we will have to test in practice to see how much it supports it.\r\n"
+        },
+        {
+            "created_at": "2022-08-17T12:40:53.070Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17398?focusedCommentId=17580770) by Rok Mihevc (rokm):*\n> I think I am referring to name overloading (although I am mostly just repeating what I hear others say ). For example CST can be both China Standard Time as Central Standard Time.\r\n\r\nCST is a good example. I suppose we'll have to offer a resolution mechanism or error.\r\n\r\n> Interesting (though in the source code I don't directly find support for that), so we will have to test in practice to see how much it supports it.\r\n\r\nInteresting inedeed."
+        }
+    ]
+}

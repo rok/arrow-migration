@@ -1,0 +1,48 @@
+{
+    "issue": {
+        "title": "[Python] High memory usage writing pyarrow.Table with large strings to parquet",
+        "body": "***Note**: This issue was originally created as [ARROW-7305](https://issues.apache.org/jira/browse/ARROW-7305). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nMy case of datasets stored is specific. I have large strings (1-100MB each).\r\n\r\nLet's take for example a single row.\r\n\r\n43mb.csv is a 1-row CSV with 10 columns. One column a 43mb string.\r\n\r\nWhen I read this csv with pandas and then dump to parquet, my script consumes 10x of the 43mb.\r\n\r\nWith increasing amount of such rows memory footprint overhead diminishes, but I want to focus on this specific case.\r\n\r\nHere's the footprint after running using memory profiler:\r\n```java\n\r\nLine #    Mem usage    Increment   Line Contents\r\n================================================\r\n     4     48.9 MiB     48.9 MiB   @profile\r\n     5                             def test():\r\n     6    143.7 MiB     94.7 MiB       data = pd.read_csv('43mb.csv')\r\n     7    498.6 MiB    354.9 MiB       data.to_parquet('out.parquet')\r\n \n```\r\nIs this typical for parquet in case of big strings?",
+        "created_at": "2019-12-04T02:21:17.000Z",
+        "updated_at": "2019-12-24T20:28:24.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: task"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2019-12-10T14:47:00.664Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7305?focusedCommentId=16992615) by Wes McKinney (wesm):*\nThere may be some things we could do about this, do you have an example file we could use to help with profiling the internal memory allocations during the write process? "
+        },
+        {
+            "created_at": "2019-12-18T00:01:57.773Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7305?focusedCommentId=16998688) by Bogdan Klichuk (klichukb):*\nSorry for delay, attaching a gzipped 50mb csv file with sample text that performs the same! Thanks."
+        },
+        {
+            "created_at": "2019-12-18T17:56:03.878Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7305?focusedCommentId=16999391) by Wes McKinney (wesm):*\nNote because you are on macOS the background thread jemalloc memory reclamation is disabled. cc `[~apitrou]`"
+        },
+        {
+            "created_at": "2019-12-20T13:41:31.056Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7305?focusedCommentId=17000893) by Bogdan Klichuk (klichukb):*\nI have tried this in ubuntu docker and results for 0.14.1 vs 0.15.1 are pretty interesting.\r\n\r\n\u00a0\r\n\r\n0.14.1:\r\n```java\n\r\n Line #    Mem usage    Increment   Line Contents\r\n================================================\r\n     4     50.5 MiB     50.5 MiB   @profile\r\n     5                             def do():\r\n     6     99.9 MiB     49.4 MiB       df = pd.read_csv('50mb.csv')\r\n     7    112.1 MiB     12.1 MiB       df.to_parquet('test.parquet')\n```\r\n0.15.1:\r\n```java\n\r\nLine #    Mem usage    Increment   Line Contents\r\n================================================\r\n     4     50.5 MiB     50.5 MiB   @profile\r\n     5                             def do():\r\n     6    100.0 MiB     49.4 MiB       df = pd.read_csv('50mb.csv')\r\n     7    401.4 MiB    301.4 MiB       df.to_parquet('test.parquet') \n```\r\nwhich besides the fact that 0.14.1 does indeed behave better on non-mac, also shows that 0.15.1 requires much more memory to write.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-12-20T14:48:19.895Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7305?focusedCommentId=17000928) by Bogdan Klichuk (klichukb):*\nLooking at a bigger example\r\n```java\n\r\ndf = pd.concat([df] * 20) \n```\r\nResolves into 1.2.gb real usage on 0.14.1 and 2gb on 0.15.1"
+        },
+        {
+            "created_at": "2019-12-20T20:45:34.806Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7305?focusedCommentId=17001208) by Wes McKinney (wesm):*\nThanks for the additional information. Someone (which can be you) will need to investigate. These issues are very time consuming to diagnose"
+        },
+        {
+            "created_at": "2019-12-24T19:44:21.299Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7305?focusedCommentId=17002975) by Wes McKinney (wesm):*\nSee the following script\r\n\r\nhttps://gist.github.com/wesm/193f644d10b5aee8c258b8f4f81c5161\r\n\r\nHere is the output for me (off of master branch, I assume 0.15.1 is the same)\r\n\r\n```Java\n\r\n$ python arrow7305.py \r\nStarting RSS: 102367232\r\nRead CSV RSS: 154279936\r\nWrote Parquet RSS: 522485760\r\nWaited 1 second RSS: 161763328\r\nRead CSV RSS: 164732928\r\nWrote Parquet RSS: 528371712\r\nWaited 1 second RSS: 226361344\r\nRead CSV RSS: 167698432\r\nWrote Parquet RSS: 528502784\r\nWaited 1 second RSS: 226492416\r\nRead CSV RSS: 172175360\r\nWrote Parquet RSS: 532971520\r\nWaited 1 second RSS: 230961152\r\nRead CSV RSS: 172093440\r\nWrote Parquet RSS: 532889600\r\nWaited 1 second RSS: 230879232\r\nRead CSV RSS: 230940672\r\nWrote Parquet RSS: 532992000\r\nWaited 1 second RSS: 230981632\r\nRead CSV RSS: 232812544\r\nWrote Parquet RSS: 534822912\r\nWaited 1 second RSS: 232812544\r\nRead CSV RSS: 235274240\r\nWrote Parquet RSS: 537608192\r\nWaited 1 second RSS: 235577344\r\nRead CSV RSS: 236883968\r\nWrote Parquet RSS: 531349504\r\nWaited 1 second RSS: 229318656\r\nRead CSV RSS: 231157760\r\nWrote Parquet RSS: 533168128\r\nWaited 1 second RSS: 231157760\r\nWaited 1 second RSS: 172433408\r\nWaited 1 second RSS: 172433408\r\nWaited 1 second RSS: 172433408\r\nWaited 1 second RSS: 172433408\r\nWaited 1 second RSS: 172433408\r\nWaited 1 second RSS: 172433408\r\nWaited 1 second RSS: 172433408\r\nWaited 1 second RSS: 172433408\r\nWaited 1 second RSS: 172433408\r\nWaited 1 second RSS: 172433408\r\n```\r\n\r\nHere is the output from 0.14.1\r\n\r\n```Java\n\r\n$ python arrow7305.py \r\nStarting RSS: 74477568\r\nRead CSV RSS: 126550016\r\nWrote Parquet RSS: 129470464\r\nWaited 1 second RSS: 129470464\r\nRead CSV RSS: 132321280\r\nWrote Parquet RSS: 135151616\r\nWaited 1 second RSS: 135151616\r\nRead CSV RSS: 135155712\r\nWrote Parquet RSS: 133169152\r\nWaited 1 second RSS: 133169152\r\nRead CSV RSS: 135159808\r\nWrote Parquet RSS: 133230592\r\nWaited 1 second RSS: 133230592\r\nRead CSV RSS: 135217152\r\nWrote Parquet RSS: 135217152\r\nWaited 1 second RSS: 135217152\r\nRead CSV RSS: 139567104\r\nWrote Parquet RSS: 139567104\r\nWaited 1 second RSS: 139567104\r\nRead CSV RSS: 141398016\r\nWrote Parquet RSS: 133378048\r\nWaited 1 second RSS: 133378048\r\nRead CSV RSS: 137068544\r\nWrote Parquet RSS: 133234688\r\nWaited 1 second RSS: 133234688\r\nRead CSV RSS: 135221248\r\nWrote Parquet RSS: 135221248\r\nWaited 1 second RSS: 135221248\r\nRead CSV RSS: 139567104\r\nWrote Parquet RSS: 133234688\r\nWaited 1 second RSS: 133234688\r\nWaited 1 second RSS: 133234688\r\nWaited 1 second RSS: 133234688\r\nWaited 1 second RSS: 133234688\r\nWaited 1 second RSS: 133234688\r\nWaited 1 second RSS: 133234688\r\nWaited 1 second RSS: 133234688\r\nWaited 1 second RSS: 133234688\r\nWaited 1 second RSS: 133234688\r\nWaited 1 second RSS: 133234688\r\nWaited 1 second RSS: 133234688\r\n```\r\n\r\nI've only begun to investigate but these changes have to do with the jemalloc version upgrade and the changes that we made to configuration options. I don't know what is causing the ~30-40MB difference in the baseline memory usage, though (could be differences in aggregate shared library sizes). We changed memory page management to be performed in the background which means that memory is not released to the OS immediately as it was before but rather on a short time delay as you can see. \r\n\r\nThe basic idea is that requesting memory from the operating system is expensive, and so jemalloc is being a bit greedy about holding on to memory for a short period of time because applications that use a lot of memory often continue using a lot of memory, and this will result in improved performance. \r\n\r\nAn alternative to our current configuration would be to disable the background_thread option and set the decay_ms to 0. This would likely yield worse performance in some applications. \r\n\r\nWe're having to strike a delicate balance between having a piece of software that performs well in real world scenarios while also offering predictable resource utilization. It is hard to satisfy everyone. "
+        },
+        {
+            "created_at": "2019-12-24T20:28:24.613Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7305?focusedCommentId=17002987) by Wes McKinney (wesm):*\nI found a different but also concerning problem on macOS relating to ARROW-6994 and have just put up this patch\r\n\r\nhttps://github.com/apache/arrow/pull/6100"
+        }
+    ]
+}

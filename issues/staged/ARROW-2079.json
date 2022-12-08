@@ -1,0 +1,92 @@
+{
+    "issue": {
+        "title": "[Python][C++] Possibly use `_common_metadata` for schema if `_metadata` isn't available",
+        "body": "***Note**: This issue was originally created as [ARROW-2079](https://issues.apache.org/jira/browse/ARROW-2079). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently pyarrow's parquet writer only writes `_common_metadata` and not `_metadata`. From what I understand these are intended to contain the dataset schema but not any row group information.\r\n\r\n\u00a0\r\n\r\nA few (possibly naive) questions:\r\n\r\n\u00a0\r\n\r\n1. In the `__init__` for `ParquetDataset`, the following lines exist:\r\n```java\n\r\nif self.metadata_path is not None:\r\n    with self.fs.open(self.metadata_path) as f:\r\n        self.common_metadata = ParquetFile(f).metadata\r\nelse:\r\n    self.common_metadata = None\r\n```\r\nI believe this should use `common_metadata_path` instead of `metadata_path`, as the latter is never written by `pyarrow`, and is given by the `_metadata` file instead of `_common_metadata` (as seemingly intended?).\r\n\r\n\u00a0\r\n\r\n2. In `validate_schemas` I believe an option should exist for using the schema from `_common_metadata` instead of `_metadata`, as pyarrow currently only writes the former, and as far as I can tell `_common_metadata` does include all the schema information needed.\r\n\r\n\u00a0\r\n\r\nPerhaps the logic in `validate_schemas` could be ported over to:\r\n\r\n\u00a0\r\n```java\n\r\nif self.schema is not None:\r\n    pass  # schema explicitly provided\r\nelif self.metadata is not None:\r\n    self.schema = self.metadata.schema\r\nelif self.common_metadata is not None:\r\n    self.schema = self.common_metadata.schema\r\nelse:\r\n    self.schema = self.pieces[0].get_metadata(open_file).schema\n```\r\nIf these changes are valid, I'd be happy to submit a PR. It's not 100% clear to me the difference between `_common_metadata` and `_metadata`, but I believe the schema in both should be the same. Figured I'd open this for discussion.",
+        "created_at": "2018-02-01T21:55:35.000Z",
+        "updated_at": "2022-09-23T14:12:56.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2018-02-01T21:58:38.062Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=16349345) by Jim Crist (jim.crist):*\ncc `[~xhochy]`"
+        },
+        {
+            "created_at": "2018-02-06T21:46:27.560Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=16354594) by Uwe Korn (uwe):*\n1) Yes this should be `common_metadata_path` but we could also use here `metadata_path` is `common_metadata_path` is None.\r\n\r\n2) yes, this also looks fine.\r\n\r\n\u00a0\r\n\r\n`_common_metadata` is simply a Parquet file that contains the schema of all files that are part of a dataset. `_metadata` is the same but it additionally contains the metadata of each RowGroup that is part of the dataset, i.e. `_metadata` is a superset from `_common_metadata`."
+        },
+        {
+            "created_at": "2019-04-29T08:44:30.610Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=16829034) by Joris Van den Bossche (jorisvandenbossche):*\nIt seems to me that this is closed by ARROW-2209 (<https://github.com/apache/arrow/pull/1656>).\r\n\r\nAt least, the two items mentioned above have been done by that PR (fixing the `metadata_path` -> `common_metadata_path` mentioned in 1), and `validate_schemas` now also falls back to `common_metadata_path` to get the schema).\r\n\r\n\u2014\r\n\r\nOne aspect I don't fully understand is the _\"Currently pyarrow's parquet writer only writes `_common_metadata` and not `_metadata`\"_, as it seems to me that pyarrow does not write any of both? (at least not with `write_to_dataset`)"
+        },
+        {
+            "created_at": "2019-04-29T15:26:23.976Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=16829345) by Wes McKinney (wesm):*\nWe read it but don't write it. We might want to change that in the course of addressing ARROW-1983 "
+        },
+        {
+            "created_at": "2019-04-29T15:34:55.843Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=16829355) by Joris Van den Bossche (jorisvandenbossche):*\nBut the `_common_metadata` we could already write now? As far as I understand, `_common_metadata` contains the metadata/schema of the full dataset, without the additional combined metadata for each dataset piece (which is what ARROW-1983 tries to address)"
+        },
+        {
+            "created_at": "2019-04-29T15:47:01.202Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=16829363) by Wes McKinney (wesm):*\nSure, we certainly could. I don't think it would make sense to do this independently from addressing the _metadata file though"
+        },
+        {
+            "created_at": "2019-04-29T15:48:53.180Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=16829365) by Uwe Korn (uwe):*\nIt does make sense to write `_common_metadata` without `_metadata` as this already gives you a global schema for all Parquet files in the dataset. In the presence of `_metadata`, `_common_metadata` is actually redundant as the schema is already contained in `_metadata`."
+        },
+        {
+            "created_at": "2020-05-25T19:40:32.387Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=17116205) by Francois Saint-Jacques (fsaintjacques):*\nQuestion to users/developers, why the need of 2 files, is it because `_metadata` can be too big?"
+        },
+        {
+            "created_at": "2020-05-26T12:15:26.765Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=17116686) by Joris Van den Bossche (jorisvandenbossche):*\ncc `[~rjzamora]` `[~mdurant]`"
+        },
+        {
+            "created_at": "2020-05-26T12:52:02.038Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=17116721) by Martin Durant (mdurant):*\n>\u00a0why the need of 2 files\r\n\r\n\u00a0\r\n\r\nExactly - the _metadata file also contains all the column stats and encodings/offsets for every row-group in every file;\u00a0__common__metadata contains only the schema and key/value global metadata."
+        },
+        {
+            "created_at": "2020-05-26T12:57:55.508Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=17116722) by Joris Van den Bossche (jorisvandenbossche):*\nIn practice, what does dask do? For `_metadata`, there is the option to disable it with `write_metadata_file=False`. \r\nBut will `_common_metadata` always be written?"
+        },
+        {
+            "created_at": "2020-05-26T12:58:53.864Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=17116725) by Francois Saint-Jacques (fsaintjacques):*\n`[~mdurant]`, my question is more about \"why\" than \"how\"."
+        },
+        {
+            "created_at": "2020-05-26T13:06:19.805Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=17116728) by Martin Durant (mdurant):*\n`to_parquet` currently has `write_metadata_file=True` by default.\r\n\r\nI believe that if it is False, you get neither file - this could be easily changed, however.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-06-04T09:22:41.370Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=17125733) by Joris Van den Bossche (jorisvandenbossche):*\n`[~mdurant]` so in practice (when using dask), you will always have either both or either none, I understand? \r\nOn the reading side, has dask an API to indicate to use `_common_metadata` but not `_metadata` ? "
+        },
+        {
+            "created_at": "2020-06-04T09:26:38.381Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=17125738) by Joris Van den Bossche (jorisvandenbossche):*\nAnd the reason we are asking those questions is just to understand the use cases of `_common_metadata`, as the question is if it is worth supporting this in Arrow (we now support creating a dataset from `_metadata`, ARROW-8062)"
+        },
+        {
+            "created_at": "2020-06-04T09:33:09.889Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=17125743) by Uwe Korn (uwe):*\nFor the datasets, we write in \\`kartothek`, we only write \\`_common_metadata` (I think Apache Drill does the same). This is useful to have the schema for the whole dataset but writing the `_metadata` file with all information would be to expensive and in the `kartothek` case even useless."
+        },
+        {
+            "created_at": "2020-06-04T13:00:26.212Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=17125900) by Martin Durant (mdurant):*\nIndeed, I believe spark always writes\u00a0_common_metadata, but _metadata is optional (off by default)"
+        },
+        {
+            "created_at": "2020-06-04T13:27:32.155Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=17125920) by Joris Van den Bossche (jorisvandenbossche):*\nSo in practice, when using the factory to discover a partitioned parquet dataset, the default right now is to \"infer\" the schema just from reading the schema from the first file (and optionally you can let it read all schemas of all files and get a \"unified\" schema from those, or pass an explicit schema).  So what are the concrete TODO items that we want to change here related to the discussion in this issue?\r\n\r\nIf there is a `_common_metadata` file present, use that to read the schema instead of the \"first\" file (and I suppose that's all that we would do with this `_common_metadata` file?).   \r\nAnd is the advantage then that this `_common_metadata` file is a smaller file than the \"first\" data file?"
+        },
+        {
+            "created_at": "2020-12-22T14:03:52.215Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2079?focusedCommentId=17253519) by Daniel Figus (goddi):*\n`[~jorisvandenbossche]`: In my opinion the biggest advantage of using the\u00a0`_common_metadata` is in case of schema evolution. The first parquet file might not contain all fields and newer files might have additional fields. In order to get the full schema with all fields one would need to infer the effective schema from all files which might be very expensive for larger datasets.\r\n\r\nCurrent workaround is to manually read the schema from the `_common_metadata` file\u00a0and pass it to the dataset API. "
+        }
+    ]
+}

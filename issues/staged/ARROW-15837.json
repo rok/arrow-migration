@@ -1,0 +1,47 @@
+{
+    "issue": {
+        "title": "[C++][Python][Doc] ListArray.offsets is wrong when it contains both lists and null values",
+        "body": "***Note**: This issue was originally created as [ARROW-15837](https://issues.apache.org/jira/browse/ARROW-15837). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi ! I noticed this bug by running this code:\r\n```java\n\r\nimport pyarrow as pa\r\n\r\narr = pa.array([None, [0]])\r\nreconstructed_arr = pa.ListArray.from_arrays(arr.offsets, arr.values)\r\nprint(reconstructed_arr.to_pylist())\r\n# [[], [0]] \n```\r\nThe resulting array, reconstructed from the offsets and values of the original array, {**}is not the same at the original array{**}.\r\n\r\nThis is the case because it seems that `arr.offsets` is wrong. Indeed it returns `[0, 0, 1]` instead of `[None, 0, 1]`:\r\n```java\n\r\nprint(arr.offsets.to_pylist())\r\n# [0, 0, 1]\r\n\r\nfixed_reconstructed_arr = pa.ListArray.from_arrays(pa.array([None, 0, 1]), arr.values)\r\nprint(fixed_reconstructed_arr.to_pylist())\r\n# [None, [0]]\n```\r\nIf it can help, here is my investigation:\r\n\r\nThe offsets seem to be wrong because they don't include the validity bitmap from ``{}arr.buffers()[0]`{`}, which is used to say which values are null and which values are non-null. Therefore the `None` is replaced by `0`.\r\n\r\nThough even if the validity bitmap is not taken into account at all, I checked its value and it\u00a0 was not what I expected: the validity bitmap at ``{}arr.buffers()[0]`{`} is supposed to be `110` (in order to mask the None in `[None, 0, 1]`) but it is `10` for some reason:\r\n```java\n\r\nbin(int(arr.buffers()[0].hex(), 16))\r\n# '0b10'\r\n# I think it should be 0b110 - 1 corresponds to non-null and 0 corresponds to null, if you take the bits in reverse order \n```",
+        "created_at": "2022-03-03T17:09:14.000Z",
+        "updated_at": "2022-03-08T19:02:31.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Documentation",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-03-08T11:04:34.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-03T17:29:03.269Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15837?focusedCommentId=17500927) by Antoine Pitrou (apitrou):*\nThe validity bitmap is right: it has two bits since the list array has logical length two.\r\nSince a list array has N+1 offsets (as opposed to N bits in the validity bitmap), it is expected that the returned offsets arrays cannot encode validity. However, this should probably be more clearly documented (both in C++ and Python)."
+        },
+        {
+            "created_at": "2022-03-03T17:35:55.635Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15837?focusedCommentId=17500929) by quentin lhoest (lhoestq):*\nOk thanks for the details ! Does that mean that we can't reconstruct such a ListArray from its values and offsets then ?"
+        },
+        {
+            "created_at": "2022-03-03T17:45:55.444Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15837?focusedCommentId=17500938) by Antoine Pitrou (apitrou):*\n`ListArray.from_arrays` actually accepts an offsets array with nulls in it (in which case it will recreate a new validity bitmap and a new offsets buffer - the latter with the right values in place of null entries). However, there is no easy way to create that offsets array with nulls...\r\n\r\nPerhaps we can instead add a functionality to create a list array from offsets, values and a separate validity bitmap?"
+        },
+        {
+            "created_at": "2022-03-03T17:49:55.184Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15837?focusedCommentId=17500944) by quentin lhoest (lhoestq):*\n> Perhaps we can instead add a functionality to create a list array from offsets, values and a separate validity bitmap?\r\n\r\nThat would be super useful ! It could ask for the validity bitmap, or simply a mask (for consistency with pyarrow.StructArray.from_arrays for example)\r\n\r\n\u00a0\r\n\r\nDo you want me to create an issue for that ?"
+        },
+        {
+            "created_at": "2022-03-03T17:51:06.510Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15837?focusedCommentId=17500945) by Antoine Pitrou (apitrou):*\nYes, please do :-)"
+        },
+        {
+            "created_at": "2022-03-03T18:02:04.761Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15837?focusedCommentId=17500952) by quentin lhoest (lhoestq):*\nOk, created at https://issues.apache.org/jira/browse/ARROW-15839 \u00a0:)"
+        },
+        {
+            "created_at": "2022-03-08T11:04:34.133Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15837?focusedCommentId=17502862) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 12557\n<https://github.com/apache/arrow/pull/12557>"
+        }
+    ]
+}

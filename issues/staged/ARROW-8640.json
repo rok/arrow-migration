@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "pyarrow.UnionArray.from_buffers() expected number of buffers (1) did not match the passed number (3)",
+        "body": "***Note**: This issue was originally created as [ARROW-8640](https://issues.apache.org/jira/browse/ARROW-8640). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n```python\n\r\narr1 = pa.array([1,2,3,4,5])arr1.buffers()\r\narr2 = pa.array([1.1,2.2,3.3,4.4,5.5])\r\ntypes = pa.array([0, 1, 0, 0, 1, 1, 0], type='int8')\r\nvalue_offsets = pa.array([1, 0, 0, 2, 1, 2, 3], type='int32')value_offsets.buffers()\r\narr = pa.UnionArray.from_dense(types, value_offsets,                                          [arr1, arr2])\r\narr4 = pa.UnionArray.from_buffers(pa.struct([pa.field(\"0\", arr1.type) , pa.field(\"1\", arr2.type)]), 5, arr.buffers()[0:3], children=[arr1, arr2])\r\n```\r\n\r\nThe problem here arises when I try to produce the Union Array via buffers, according to the Columnar Documentation I need 3 buffers to produce a dense Union Array. But when I try this, there is the error `Type's expected number of buffers (1) did not match the passed number (3)`. ",
+        "created_at": "2020-04-30T05:22:52.000Z",
+        "updated_at": "2020-04-30T06:08:27.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-04-30T05:58:52.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-04-30T05:33:42.189Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8640?focusedCommentId=17096145) by Micah Kornfield (emkornfield@gmail.com):*\nIt looks like from_buffers is a method declared on the parent class Array.\u00a0 And\u00a0 the type that the sample code is passing in is a struct (which should only have the nullability buffer).\u00a0 To construct a dense union you need to instantiate a new UnionType.\u00a0 I'm not seeing it the documentation for some reason but I think you can use the union method (definition pasted below).\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n`def union(children_fields, mode, type_codes=None):`\r\n` \"\"\"`\r\n` Create UnionType from children fields.`\r\n` A union is defined by an ordered sequence of types; each slot in the union`\r\n` can have a value chosen from these types.`\r\n` Parameters`\r\n` ----------`\r\n` fields : sequence of Field values`\r\n` Each field must have a UTF8-encoded name, and these field names are`\r\n` part of the type metadata.`\r\n` mode : str`\r\n` Either 'dense' or 'sparse'.`\r\n` type_codes : list of integers, default None`\r\n` Returns`\r\n` -------`\r\n` type : DataType`"
+        },
+        {
+            "created_at": "2020-04-30T05:51:47.194Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8640?focusedCommentId=17096156) by Anish Biswas (trickarcher):*\nYup, thanks that was the trick!\r\n```java\n\r\ntype_arr = pa.union(pa.struct([pa.field(\"0\", arr1.type) , pa.field(\"1\", arr2.type)]), \"dense\", [0,1])\r\n\r\narr4 = pa.UnionArray.from_buffers(type_arr, 5, arr.buffers()[0:3], children=[arr1, arr2])\r\n```\r\nCreating a type_arr and then passing it into the types field worked. Thanks! Just a follow-up question. Why are we required to place the Datatype in fields, finally accumulated by the struct instead of passing a list of Datatype in which the position determines the type-codes?"
+        },
+        {
+            "created_at": "2020-04-30T05:58:36.650Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8640?focusedCommentId=17096159) by Micah Kornfield (emkornfield@gmail.com):*\nreally it is misleading to use pa.UnionArray.from_buffers, you should probably use pa.Array.from_buffers.\r\n\r\n\u00a0\r\n\r\nI'm not sure what you mean?\u00a0 If you think there is a more obvious API for Union construction, feel free to create a proposal JIRA/PR for discussion."
+        },
+        {
+            "created_at": "2020-04-30T06:08:17.231Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8640?focusedCommentId=17096164) by Anish Biswas (trickarcher):*\nAh, I see. Yes, that makes more sense. Thanks for the help! I'll close this issue now."
+        }
+    ]
+}

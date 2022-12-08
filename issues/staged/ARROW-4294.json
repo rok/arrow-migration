@@ -1,0 +1,26 @@
+{
+    "issue": {
+        "title": "[Plasma] Add support for evicting objects to external store",
+        "body": "***Note**: This issue was originally created as [ARROW-4294](https://issues.apache.org/jira/browse/ARROW-4294). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently,\u00a0when Plasma needs\u00a0storage space for additional objects, it evicts objects by deleting them from the Plasma store. This is a problem when it isn't possible to reconstruct the object or reconstructing it is expensive. Adding support for a pluggable external\u00a0store that Plasma can evict objects to will address this issue.\u00a0\r\n\r\nMy proposal is described below.\r\n\r\n**Requirements**\r\n \\* Objects in Plasma should be evicted to a external store\u00a0rather than being removed altogether\r\n \\* Communication to the external storage service should be through a very thin, shim interface. At the same time, the interface should be general enough to support arbitrary remote services (e.g., S3, DynamoDB, Redis, etc.)\r\n \\* Should be pluggable (e.g., it should be simple to add in or remove the external storage service for eviction, switch between different remote services, etc.) and easy to implement\r\n\r\n**Assumptions/Non-Requirements**\r\n \\* The external store\u00a0has practically infinite storage\r\n \\* The external store's\u00a0write\u00a0operation is idempotent and atomic; this is needed ensure there are no race conditions due to multiple concurrent evictions of the same object.\r\n\r\n**Proposed Implementation**\r\n \\* Define a ExternalStore interface with a Connect call. The call returns an ExternalStoreHandle, that exposes Put and Get calls. Any external store that needs to be supported has to have this interface implemented.\r\n \\* In order to read or write data to the external store in a thread-safe manner, one ExternalStoreHandle should be created per-thread. While the ExternalStoreHandle itself is not required to be thread-safe, multiple ExternalStoreHandles across multiple threads should be able to modify the external store in a thread-safe manner. These handles are most likely going to be wrappers around the external store client interfaces.\r\n \\* Replace the DeleteObjects method in the Plasma Store with an EvictObjects method. If an external store is specified for the Plasma store, the EvictObjects method would mark the object state as PLASMA_EVICTED, write the object data to the external store (via the ExternalStoreHandle) and reclaim the memory associated with the object data/metadata rather than remove the entry from the Object Table altogether. In case there is no valid external store, the eviction path would remain the same (i.e., the object entry is still deleted from the Object Table).\r\n \\* The Get method in Plasma Store now tries to fetch the object from external store if it is not found locally and there is an external store associated with the Plasma Store. The method tries to offload this to an external worker thread pool with a fire-and-forget model, but may need to do this synchronously if there are too many requests already enqueued.\r\n \\* The CMake build system can expose a variable, EXTERNAL_STORE_SOURCES, which can be appended to with implementations of the ExternalStore and ExternalStoreHandle interfaces, which will then be compiled into the plasma_store_server executable.\r\n\r\n\u00a0",
+        "created_at": "2019-01-18T21:04:30.000Z",
+        "updated_at": "2019-02-05T02:24:47.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: C++ - Plasma",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-02-05T02:24:30.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-01-19T02:44:46.008Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4294?focusedCommentId=16746919) by Anurag Khandelwal (anuragkh):*\ncc `[~pcmoritz]`"
+        },
+        {
+            "created_at": "2019-02-05T02:24:30.477Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4294?focusedCommentId=16760403) by Philipp Moritz (pcmoritz):*\nIssue resolved by pull request 3482\n<https://github.com/apache/arrow/pull/3482>"
+        }
+    ]
+}

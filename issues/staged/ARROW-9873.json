@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[C++][Compute] Improve mode kernel for intergers within limited value range",
+        "body": "***Note**: This issue was originally created as [ARROW-9873](https://issues.apache.org/jira/browse/ARROW-9873). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIt's possible to improve mode kernel performance for integers within limited value range by using a value indexed array instead of general hash table.\r\n Similar trick is used in sorting kernel ARROW-1571.",
+        "created_at": "2020-08-27T03:32:03.000Z",
+        "updated_at": "2020-09-02T18:01:23.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-09-02T18:01:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-08-27T04:45:29.425Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9873?focusedCommentId=17185599) by Yibo Cai (yibocai):*\nDid some benchmarks on skylake, i7 and arm64 cpu with similar result: we can get big performance improvement with this approach. **A possible threshold is for arrays with at least 1024 elements, and with value range smaller than 16384.**\r\n\r\nBelow graph is tested on skylake. Y axis plots speed comparison of this counting method .vs. hash table, above 1 means better. X axis is array size. Difference lines means different value range. See [test code](https://github.com/cyb70289/mytests/blob/master/cpp/mode-range.cc) for details.\r\n\r\n ![mode-range-skylake.png](https://issues.apache.org/jira/secure/attachment/13010594/mode-range-skylake.png) "
+        },
+        {
+            "created_at": "2020-08-27T04:57:35.895Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9873?focusedCommentId=17185601) by Yibo Cai (yibocai):*\n**NOTE: this approach will cause performance regression in certain conditions.**\r\nWe need to find min/max values before deciding if we can use this counting method. If we finally find (max-min) is too large, that step is wasted and causes performance drop. This drop is trivial normally.\r\nBut it can be big in certain conditions: there are few distinct values, but sparsely distributed(max-min is big). In this condition, hash table will be very fast, so the penalty of finding min/max is non-trivial. Above 10% performance drop is observed per my test, see [test code](https://github.com/cyb70289/mytests/blob/master/cpp/minmax-penalty.cc)."
+        },
+        {
+            "created_at": "2020-08-27T09:32:56.464Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9873?focusedCommentId=17185744) by Antoine Pitrou (apitrou):*\n> A possible threshold is for arrays with at least 1024 elements, and with value range smaller than 16384.\r\n\r\nThat sounds ok to me."
+        },
+        {
+            "created_at": "2020-08-27T10:16:28.484Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9873?focusedCommentId=17185760) by Yibo Cai (yibocai):*\nHi `[~apitrou]`, aggregation kernel should implement MergeFrom operation, kind of confused what it does.\r\n\r\n[Consume](https://github.com/apache/arrow/blob/7ce498e3db6bd755cf2fd5a1b532a0d7276496de/cpp/src/arrow/compute/kernels/aggregate_mode.cc#L117-L135) can creates map or counting based \"state\" object per (max - min).\r\n[MergeFrom](https://github.com/apache/arrow/blob/7ce498e3db6bd755cf2fd5a1b532a0d7276496de/cpp/src/arrow/compute/kernels/aggregate_mode.cc#L137-L140) merges this \"state\" with another \"state\", so they must be the same type.\r\n\r\nI'm not sure if below situation will happen:\r\n- In Consume, int32, max-min is small, so we created counting based \"state\"\n- In MergeFrom, int32, the input \"state\" is map based, so they cannot merge"
+        },
+        {
+            "created_at": "2020-08-27T15:35:10.566Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9873?focusedCommentId=17185923) by Antoine Pitrou (apitrou):*\nIf the input is a ChunkedArray (not sure that's possible now), you could have a chunk with a small range and another chunk with a large range."
+        },
+        {
+            "created_at": "2020-08-28T02:25:51.320Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9873?focusedCommentId=17186213) by Yibo Cai (yibocai):*\nMaybe we can use counting method as first step, then scan the counter array and insert into a map finally. Guess there won't cause much performance loss as the map is small, and we can reserve buckets first. Will do some tests.\r\n\r\nTest result with current arrow benchmark (values within -100~100, array size 1M in bytes):\r\n- Small performance drop (< 10%) for Boolean and Int8.\n- About 2x performance improvement for Int16/32/64 with limited value range.\n  \n  Adjusting value range and array size leads to consistent performance uplift."
+        },
+        {
+            "created_at": "2020-09-01T05:10:01.269Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9873?focusedCommentId=17188142) by Yibo Cai (yibocai):*\nArray size in bytes looks a more reasonable crossover point than array size in items. Tested with int32/int64, int32 needs more items than int64 to benefit from this optimization.\r\nSo the threshold is:\r\n- array size in bytes >= 8192\n- array value range <= 16384"
+        },
+        {
+            "created_at": "2020-09-02T18:01:08.394Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9873?focusedCommentId=17189606) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 8091\n<https://github.com/apache/arrow/pull/8091>"
+        }
+    ]
+}

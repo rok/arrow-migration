@@ -1,0 +1,62 @@
+{
+    "issue": {
+        "title": "[Python] Pandas-Arrow roundtrip makes pd categorical index not writeable",
+        "body": "***Note**: This issue was originally created as [ARROW-3801](https://issues.apache.org/jira/browse/ARROW-3801). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSerializing and deserializing a pandas series with categorical dtype will make the categorical index non-writeable, which in turn trips up pandas when e.g. reordering the categories, raising \"ValueError: buffer source array is read-only\"\u00a0:\r\n```Java\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\n\r\ndf = pd.Series([1,2,3], dtype='category', name=\"c1\").to_frame()\r\nprint(\"DType before:\", repr(df.c1.dtype))\r\nprint(\"Writeable:\", df.c1.cat.categories.values.flags.writeable)\r\nro = df.c1.cat.reorder_categories([3,2,1])\r\nprint(\"DType reordered:\", repr(ro.dtype), \"\\n\")\r\n\r\ntbl = pa.Table.from_pandas(df)\r\ndf2 = tbl.to_pandas()\r\nprint(\"DType after:\", repr(df2.c1.dtype))\r\nprint(\"Writeable:\", df2.c1.cat.categories.values.flags.writeable)\r\nro = df2.c1.cat.reorder_categories([3,2,1])\r\nprint(\"DType reordered:\", repr(ro.dtype), \"\\n\")\r\n```\r\n\u00a0\r\n\r\nOutputs:\r\n\r\n\r\n\r\n\u00a0\r\n```java\n\r\nDType before: CategoricalDtype(categories=[1, 2, 3], ordered=False)\r\nWriteable: True\r\nDType reordered: CategoricalDtype(categories=[3, 2, 1], ordered=False)\r\nDType after: CategoricalDtype(categories=[1, 2, 3], ordered=False)\r\nWriteable: False\r\n---------------------------------------------------------------------------\r\nValueError Traceback (most recent call last)\r\n<ipython-input-365-85b439586c1a> in <module>\r\n 12 print(\"DType after:\", repr(df2.c1.dtype))\r\n 13 print(\"Writeable:\", df2.c1.cat.categories.values.flags.writeable)\r\n---> 14 ro = df2.c1.cat.reorder_categories([3,2,1])\r\n 15 print(\"DType reordered:\", repr(ro.dtype), \"\\n\")\r\n```\r\n\u00a0\r\n\r\n\u00a0\r\n\u00a0",
+        "created_at": "2018-11-15T12:33:36.000Z",
+        "updated_at": "2022-08-27T14:42:05.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-06-07T16:00:07.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-05-31T01:31:05.383Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3801?focusedCommentId=16852549) by Wes McKinney (wesm):*\ncc `[~jorisvandenbossche]`"
+        },
+        {
+            "created_at": "2019-06-07T10:21:33.157Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3801?focusedCommentId=16858460) by Joris Van den Bossche (jorisvandenbossche):*\n`[~buhrmann]` do you know which version of pandas you were using? \r\n\r\nAs for me, with the combinations of pandas+arrow master or pandas 0.24.2 + arrow 0.12.1, this works fine for me (the reordered categorical its categories get turned into a writable numpy array).\r\n\r\nThere have been improvements in pandas to deal with read-only arrays related to hastables, such as https://github.com/pandas-dev/pandas/pull/18825 and https://github.com/pandas-dev/pandas/pull/21688, so those might have fixed it."
+        },
+        {
+            "created_at": "2019-06-07T10:23:11.646Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3801?focusedCommentId=16858462) by Joris Van den Bossche (jorisvandenbossche):*\nI am going to close this issue, as I think it is fixed on the latest versions. But `[~buhrmann]`, it would be good it you could also check it is fixed for you. We can always reopen if that doesn't seem to be the case."
+        },
+        {
+            "created_at": "2019-06-07T10:51:31.885Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3801?focusedCommentId=16858496) by Thomas Buhrmann (buhrmann):*\nHi, yes, I can confirm that pandas 0.24.2 deals correctly with the non-writable category index. However, I would still consider the fact that Arrow serializes this index as non-writable, if not a bug, an unnecessary limitation. Not everybody may be able to update their production code to pandas 0.24.2, so maybe for compatibility reasons this could still be \"fixed\"?\r\n\r\nIf not, I'll leave\u00a0the following\u00a0workaround here for reference, which I use whenever I load an Arrow serialized DataFrame in Python:\r\n```python\n\r\ndef fix_arrow_categoricals(df):\r\n    \"\"\"A roundtrip of categoricals through pd->arr->pd can make categories non-writeable,\r\n    which may make other parts of pandas blow up later on.\r\n    \"\"\"\r\n    cats = df.select_dtypes('category').columns\r\n    for col in cats:\r\n# Copying resets array's flags\r\n        df[col].cat.categories = np.copy(df[col].cat.categories)\r\n```"
+        },
+        {
+            "created_at": "2019-06-07T11:58:32.394Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3801?focusedCommentId=16858552) by Joris Van den Bossche (jorisvandenbossche):*\nI am not yet too familiar with the logics behind the conversions from arrow to python, but I want to note that also plain array conversion gives a read-only numpy array:\r\n\r\n```python\n\r\nIn [53]: a = pa.array([1, 2, 3])                                                                                                                                                                                    \r\n\r\nIn [54]: a.to_pandas()                                                                                                                                                                                              \r\nOut[54]: array([1, 2, 3])\r\n\r\nIn [55]: a.to_pandas().flags.writeable                                                                                                                                                                              \r\nOut[55]: False\r\n```\r\n\r\nSo this is in any case not specific to categoricals (DictionaryArray). And eg also the codes of the categorical are read-only."
+        },
+        {
+            "created_at": "2019-06-07T15:48:12.457Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3801?focusedCommentId=16858751) by Wes McKinney (wesm):*\nCan we change our conversions to yield writable arrays? I don't think this would cause any problems"
+        },
+        {
+            "created_at": "2019-06-07T15:48:26.656Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3801?focusedCommentId=16858752) by Wes McKinney (wesm):*\nReopening..."
+        },
+        {
+            "created_at": "2019-06-07T15:51:00.809Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3801?focusedCommentId=16858756) by Joris Van den Bossche (jorisvandenbossche):*\nIn general, or only for this specific case?"
+        },
+        {
+            "created_at": "2019-06-07T15:59:55.316Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3801?focusedCommentId=16858768) by Wes McKinney (wesm):*\nI see, the reason is to protect against mutation of zero-copy views. Hmm. Yes, I think resolving this since the underlying issue is fixed in pandas is okay"
+        },
+        {
+            "created_at": "2019-06-07T19:19:27.282Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3801?focusedCommentId=16858922) by Thomas Buhrmann (buhrmann):*\nOk. Makes sense to me... Thanks for looking into it anyways!"
+        },
+        {
+            "created_at": "2022-08-27T14:42:05.005Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3801?focusedCommentId=17586029) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

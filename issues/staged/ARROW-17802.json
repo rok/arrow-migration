@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[R] Merging multi file datasets on particular columns that are present in all the datasets.",
+        "body": "***Note**: This issue was originally created as [ARROW-17802](https://issues.apache.org/jira/browse/ARROW-17802). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhile working with multi file datasets, I came across an issue where I wanted to merge specific columns from all the datasets and work on them.\r\nThough I was not able to do so, I want to know whether there is any work around for merging multi file datasets around some specific columns?\r\nPlease look into it and do let me know if there's anything regarding this.\r\n```java\n\r\nsystem.time({\r\n\u00a0 df <- open_dataset('C:/Test/Files/test', format = \"arrow\")\r\n  df <- df %>% collect() %>%\r\n  #merging logic so as to select only specified column(s)\r\n\u00a0 #write_dataset(df, 'C:/Test/Files/test', format = \"arrow\")\r\n}) \n```",
+        "created_at": "2022-09-21T14:37:58.000Z",
+        "updated_at": "2022-09-26T07:15:26.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-09-26T07:15:26.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-21T14:50:38.976Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17802?focusedCommentId=17607798) by Nicola Crane (thisisnic):*\n`[~nanimesh]` Can you give an example using small toy/example datasets showing the kind of thing you mean?\u00a0 Some example inputs and an example output that you'd like to achieve, perhaps.\u00a0 The code example in the description doesn't help me see what you're trying to achieve here."
+        },
+        {
+            "created_at": "2022-09-21T16:14:20.993Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17802?focusedCommentId=17607847) by N Gautam Animesh (nanimesh):*\nActually, I want to merge two or more arrow files after reading them through open_dataset(). By default, it is binding them row-wise.\r\nBut my use case is to merge the files based on a specified column that is common to them. For example: file1 and file2 contain 5 columns out of which they have one column in common.\r\nI want a resulting data frame that contains 9 columns (5 from file1 and 4 from file2 since 1 column from file1 is repeated in file2).\r\n\r\nI hope I am able to explain my use case.\r\n\r\nDo let me know if there's anything else required or any other work around that would achieve the same functionality."
+        },
+        {
+            "created_at": "2022-09-21T16:53:09.995Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17802?focusedCommentId=17607890) by Nicola Crane (thisisnic):*\nYou can specify a schema to `open_dataset()` like this:\r\n\r\n\u00a0\r\n```r\n\r\nlibrary(arrow)\r\nlibrary(dplyr)\r\n\r\n# create 2 tables with column `x` in common\r\ntbl1 <- arrow_table(x = 1:3, z = c(TRUE, FALSE, TRUE))\r\ntbl2 <- arrow_table(x = 4:6, y = c(\"do\", \"ray\", \"me\"))\r\n\r\n# set up temporary directory\r\ntf <- tempfile()\r\ndir.create(tf)\r\n\r\n\r\nwrite_parquet(tbl1, file.path(tf, \"file_1.parquet\"))\r\nwrite_parquet(tbl2, file.path(tf, \"file_2.parquet\"))\r\n\r\n# open the dataset specifying the schema with both columns\r\nopen_dataset(tf, schema = schema(x = int32(), y = string(), z = boolean())) %>%\r\n  collect()\r\n#> # A tibble: 6 \u00d7 3\r\n#>       x y     z    \r\n#>   <int> <chr> <lgl>\r\n#> 1     1 <NA>  TRUE \r\n#> 2     2 <NA>  FALSE\r\n#> 3     3 <NA>  TRUE \r\n#> 4     4 do    NA   \r\n#> 5     5 ray   NA   \r\n#> 6     6 me    NA\r\n```"
+        },
+        {
+            "created_at": "2022-09-22T07:14:03.763Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17802?focusedCommentId=17608111) by N Gautam Animesh (nanimesh):*\nI just had one doubt for a use case: What if we want something like:\r\ntbl1 <- arrow_table(x = 1:3, y = c(\"dso\", \"rawy\", \"mqe\"), z = c(TRUE, FALSE, TRUE))\r\ntbl2 <- arrow_table(x = 4:6, y = c(\"do\", \"ray\", \"me\"))\r\nlike in this case\r\ni want only x to be common\r\nso the columns would be\r\nx, y, y, z"
+        },
+        {
+            "created_at": "2022-09-22T09:56:34.023Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17802?focusedCommentId=17608193) by Nicola Crane (thisisnic):*\nYou'd probably want to rename one of your `y` columns to something else, otherwise the schema has no way of \"knowing\" that you intend for them to be different columns.  Alternatively, I suppose you could read them in separately and join the tables on the `x` column but not the `y` column."
+        },
+        {
+            "created_at": "2022-09-22T17:18:38.168Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17802?focusedCommentId=17608360) by Weston Pace (westonpace):*\nExample of the join\r\n\r\n```\n\r\nlibrary(arrow)\r\nlibrary(dplyr)\r\n\r\n# create 2 tables with column `x` in common\r\ntbl1 <- arrow_table(x = 1:3, z = c(TRUE, FALSE, TRUE))\r\ntbl2 <- arrow_table(x = 1:3, y = c(\"do\", \"ray\", \"me\"))\r\n\r\ntf1 <- tempfile()\r\ndir.create(tf1)\r\ntf2 <- tempfile()\r\ndir.create(tf2)\r\n\r\nwrite_parquet(tbl1, file.path(tf1, \"chunk-0.parquet\"))\r\nwrite_parquet(tbl2, file.path(tf2, \"chunk-0.parquet\"))\r\n\r\nds1 <- open_dataset(tf1)\r\nds2 <- open_dataset(tf2)\r\n\r\ninner_join(ds1, ds2, by='x') %>% collect()\r\n\r\n#>  A tibble: 3 \u00d7 3\r\n#>       x z     y    \r\n#>   <int> <lgl> <chr>\r\n#> 1     1 TRUE  do   \r\n#> 2     2 FALSE ray  \r\n#> 3     3 TRUE  me\r\n```"
+        }
+    ]
+}

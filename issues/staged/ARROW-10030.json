@@ -1,0 +1,21 @@
+{
+    "issue": {
+        "title": "[Rust] Support fromIter and toIter",
+        "body": "***Note**: This issue was originally created as [ARROW-10030](https://issues.apache.org/jira/browse/ARROW-10030). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nProposal for comments: <https://docs.google.com/document/d/1d6rV1WmvIH6uW-bcHKrYBSyPddrpXH8Q4CtVfFHtI04/edit?usp=sharing>\r\n\r\n(dump of the document above)\r\n\r\nRust Arrow supports two main computational models:\r\n1. Batch Operations, that leverage some form of vectorization\n1. Element-by-element operations, that emerge in more complex operations\n   \n   This document concerns element-by-element operations, that are common outside of the library (and sometimes in the library).\n   ## Element-by-element operations\n   \n   These operations are programmatically written as:\n1. Downcast the array to its specific type\n1. Initialize buffers\n1. Iterate over indices and perform the operation, appending to the buffers accordingly\n1. Create ArrayData with the required null bitmap, buffers, childs, etc.\n1. return ArrayRef from ArrayData\n   \n   \u00a0\n   \n   We can split this process in 3 parts:\n1. Initialization (1 and 2)\n1. Iteration (3)\n1. Finalization (4 and 5)\n   \n   Currently, the API that we offer to our users is:\n1. as_any() to downcast the array based on its DataType\n1. Builders for all types, that users can initialize, matching the downcasted array\n1. Iterate\n   1. Use for i in (0..array.len())\n   1. Use `Array::value(i)` and `Array::is_valid(i)/is_null(i)`\n   1. use builder.append_value(new_value) or builder.append_null()\n1. Finish the builder and wrap the result in an Arc\n   \n   This API has some issues:\n1. value(i) is unsafe, even though it is not marked as such\n1. builders are usually slow due to the checks that they need to perform\n1. The API is not intuitive\n   \n   ## Proposal\n   \n   This proposal aims at improving this API in 2 specific ways:\n    \\* Implement IntoIterator Iterator<Item=T> and Iterator<Item=Option<T>>\n    \\* Implement FromIterator<Item=T> and Item=Option<T>\n   \n   so that users can write:\n   ```java\n   \n   // incoming array\n   let array = Int32Array::from(vec![Some(0), None, Some(2), None, Some(4)]);\n   let array = Arc::new(array) as ArrayRef;\n   let array = array.as_any().downcast_ref::<Int32Array>().unwrap();\n   \n   // to and from iter, with a +1\n   let result: Int32Array = array\n   \u00a0\u00a0\u00a0 .iter()\n   \u00a0\u00a0\u00a0 .map(|e| if let Some(r) = e { Some(r + 1) } else { None })\n   \u00a0\u00a0\u00a0 .collect();\n   \n   let expected = Int32Array::from(vec![Some(1), None, Some(3), None, Some(5)]); \n   \n   assert_eq!(result, expected);\n   ```\n   \u00a0\n   \n   This results in an API that is:\n1. efficient, as it is our responsibility to create `FromIterator` that are efficient in populating the buffers/child etc from an iterator\n1. Safe, as it does not allow segfaults\n1. Simple, as users do not need to worry about Builders, buffers, etc, only native Rust.",
+        "created_at": "2020-09-17T07:07:17.000Z",
+        "updated_at": "2020-10-07T16:47:00.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-10-07T16:47:00.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-10-07T16:47:00.217Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10030?focusedCommentId=17209674) by Jorge Leit\u00e3o (jorgecarleitao):*\nIssue resolved by pull request 8211\n<https://github.com/apache/arrow/pull/8211>"
+        }
+    ]
+}

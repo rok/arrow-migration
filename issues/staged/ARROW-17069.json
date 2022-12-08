@@ -1,0 +1,74 @@
+{
+    "issue": {
+        "title": "[Python][R] GCSFIleSystem reports cannot resolve host on public buckets",
+        "body": "***Note**: This issue was originally created as [ARROW-17069](https://issues.apache.org/jira/browse/ARROW-17069). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nGCSFileSystem will returns `Couldn't resolve host name` if you don't supply `anonymous` as the user:\r\n```python\n\r\nimport pyarrow.dataset as ds\r\n\r\n# Fails:\r\ndataset = ds.dataset(\"gs://voltrondata-labs-datasets/nyc-taxi/?retry_limit_seconds=3\")\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"/Users/willjones/Documents/arrows/arrow/python/pyarrow/dataset.py\", line 749, in dataset\r\n    return _filesystem_dataset(source, **kwargs)\r\n  File \"/Users/willjones/Documents/arrows/arrow/python/pyarrow/dataset.py\", line 441, in _filesystem_dataset\r\n    fs, paths_or_selector = _ensure_single_source(source, filesystem)\r\n  File \"/Users/willjones/Documents/arrows/arrow/python/pyarrow/dataset.py\", line 408, in _ensure_single_source\r\n    file_info = filesystem.get_file_info(path)\r\n  File \"pyarrow/_fs.pyx\", line 444, in pyarrow._fs.FileSystem.get_file_info\r\n    info = GetResultValue(self.fs.GetFileInfo(path))\r\n  File \"pyarrow/error.pxi\", line 144, in pyarrow.lib.pyarrow_internal_check_status\r\n    return check_status(status)\r\n  File \"pyarrow/error.pxi\", line 115, in pyarrow.lib.check_status\r\n    raise IOError(message)\r\nOSError: google::cloud::Status(UNAVAILABLE: Retry policy exhausted in GetObjectMetadata: EasyPerform() - CURL error [6]=Couldn't resolve host name)\r\n\r\n# This works fine:\r\n>>> dataset = ds.dataset(\"gs://anonymous@voltrondata-labs-datasets/nyc-taxi/?retry_limit_seconds=3\")\r\n```\r\n\r\nI would expect that we could connect.",
+        "created_at": "2022-07-14T02:08:02.000Z",
+        "updated_at": "2022-10-16T11:12:41.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-14T14:06:30.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-07-14T07:57:14.466Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17069?focusedCommentId=17566698) by Antoine Pitrou (apitrou):*\nThis is interesting. `[~coryan]` `[~emkornfield]` Do you know if it is the expected behaviour?"
+        },
+        {
+            "created_at": "2022-07-14T08:31:00.021Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17069?focusedCommentId=17566709) by Micah Kornfield (emkornfield):*\nThat is surprising but not an expert on GCS and why this would impact host resolution and not permissions.\u00a0 Just to clarify, `[~willjones127]` \u00a0 you have a similar example working on a private bucket?"
+        },
+        {
+            "created_at": "2022-07-14T08:32:19.845Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17069?focusedCommentId=17566710) by Micah Kornfield (emkornfield):*\nAlso does it help if you increase retry_limit_seconds to something higher?"
+        },
+        {
+            "created_at": "2022-07-14T12:51:32.548Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17069?focusedCommentId=17566822) by Carlos O'Ryan (coryan):*\nAt a guess `gs://voltrondata-labs-datasets/nyc-taxi/?retry_limit_seconds=3` is using the default credentials.  After trying a number of things the client library will try to GCE credentials, which try to resolve `metadata.google.internal`.  So, not the most illuminating error message, but expected if (a) you are using default credentials, and (b) you have not configured your default credentials, and (c) you are not running on GCE where the fallback would work.\r\n"
+        },
+        {
+            "created_at": "2022-07-14T14:51:47.939Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17069?focusedCommentId=17566873) by Will Jones (willjones127):*\nThanks `[~coryan]` for those details. I'm new to GCS, so still learning how it works, and trying to get the docs for R bindings up to speed. Is there a good reference for how authentication works with GCS? Might be good to have a link to point users to.\r\n\r\nIn my case, I think I have a default profile setup, but maybe not in the way you mean?\r\n\r\n```Java\n\r\n\u276f gcloud config configurations list\r\nNAME     IS_ACTIVE  ACCOUNT               PROJECT                  COMPUTE_DEFAULT_ZONE  COMPUTE_DEFAULT_REGION\r\ndefault  True       will@XXX.com  xxxxx\r\n```"
+        },
+        {
+            "created_at": "2022-07-14T17:52:17.398Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17069?focusedCommentId=17566931) by Weston Pace (westonpace):*\nI don't know if it is relevant but something similar happens on S3.  If you try and access a public bucket using credentials you will get AccessDenied.  You have to specify \"anonymous\" which won't supply any credentials.  See ARROW-15419"
+        },
+        {
+            "created_at": "2022-07-14T18:03:46.203Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17069?focusedCommentId=17566937) by Carlos O'Ryan (coryan):*\n`[~willjones127]` that output is helpful, but does not tell me if your application default credentials are configured. I won't say this makes sense, but there are two different ways to login with `gcloud`:\r\n\r\n<https://stackoverflow.com/questions/53306131/difference-between-gcloud-auth-application-default-login-and-gcloud-auth-logi>\r\n\r\n"
+        },
+        {
+            "created_at": "2022-07-14T19:04:25.642Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17069?focusedCommentId=17566950) by Antoine Pitrou (apitrou):*\nWell, \"access denied\" is a more helpful hint at the potential resolution than \"Couldn't resolve host name\"...\r\n"
+        },
+        {
+            "created_at": "2022-07-14T22:14:42.939Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17069?focusedCommentId=17566997) by Carlos O'Ryan (coryan):*\n> Well, \"access denied\" is a more helpful hint at the potential resolution than \"Couldn't resolve host name\"...\r\nI agree with you that the error message is terrible, and I will fix it as soon as I have a minute. But that is not the right fix. No access has been denied, not yet. Authorization has not taken place, i.e., nothing has verified whether the principal (in this case `{}will@XXX.com{`}) has permissions to access some GCS resource. In fact, not even authentication has taken place, i.e., the client library was trying to create the tokens that prove the access is coming from `will@XXX.com` and **that** failed. I think a better message could be:\r\n> Could not create a OAuth2 access token authenticate your request with Google Cloud. Your request was not sent. Such an access token is required to complete the request successfully (unless you meant to use anonymous access, but the library is not configured to do so). The underlying error was: EasyPerform() - CURL error [6]=Couldn't resolve host name."
+        },
+        {
+            "created_at": "2022-07-16T15:52:20.260Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17069?focusedCommentId=17567503) by Carlos O'Ryan (coryan):*\nFWIW: https://github.com/googleapis/google-cloud-cpp/pull/9485"
+        },
+        {
+            "created_at": "2022-07-21T19:53:12.555Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17069?focusedCommentId=17569674) by Will Jones (willjones127):*\nOkay came back to this, and you are right Carlos. If I run:\r\n\r\n```none\n\r\ngcloud auth application-default login\r\n```\r\n\r\nThen subsequently I can access public or private buckets just fine. I will clarify the docs to say that you must either run that command or pass `anonymous` user to access public buckets."
+        },
+        {
+            "created_at": "2022-10-12T14:38:11.734Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17069?focusedCommentId=17616476) by Joris Van den Bossche (jorisvandenbossche):*\n`[~willjones127]` do you have time to make that documentation update? "
+        },
+        {
+            "created_at": "2022-10-12T21:10:30.395Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17069?focusedCommentId=17616691) by Will Jones (willjones127):*\nSure. I had done this earlier for R: https://arrow.apache.org/docs/r/articles/fs.html#gcs-authentication\r\n\r\nI will make a PR to update the Python user guide."
+        },
+        {
+            "created_at": "2022-10-14T14:06:30.497Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17069?focusedCommentId=17617750) by David Li (lidavidm):*\nIssue resolved by pull request 14392\n<https://github.com/apache/arrow/pull/14392>"
+        }
+    ]
+}

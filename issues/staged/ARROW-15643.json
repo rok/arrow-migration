@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[C++] Kernel to select subset of fields of a StructArray",
+        "body": "***Note**: This issue was originally created as [ARROW-15643](https://issues.apache.org/jira/browse/ARROW-15643). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nTriggered by https://stackoverflow.com/questions/71035754/pyarrow-drop-a-column-in-a-nested-structure. I thought there was already an issue about this, but don't directly find one.\r\n\r\nAssume you have a struct array with some fields:\r\n\r\n```Java\n\r\n>>> arr = pa.StructArray.from_arrays([[1, 2, 3]]*3, names=['a', 'b', 'c'])\r\n>>> arr.type\r\nStructType(struct<a: int64, b: int64, c: int64>)\r\n```\r\n\r\nWe have a kernel to select a single child field:\r\n\r\n```Java\n\r\n>>> pc.struct_field(arr, [0])\r\n<pyarrow.lib.Int64Array object at 0x7ffa9e229940>\r\n[\r\n  1,\r\n  2,\r\n  3\r\n]\r\n```\r\n\r\nBut if you want to subset the StructArray to some of its fields, resulting in a new StructArray, that's not possible with `struct_field`, and doing this manually is a bit cumbersome:\r\n\r\n```Java\n\r\n>>> fields = ['a', 'c']\r\n>>> arrays = [arr.field(n) for n in fields]\r\n>>> arr_subset = pa.StructArray.from_arrays(arrays, names=fields)\r\n>>> arr_subset.type\r\nStructType(struct<a: int64, c: int64>)\r\n```\r\n\r\n(this is still OK, but if you had a ChunkedArray, it certainly gets annoying)\r\n\r\nOne option could be to expand the existing `struct_field` to allow selecting multiple fields (although that probably gets ambigous/confusing with how you currently select a recursively nested field -> [0, 1] currently means \"first child, second subchild\" and not \"first and second child\"). \r\nOr a new kernel like \"struct_subset\" or some other name.\r\n\r\nThis might also overlap with general projection functionality? (cc `[~westonpace]`)\r\n",
+        "created_at": "2022-02-10T11:05:36.000Z",
+        "updated_at": "2022-04-04T17:08:31.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-04-01T16:22:23.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-10T11:43:59.896Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15643?focusedCommentId=17490148) by &res (0x26dres):*\nThanks for raising the issue.\r\n\r\nI've noticed that you can't cast a struct array to a sub set of the struct. So for example:\r\n```python\n\r\nimport pyarrow as pa\r\n\r\n\r\nstruct_type = pa.struct(\r\n    [pa.field(\"field1\", pa.string()), pa.field(\"field2\", pa.int32())]\r\n)\r\n\r\nsub_struct_type = pa.struct(\r\n    [\r\n        pa.field(\"field1\", pa.string()),\r\n    ]\r\n)\r\n\r\n\r\nstruct_array = pa.array(\r\n    [\r\n        (\"ABC\", 123),\r\n        (\"EFG\", 456),\r\n    ],\r\n    struct_type,\r\n)\r\n\r\nstruct_array.cast(sub_struct_type)\r\n\r\n```\r\n\r\nGives you:\r\n```Java\n\r\n\r\n    return call_function(\"cast\", [arr], options)\r\n  File \"pyarrow/_compute.pyx\", line 527, in pyarrow._compute.call_function\r\n  File \"pyarrow/_compute.pyx\", line 337, in pyarrow._compute.Function.call\r\n  File \"pyarrow/error.pxi\", line 143, in pyarrow.lib.pyarrow_internal_check_status\r\n  File \"pyarrow/error.pxi\", line 120, in pyarrow.lib.check_status\r\npyarrow.lib.ArrowNotImplementedError: Unsupported cast from struct<field1: string, field2: int32> to struct using function cast_struct\r\n\r\n```\r\n\r\nSo one option would be to support this type of cast."
+        },
+        {
+            "created_at": "2022-02-10T11:52:19.665Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15643?focusedCommentId=17490155) by Joris Van den Bossche (jorisvandenbossche):*\nIn general we don't yet have implemented much casting support for structs (eg ARROW-1888 to cast the fields to a different type, which is currently being worked on. But I _suppose_ that PR currently allows the cast only for the same field names and number of fields, i.e. only changing the type of the field).   \r\nBut indeed, that would also be a way to support this functionality. I think such a cast would be useful to allow in any case. But I also might not directly think about using casting if I am looking to do a field selection (eg a Table and RecordBatch have a `select` method, and RecordBatch and StructArray are quite similar, so we could also have a StructArray.select method)\r\n \r\n"
+        },
+        {
+            "created_at": "2022-02-11T14:13:48.971Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15643?focusedCommentId=17490945) by David Li (lidavidm):*\nI think we can implement it as a cast, but have a utility method `StructArray.select`. We can extend ARROW-1888 indeed."
+        },
+        {
+            "created_at": "2022-02-15T15:53:50.623Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15643?focusedCommentId=17492687) by Joris Van den Bossche (jorisvandenbossche):*\nARROW-1888 has been merged now, and currently the cast is \"strict\", meaning that it requires the exact same number of fields with the same names in the same order. If we want to support this issue through a cast, this could be relaxed to:\r\n\r\n- allowing the fields of the target type to be a subset of the existing fields (but so no field names that are not present in the original array? Or also allow that in which case that field gets filled with nulls)\n- also allowing them to be in a different order?\n  \n  One thing I am wondering though, is whether we should consider this as a \"safe\" cast, or if we should add a new flag to the CastOptions to allow changing the fields of a struct "
+        },
+        {
+            "created_at": "2022-02-15T16:07:55.923Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15643?focusedCommentId=17492693) by Will Ayd (willayd):*\nIt feels right to me to allow the target type to subset the originating type. I'm not yet sure about the different order aspect. There is definitely some ambiguity that arises when the order changes. If you have an originating type of \"x, y, z\" and a target type of \"z, y, x\" I don't think its very clear if the alignment should be by name or by position - perhaps that is where the flag you are thinking about comes into play?"
+        },
+        {
+            "created_at": "2022-02-15T19:24:41.392Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15643?focusedCommentId=17492843) by Weston Pace (westonpace):*\nWe have a concrete use case for the \"subset\" version in scanning.  Users can specify nested refs which can be satisfied in the parquet reader but not the CSV reader.  So for the CSV case we need to be able to read in the full column and then cast down to the targetted struct the user is asking for in the nested ref.\r\n\r\nI don't know about reordering but it might be needed for Substrait to support their emit property which I think can arbitrarily reorder columns, both at the batch level and any nested level in a struct.\r\n\r\nI'm not sure what the rationale is for the \"safe\" flag.  Are you saying it might be nice for users to say \"do this cast if it can be done zero-copy but fail otherwise\"?"
+        },
+        {
+            "created_at": "2022-03-25T08:19:53.828Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15643?focusedCommentId=17512249) by Dhruv Vats (dhruv9vats):*\nIf this has some priority, I'd be happy to work on this. But I'm not clear on what path are we settling on. Do we implement `struct_subset` kernel and the casting functionality differently? Or should it be like\u00a0implement one and use that to implement the other?"
+        },
+        {
+            "created_at": "2022-03-25T12:45:44.079Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15643?focusedCommentId=17512359) by David Li (lidavidm):*\nI believe this should be a cast. For one, that means it will automatically make scanning better!\r\n\r\nWe can tackle the unambiguous cases first, and work on the ambiguous cases later. For instance, subsetting fields without changing order should be reasonable. We can later add a field to also allow reordering, and to handle various ambiguous cases that Will raised.\r\n\r\nIMO, \"safe\" isn't about copying (all kernels copy, basically, though it would be good to optimize out copies for the struct fields if there's no type conversion), but is about whether the cast may produce invalid data or not, and whether the kernel should error or not. That isn't a concern here, it'll be passed down to the casts for the child fields."
+        },
+        {
+            "created_at": "2022-04-01T16:22:23.172Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15643?focusedCommentId=17515989) by David Li (lidavidm):*\nIssue resolved by pull request 12724\n<https://github.com/apache/arrow/pull/12724>"
+        }
+    ]
+}

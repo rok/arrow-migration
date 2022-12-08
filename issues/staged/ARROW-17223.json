@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[C#] DecimalArray incorrectly appends values greater than MaxValue / 2 and less than MinValue / 2",
+        "body": "***Note**: This issue was originally created as [ARROW-17223](https://issues.apache.org/jira/browse/ARROW-17223). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI try to append values into Decimal arrays (Decimal128Array or Decimal256Array), but for values greater than Decimal.MaxValue / 2 and less than Decimal.MinValue / 2, it fails to do it correctly.\r\n\r\nFor example for DecimalArray128 I created simple unit test:\r\n```c#\n\r\n[Fact]\r\npublic void AppendMaxMinDecimal() \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0\r\n{\r\n  // Assert\r\n  var builder = new Decimal128Array.Builder(new Decimal128Type(29, 0));\r\n  var max = Decimal.MaxValue;\r\n  var min = Decimal.MinValue; \r\n \r\n  // Act\r\n\u00a0 builder.Append(max);\r\n\u00a0 builder.Append(min); \r\n\r\n \u00a0// Assert\r\n  var array = builder.Build();\r\n\u00a0 Assert.Equal(max, array.GetValue(0));\r\n  Assert.Equal(min, array.GetValue(1));\r\n}\r\n```\r\nI assume it to work correctly, but get:\r\n\r\n<font color=\"#de350b\">_Assert.Equal() Failure\u00a0Expected: 79228162514264337593543950335\u00a0Actual: \u00a0 -1_</font>\r\n\r\nLooks like the root cause is in _GetBytes_ method of\u00a0_DecimalUtility_ class:\r\n```c#\n\r\n//...\r\nSpan<byte> bigIntBytes = stackalloc byte[12];\r\n\r\nfor (int i = 0; i < 3; i++)\r\n{\r\n       int bit = decimalBits[i];\r\n       Span<byte> intBytes = stackalloc byte[4];\r\n       if (!BitConverter.TryWriteBytes(intBytes, bit))\r\n           throw new OverflowException($\"Could not extract bytes from int {bit}\");\r\n\r\n       for (int j = 0; j < 4; j++)\r\n       {\r\n             bigIntBytes[4 * i + j] = intBytes[j];\r\n       }\r\n }\r\n bigInt = new BigInteger(bigIntBytes);\r\n\r\n//...\r\n```\r\naccording to MSDN: \"The binary representation of a\u00a0`Decimal` value is 128-bits consisting of a 96-bit integer number, and a 32-bit set of flags representing things such as the sign and scaling factor used to specify what portion of it is a decimal fraction\".\r\n\r\nIn 12 bytes BigInteger only 95 bits are used to numbers and 1 bit for a sign.\r\n\r\nSo code:\r\n\r\n```c#\n\r\nvar newBigInt = new BigInteger(Decimal.MaxValue);\r\nvar arr = newBigInt.ToByteArray();\r\n```\r\n\r\nwill produce array of 13 bytes long, not 12.\u00a0\r\n\r\nI tried to change \r\n\r\n_Span<byte> bigIntBytes = stackalloc byte[12];_\r\n\r\nto\r\n\r\n_Span<byte> bigIntBytes = stackalloc byte[13];_\r\n\r\nand this solved the issue.\r\n\r\nPR: https://github.com/apache/arrow/pull/13732",
+        "created_at": "2022-07-26T21:02:49.000Z",
+        "updated_at": "2022-07-29T07:02:38.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C#",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-07-28T22:00:37.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-07-28T08:52:21.049Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17223?focusedCommentId=17572330) by Alexey Smirnov (asmirnov82):*\nhttps://github.com/apache/arrow/pull/13732"
+        },
+        {
+            "created_at": "2022-07-28T13:12:14.513Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17223?focusedCommentId=17572450) by Ra\u00fal Cumplido (raulcd):*\ncc ~ `[~eerhardt]` \u00a0"
+        },
+        {
+            "created_at": "2022-07-28T22:00:37.676Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17223?focusedCommentId=17572670) by Eric Erhardt (eerhardt):*\nIssue resolved by pull request 13732\n<https://github.com/apache/arrow/pull/13732>"
+        }
+    ]
+}

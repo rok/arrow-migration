@@ -1,0 +1,44 @@
+{
+    "issue": {
+        "title": "[Python] Parquet partitioning degrades Int32 to float64",
+        "body": "***Note**: This issue was originally created as [ARROW-9134](https://issues.apache.org/jira/browse/ARROW-9134). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAs you can see below, as soon as I partition the parquet dataset, my\u00a0`Int32`\u00a0type is read back as\u00a0`float64`. This seems like a bug to me, as partitioning shouldn't change the datatype, and I loose all the advantages of the nullable int.\r\n\r\n\u00a0\r\n```java\n\r\nimport pandas as pd # 1.0.4\r\nimport pyarrow as pa # 0.17.1\r\nimport pyarrow.parquet as pq\r\n\r\nx = pd.DataFrame({'a':[1, 2, None, 1], 'b':['x']*4})\r\nx.a = x.a.astype('Int32')\r\ntbl = pa.Table.from_pandas(x)\r\npq.write_to_dataset(tbl, 'ok')\r\npq.write_to_dataset(tbl, 'busted', partition_cols=['b'])\r\n\r\nprint(pd.read_parquet('ok').dtypes['a'])  # Int32\r\nprint(pd.read_parquet('busted').dtypes['a'])  # float64\r\n```\r\n\u00a0\r\n\r\n(cross-posted on stackoverflow)\u00a0\r\n\r\n<https://stackoverflow.com/questions/62356730/parquet-partitioning-degrades-int32-to-float64>\r\n\r\n\u00a0",
+        "created_at": "2020-06-15T13:01:51.000Z",
+        "updated_at": "2022-08-27T14:42:06.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-07-08T08:17:44.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-06-15T13:52:55.177Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9134?focusedCommentId=17135877) by Wes McKinney (wesm):*\nCurious. We correctly handle converting to Arrow from the extension type so the issues must lie downstream of that\r\n\r\n```Java\n\r\nIn [9]: x                                                                                                                                                                                      \r\nOut[9]: \r\n      a  b\r\n0     1  x\r\n1     2  x\r\n2  <NA>  x\r\n3     1  x\r\n\r\nIn [10]: pa.table(x)                                                                                                                                                                           \r\nOut[10]: \r\npyarrow.Table\r\na: int32\r\nb: string\r\n```"
+        },
+        {
+            "created_at": "2020-06-15T14:59:55.877Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9134?focusedCommentId=17135942) by Joris Van den Bossche (jorisvandenbossche):*\nThis is working correctly on pyarrow master for me:\r\n\r\n```Java\n\r\nIn [49]: pd.read_parquet('busted').dtypes                                                                                                                                                                  \r\nOut[49]: \r\na       Int32\r\nb    category\r\ndtype: object\r\n```\r\n\r\nI suppose fixed by ARROW-8251\r\n\r\nInside `write_to_dataset` we have some back and forth pandas conversion, and before we didn't preserve the pandas metadata there, so the int with null got converted into float."
+        },
+        {
+            "created_at": "2020-06-15T15:01:10.193Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9134?focusedCommentId=17135944) by Joris Van den Bossche (jorisvandenbossche):*\nIt might still be good to add a test for this, though. My original PR (https://github.com/apache/arrow/pull/7054) only added a case with an extension dtype as a normal column, and not as a partition column."
+        },
+        {
+            "created_at": "2020-06-15T15:07:14.468Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9134?focusedCommentId=17135948) by Nicholas Palko (npalko):*\nMakes sense to me. Thank you for the incredible software and support."
+        },
+        {
+            "created_at": "2020-07-08T08:17:26.167Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9134?focusedCommentId=17153339) by Joris Van den Bossche (jorisvandenbossche):*\nLooking at this again, the case reported here (pandas nullable dtype being lost for a normal column) is actually the exact case covered in the tests in https://github.com/apache/arrow/pull/7054. For partition columns, it's much less straightforward since for those we drop that information from the pandas metadata in `write_to_dataset` (this could be a new issue).\r\n\r\nSo closing this as a duplicate of ARROW-8251."
+        },
+        {
+            "created_at": "2020-07-08T08:28:56.085Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9134?focusedCommentId=17153347) by Joris Van den Bossche (jorisvandenbossche):*\n> For partition columns, it's much less straightforward since for those we drop that information from the pandas metadata in write_to_dataset (this could be a new issue).\r\n\r\nThere are already other related issues about this, such as ARROW-6114"
+        },
+        {
+            "created_at": "2022-08-27T14:42:06.706Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9134?focusedCommentId=17586045) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

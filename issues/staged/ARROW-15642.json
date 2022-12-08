@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] [JavaScript] Arrow IPC file output by apache-arrow tableToIPC method cannot be read by pyarrow",
+        "body": "***Note**: This issue was originally created as [ARROW-15642](https://issues.apache.org/jira/browse/ARROW-15642). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIPC files created by the node library `apache-arrow` don't seem to be able to be read by pyarrow. There is an example of this issue here: [https://github.com/dancoates/pyarrow-jsarrow-test\u00a0](https://github.com/dancoates/pyarrow-jsarrow-test)\r\n\r\n\u00a0\r\n\r\nwriting the arrow file from js\r\n```javascript\n\r\nimport {tableToIPC, tableFromArrays} from 'apache-arrow';\r\nimport fs from 'fs';\r\n\r\nconst LENGTH = 2000;\r\nconst rainAmounts = Float32Array.from(\r\n\u00a0 \u00a0 { length: LENGTH },\r\n\u00a0 \u00a0 () => Number((Math.random() * 20).toFixed(1)));\r\n\r\nconst rainDates = Array.from(\r\n\u00a0 \u00a0 { length: LENGTH },\r\n\u00a0 \u00a0 (_, i) => new Date(Date.now() - 1000 * 60 * 60 * 24 * i));\r\n\r\nconst rainfall = tableFromArrays({\r\n\u00a0 \u00a0 precipitation: rainAmounts,\r\n\u00a0 \u00a0 date: rainDates\r\n});\r\n\r\nconst outputTable = tableToIPC(rainfall);\r\nfs.writeFileSync('jsarrow.arrow', outputTable); \n```\r\n\u00a0\r\n\r\nreading in python\r\n```python\n\r\nimport pyarrow as pa\r\nwith open('jsarrow.arrow', 'rb') as f:\r\n    with pa.ipc.open_file(f) as reader:\r\n        df = reader.read_pandas()\r\n        print(df.head())\r\n\r\n \n```\r\n\u00a0\r\n\r\nproduces the error:\r\n```java\n\r\npyarrow.lib.ArrowInvalid: Not an Arrow file \n```\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2022-02-10T07:21:08.000Z",
+        "updated_at": "2022-07-12T14:04:23.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: JavaScript",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-11T03:41:52.062Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15642?focusedCommentId=17504707) by Weston Pace (westonpace):*\nYou are creating a table in the Arrow IPC streaming format and then attempting to read it using the Arrow IPC file format.\r\n\r\nYou can either change your JS to write the file format:\r\n\r\nhttps://arrow.apache.org/docs/js/modules/Arrow_dom.html#tableToIPC\r\n\r\n```\n\r\nconst outputTable = tableToIPC(rainfall, 'file');\r\n```\r\n\r\nor you can change your python to read the stream format:\r\n\r\n```\n\r\nwith pa.ipc.RecordBatchStreamReader('jsarrow.arrow') as reader:\r\n    tab = reader.read_all()\r\n    print(tab.to_pandas())\r\n```"
+        },
+        {
+            "created_at": "2022-03-11T03:59:57.168Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15642?focusedCommentId=17504715) by Dan Coates (dancoates):*\nThank you for the explanation `[~westonpace]` it is much appreciated.\r\n\r\nI think my confusion might have stemmed from the fact that arquero creates arrow files in the streaming format. I'll see if it is possible to add an option to arquero to output IPC file format instead."
+        },
+        {
+            "created_at": "2022-03-11T17:41:12.537Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15642?focusedCommentId=17505032) by Weston Pace (westonpace):*\nThat sounds like a good plan.  One thing to keep in mind is that the two formats have different purposes so it is entirely possible that arquero (I'm afraid I don't know much about this lib) is intentionally using the streaming format and the file format doesn't make sense.\r\n\r\nStreaming format: The recipient can start processing results before they have received the entire delivery.  Typically used when sending results between two processes.\r\nFile format: Allows for random access to batches.  Typically used when storing data on disk or some other storage device with random access capabilities.\r\n\r\nMost (maybe all?) language implementations can read and write both formats."
+        },
+        {
+            "created_at": "2022-04-06T14:05:41.905Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15642?focusedCommentId=17518150) by Dominik Moritz (domoritz):*\nInteresting discussion. I wonder whether we should by default create file IPC instead of stream since file is the more common use case. What's the default in other libraries? "
+        },
+        {
+            "created_at": "2022-04-06T16:41:51.119Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15642?focusedCommentId=17518297) by Paul Taylor (paul.e.taylor):*\n`[~domoritz]` the IPC stream format is the more common use-case, at least in real-time ETL processing. File format is useful for reading more efficiently from disk, but not suited for inter-process communication.\r\n\r\nIf a consumer process wanted the advantage of constant-time random batch access (like the File format provides), they could buffer the stream until it's finished and write the footer. However it is not possible to to process an incoming Arrow table (in the IPC File format) in batches as they arrive, as the IPC File reader blocks until it sees the footer at the end."
+        },
+        {
+            "created_at": "2022-07-12T14:04:23.088Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15642?focusedCommentId=17565571) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

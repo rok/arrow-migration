@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Python] Segfault reading Parquet dataset with Timestamp filter",
+        "body": "***Note**: This issue was originally created as [ARROW-11538](https://issues.apache.org/jira/browse/ARROW-11538). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe first two tests pass but the third gives: Fatal Python error: Segmentation fault\r\n\r\nAll three pass in with pyarrow=2.0.0\r\n```java\n\r\nimport pandas\r\nimport pyarrow as pa\r\nimport pyarrow.dataset as ds\r\nimport pyarrow.parquet as pq\r\nimport pytest\r\n\r\n\r\n@pytest.fixture\r\ndef data_path(tmp_path):\r\n    path = tmp_path / \"data.parquet\"\r\n    df = pandas.DataFrame(\r\n        [\r\n            [\"A\", pandas.Timestamp(\"2020-11-04\")],\r\n        ],\r\n        columns=[\"name\", \"date\"],\r\n    )\r\n    table = pa.Table.from_pandas(df)\r\n    pq.write_table(table, path, version=\"2.0\")\r\n    return df, path\r\n\r\n\r\n@pytest.mark.parametrize(\r\n    \"filter\",\r\n    [\r\n        None,\r\n        ds.field(\"date\") == \"2020-11-04\",\r\n        ds.field(\"date\") == pandas.Timestamp(\"2020-11-04\"),\r\n    ],\r\n)\r\ndef test_dataset_filter(filter, data_path):\r\n    data, path = data_path\r\n\r\n    dataset = ds.dataset(path, format=\"parquet\")\r\n    assert data.equals(dataset.to_table(filter=filter).to_pandas())\r\n\r\n```",
+        "created_at": "2021-02-06T15:01:18.000Z",
+        "updated_at": "2021-03-10T16:39:59.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-02-11T14:55:41.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-02-08T09:34:01.393Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11538?focusedCommentId=17280887) by Joris Van den Bossche (jorisvandenbossche):*\n`[~josham]` thanks a lot for the clear report! \r\nWe got a similar report about int96 timestamps (ARROW-11480), but apparently it also happens with nanosecond timestamps (because you are passing `version=\"2.0\"`, you save the pandas nanosecond timestamps like that in the parquet file. With the default of `version=\"1.0\"`, we convert them to microseconds to write in the parquet file)."
+        },
+        {
+            "created_at": "2021-02-08T09:36:30.012Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11538?focusedCommentId=17280888) by Joris Van den Bossche (jorisvandenbossche):*\nOf course, the INT96 parquet timestamps also represent nanoseconds."
+        },
+        {
+            "created_at": "2021-02-08T10:25:24.225Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11538?focusedCommentId=17280926) by Joris Van den Bossche (jorisvandenbossche):*\nEventually, this seems to come back to the fact that casting scalars is not yet working (and segfaulting) for temporal casts between units. Small example:\r\n\r\n```python\n\r\n>>> import pyarrow.compute as pc\r\n>>> timestamp_ns = pa.scalar(int(1e9), type=pa.timestamp(\"ns\"))\r\n>>> timestamp_ns\r\n<pyarrow.TimestampScalar: Timestamp('1970-01-01 00:00:01')>\r\n>>> pc.cast(timestamp_ns, pa.timestamp(\"us\"))\r\n... segfault\r\n```\r\n\r\nSo that is related to ARROW-6974, ARROW-9196"
+        },
+        {
+            "created_at": "2021-02-08T14:27:38.486Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11538?focusedCommentId=17281102) by Josh (josham):*\nThanks, will use casting to avoid the issue"
+        },
+        {
+            "created_at": "2021-02-11T13:53:42.889Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11538?focusedCommentId=17283035) by Ben Kietzman (bkietz):*\nAfter ARROW-8919, we no longer allow implicit casts between string and timestamp types in filters, so the filter `ds.field(\"date\") == \"2020-11-04\"` is expected to raise an error now:\r\n\r\n`pyarrow.lib.ArrowNotImplementedError: Function equal has no kernel matching input types (array[timestamp[ns]], scalar[string])`\r\n\r\nFiltering on an explicit timestamp (the third parameter case above) is supported after ARROW-8919, as is casting scalars between temporal types.\r\n\r\n`[~jorisvandenbossche]` should we mark this resolved?"
+        },
+        {
+            "created_at": "2021-02-11T13:58:14.308Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11538?focusedCommentId=17283039) by Joris Van den Bossche (jorisvandenbossche):*\nIf we want to restore the string behaviour, we can open a new issue about that. \r\nBut to close this one, we should still add a test? (can be added in the PR https://github.com/apache/arrow/pull/9470 for ARROW-11480, although both cases probably already take the same code path on the C++ side, as both end up as nanoseconds)"
+        },
+        {
+            "created_at": "2021-02-11T14:55:17.875Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11538?focusedCommentId=17283062) by Ben Kietzman (bkietz):*\nOkay, I'm closing this issue. If necessary, please indicate which tests should be added in the PR  https://github.com/apache/arrow/pull/9470 for ARROW-11480"
+        }
+    ]
+}

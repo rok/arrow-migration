@@ -1,0 +1,30 @@
+{
+    "issue": {
+        "title": "[Rust] [DataFusion] Performance degredation after removing specialization",
+        "body": "***Note**: This issue was originally created as [ARROW-10453](https://issues.apache.org/jira/browse/ARROW-10453). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe following commit caused a pretty large drop in performance for the TPC-H benchmark running against a SF=100 data set.\r\n```java\n\r\n 29e9d13481ea6acc3f74cda108ed34ef8a411ba2 is the first bad commit\r\ncommit 29e9d13481ea6acc3f74cda108ed34ef8a411ba2\r\nAuthor: Jorge C. Leitao <jorgecarleitao@gmail.com>\r\nDate:   Sun Oct 18 21:05:48 2020 +0200    ARROW-10002: [Rust] Remove trait specialization from arrow crate\r\n    \r\n    This PR removes trait specialization by leveraging the compiler to remove trivial `if` statements.\r\n    \r\n    I verified that the assembly code was the same in a [simple example](https://rust.godbolt.org/z/qrcW8W). I do not know if this generalizes to our use-case, but I suspect so as LLVM is (hopefully) removing trivial branches like `if a != a`.\r\n    \r\n    The change `get_data_type()` to `DATA_TYPE` is not necessary. I did it before realizing this. IMO it makes it more explicit that this is not a function, but a constant, but we can revert it.\r\n    \r\n    Closes #8485 from jorgecarleitao/simp_types\r\n    \r\n    Authored-by: Jorge C. Leitao <jorgecarleitao@gmail.com>\r\n    Signed-off-by: Neville Dipale <nevilledips@gmail.com>:040000 040000 cbdaf3c9e924ec0e51d178df73169956b2bf723f 87c79e17378196b61dce9c5373e008ee94620d58 M\trust\r\n```\r\nBenchmark command:\r\n```java\n\r\n cargo run --release --bin tpch -- --iterations 3 --path /mnt/tpch/parquet-100GB --format parquet --query 1 --batch-size 4096 --concurrency 24\n```\r\nBefore this commit:\r\n```java\n\r\nQuery 1 iteration 0 took 13629 ms\r\nQuery 1 iteration 1 took 13450 ms\r\nQuery 1 iteration 2 took 13465 ms \n```\r\nAfter this commit:\r\n```java\n\r\nQuery 1 iteration 0 took 18586 ms\r\nQuery 1 iteration 1 took 18297 ms\r\nQuery 1 iteration 2 took 18253 ms \n```",
+        "created_at": "2020-10-31T20:19:51.000Z",
+        "updated_at": "2020-12-12T04:53:28.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Component: Rust - DataFusion",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-12-12T04:53:28.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-11-01T04:58:51.443Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10453?focusedCommentId=17224221) by Jorge Leit\u00e3o (jorgecarleitao):*\nThanks a lot `[~andygrove]` for taking the time to dig into this. I will look at this, to see how we can address it."
+        },
+        {
+            "created_at": "2020-12-11T04:42:52.080Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10453?focusedCommentId=17247628) by Jorge Leit\u00e3o (jorgecarleitao):*\n`[~andygrove]`, <https://github.com/apache/arrow/pull/8842> was merged, could you check if the performance was recovered?"
+        },
+        {
+            "created_at": "2020-12-11T05:36:34.068Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10453?focusedCommentId=17247647) by Andy Grove (andygrove):*\nI re-ran TPC-H 1 query 1, starting from the same commit that I reported in this PR just to be sure I am getting consistent results:\r\n```java\n\r\nRunning benchmarks with the following options: TpchOpt { query: 1, debug: false, iterations: 3, concurrency: 24, batch_size: 4096, path: \"/mnt/tpch/parquet-100GB\", file_format: \"parquet\", mem_table: false }\r\nQuery 1 iteration 0 took 18858 ms\r\nQuery 1 iteration 1 took 18508 ms\r\nQuery 1 iteration 2 took 18430 ms\r\n```\r\nNext, I ran with commit in master just **before** #8842 was merged (a774ae7f3b83dd3127cf40709f9ac9d5c8d98e25)\r\n```java\n\r\nRunning benchmarks with the following options: BenchmarkOpt { query: 1, debug: false, iterations: 3, concurrency: 24, batch_size: 4096, path: \"/mnt/tpch/parquet-100GB\", file_format: \"parquet\", mem_table: false }\r\nQuery 1 iteration 0 took 13935 ms\r\nQuery 1 iteration 1 took 13926 ms\r\nQuery 1 iteration 2 took 13895 ms \n```\r\nThere have been a lot of optimizations lately and they are clearly paying off!\r\n\r\nFinally, I ran with latest from master (2816f37ff01cfd31101b3ee6cc8574cc9246dd1b)\r\n```java\n\r\nRunning benchmarks with the following options: BenchmarkOpt { query: 1, debug: false, iterations: 3, concurrency: 24, batch_size: 4096, path: \"/mnt/tpch/parquet-100GB\", file_format: \"parquet\", mem_table: false }\r\nQuery 1 iteration 0 took 10722 ms\r\nQuery 1 iteration 1 took 10305 ms\r\nQuery 1 iteration 2 took 10146 ms \n```\r\nThis is the best that performance has ever been :)\r\n\r\nThis is really great to see. Thank you `[~jorgecarleitao]` and everyone else who contributed to this ( `[~Dandandan]`, `[~jhorstmann]`, `[~alamb]`)!"
+        }
+    ]
+}

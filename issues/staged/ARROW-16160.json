@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[C++] IPC Stream Reader doesn't check if extra fields are present for RecordBatches",
+        "body": "***Note**: This issue was originally created as [ARROW-16160](https://issues.apache.org/jira/browse/ARROW-16160). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI looked through recent commits and I don't think this issue has been patched since:\r\n\r\n```Java\n\r\nimport pyarrow as pa\r\nwith pa.output_stream(\"/tmp/f1\") as sink:\r\n  with pa.RecordBatchStreamWriter(sink, rb1.schema) as writer:\r\n    writer.write(rb1)\r\n    end_rb1 = sink.tell()\r\n\r\nwith pa.output_stream(\"/tmp/f2\") as sink:\r\n  with pa.RecordBatchStreamWriter(sink, rb2.schema) as writer:\r\n    writer.write(rb2)\r\n    start_rb2_only = sink.tell()\r\n    writer.write(rb2)\r\n    end_rb2 = sink.tell()\r\n\r\n# Stitch to togher rb1.schema, rb1 and rb2 without schema.\r\nwith pa.output_stream(\"/tmp/f3\") as sink:\r\n  with pa.input_stream(\"/tmp/f1\") as inp:\r\n     sink.write(inp.read(end_rb1))\r\n  with pa.input_stream(\"/tmp/f2\") as inp:\r\n    inp.seek(start_rb2_only)\r\n    sink.write(inp.read(end_rb2 - start_rb2_only))\r\n\r\nwith pa.ipc.open_stream(\"/tmp/f3\") as sink:\r\n  print(sink.read_all())\r\n```\r\nYields:\r\n```Java\n\r\n{{pyarrow.Table\r\nc1: int64\r\n----\r\nc1: [[1],[1]]\r\n```\r\n\r\nI would expect this to error because the second stiched in record batch has more fields then necessary but it appears to load just fine.  \r\n\r\nIs this intended behavior?",
+        "created_at": "2022-04-08T22:19:53.000Z",
+        "updated_at": "2022-04-11T12:57:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-04-08T22:23:12.972Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16160?focusedCommentId=17519818) by Micah Kornfield (emkornfield):*\nThe opposite direction returns an error \"ArrowInvalid: Ran out of field metadata, likely malformed\".  If we agree this case should be an error it would an error message that indicates too many fields were provided.\r\n\r\nI can provide a patch if we think we want to change this behavior."
+        },
+        {
+            "created_at": "2022-04-08T22:37:01.343Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16160?focusedCommentId=17519819) by Micah Kornfield (emkornfield):*\nIt appears in on master branch we get:\r\n\"pyarrow.lib.ArrowInvalid: Tried reading schema message, was null or length 0\"\r\n\r\nIt seems like the error message could be improved here."
+        },
+        {
+            "created_at": "2022-04-11T12:57:03.755Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16160?focusedCommentId=17520558) by David Li (lidavidm):*\nWe should definitely improve those errors, and I would consider the behavior in the OP to be a bug as well."
+        }
+    ]
+}

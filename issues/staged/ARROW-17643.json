@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[R] Latest duckdb release is causing test failure",
+        "body": "***Note**: This issue was originally created as [ARROW-17643](https://issues.apache.org/jira/browse/ARROW-17643). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe latest duckdb release was just put on CRAN (0.5.0), and when it's installed we get a test failure:\r\n\r\n```\n\r\n\u2500\u2500 Error (test-duckdb.R:212:3): Joining, auto-cleanup enabled \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\r\nError: rapi_execute: Failed to run query\r\nError: Invalid Error: std::exception\r\nBacktrace:\r\n    \u2586\r\n 1. \u251c\u2500DBI::dbGetQuery(...) at test-duckdb.R:212:2\r\n 2. \u2514\u2500DBI::dbGetQuery(...)\r\n 3.   \u2514\u2500DBI (local) .local(conn, statement, ...)\r\n 4.     \u251c\u2500DBI::dbSendQuery(conn, statement, ...)\r\n 5.     \u2514\u2500duckdb::dbSendQuery(conn, statement, ...)\r\n 6.       \u2514\u2500duckdb (local) .local(conn, statement, ...)\r\n 7.         \u2514\u2500duckdb:::duckdb_result(...)\r\n 8.           \u2514\u2500duckdb:::duckdb_execute(res)\r\n 9.             \u2514\u2500duckdb:::rapi_execute(...)\r\n\r\n[ FAIL 1 | WARN 1 | SKIP 28 | PASS 8460 ]\r\nError: Test failures\r\nExecution halted\r\nWarning messages:\r\n1: Connection is garbage-collected, use dbDisconnect() to avoid this. \r\n2: Database is garbage-collected, use dbDisconnect(con, shutdown=TRUE) or duckdb::duckdb_shutdown(drv) to avoid this. \r\n\r\n1 error \u2716 | 0 warnings \u2714 | 2 notes \u2716\r\n```\r\n\r\nUnfortunately I can't reproduce this on either MacOS nor Ubuntu (20.04).\r\n\r\n",
+        "created_at": "2022-09-07T13:35:57.000Z",
+        "updated_at": "2022-09-21T17:48:42.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-09-16T12:58:36.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-07T13:47:28.258Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17643?focusedCommentId=17601315) by Antoine Pitrou (apitrou):*\nDid you try reproducing using Docker and Archery? Perhaps it depends on some dependency or compiler specifics?"
+        },
+        {
+            "created_at": "2022-09-07T15:09:26.591Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17643?focusedCommentId=17601353) by Dewey Dunnington (paleolimbot):*\nIn theory this should reproduce it (although it works for me):\r\n\r\n```R\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\n#> Some features are not enabled in this build of Arrow. Run `arrow_info()` for more information.\r\nlibrary(duckdb)\r\n#> Loading required package: DBI\r\n\r\nds <- InMemoryDataset$create(\r\n  data.frame(\r\n    int = c(1L, 2L, 3L, NA, 5L, 6L),\r\n    dbl = c(1.1, 2.1, 3.1, 4.1, 5.1, 6.1),\r\n    dbl2 = c(5, 5, 5, 5, 5, 5), \r\n    lgl = c(TRUE, NA, TRUE, FALSE, TRUE, NA),\r\n    false = c(FALSE, FALSE, FALSE, FALSE, FALSE, FALSE),\r\n    chr = c(\"a\", \"b\", \"c\", \"d\", \"e\", NA),\r\n    fct = factor(c(\"a\", \"b\", \"c\", \"d\", \"g\", \"h\"))\r\n  )\r\n)\r\n\r\ncon <- dbConnect(duckdb::duckdb())\r\ndbExecute(con, \"PRAGMA threads=2\")\r\n#> [1] 0\r\n\r\ntable_one_name <- \"my_arrow_table_1\"\r\ntable_one <- to_duckdb(ds, con = con, table_name = table_one_name)\r\ntable_two_name <- \"my_arrow_table_2\"\r\ntable_two <- to_duckdb(ds, con = con, table_name = table_two_name)\r\n\r\ndbGetQuery(\r\n  con,\r\n  paste0(\r\n    \"SELECT * FROM \", table_one_name,\r\n    \" INNER JOIN \", table_two_name,\r\n    \" ON \", table_one_name, \".int = \", table_two_name, \".int\"\r\n  )\r\n)\r\n#>   int dbl dbl2  lgl false  chr fct int dbl dbl2  lgl false  chr fct\r\n#> 1   1 1.1    5 TRUE FALSE    a   a   1 1.1    5 TRUE FALSE    a   a\r\n#> 2   2 2.1    5   NA FALSE    b   b   2 2.1    5   NA FALSE    b   b\r\n#> 3   3 3.1    5 TRUE FALSE    c   c   3 3.1    5 TRUE FALSE    c   c\r\n#> 4   5 5.1    5 TRUE FALSE    e   g   5 5.1    5 TRUE FALSE    e   g\r\n#> 5   6 6.1    5   NA FALSE <NA>   h   6 6.1    5   NA FALSE <NA>   h\r\n\r\ndbDisconnect(con, shutdown = TRUE)\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-09-07T15:22:01.677Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17643?focusedCommentId=17601357) by Dewey Dunnington (paleolimbot):*\nThe error is almost certainly a result of `arrow::Status::Invalid(e.what())` where the exception is a `cpp11::unwind_exception()` (Or some other exception that doesn't have `what()` overridden:\r\n\r\nProbably in parquet/exception.h:\r\n\r\n```\n\r\n#define END_PARQUET_CATCH_EXCEPTIONS                   \\\r\n  }                                                    \\\r\n  catch (const ::parquet::ParquetStatusException& e) { \\\r\n    return e.status();                                 \\\r\n  }                                                    \\\r\n  catch (const ::parquet::ParquetException& e) {       \\\r\n    return ::arrow::Status::IOError(e.what());         \\\r\n  }\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-09-07T15:32:12.892Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17643?focusedCommentId=17601360) by Antoine Pitrou (apitrou):*\nPerhaps we should explicitly catch `cpp11::unwind_exception` in that macro and adjoin a dedicated error message?\r\n\r\nAlso, raise UnknownError instead of IOError in that case?"
+        },
+        {
+            "created_at": "2022-09-07T15:42:20.258Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17643?focusedCommentId=17601365) by Dewey Dunnington (paleolimbot):*\nI'm about to try it, but most likely the issue is that we do `cpp11::stop(\"some message\")` a lot of places in the R package (which throws a cpp11::unwind_exception that is caught before it can propagate to a catch() that knows what that is). We should probably do an explicit throw std::runtime_error() or similar."
+        },
+        {
+            "created_at": "2022-09-08T16:34:06.521Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17643?focusedCommentId=17601915) by Dewey Dunnington (paleolimbot):*\nA few things based on trying a bunch of things yesterday and today:\r\n\r\nThe error is probably not coming directly from Arrow. There's only one place where we do `Status::Invalid(e.what())` and it's when converting wide strings to unicode. Also, I added extra error handling stuff such that we never `throw cpp11::unwind_exception` without an explanatory message and that didn't surface any extra error information. After adding `ARROW_EXTRA_ERROR_CONTEXT=ON` to the docker builds that had been failing, I wasn't able to replicate the error at all (although this may be because there was less CI pressure today than yesterday).\r\n\r\nI opened an issue on DuckDB to see if they have any ideas: https://github.com/duckdb/duckdb/issues/4656"
+        },
+        {
+            "created_at": "2022-09-16T12:58:36.879Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17643?focusedCommentId=17605806) by Neal Richardson (npr):*\nIssue resolved by pull request 14149\n<https://github.com/apache/arrow/pull/14149>"
+        }
+    ]
+}

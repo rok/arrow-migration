@@ -1,0 +1,46 @@
+{
+    "issue": {
+        "title": "[Go] goPanicIndex in firstTimeBitmapWriter.Finish()",
+        "body": "***Note**: This issue was originally created as [ARROW-17169](https://issues.apache.org/jira/browse/ARROW-17169). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI'm working with complex parquet files with 500+ \"root\" columns where some fields are lists of structs, internally referred to as 'topics'.\u00a0 Some of these structs have 100's of columns.\u00a0 When reading a particular topic, I get an Index Panic at the line indicated below. This error occurs when the value for the topic is Null, as in, for this particular root record, this topic has no data.\u00a0 The root is household data, the topic is auto, so the error occurs when the household has no autos.\u00a0 The auto field is a Nullable List of Struct.\r\n\r\n\u00a0\r\n```go\n\r\n/* Finish() was called from defLevelsToBitmapInternal.\r\n\r\ndata values when panic occurs....\r\nbw.length == 17531\r\nbw.bitMask == 1\r\nbw.pos == 3424\r\nbw.length == 17531\r\nlen(bw.Buf) == 428\r\ncap(bw.Buf) == 448\r\nbw.byteOffset == 428\r\nbw.curByte == 0\r\n*/\r\n\r\n// bitmap_writer.go\r\nfunc (bw *firstTimeBitmapWriter) Finish() {\r\n// store curByte into the bitmap\r\n     if bw.length >0&& bw.bitMask !=0x01|| bw.pos < bw.length {\r\n          bw.buf[int(bw.byteOffset)] = bw.curByte   // <---- Panic index\r\n     }\r\n}\r\n```\r\nIn every case, when the panic occurs, bw.byteOffset == len(bw.Buf). I tested the below modification and it does remedy the bug. However, it's probably only masking the actual bug.\r\n```go\n\r\n// Test version: No Panic\r\nfunc (bw *firstTimeBitmapWriter) Finish() {\r\n\t// store curByte into the bitmap\r\n\tif bw.length > 0 && bw.bitMask != 0x01 || bw.pos < bw.length {\r\n                if int(bw.byteOffset) == len(bw.Buf) {\r\n                     bw.buf = append(bw.buf, bw.curByte)\r\n                } else {\r\n\t\t     bw.buf[int(bw.byteOffset)] = bw.curByte\r\n               }\r\n\t}\r\n}\n```",
+        "created_at": "2022-07-21T17:42:13.000Z",
+        "updated_at": "2022-09-22T05:12:34.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Go",
+            "Component: Parquet",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-09-21T15:06:02.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-07-25T17:41:22.831Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17169?focusedCommentId=17571022) by Matthew Topol (zeroshade):*\n`[~Purdom]` Would you be able to construct a reproducer or something I could use to take a look at this? Looking at the code and the variables you've provided it looks like the issue is that the length that was used to initialize the writer was larger than expected rather than corresponding appropriately to the length of the buffer that was provided. \r\n\r\nie: len(defLevels) was significantly larger than len(out.ValidBits)\\*8 which resulted in the check `bw.pos < bw.length` being true when it should have been false leading to the panic you saw. If you can provide a reproducer of some kind i'll take a look and see if i can figure out how it got into that state and determine a good fix for this."
+        },
+        {
+            "created_at": "2022-07-25T20:06:23.058Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17169?focusedCommentId=17571079) by Robert Purdom (Purdom):*\nYeah, I can.\u00a0 Will be a couple of days before I can come back to it.\u00a0 Perhaps later in the week."
+        },
+        {
+            "created_at": "2022-08-09T18:04:47.535Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17169?focusedCommentId=17577569) by Matthew Topol (zeroshade):*\n`[~Purdom]` any updates here?"
+        },
+        {
+            "created_at": "2022-08-10T21:08:36.744Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17169?focusedCommentId=17578149) by Robert Purdom (Purdom):*\n`[~zeroshade]` I'm having difficulty reproducing the issue.\u00a0 When I created a little test program with generated data, it doesn't happen.\u00a0\u00a0"
+        },
+        {
+            "created_at": "2022-08-12T14:55:52.999Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17169?focusedCommentId=17579003) by Matthew Topol (zeroshade):*\n`[~Purdom]` i'll leave this open for now, if you're able to create any reproducer for this I'll definitely take a look into it."
+        },
+        {
+            "created_at": "2022-09-20T20:43:34.106Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17169?focusedCommentId=17607395) by Matthew Topol (zeroshade):*\n`[~Purdom]` I accidentally ended up being able to replicate this and narrowed down the cause. I've got a fix that works for this and I'm going to try to see if I can construct a test for it. This issue will get updated when I put the PR up for it."
+        },
+        {
+            "created_at": "2022-09-21T15:06:02.094Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17169?focusedCommentId=17607800) by Matthew Topol (zeroshade):*\nIssue resolved by pull request 14183\n<https://github.com/apache/arrow/pull/14183>"
+        }
+    ]
+}

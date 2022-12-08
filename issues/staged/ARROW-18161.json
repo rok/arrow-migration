@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[Ruby] Tables can have buffers get GC'ed",
+        "body": "***Note**: This issue was originally created as [ARROW-18161](https://issues.apache.org/jira/browse/ARROW-18161). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nven an Arrow::Table with several columns \"X\"\r\n\r\n\u00a0\r\n```ruby\n\r\n# Rails console outputs\r\n3.1.2 :107 > x.schema\r\n\u00a0=>\u00a0\r\n#<Arrow::Schema:0x7ff2fbc426d8 ptr=0x55851587bc20 actual_values: int64\r\ndates: date32[day] \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0\u00a0\r\nexpected_values: double> \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0\u00a0\r\n3.1.2 :108 > x.schema\r\n\u00a0=>\u00a0\r\n#<Arrow::Schema:0x7ff2fbbcda68 ptr=0x55851a541020 actual_values: int64\r\ndates: date32[day] \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0\u00a0\r\nexpected_values: double> \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0\u00a0\r\n3.1.2 :109 >\u00a0 \n```\r\nNote that the object and pointer have both changed values.\r\n\r\nBut the far bigger issue is that repeated reads from it will cause different results:\r\n```ruby\n\r\n3.1.2 :097 > x[1][0]\r\n\u00a0=> Sun, 22 Aug 2021\u00a0\r\n3.1.2 :098 > x[1][1]\r\n\u00a0=> nil\u00a0\r\n3.1.2 :099 > x[1][0]\r\n\u00a0=> nil \n```\r\n\r\nI have a lot of issues like this - when I have done these types of read operations, I get the original table with the data in the columns all shuffled around or deleted.\u00a0\r\n\r\nI do ingest the data slightly oddly in the first place as it comes in over GRPC and I am using Arrow::Buffer to read it from the GRPC and then passing that into Arrow::Table.load. But I would not expect that once it was in Arrow::Table that I could do anything to permute it unintentionally.\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2022-10-25T21:10:20.000Z",
+        "updated_at": "2022-11-01T20:53:48.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Ruby",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-25T21:32:59.108Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18161?focusedCommentId=17624056) by Kouhei Sutou (kou):*\n> I am using Arrow::Buffer to read it from the GRPC and then passing that into Arrow::Table.load.\r\n\r\nCould you share the code for it? It seems that the `Arrow::Buffer` is GC-ed."
+        },
+        {
+            "created_at": "2022-10-25T22:01:39.082Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18161?focusedCommentId=17624064) by Noah Horton (nhorton):*\n```ruby\n\r\n# Arrow_frame is a GRPC Map (basically a hash) with UIDs as the keys, and the serialized arrow data as the value. \r\n# Friendly name for key in the code is generating the column names we want to show instead of the UIDs the incoming data has for column names. \r\ndef _get_arrow_frame_from_proto_arrow_frame(arrow_frame)\u00a0\r\n \u00a0 \u00a0 \u00a0 table = {}\u00a0\u00a0 \u00a0 \r\n       arrow_frame.keys.each do |key|\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \r\n           tmp = Arrow::Table.load(Arrow::Buffer.new(arrow_frame[key].value))\u00a0 \u00a0\r\n           col_name = create_friendly_name_for_key(key)\r\n     \u00a0 \u00a0 \u00a0 table[col_name] = tmp[0].data\u00a0 \u00a0 \u00a0 \u00a0 \r\n       end\u00a0 \u00a0 \u00a0 \u00a0 \r\n       Arrow::Table.new(**table)\u00a0 \u00a0 \u00a0 \r\nend \n```\r\n\r\nThanks for the look at this."
+        },
+        {
+            "created_at": "2022-10-27T06:50:36.965Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18161?focusedCommentId=17624887) by Kouhei Sutou (kou):*\nThanks.\r\n`Arrow::Table.new(**table)` is the cause of this problem.\r\nWe need to keep `Arrow::Buffer` for each `arrow_frame[key].value` while `Arrow::Table.new(\\*\\*table)` object is alive to avoid memory copy.\r\n`Arrow::Table.load(Arrow::Buffer.new)` keeps a reference to the given `Arrow::Buffer` but `Arrow::table.new(\\*\\*table)` doesn't. So `Arrow::Buffer` s are GC-ed.\r\n\r\nHow about the following for now?\r\n\r\n```ruby\n\r\ndef _get_arrow_frame_from_proto_arrow_frame(arrow_frame)\r\n  columns = {}\r\n  buffers = []\r\n  arrow_frame.keys.each do |key|\r\n    buffer = Arrow::Buffer.new(arrow_frame[key].value)\r\n    buffers << buffer\r\n    tmp = Arrow::Table.load(buffer)\r\n    col_name = create_friendly_name_for_key(key)\r\n    columns[col_name] = tmp[0].data\r\n  end\r\n  table = Arrow::Table.new(**columns)\r\n  table.instance_variable_set(:@buffers, buffers)\r\n  table\r\nend\r\n```\r\n\r\nWe can avoid the `instance_variable_set` in the future by referring the associated buffer from all related objects such as `Arrow::ChunkedArray` in `Arrow::Table`."
+        },
+        {
+            "created_at": "2022-11-01T14:16:43.362Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18161?focusedCommentId=17627180) by Noah Horton (nhorton):*\nThis appears to have worked for the workaround - thanks. Leaving the ticket as the deeper fix would help folks in the future."
+        }
+    ]
+}

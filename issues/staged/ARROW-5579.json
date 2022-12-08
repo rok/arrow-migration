@@ -1,0 +1,73 @@
+{
+    "issue": {
+        "title": "[Java] shade flatbuffer dependency",
+        "body": "***Note**: This issue was originally created as [ARROW-5579](https://issues.apache.org/jira/browse/ARROW-5579). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nReported in a [github issue\\|[https://github.com/apache/arrow/issues/4489]]\u00a0\r\n\r\n\u00a0\r\n\r\nAfter some\u00a0[discussion](https://github.com/google/flatbuffers/issues/5368)\u00a0with the Flatbuffers maintainer, it appears that FB generated code is not guaranteed to be compatible with\u00a0_any other_\u00a0version of the runtime library other than the exact same version of the flatc used to compile it.\r\n\r\nThis makes depending on flatbuffers in a library (like arrow) quite risky, as if an app depends on any other version of FB, either directly or transitively, it's likely the versions will clash at some point and you'll see undefined behaviour at runtime.\r\n\r\nShading the dependency looks to me the best way to avoid this.",
+        "created_at": "2019-06-13T05:23:33.000Z",
+        "updated_at": "2019-08-08T17:36:33.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-08T17:36:02.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-06-15T06:28:45.052Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5579?focusedCommentId=16864614) by Micah Kornfield (emkornfield@gmail.com):*\nIssue resolved by pull request 4540\n<https://github.com/apache/arrow/pull/4540>"
+        },
+        {
+            "created_at": "2019-06-18T06:19:18.896Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5579?focusedCommentId=16866277) by Ji Liu (tianchen92):*\n[~emkornfield@gmail.com] I am afraid the above PR did not really shade the flatbuffer dependency, I am not quite familiar with maven-shade-plugin(<https://maven.apache.org/plugins/maven-shade-plugin/>), correct me if I am wrong:\r\n\r\nIf we want to shade a dependency, we should follow the next steps:\r\n1. User maven-shade-plugin and add include tags for flatbuffer\n1. Add relocations to rename the package.\n   \n   In the above PR, we use <exclude> tag and seems this plugin will not process this dependency?\n   \n   If we use relocations to rename packages it will cause new problems and I don't know how to solve:\n   \n   _/org/apache/arrow/vector/types/pojo/ArrowType.java:[239,46] \u9519\u8bef: \u4e0d\u517c\u5bb9\u7684\u7c7b\u578b: com.google.flatbuffers.FlatBufferBuilder\u65e0\u6cd5\u8f6c\u6362\u4e3a arrow.format.com.google.flatbuffers.FlatBufferBuilder_\n   \n   Seems the direct flatbuffer dependency in arrow-vector is not compatible with renamed dependency in arrow-format.\n   \n   What do you think?\n   \n   \u00a0"
+        },
+        {
+            "created_at": "2019-06-18T06:26:04.728Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5579?focusedCommentId=16866282) by Micah Kornfield (emkornfield@gmail.com):*\nHmm, I knew that seemed too easy :( I wasn't too familiar with shading either.  Can you post your working code I can try to take a look?"
+        },
+        {
+            "created_at": "2019-06-18T06:42:54.465Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5579?focusedCommentId=16866301) by Ji Liu (tianchen92):*\n<https://github.com/tianchen92/arrow/commits/ARROW-5579-new2>\r\n\r\n[~emkornfield@gmail.com] Here is my test branch, many thanks!"
+        },
+        {
+            "created_at": "2019-06-20T02:25:09.004Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5579?focusedCommentId=16868186) by Ji Liu (tianchen92):*\n[~emkornfield@gmail.com]\u00a0Any update for this? I do have some new thoughts, I tried two different ways:\r\n\r\n1\u3001add arrow-shaded module and relocate package, then add this dependency in arrow-format instead of flatbuffers, but in flatbuffer-generated code the import is still origin package path and cause error.\r\n\r\n2\u3001Another approach is relocate package only in arrow-format since other modules depends on this and replace \"com.google.flatbuffers.**\" such imports with new relocated path such as \"arrow.format.com.google.flatbuffers.**\", in this way all arrow-related modules use the same flatbuffers and will not conflict with user applications. In this way, maven build fine but seems Intellij not support resolve shaded dependencies(see <https://youtrack.jetbrains.com/issue/IDEA-93855>), so manually run tests still cause errors which is still a big problem.:(\r\n\r\nNew test code can be seen in my branch. Thanks"
+        },
+        {
+            "created_at": "2019-06-20T07:32:41.447Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5579?focusedCommentId=16868315) by Micah Kornfield (emkornfield@gmail.com):*\n`[~tianchen92]` I think the second approach sounds better to me, the lack of intellij support is unfortunate.  I started working on this on a branch of my own https://github.com/emkornfield/arrow/tree/shade but I am running into a compilation issue with Flight, not sure if you have gotten past that on your branch?\r\n\r\nI think the first thing we should do is revert the initial PR, can you submit a PR for that?\r\n\r\n\r\n\r\n"
+        },
+        {
+            "created_at": "2019-06-20T08:01:02.938Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5579?focusedCommentId=16868324) by Ji Liu (tianchen92):*\n[~emkornfield@gmail.com] Sure, seems your solution similar with the second approach.\u00a0\r\n\r\nI have submitted a PR for reverting.\r\n\r\nMaven build works fine with my branch (<https://github.com/tianchen92/arrow/commits/ARROW-5579-new2>).\r\n\r\nBut how to solve the problem that Intellij not supporting shaded dependency? This is a break change since developers cannot run tests locally anymore:("
+        },
+        {
+            "created_at": "2019-06-20T08:19:04.581Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5579?focusedCommentId=16868336) by Micah Kornfield (emkornfield@gmail.com):*\nIt looks like there is a work-around in the link you provided which isn't ideal but doesn't break anybody.  \r\n\r\nThis might be worth discussing on the mailing list since it is a fairly invasive change."
+        },
+        {
+            "created_at": "2019-06-20T15:27:11.763Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5579?focusedCommentId=16868630) by Wes McKinney (wesm):*\nIssue resolved by pull request 4625\n<https://github.com/apache/arrow/pull/4625>"
+        },
+        {
+            "created_at": "2019-06-21T05:00:56.918Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5579?focusedCommentId=16869189) by Ji Liu (tianchen92):*\n[~emkornfield@gmail.com]\u00a0The revert PR is merged, I opened a new PR(<https://github.com/apache/arrow/pull/4629>) and the travis has pass.\r\n\r\nHowever, IED issue seems not always work with work-around. I think we still need do some work before it can be merged.\r\n\r\nIf there is no reasonable solution,\u00a0then we should discuss in mailing list to see if anyone has some different thoughts.\r\n\r\nThanks!"
+        },
+        {
+            "created_at": "2019-06-21T05:34:00.047Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5579?focusedCommentId=16869196) by Micah Kornfield (emkornfield@gmail.com):*\nSorry what is the IED work-around referring to?  Intellij?\n\n\n"
+        },
+        {
+            "created_at": "2019-06-21T05:38:46.093Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5579?focusedCommentId=16869199) by Ji Liu (tianchen92):*\nyes, as we discussed before, sorry it should be 'IDE':)"
+        },
+        {
+            "created_at": "2019-06-21T05:44:00.044Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5579?focusedCommentId=16869201) by Micah Kornfield (emkornfield@gmail.com):*\nSend a e-mail to the mailing list to discuss the change there.\n\n\n"
+        },
+        {
+            "created_at": "2019-08-08T17:36:02.743Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5579?focusedCommentId=16903175) by Bryan Cutler (bryanc):*\nIssue resolved by pull request 4701\n<https://github.com/apache/arrow/pull/4701>"
+        }
+    ]
+}

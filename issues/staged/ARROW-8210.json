@@ -1,0 +1,24 @@
+{
+    "issue": {
+        "title": "[C++][Dataset] Handling of duplicate columns in Dataset factory and scanning",
+        "body": "***Note**: This issue was originally created as [ARROW-8210](https://issues.apache.org/jira/browse/ARROW-8210). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhile testing duplicate column names, I ran into multiple issues:\r\n\r\n- Factory fails if there are duplicate columns, even for a single file\n- In addition, we should also fix and/or test that factory works for duplicate columns if the schema's are equal\n- Once a Dataset with duplicated columns is created, scanning without any column projection fails\n  \n\u2014\r\n\r\nMy python reproducer:\r\n\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nimport pyarrow.dataset as ds\r\nimport pyarrow.fs\r\n\r\n# create single parquet file with duplicated column names\r\ntable = pa.table([pa.array([1, 2, 3]), pa.array([4, 5, 6]), pa.array([7, 8, 9])], names=['a', 'b', 'a'])\r\npq.write_table(table, \"data_duplicate_columns.parquet\")\r\n```\r\n\r\nFactory fails:\r\n\r\n```Java\n\r\ndataset = ds.dataset(\"data_duplicate_columns.parquet\", format=\"parquet\")\r\n...\r\n~/scipy/repos/arrow/python/pyarrow/dataset.py in dataset(paths_or_factories, filesystem, partitioning, format)\r\n    346 \r\n    347     factories = [_ensure_factory(f, **kwargs) for f in paths_or_factories]\r\n--> 348     return UnionDatasetFactory(factories).finish()\r\n    349 \r\n    350 \r\n\r\nArrowInvalid: Can't unify schema with duplicate field names.\r\n```\r\n\r\nAnd when creating a Dataset manually:\r\n\r\n```python\n\r\nschema = pa.schema([('a', 'int64'), ('b', 'int64'), ('a', 'int64')])\r\ndataset = ds.FileSystemDataset(\r\n    schema, None, ds.ParquetFileFormat(), pa.fs.LocalFileSystem(),\r\n    [str(basedir / \"data_duplicate_columns.parquet\")], [ds.ScalarExpression(True)])\r\n```\r\n\r\nthen scanning fails:\r\n\r\n```Java\n\r\n>>> dataset.to_table()\r\n...\r\nArrowInvalid: Multiple matches for FieldRef.Name(a) in a: int64\r\nb: int64\r\na: int64\r\n```",
+        "created_at": "2020-03-25T15:10:03.000Z",
+        "updated_at": "2022-09-06T14:17:09.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-03-25T22:59:07.067Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8210?focusedCommentId=17067208) by Wes McKinney (wesm):*\nWe should probably relax the code around duplicate column names except in scenarios where this is definitely ambiguity. "
+        },
+        {
+            "created_at": "2022-09-06T14:17:09.959Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8210?focusedCommentId=17600788) by Joris Van den Bossche (jorisvandenbossche):*\nThere is some discussion in https://github.com/apache/arrow/pull/13938#issuecomment-1223657494 about how this could be handled"
+        }
+    ]
+}

@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] Multiple warnings with -Wconversion",
+        "body": "***Note**: This issue was originally created as [ARROW-2347](https://issues.apache.org/jira/browse/ARROW-2347). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThere are multiple warnings when compiling the Cython-generated code with `-Wconversion`:\r\n\r\n\u00a0```Java\n\r\n/home/antoine/arrow/python/build/temp.linux-x86_64-3.6/lib.cxx: In function 'PyObject* __pyx_pf_7pyarrow_3lib_62union(PyObject*, PyObject*, PyObject*)':\r\n/home/antoine/arrow/python/build/temp.linux-x86_64-3.6/lib.cxx:23850:45: warning: conversion to 'std::vector<unsigned char>::value_type {aka unsigned char}' from 'int' may alter its value [-Wconversion]\r\n       __pyx_v_type_codes.push_back(__pyx_v_i);\r\n                                             ^\r\n/home/antoine/arrow/python/build/temp.linux-x86_64-3.6/lib.cxx: In function 'PyObject* __Pyx_PyInt_From_enum____arrow_3a__3a_Type_3a__3a_type(arrow::Type::type)':\r\n/home/antoine/arrow/python/build/temp.linux-x86_64-3.6/lib.cxx:125758:70: warning: the result of the conversion is unspecified because '-1' is outside the range of type 'arrow::Type::type' [-Wconversion]\r\n     const enum  arrow::Type::type neg_one = (enum  arrow::Type::type) -1, const_zero = (enum  arrow::Type::type) 0;\r\n                                                                      ^\r\n/home/antoine/arrow/python/build/temp.linux-x86_64-3.6/lib.cxx: In function 'PyObject* __Pyx_PyInt_From_enum____arrow_3a__3a_UnionMode_3a__3a_type(arrow::UnionMode::type)':\r\n/home/antoine/arrow/python/build/temp.linux-x86_64-3.6/lib.cxx:125789:80: warning: the result of the conversion is unspecified because '-1' is outside the range of type 'arrow::UnionMode::type' [-Wconversion]\r\n     const enum  arrow::UnionMode::type neg_one = (enum  arrow::UnionMode::type) -1, const_zero = (enum  arrow::UnionMode::type) 0;\r\n                                                                                ^\r\n/home/antoine/arrow/python/build/temp.linux-x86_64-3.6/lib.cxx: In function 'PyObject* __Pyx_PyInt_From_enum____arrow_3a__3a_TimeUnit_3a__3a_type(arrow::TimeUnit::type)':\r\n/home/antoine/arrow/python/build/temp.linux-x86_64-3.6/lib.cxx:125820:78: warning: the result of the conversion is unspecified because '-1' is outside the range of type 'arrow::TimeUnit::type' [-Wconversion]\r\n     const enum  arrow::TimeUnit::type neg_one = (enum  arrow::TimeUnit::type) -1, const_zero = (enum  arrow::TimeUnit::type) 0;\r\n                                                                              ^\r\n```\r\n\r\n(also similar warnings for _parquet.pyx due to Parquet enumerations)",
+        "created_at": "2018-03-23T10:03:59.000Z",
+        "updated_at": "2021-08-04T09:41:37.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-08-04T09:41:37.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-03-23T10:05:47.553Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2347?focusedCommentId=16411130) by Antoine Pitrou (apitrou):*\nAt least the enum signedness warnings can be fixed easily by making the C++ enums signed, e.g.:\r\n```c++\n\r\nstruct Type {\r\n  enum type : signed int {\r\n    // etc.\r\n```"
+        },
+        {
+            "created_at": "2018-03-23T10:08:59.462Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2347?focusedCommentId=16411139) by Antoine Pitrou (apitrou):*\nAlso, if these warnings get fixed, perhaps we want to enable them by default? `[~wesmckinn]`"
+        },
+        {
+            "created_at": "2018-03-23T17:52:39.221Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2347?focusedCommentId=16411785) by Wes McKinney (wesm):*\nHm, are there other solutions to the enum signedness issue? "
+        },
+        {
+            "created_at": "2018-03-28T15:17:27.590Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2347?focusedCommentId=16417526) by Antoine Pitrou (apitrou):*\n> Hm, are there other solutions to the enum signedness issue?\r\n\r\nI'm not sure. It seems Cython is generating that code precisely to know whether the enum is signed:\r\n\r\n```c\n\r\nstatic CYTHON_INLINE PyObject* __Pyx_PyInt_From_enum____arrow_3a__3a_Type_3a__3a_type(enum  arrow::Type::type value) {\r\n    const enum  arrow::Type::type neg_one = (enum  arrow::Type::type) -1, const_zero = (enum  arrow::Type::type) 0;\r\n    const int is_unsigned = neg_one > const_zero;\r\n    if (is_unsigned) {\r\n        if (sizeof(enum  arrow::Type::type) < sizeof(long)) {\r\n            return PyInt_FromLong((long) value);\r\n        } else if (sizeof(enum  arrow::Type::type) <= sizeof(unsigned long)) {\r\n            return PyLong_FromUnsignedLong((unsigned long) value);\r\n#ifdef HAVE_LONG_LONG\r\n        } else if (sizeof(enum  arrow::Type::type) <= sizeof(unsigned PY_LONG_LONG)) {\r\n            return PyLong_FromUnsignedLongLong((unsigned PY_LONG_LONG) value);\r\n#endif\r\n        }\r\n    } else {\r\n        if (sizeof(enum  arrow::Type::type) <= sizeof(long)) {\r\n            return PyInt_FromLong((long) value);\r\n#ifdef HAVE_LONG_LONG\r\n        } else if (sizeof(enum  arrow::Type::type) <= sizeof(PY_LONG_LONG)) {\r\n            return PyLong_FromLongLong((PY_LONG_LONG) value);\r\n#endif\r\n        }\r\n    }\r\n    {\r\n        int one = 1; int little = (int)*(unsigned char *)&one;\r\n        unsigned char *bytes = (unsigned char *)&value;\r\n        return _PyLong_FromByteArray(bytes, sizeof(enum  arrow::Type::type),\r\n                                     little, !is_unsigned);\r\n    }\r\n}\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-08-04T09:41:37.732Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2347?focusedCommentId=17392932) by Antoine Pitrou (apitrou):*\nI'm going to close for now as this is minor and there is no obvious solution on our side.\r\n"
+        }
+    ]
+}

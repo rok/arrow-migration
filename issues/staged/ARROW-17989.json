@@ -1,0 +1,44 @@
+{
+    "issue": {
+        "title": "[C++] Enable struct_field kernel to accept string field names",
+        "body": "***Note**: This issue was originally created as [ARROW-17989](https://issues.apache.org/jira/browse/ARROW-17989). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently the \"struct_field\" kernel only works for integer indices for the child fields. From the StructFieldOption class (https://github.com/apache/arrow/blob/3d7f2f22a0fc441a41b8fa971e11c0f4290ebb24/cpp/src/arrow/compute/api_scalar.h#L283-L285):\r\n\r\n```Java\n\r\n  /// The child indices to extract. For instance, to get the 2nd child\r\n  /// of the 1st child of a struct or union, this would be {0, 1}.\r\n  std::vector<int> indices;\r\n```\r\n\r\nIt would be nice if you could also refer to fields by name in addition to by position.",
+        "created_at": "2022-10-11T13:36:02.000Z",
+        "updated_at": "2022-11-10T14:04:21.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-11T13:52:21.009Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17989?focusedCommentId=17615821) by Joris Van den Bossche (jorisvandenbossche):*\nThis seems somewhat duplicate / related to ARROW-17141 (cc `[~rokm]` `[~lidavidm]`), although I don't fully understand why that was closed. David mentioned:\r\n\r\n> Yeah, if the Python bindings convert names to indices that makes sense.\r\n\r\nI suppose if you call \"struct_field\" directly on an actual StructArray, it's indeed the binding that could do this string name -> index conversion (although it currently does not do that). But if you use this with expressions, at the moment when constructing the expression (eg with `pc.struct_field(pc.field(\"my_struct\"), [\"my_field\"])` you don't know the schema and can't convert the field name to index. \r\n\r\nIt _seems_ relatively straightforward in the kernel itself to also work with string field names (getting the index would be a `struct_array->type->GetFieldIndex(name)` away), unless I am missing some consequences?\r\n"
+        },
+        {
+            "created_at": "2022-10-11T14:00:14.628Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17989?focusedCommentId=17615838) by David Li (lidavidm):*\nI think that was closed because you can already use FieldPath with a schema to resolve a sequence of field names into a sequence of field indices. But indeed this doesn't help the bindings.\r\n\r\nI just wanted to keep the kernel simple during the original implementation. I think it would be fine to add a list of names instead, and the kernel could just turn that into indices before proceeding (again via FieldPath)."
+        },
+        {
+            "created_at": "2022-10-11T14:23:33.167Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17989?focusedCommentId=17615860) by Rok Mihevc (rokm):*\nThis would indeed be nice to have!"
+        },
+        {
+            "created_at": "2022-10-13T12:02:32.272Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17989?focusedCommentId=17616998) by Joris Van den Bossche (jorisvandenbossche):*\nCurrently the StructFieldOptions have a `std::vector<int> indices` field. \r\n\r\nIf we want to add ability to specify string names, one option would be to make this a vector of std::variant<int, std::string>?   \r\nOr otherwise add a second option argument, eg `names`, that can be used to list strings. But then those two options can only be used exclusively (only of of both can be specified, not the nicest API). Also the variant would allow a mixture of names and indices, which is something that FieldRef also allows.\r\n"
+        },
+        {
+            "created_at": "2022-10-13T12:06:48.637Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17989?focusedCommentId=17617002) by David Li (lidavidm):*\nCould we just change it to take a FieldRef directly? Would that be an issue for Python bindings?"
+        },
+        {
+            "created_at": "2022-10-13T12:17:50.896Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17989?focusedCommentId=17617007) by Joris Van den Bossche (jorisvandenbossche):*\nAh, yes, that's also a good option (and that's fine for the python bindings, FieldRef is exposed in python)\r\nBut that would still be a separate option to avoid a breaking change in C++? Or can we have a constructor of the options class that translates a vector of indices into a FieldRef? (I don't know if the StructFieldOptions class fields are considered public? probably yes?)"
+        },
+        {
+            "created_at": "2022-10-13T12:21:52.819Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17989?focusedCommentId=17617009) by David Li (lidavidm):*\nThe fields are public. I think a change is OK, or else just having both fields is OK (with a deprecation cycle on the redundant one)"
+        }
+    ]
+}

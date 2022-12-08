@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[C++] Add a strptime option to control the cutoff between 1900 and 2000 when %y ",
+        "body": "***Note**: This issue was originally created as [ARROW-16596](https://issues.apache.org/jira/browse/ARROW-16596). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen parsing to datetime a string with year in the short format (`{}%y{`}), it would be great if we could have control over the cutoff point between 1900 and 2000. Currently it is implicitly set to 68:\r\n```r\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\n\r\na <- Array$create(c(\"68-05-17\", \"69-05-17\"))\r\ncall_function(\"strptime\", a, options = list(format = \"%y-%m-%d\", unit = 0L))\r\n#> Array\r\n#> <timestamp[s]>\r\n#> [\r\n#>   2068-05-17 00:00:00,\r\n#>   1969-05-17 00:00:00\r\n#> ]\r\n```\r\nFor example, lubridate named this argument `cutoff_2000` argument (e.g. for `{}fast_strptime){`}. This works as follows:\r\n```r\n\r\nlibrary(lubridate, warn.conflicts = FALSE)\r\n\r\ndates_vector <- c(\"68-05-17\", \"69-05-17\", \"55-05-17\")\r\nfast_strptime(dates_vector, format = \"%y-%m-%d\")\r\n#> [1] \"2068-05-17 UTC\" \"1969-05-17 UTC\" \"2055-05-17 UTC\"\r\nfast_strptime(dates_vector, format = \"%y-%m-%d\", cutoff_2000 = 50)\r\n#> [1] \"1968-05-17 UTC\" \"1969-05-17 UTC\" \"1955-05-17 UTC\"\r\nfast_strptime(dates_vector, format = \"%y-%m-%d\", cutoff_2000 = 70)\r\n#> [1] \"2068-05-17 UTC\" \"2069-05-17 UTC\" \"2055-05-17 UTC\"\r\n```\r\nIn the `lubridate::fast_strptime()` documentation it is described as follows:\r\n> cutoff_2000 \n> integer. For y format, two-digit numbers smaller or equal to cutoff_2000 are parsed as though starting with 20, otherwise parsed as though starting with 19. {~~}Available only for functions relying on lubridates internal parser{~~}.",
+        "created_at": "2022-05-17T13:39:14.000Z",
+        "updated_at": "2022-05-19T08:12:39.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-05-17T13:41:17.125Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16596?focusedCommentId=17538205) by Antoine Pitrou (apitrou):*\n\"Available only for functions relying on lubridates internal parser\" means we don't have to implement it, right?"
+        },
+        {
+            "created_at": "2022-05-17T13:52:13.413Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16596?focusedCommentId=17538219) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nI think we would need to if we wanted to emulate the behaviour. I think it refers to the fact that other parsing functions in lubridate use the parsing functionality native to R (e.g. R's `strptime` as opposed to lubridate's `{}fast_strptime){`}.\r\n\r\nI implemented this using the Arrow strptime kernel, but it would definitely be nice to have this option.\r\n\u00a0\r\nHaving said that, it is not crucial, as the users can manipulate strings to add the first 2 digits and then parse with a `\"%Y-%m-%d\"` format. "
+        },
+        {
+            "created_at": "2022-05-18T21:01:59.009Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16596?focusedCommentId=17539077) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nMaybe related. I find the following unexpected:\r\n```r\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\n\r\na <- Array$create(\"68-10-07 19:04:0\")\r\ncall_function(\"strptime\", a, options = list(format = \"%Y-%m-%d %H:%M:%S\", unit = 0L))\r\n#> Array\r\n#> <timestamp[s]>\r\n#> [\r\n#>   0068-10-07 19:04:00\r\n#> ]\r\ncall_function(\"strptime\", a, options = list(format = \"%y-%m-%d %H:%M:%S\", unit = 0L))\r\n#> Array\r\n#> <timestamp[s]>\r\n#> [\r\n#>   2068-10-07 19:04:00\r\n#> ]\r\n```\r\nI would expect an error when there is a mismatch between the string and the format, i.e. string has a short year (`{}%y{`}) and we try to parse using a long format (`{}%Y{`}). I think it would be much better to error or return a null in this situation."
+        },
+        {
+            "created_at": "2022-05-19T07:52:55.711Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16596?focusedCommentId=17539374) by Antoine Pitrou (apitrou):*\n`[~dragosmg]` On which platform is this? On non-Windows platforms, we basically defer to the platform's `strptime` function, so there is not much we can do to prevent this."
+        },
+        {
+            "created_at": "2022-05-19T08:06:52.411Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16596?focusedCommentId=17539384) by Antoine Pitrou (apitrou):*\nInterestingly, Python's own `strptime` implementation catches this:\r\n```python\n\r\n>>> time.strptime(\"68-10-07 19:04:00\", \"%Y-%m-%d %H:%M:%S\")\r\nTraceback (most recent call last):\r\n  Input In [16] in <cell line: 1>\r\n    time.strptime(\"68-10-07 19:04:00\", \"%Y-%m-%d %H:%M:%S\")\r\n  File ~/miniconda3/envs/pyarrow/lib/python3.9/_strptime.py:562 in _strptime_time\r\n    tt = _strptime(data_string, format)[0]\r\n  File ~/miniconda3/envs/pyarrow/lib/python3.9/_strptime.py:349 in _strptime\r\n    raise ValueError(\"time data %r does not match format %r\" %\r\nValueError: time data '68-10-07 19:04:00' does not match format '%Y-%m-%d %H:%M:%S'\r\n\r\n>>> time.strptime(\"68-10-07 19:04:00\", \"%y-%m-%d %H:%M:%S\")\r\ntime.struct_time(tm_year=2068, tm_mon=10, tm_mday=7, tm_hour=19, tm_min=4, tm_sec=0, tm_wday=6, tm_yday=281, tm_isdst=-1)\r\n>>> time.strptime(\"1968-10-07 19:04:00\", \"%Y-%m-%d %H:%M:%S\")\r\ntime.struct_time(tm_year=1968, tm_mon=10, tm_mday=7, tm_hour=19, tm_min=4, tm_sec=0, tm_wday=0, tm_yday=281, tm_isdst=-1)\r\n```"
+        },
+        {
+            "created_at": "2022-05-19T08:08:49.378Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16596?focusedCommentId=17539385) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\n`[~apitrou]` \u00a0I'm on macOS.\u00a0"
+        },
+        {
+            "created_at": "2022-05-19T08:10:23.759Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16596?focusedCommentId=17539387) by Antoine Pitrou (apitrou):*\nAlso, by reading the code, the vendored implementation we use on Windows (which was copied from the musl libc) probably shows the same lenient behaviour."
+        },
+        {
+            "created_at": "2022-05-19T08:12:39.867Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16596?focusedCommentId=17539389) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nInteresting, but the base R implementation behaves the same. `lubridate` is a\u00a0bit more robust though:\r\n\r\n```r\n\r\nb <- \"68-10-07 19:04:0\"\r\nstrptime(b, format = \"%Y-%m-%d %H:%M:%S\")\r\n#> [1] \"0068-10-07 19:04:00 LMT\"\r\nstrptime(b, format = \"%y-%m-%d %H:%M:%S\")\r\n#> [1] \"2068-10-07 19:04:00 BST\"\r\n\r\nlubridate::fast_strptime(b, format = \"%Y-%m-%d %H:%M:%S\")\r\n#> [1] NA\r\nlubridate::fast_strptime(b, format = \"%y-%m-%d %H:%M:%S\")\r\n#> [1] \"2068-10-07 19:04:00 UTC\"\r\n```\r\n"
+        }
+    ]
+}

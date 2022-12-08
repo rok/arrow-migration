@@ -1,0 +1,52 @@
+{
+    "issue": {
+        "title": "[C++] Explore alternative strategy for Compare kernel implementation for better performance",
+        "body": "***Note**: This issue was originally created as [ARROW-9842](https://issues.apache.org/jira/browse/ARROW-9842). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe compiler may be able to vectorize comparison options if the bitpacking of results is deferred until the end (or in chunks). Instead, a temporary bytemap can be populated on a chunk-by-chunk basis and then the bytemaps can be bitpacked into the output buffer. This may also reduce the code size of the compare kernels (which are actually quite large at the moment)",
+        "created_at": "2020-08-24T16:32:30.000Z",
+        "updated_at": "2022-04-08T13:13:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-08-24T16:51:13.514Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9842?focusedCommentId=17183447) by Antoine Pitrou (apitrou):*\nWe may even create a generic BitPackingBuilder or something based on that approach, since that may benefit other routines.\r\nApparently SSE2 is enough to bitpack 16 bytes at once ({_mm_movemask_epi8}). "
+        },
+        {
+            "created_at": "2020-08-24T16:52:06.515Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9842?focusedCommentId=17183448) by Antoine Pitrou (apitrou):*\ncc [~frank.du]"
+        },
+        {
+            "created_at": "2020-08-24T20:22:28.609Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9842?focusedCommentId=17183581) by Wes McKinney (wesm):*\nSounds like a good idea. "
+        },
+        {
+            "created_at": "2021-03-22T16:33:17.770Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9842?focusedCommentId=17306354) by Antoine Pitrou (apitrou):*\ncc `[~yibocai]`"
+        },
+        {
+            "created_at": "2021-03-23T01:33:41.281Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9842?focusedCommentId=17306682) by yibocai#1 (yibocai#1):*\nWill have a look."
+        },
+        {
+            "created_at": "2021-03-25T06:24:29.721Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9842?focusedCommentId=17308410) by yibocai#1 (yibocai#1):*\n[GenerateBitsUnrolled](https://github.com/apache/arrow/blob/master/cpp/src/arrow/util/bitmap_generate.h#L63) is called to do the actual job. Manually written _mm_movemask_epi8 does improve compare kernel performance significantly for integers. A quick POC patch is attached:  [movemask.patch](movemask.patch) \r\n\r\n**NOTE:** this patch only improves operations with trivial generator (integer compare), which is easily vectorizable. For non-trivial generators (string compare ), it hurts performance. And GenerateBits benchmark itself also drops.\r\nMy gut feeling is it's better to tweak C++ code and let compiler do the dirty job.\r\n\r\n```\n\r\n$ archery benchmark diff --suite-filter=\"arrow-compute-scalar-compare-benchmark\" --cc=clang-9 --cxx=clang++-9\r\n\r\n-----------------------------------------------------------------------------------------------\r\nNon-regressions: (17)\r\n-----------------------------------------------------------------------------------------------\r\n                           benchmark            baseline           contender  change % counters\r\n    GreaterArrayArrayInt64/32768/100    1.889G items/sec    3.119G items/sec    65.101       {}\r\n      GreaterArrayArrayInt64/32768/0    1.942G items/sec    3.175G items/sec    63.429       {}\r\n  GreaterArrayArrayInt64/32768/10000    1.901G items/sec    3.102G items/sec    63.169       {}\r\n     GreaterArrayArrayInt64/32768/10    1.916G items/sec    3.126G items/sec    63.147       {}\r\n      GreaterArrayArrayInt64/32768/2    1.909G items/sec    3.104G items/sec    62.651       {}\r\n      GreaterArrayArrayInt64/32768/1    1.923G items/sec    3.128G items/sec    62.630       {}\r\n    GreaterArrayScalarInt64/32768/10    2.715G items/sec    3.206G items/sec    18.079       {}\r\n GreaterArrayScalarInt64/32768/10000    2.700G items/sec    3.176G items/sec    17.631       {}\r\n     GreaterArrayScalarInt64/32768/1    2.744G items/sec    3.194G items/sec    16.386       {}\r\n   GreaterArrayScalarInt64/32768/100    2.733G items/sec    3.176G items/sec    16.192       {}\r\n     GreaterArrayScalarInt64/32768/2    2.746G items/sec    3.184G items/sec    15.952       {}\r\n     GreaterArrayScalarInt64/32768/0    2.772G items/sec    3.208G items/sec    15.719       {}\r\n GreaterArrayArrayString/32768/10000  115.583M items/sec  115.174M items/sec    -0.354       {}\r\n     GreaterArrayArrayString/32768/0  116.099M items/sec  115.286M items/sec    -0.700       {}\r\n   GreaterArrayArrayString/32768/100  115.595M items/sec  113.561M items/sec    -1.760       {}\r\n    GreaterArrayScalarString/32768/2  210.101M items/sec  204.424M items/sec    -2.702       {}\r\n    GreaterArrayArrayString/32768/10  117.269M items/sec  113.311M items/sec    -3.375       {}\r\n\r\n------------------------------------------------------------------------------------------------\r\nRegressions: (7)\r\n------------------------------------------------------------------------------------------------\r\n                            benchmark            baseline           contender  change % counters\r\n      GreaterArrayArrayString/32768/2  136.027M items/sec  126.051M items/sec    -7.334       {}\r\n     GreaterArrayScalarString/32768/0  603.706M items/sec  524.915M items/sec   -13.051       {}\r\n GreaterArrayScalarString/32768/10000  603.305M items/sec  521.166M items/sec   -13.615       {}\r\n   GreaterArrayScalarString/32768/100  580.450M items/sec  497.031M items/sec   -14.371       {}\r\n    GreaterArrayScalarString/32768/10  437.081M items/sec  368.205M items/sec   -15.758       {}\r\n     GreaterArrayScalarString/32768/1  812.923M items/sec  675.911M items/sec   -16.854       {}\r\n      GreaterArrayArrayString/32768/1  613.903M items/sec  441.708M items/sec   -28.049       {}\r\n\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-03-29T05:27:13.354Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9842?focusedCommentId=17310428) by yibocai#1 (yibocai#1):*\nTested on skylake, clang-9, -msse4.2.\r\n\r\nUpdated POC patch to evaluate best chunk size to accumulate bits before packing.\r\n[movemask-in-chunks.diff](movemask-in-chunks.diff)\r\n\r\nTo my surprise, big chunks actually hurts performance (tested with arrow-compute-scalar-compare-benchmark). Chunk size 16 gives ~3G items/sec, while chunk size 256 gives ~2G.\r\n\r\nMy theory is for big chunk size, cpu has to stall for memory loading. For small chunk size, cpu can interleave memory loading and latter computation (packing bytes to bits). I see IPC (instruction per cycle) drops from 2.4 to 2.2, when chunk size increases from 16 to 64.\r\n\r\nDisassembler shows for big chunk size, clang disables vectorization of the hot loop calling generator repeatedly. At first glance it looks strange, but it turns out compiler did quite good job. Forcing compiler to vectorize the generator hot loop actually results to worse performance. I think the reason is what I listed above. I see IPC drops to 2.0. Compiler recognises the pattern and generates code try to use cpu pipelines more effectively.\r\n\r\nJust for the record, I simplified the code and pasted to godbolt. The generated code looks much better than in arrow.\r\nhttps://godbolt.org/z/ETW3vMvqY"
+        },
+        {
+            "created_at": "2021-03-29T07:18:14.998Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9842?focusedCommentId=17310461) by yibocai#1 (yibocai#1):*\nSome observation:\r\n- Manually tweaking mm_movemask_epi8 can improve compare kernel performance for numerical data by ~60%.\n- Defer bitpacking with big chunks may hurt performance.\n- The actual effect depends heavily on the generator function and compiler. It's not easy to find a general approach to benefit all cases."
+        },
+        {
+            "created_at": "2021-05-12T10:02:18.476Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9842?focusedCommentId=17343157) by Antoine Pitrou (apitrou):*\n`[~edponce]`"
+        }
+    ]
+}

@@ -1,0 +1,34 @@
+{
+    "issue": {
+        "title": "[R] arrow::create_package_with_all_dependencies() fails to download third party dependencies",
+        "body": "***Note**: This issue was originally created as [ARROW-16103](https://issues.apache.org/jira/browse/ARROW-16103). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHello, Im in the unfortunate position that I need to get the arrow package to a company R Server without access to the web.\r\n## Main Problem\r\n\r\n`arrow;;create_package_with_all_dependencies` from the R arrow package (7.0) fails to download the third party dependencies. This happens irrespective of OS (Windows, Ubuntu Focal, OpenSuse EPS 15 SP2) on company and private machines (several...).\r\nI suspect an issue with the function or the underlying shell script that downloads these third party dependencies.\r\n\r\n\u00a0\r\n\r\nSimilar to [this Stackexchange thread]([https://stackoverflow.com/questions/70044518/how-to-install-c-dependencies-for-the-arrow-package).](https://stackoverflow.com/questions/70044518/how-to-install-c-dependencies-for-the-arrow-package))\r\n\r\n\u00a0\r\n```java\n\r\narrow::create_package_with_all_dependencies()\r\nDownloading Arrow source file\r\ntrying URL 'https://cran.rstudio.com/src/contrib/arrow_7.0.0.tar.gz'\r\nContent type 'application/x-gzip' length 4553836 bytes (4.3 MB)\r\ndownloaded 4.3 MB\r\nDownloading files to C:\\Users\\<user_here>\\AppData\\Local\\Temp\\4\\Rtmp0srhMl\\file1475c6909878/arrow/tools/thirdparty_dependencies\r\nError in arrow::create_package_with_all_dependencies() :\u00a0\r\n\u00a0 Failed to download thirdparty dependencies\r\n```\r\n\u00a0\r\n\r\nPS: Ghee I wish Jira would have simple MD support.",
+        "created_at": "2022-04-04T07:27:05.000Z",
+        "updated_at": "2022-04-13T10:40:08.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-04-13T10:40:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-04-04T13:55:37.105Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16103?focusedCommentId=17516838) by Dewey Dunnington (paleolimbot):*\nI also wish JIRA would do Markdown!\r\n\r\nIt is a known bug that `arrow::create_package_with_all_dependencies()` doesn't work on Windows (ARROW-15092, ARROW-15608); however, I can't seem to reproduce this on Ubuntu:\r\n\r\n```\n\r\n# docker run --rm -it ubuntu:focal\r\napt-get update && apt-get install -y r-base libcurl4-openssl-dev\r\nNOT_CRAN=true R -e 'install.packages(\"arrow\")'\r\nR -e 'arrow::create_package_with_all_dependencies()'\r\n```\r\n\r\nWe did notice in the process of reproducing this that the URL https://arrow-r-nightly.s3.amazonaws.com/libarrow/bin/ubuntu-18.04/arrow-7.0.0.zip seems to be missing (we're working on fixing it), although that didn't seem to affect `R -e 'arrow::create_package_with_all_dependencies()'` when I ran it.\r\n"
+        },
+        {
+            "created_at": "2022-04-05T09:20:47.284Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16103?focusedCommentId=17517326) by Daniel Paierl (Ruser):*\nThank you very much `[~paleolimbot]` !\u00a0\r\n\r\nWith Docker it worked!\r\n\r\nTrying to run `create_package_with_all_dependencies()` on ubuntu focal yielded the following output:\r\n```java\n\r\n$ Sys.setenv(NOT_CRAN=\"true\")\r\n$ arrow::create_package_with_all_dependencies()\r\n\r\nDownloading Arrow source filetrying URL 'https://packagemanager.rstudio.com/all/__linux__/focal/latest/src/contrib/arrow_7.0.0.tar.gz'Content type 'binary/octet-stream' length 29595575 bytes (28.2 MB)==================================================downloaded 28.2 MB\u00a0\r\n\r\nDownloading files to /tmp/RtmpcbzOF9/file179b139c6b19/arrow/tools/thirdparty_dependenciessh: \r\n1: /tmp/RtmpcbzOF9/file179b139c6b19/arrow/tools/cpp/thirdparty/download_dependencies.sh: not found\r\nError in create_package_with_all_dependencies() :\u00a0 Failed to download thirdparty dependenciesIn addition:\r\n Warning messages:1: In dir.create(download_dir) :\u00a0\r\n cannot create dir '/tmp/RtmpcbzOF9/file179b139c6b19/arrow/tools/thirdparty_dependencies', reason 'No such file or directory'2: In system2(download_dependencies_sh, download_dir, stdout = FALSE) :\u00a0 error in running command \n```\r\nI suspect the key is to set NOT_CRAN=true without messing with the standard CRAN Mirror settings (which I did by pointing to the RSPM)."
+        },
+        {
+            "created_at": "2022-04-05T11:36:03.406Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16103?focusedCommentId=17517390) by Dewey Dunnington (paleolimbot):*\nI'm not sure...`/tmp/RtmpcbzOF9/file179b139c6b19/arrow/tools/thirdparty_dependenciessh` looks wrong to me (the dot is stripped and I'm not sure why!). I couldn't spot anything in these few lines that jumps out at me, but perhaps you can!\r\n\r\nhttps://github.com/apache/arrow/blob/9064fa0cccd240d30ad243daded9d84825983c83/r/R/install-arrow.R#L208-L212"
+        },
+        {
+            "created_at": "2022-04-13T10:40:08.812Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16103?focusedCommentId=17521609) by Jacob Wujciak-Jens (assignUser):*\nI could not reproduce this either on my ubuntu machine and as the problem is solved for `[~Ruser]` \u00a0and with ARROW-15092 reworking the function I am closing this."
+        }
+    ]
+}

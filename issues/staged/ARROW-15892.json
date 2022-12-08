@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[C++] Dataset APIs require s3:ListBucket Permissions",
+        "body": "***Note**: This issue was originally created as [ARROW-15892](https://issues.apache.org/jira/browse/ARROW-15892). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi team, first time posting an issue so I apologize if the format is lacking. My original comment is on ARROW-13685 Github Issue [here](https://github.com/apache/arrow/pull/11136#issuecomment-1062406820).\u00a0\r\n\r\nLong story short, our environment is super locked down, and while my application has permission to write data against an s3 prefix, I do not have the `ListBucket` permission nor can I add it. This does not prevent me from using the \"individual\" file APIs like `pq.write_table` but the bucket validation logic in the \"dataset\" APIs breaks when trying to test for the bucket's existence.\u00a0\r\n```java\n\r\npq.write_to_dataset(pa.Table.from_batches([data]), location, filesystem=s3fs)\n```\r\n```java\n\r\nOSError: When creating bucket '<my bucket>': AWS Error [code 15]: Access Denied\n```\r\nThe same is true for the generic `pyarrow.dataset` APIs. My understanding is the bucket validation logic is part of the C++ code, not the Python API. As a Pythonista who knows nothing of C++ I am not sure how to resolve this problem.\r\n\u00a0\r\nWould it be possible to disable the bucket existence check with an optional key word argument? Thank you for your time!\r\n\u00a0",
+        "created_at": "2022-03-09T15:48:53.000Z",
+        "updated_at": "2022-05-01T06:21:04.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-04-25T16:52:31.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-09T16:33:04.000Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15892?focusedCommentId=17503711) by Antoine Pitrou (apitrou):*\nWhich permissions do you have in that S3 environment exactly?"
+        },
+        {
+            "created_at": "2022-03-09T17:03:07.438Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15892?focusedCommentId=17503735) by Will Jones (willjones127):*\nI think the ListBucket permission grants access to list objects in the bucket, which I think is required for a lot of dataset operations.\r\n\r\nFrom [Amazon's docs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-policy-language-overview.html):\u00a0\r\n> For example, the\u00a0`s3:ListBucket`\u00a0permission allows the user to use the Amazon S3\u00a0[GET Bucket (List Objects)](https://docs.aws.amazon.com/AmazonS3/latest/API/RESTBucketGET.html)\u00a0operation.\r\nThe error you have sounds more like it's from not having s3:CreateBucket? Which I would agree is something that shouldn't be necessary."
+        },
+        {
+            "created_at": "2022-03-09T18:08:00.565Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15892?focusedCommentId=17503766) by Jonny Fuller (mRWaffles):*\nMy understanding is that the API tries to create a bucket to see if it exists as part of its standard workflow. The only permissions I have are PutObject within a prefix boundary (ie put object at /myapp/namespace/<etc>). I'm looking for a way to bypass the bucket checking step and simply write the data as if I was using the `write_table` API.\u00a0\r\n\r\nI should add, I cannot provide the detailed permissions because they are provided by a temporary STS session. To my knowledge there is no way to ask STS \"what permissions does this assumed role have?\" ie you have to actually make requests to see if they are denied. I know I can `PutObject` because `write_table` ie writing a single parquet file works, as do other single file operations. Only when trying to use the higher level dataset (aka multiple file partition APIs) does my operation fail due to access control issues as detailed above.\u00a0"
+        },
+        {
+            "created_at": "2022-03-09T21:51:45.854Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15892?focusedCommentId=17503868) by Weston Pace (westonpace):*\nI can reproduce this and I agree that the permission in question is probably `ListBucket`.  In this case it isn't the logic around checking bucket existence exactly that is causing the problem.  In the datasets module we always call `CreateDir` since the function succeeds if the directory already exists.\r\n\r\nIn s3fs, if the directory is a bucket (e.g. if it is `foo` and not `foo/my_dataset`), we call `CreateBucket` without doing any existence checking at all (then if we get a \"bucket already exists\" error we just return ok).  That explains why the error you are getting is `\"OSError: When creating bucket\"` and not `\"OSError: When testing for existence of bucket\"`\r\n\r\nIt should be straightforward to add an option to completely disable `CreateDir` calls in datasets.  This would be a little bizarre from a local filesystem perspective but makes perfect sense in an object store where directories don't need to be created.  You would also need to make sure you specify `existing_data_behavior=overwrite_or_ignore`\r\n"
+        },
+        {
+            "created_at": "2022-03-09T22:00:31.488Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15892?focusedCommentId=17503873) by Weston Pace (westonpace):*\nActually, I suppose this means that a user might need the `CreateBucket` permission (assuming they don't disable CreateDir calls entirely with the aforementioned flag) in order to use `write_dataset` if the base directory for their dataset is a bucket.\r\n\r\nIn other words, today, the call `write_dataset(tab, 'foo', filesystem=s3fs, format='parquet')` requires both `CreateBucket` and `ListBucket` permission and the call `write_dataset(tab, 'foo/my_dataset', filesystem=s3fs, format='parquet')` only requires `ListBucket` permission (assuming the foo bucket exists).  We could probably improve on that as well."
+        },
+        {
+            "created_at": "2022-03-09T23:13:28.268Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15892?focusedCommentId=17503902) by Will Jones (willjones127):*\n`[~westonpace]` based on my prior experience with S3, I'm actually surprise it would call CreateBucket at all. IMO it should probably error if the bucket doesn't exist by default; buckets are entities that usually have lots of governance around them (tags, permissions, etc), so making it easy for someone to accidentally create one via a typo seems bad.\u00a0"
+        },
+        {
+            "created_at": "2022-03-10T01:03:07.341Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15892?focusedCommentId=17503930) by Jonny Fuller (mRWaffles):*\nWow thanks for following up so quickly team. I'm definitely with `[~willjones127]`. I would want to be very specific about creating buckets."
+        },
+        {
+            "created_at": "2022-03-10T03:10:11.961Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15892?focusedCommentId=17503967) by Weston Pace (westonpace):*\nI think this is one of those things that is just a bit leaky when you have a filesystem abstraction that covers both local and remote filesystems.  The flag I described above (don't create directories) ought to prevent any buckets from being created.  We could also add a configuration parameter to the S3FileSystem itself (e.g. \"safe mode\") that would error out if it were asked to create a bucket.  That would help if the user made a typo for example.  I think that probably belongs in a different JIRA so feel free to open."
+        },
+        {
+            "created_at": "2022-03-10T08:48:34.915Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15892?focusedCommentId=17504099) by Antoine Pitrou (apitrou):*\nHmm, I think adding a general S3 option is a good idea. I agree it may not make sense generally to allow implicit creation of buckets (but some S3-compatible backends may have different rules, so it should still be possible)."
+        },
+        {
+            "created_at": "2022-04-25T16:52:31.460Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15892?focusedCommentId=17527634) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 12701\n<https://github.com/apache/arrow/pull/12701>"
+        }
+    ]
+}

@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[R] R package fails to build/install: error in dyn.load()",
+        "body": "***Note**: This issue was originally created as [ARROW-5332](https://issues.apache.org/jira/browse/ARROW-5332). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSymptoms: R package appears to build but fails to load because it can't find libarrow.14 (with slight name variations per platform). On macOS, I see\u00a0\r\n```java\n\r\n# compiling compiling\r\ninstalling to /Users/enpiar/R/00LOCK-r/00new/arrow/libs\r\n** R\r\n** byte-compile and prepare package for lazy loading\r\n** help\r\n*** installing help indices\r\n** building package indices\r\n** testing if installed package can be loaded from temporary location\r\nError: package or namespace load failed for \u2018arrow\u2019 in dyn.load(file, DLLpath = DLLpath, ...):\r\nunable to load shared object '/Users/enpiar/R/00LOCK-r/00new/arrow/libs/arrow.so':\r\ndlopen(/Users/enpiar/R/00LOCK-r/00new/arrow/libs/arrow.so, 6): Library not loaded: @rpath/libarrow.14.dylib\r\nReferenced from: /Users/enpiar/R/00LOCK-r/00new/arrow/libs/arrow.so\r\nReason: image not found\r\nError: loading failed\r\nExecution halted\r\nERROR: loading failed\r\n* removing \u2018/Users/enpiar/R/arrow\u2019\n```\r\nThe sparklyr R package has also experienced this on Ubuntu:\u00a0\r\n```java\n\r\n** testing if installed package can be loaded from temporary location\r\nError: package or namespace load failed for 'arrow' in dyn.load(file, DLLpath = DLLpath, ...):\r\nunable to load shared object '/home/travis/R/Library/00LOCK-arrow/00new/arrow/libs/arrow.so':\r\nlibarrow.so.14: cannot open shared object file: No such file or directory\r\n```\r\nThis problem does not occur with the 0.13 release. I can `brew install apache-arrow` and then successfully install the R package; sparklyr on Travis tests 0.11, 0.13, and the latest of master branch of apache/arrow, and only the master branch fails.\u00a0\r\n\r\nAccording to sparklyr's build history on Travis, the last passing build with master branch of arrow was [April 5](https://travis-ci.org/rstudio/sparklyr/builds/516222934); the next build was on [April 22](https://travis-ci.org/rstudio/sparklyr/jobs/523326800)\u00a0and it failed. So something changed in that window, it seems.\u00a0\r\n\r\nThere's nothing obvious (to me) in the CMake or make output that would indicate an error in the C++ build.\r\n\r\nInterestingly, the R build on arrow's Travis-CI is not failing, so in addition to there apparently being some change that\u00a0broke both [how the R package recommends building](https://github.com/apache/arrow/blob/7a495e7800ed2f184da1d5ffc4efde7d6c4abcac/r/README.Rmd#L38-L43)\u00a0and [how sparklyr is building](https://github.com/rstudio/sparklyr/blob/master/ci/arrow-build.sh), there appears to be some [combination of flags](https://github.com/apache/arrow/blob/master/ci/travis_before_script_cpp.sh)\u00a0that does result in a successful build.\r\n\r\nBrowsing through patches that landed between April 5-22, three seemed like suspects, though I haven't yet tried bisecting the history to find out which commit exactly introduces the relevant change.\r\n\r\n\\*\u00a0<https://github.com/apache/arrow/commit/f014d76c68a9a977a19f87f7ea77511e4753bb8c>\r\n\r\n\\*\u00a0<https://github.com/apache/arrow/commit/d9f675328edb1be9fc63a753cf05e3b4e9024707>\r\n\r\n\\*\u00a0<https://github.com/apache/arrow/commit/76e1bc5dfb9d08e31eddd5cbcc0b1bab934da2c7>\r\n\r\ncc `[~romainfrancois]` `[~javierluraschi]`\r\n\r\n\u00a0",
+        "created_at": "2019-05-15T20:43:09.000Z",
+        "updated_at": "2019-05-24T22:28:33.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-05-24T22:14:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-05-15T21:20:10.857Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5332?focusedCommentId=16840776) by Neal Richardson (npr):*\nI've confirmed that\u00a0<https://github.com/apache/arrow/commit/76e1bc5dfb9d08e31eddd5cbcc0b1bab934da2c7>\u00a0introduces the issue; the previous commit\u00a0264dc56c93aeb52cda317a330a1a75234fc1fda5 builds successfully."
+        },
+        {
+            "created_at": "2019-05-15T21:55:53.346Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5332?focusedCommentId=16840809) by Neal Richardson (npr):*\nI've identified the single line that is the difference between success and failure:\u00a0<https://github.com/apache/arrow/commit/a44d1f553a3d1716dfafa7bb02753b8c4ed13d3f#diff-2816240325a8e9e6df50fb7c1faa8113R21>\r\n\r\nIf I check out\u00a076e1bc5dfb9d08e31eddd5cbcc0b1bab934da2c7 and add `-Wl,-rpath,/usr/local/lib` back to the PKG_LIBS line in Makevars.in, I get a successful installation locally on macOS. I'm not sure why that was removed, but maybe `[~romainfrancois]` recalls that commit.\u00a0\r\n\r\nI'll push up a branch and see if it breaks our Travis build, and I'll try to get a sparklyr build using my branch to confirm that it fixes the issue there too, and we can take it from there."
+        },
+        {
+            "created_at": "2019-05-24T22:14:08.192Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5332?focusedCommentId=16847930) by Kouhei Sutou (kou):*\nIssue resolved by pull request 4322\n<https://github.com/apache/arrow/pull/4322>"
+        }
+    ]
+}

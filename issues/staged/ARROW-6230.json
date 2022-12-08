@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[R] Reading in Parquet files are 20x slower than reading fst files in R",
+        "body": "***Note**: This issue was originally created as [ARROW-6230](https://issues.apache.org/jira/browse/ARROW-6230). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n**Problem**\r\n\r\nLoading any of the data I mentioned below is 20x slower than the fst format in R.\r\n\r\n\u00a0\r\n\r\n**How to get the data**\r\n\r\n<https://loanperformancedata.fanniemae.com/lppub/index.html>\r\n\r\nRegister and download any of these. I can't provide the data to you, and I think it's best you register.\r\n\r\n\u00a0\r\n\r\n![image-2019-08-14-10-04-56-834.png](https://issues.apache.org/jira/secure/attachment/12977542/image-2019-08-14-10-04-56-834.png)\r\n\r\n\u00a0\r\n\r\n**Code**\r\n\r\n\r\n```r\r\npath = \"data/Performance_2016Q4.txt\"\r\n\r\nlibrary(data.table)\r\n library(arrow)\r\n\r\na = data.table::fread(path, header = FALSE)\r\n\r\nfst::write_fst(a, \"data/a.fst\")\r\n\r\narrow::write_parquet(a, \"data/a.parquet\")\r\n\r\nrm(a); gc()\r\n\r\n#read in test\r\nsystem.time(a <- fst::read_fst(\"data/a.fst\")) # 4.61 seconds\r\n\r\nrm(a); gc()\r\n\r\nread in test\r\nsystem.time(a <- arrow::read_parquet(\"data/a.parquet\") # 99.19 seconds\r\n```",
+        "created_at": "2019-08-14T00:06:00.000Z",
+        "updated_at": "2019-08-15T16:18:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-15T16:18:03.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-08-14T02:39:43.387Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6230?focusedCommentId=16906812) by Wes McKinney (wesm):*\nThanks for the example. I'm interested to see where the time is being spent. Reading Parquet files is quite fast in Python so I'll see what the performance is there also. \r\n\r\nThere's some work going on for the current release (see ARROW-3772, ARROW-3325, ARROW-3246) that will enable direct writing of R factors to and from Parquet, so that could be a (no pun intended) factor in the results"
+        },
+        {
+            "created_at": "2019-08-14T03:07:51.085Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6230?focusedCommentId=16906825) by Wes McKinney (wesm):*\nFor the record this file takes on the same order of magnitude as fst to load and convert to pandas without any tuning of data types (e.g. converting things to factor/categorical)\r\n\r\n```Java\n\r\nIn [28]: %time table = pq.read_table('2016Q4.parquet')                                                                                                          \r\nCPU times: user 6.57 s, sys: 4.2 s, total: 10.8 s\r\nWall time: 2.05 s\r\n\r\nIn [29]: %time df = table.to_pandas()                                                                                                                           \r\nCPU times: user 2.37 s, sys: 2.11 s, total: 4.48 s\r\nWall time: 2.04 s\r\n```\r\n\r\nSo the performance issue is probably R specific. I'll build the R package tomorrow and see if I can diagnose the problem"
+        },
+        {
+            "created_at": "2019-08-14T03:08:31.557Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6230?focusedCommentId=16906826) by Wes McKinney (wesm):*\ncc `[~romainfrancois]` `[~npr]`"
+        },
+        {
+            "created_at": "2019-08-14T03:10:36.746Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6230?focusedCommentId=16906828) by Zhuo Jia Dai (xiaodai):*\nActually, I can't even read it in Python on the same machine\r\n\r\n\r\n```python\n\r\nimport pandas as pd\r\npd.read_parquet(\"~/a.parquet\")\r\n# Process finished with exit code 137 (interrupted by signal 9: SIGKILL)\r\n```\r\n"
+        },
+        {
+            "created_at": "2019-08-14T03:18:49.772Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6230?focusedCommentId=16906835) by Wes McKinney (wesm):*\nOh, you're running into https://issues.apache.org/jira/browse/ARROW-6060. If you downgrade to pyarrow==0.13.0 it should work"
+        },
+        {
+            "created_at": "2019-08-14T15:34:38.137Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6230?focusedCommentId=16907359) by Wes McKinney (wesm):*\nOn the master branch I have\r\n\r\n```Java\n\r\n> a <- data.table::fread(\"/home/wesm/data/fanniemae_loanperf/Performance_2016Q4.txt\", header=FALSE)\r\n|--------------------------------------------------|\r\n|==================================================|\r\n> fst::write_fst(a, \"/home/wesm/data/fanniemae_loanperf/2016Q4.fst\")\r\n> system.time(a <- fst::read_fst(\"/home/wesm/data/fanniemae_loanperf/2016Q4.fst\"))\r\n   user  system elapsed \r\n  8.174   2.866   2.969 \r\n> system.time(a <- arrow::read_parquet(\"/home/wesm/data/fanniemae_loanperf/2016Q4.parquet\"))\r\n   user  system elapsed \r\n  9.330   3.681   3.353 \r\n```\r\n\r\nThis is on a true 16-core system.\r\n\r\nThis suggests that you performance problem is being caused by memory thrashing related to ARROW-6060 \u2013 sorry about that, I would guess we'll have the 0.15.0 release out with that fixed within 6 weeks. \r\n\r\nperf report suggests there is certainly some optimization opportunity. \r\n\r\nhttps://gist.github.com/wesm/7b577f0ce7dfdf96fddfd91943c162e5"
+        },
+        {
+            "created_at": "2019-08-14T15:35:21.147Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6230?focusedCommentId=16907360) by Wes McKinney (wesm):*\nNote that the Parquet file is about 5x smaller than the fst file\r\n\r\n```Java\n\r\n-rw-r--r-- 1 wesm wesm  527777454 Aug 14 10:25 2016Q4.fst\r\n-rw-r--r-- 1 wesm wesm  119175882 Aug 13 22:03 2016Q4.parquet\r\n```"
+        },
+        {
+            "created_at": "2019-08-15T16:17:41.144Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6230?focusedCommentId=16908247) by Wes McKinney (wesm):*\nResolving for 0.15.0. If after 0.15.0 comes out there are performance or memory use problems please reopen this issue or open a new issue. Thanks!"
+        }
+    ]
+}

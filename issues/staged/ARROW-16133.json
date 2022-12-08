@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[R][Python] Convert python dataset to R dataset",
+        "body": "***Note**: This issue was originally created as [ARROW-16133](https://issues.apache.org/jira/browse/ARROW-16133). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi.\u00a0\r\n\r\nI can open an arrow dataset from R using reticulate, but I need to use that dataset further in R. How can I convert the Python arrow dataset to a R arrow dataset for further processing?\r\n```r\n\r\nreticulate::py_discover_config()\r\nreticulate::py_available(initialize = TRUE)\r\n\r\npd <- reticulate::import(\"pandas\", convert = FALSE)\r\nadlfs <- reticulate::import(\"adlfs\", convert = FALSE)\r\npa <- reticulate::import(\"pyarrow\", convert = FALSE)\r\npyds <- reticulate::import(\"pyarrow.dataset\", convert = FALSE)\r\npafs <- reticulate::import(\"pyarrow.filesystem\", convert = FALSE)\r\n\r\ndl_path = \"investmentaccountingdata/rawdata/transactions/transactions-xxx/v1.1\"\r\nformat_name <- \"transactions_transactions-xxx_v1.1\"\r\n\r\nconfig <- get_config()\r\ndatalake_secret <- config$get_datalake_secret()\r\n\r\naccount_name <- datalake_secret$storname\r\naccount_key <- datalake_secret$storkey\r\n\r\ndm_file_type <- dmfile_create_from_name(format_name = format_name)\r\nformat_all <- dpl_arrow_format_get(dm_file_type)\r\n\r\nfs = adlfs$AzureBlobFileSystem(account_name=account_name, account_key=account_key)\r\n\r\n# Works as expected\r\nfs$ls(\"/\")\r\n\r\nschema_file <- dpl_arrow_schema_get_dm(dm_file_type, all_char = TRUE, pyarrow = pa)\r\n\r\nds <- pyds$dataset(source = dl_path, filesystem=fs, partitioning=\"hive\", format=\"csv\", schema = schema_file)\r\n\r\n# This works as expected\r\nfiles <- ds$files\r\nfiles <- py_to_r(files)\r\n```",
+        "created_at": "2022-04-06T11:22:43.000Z",
+        "updated_at": "2022-09-30T17:51:23.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-04-11T15:26:18.732Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16133?focusedCommentId=17520644) by Dewey Dunnington (paleolimbot):*\nThat is a tricky one and I don't think that there is a good way to do this in the current implementation. I'm guessing that the larger-scale problem that you are trying to solve is that Azure Blob storage isn't implemented in the R bindings yet?\r\n\r\nSomething that you might be able to do as a workaround is (1) create a `Scanner` that does some initial filtering and pass a `RecordBatchReader` from Python to R.\r\n\r\n```R\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\nlibrary(reticulate)\r\n\r\nds_dir <- tempfile()\r\n\r\nmtcars %>% \r\n  group_by(gear) %>% \r\n  write_dataset(ds_dir)\r\n\r\npa <- reticulate::import(\"pyarrow\", convert = FALSE)\r\nds <- reticulate::import(\"pyarrow.dataset\", convert = FALSE)\r\npc <- reticulate::import(\"pyarrow.compute\", convert = FALSE)\r\nfs <- pa$fs$LocalFileSystem()\r\n\r\npy_ds <- ds$dataset(source = ds_dir, filesystem = fs, partitioning=\"hive\")\r\n\r\nrbr <- py_ds$scanner(filter = pc$equal(ds$field(\"gear\"), ds$scalar(5)))$to_reader()\r\narrow_rbr <- py_to_r(rbr)\r\n\r\narrow_rbr %>% \r\n  filter(mpg > 30) %>% \r\n  dplyr::collect()\r\n#> # A tibble: 1 \u00d7 11\r\n#>     mpg   cyl  disp    hp  drat    wt  qsec    vs    am  carb  gear\r\n#>   <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <int>\r\n#> 1  30.4     4  95.1   113  3.77  1.51  16.9     1     1     2     5\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-04-11T16:14:55.116Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16133?focusedCommentId=17520690) by Martin du Toit (martindut):*\nHi `[~paleolimbot]` , yes, Azure Blob storage isn't implemented in the R bindings yet, well not that I'm aware of.\r\n\r\nI will give your suggestion a go. Thanks"
+        },
+        {
+            "created_at": "2022-09-30T17:51:23.854Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16133?focusedCommentId=17611699) by Apache Arrow JIRA Bot (arrowjira):*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned per [project policy](https://arrow.apache.org/docs/dev/developers/bug_reports.html#issue-assignment). Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

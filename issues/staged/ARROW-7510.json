@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[C++] Array::null_count() is not thread-compatible",
+        "body": "***Note**: This issue was originally created as [ARROW-7510](https://issues.apache.org/jira/browse/ARROW-7510). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nArrayData has a mutable member null_count, that can be updated in a const function. However null_count is not atomic, so it's subject to data race.\r\n\r\n\u00a0\r\n\r\nI guess Arrays are not thread-safe (which is reasonable), but at least they should be thread-compatible so that concurrent access to const member functions are fine.\r\n\r\n(The race looks \"benign\", but see [1][2])\r\n\r\n<https://github.com/apache/arrow/blob/dbe708c7527a4aa6b63df7722cd57db4e0bd2dc7/cpp/src/arrow/array.cc#L123>\r\n\r\n\u00a0\r\n\r\n[1]<https://software.intel.com/en-us/blogs/2013/01/06/benign-data-races-what-could-possibly-go-wrong>\r\n\r\n[2]<https://bartoszmilewski.com/2014/10/25/dealing-with-benign-data-races-the-c-way/>",
+        "created_at": "2020-01-07T17:50:42.000Z",
+        "updated_at": "2020-01-14T22:27:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-01-14T22:27:53.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-01-07T18:03:52.066Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7510?focusedCommentId=17009941) by Francois Saint-Jacques (fsaintjacques):*\nIs this really an issue? Worst case, 2 threads compute the lazy null count and race to write the same value."
+        },
+        {
+            "created_at": "2020-01-07T18:17:59.025Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7510?focusedCommentId=17009948) by Zhuo Peng (brillsp):*\nYes. Please see the attached articles.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-01-11T20:32:32.170Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7510?focusedCommentId=17013568) by Antoine Pitrou (apitrou):*\nIf I understand correctly, it should be enough to use an atomic variable for `null_count`.\r\nProblem is, `ArrayData` doesn't abstract its members through accessors, so it's a slight API break."
+        },
+        {
+            "created_at": "2020-01-11T21:30:14.838Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7510?focusedCommentId=17013578) by Francois Saint-Jacques (fsaintjacques):*\nIt has an accessor GetNullCount, but the member is still public. It also makes ArrayData non-copyable with the current default. I checked the assembly with an atomic and the read path is unaffected."
+        },
+        {
+            "created_at": "2020-01-11T21:57:15.874Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7510?focusedCommentId=17013585) by Antoine Pitrou (apitrou):*\nWe could easily add a copy constructor if desired... but there's already a Copy() method IIRC."
+        },
+        {
+            "created_at": "2020-01-11T21:58:21.775Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7510?focusedCommentId=17013586) by Antoine Pitrou (apitrou):*\nAh, it seems we don't need an accessor, if https://en.cppreference.com/w/cpp/atomic/atomic/operator_T works implicitly."
+        },
+        {
+            "created_at": "2020-01-13T22:05:19.945Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7510?focusedCommentId=17014693) by Wes McKinney (wesm):*\nIt might seem heavy-handed but a process-global mutex used _only_ when setting the null count of an ArrayData would be simple to implement and the cases where it might cause a performance issue are esoteric"
+        },
+        {
+            "created_at": "2020-01-14T22:27:53.216Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7510?focusedCommentId=17015445) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 6184\n<https://github.com/apache/arrow/pull/6184>"
+        }
+    ]
+}

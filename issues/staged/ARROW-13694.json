@@ -1,0 +1,48 @@
+{
+    "issue": {
+        "title": "[R] Arrow filter crashes (R aborted session)",
+        "body": "***Note**: This issue was originally created as [ARROW-13694](https://issues.apache.org/jira/browse/ARROW-13694). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi,\r\n\r\n\u00a0\r\n\r\nI encounter a fatal error with the new version of Arrow R (5.0.0) that I did not have with its older version (4.0.1). Basically, after running \"open_dataset\", I filter and collect the data into a dataframe; then RStudio crashes :\r\n\r\n\u00a0\r\n```java\n\r\nds <- arrow::open_dataset(sources = \"XXXX\", partitioning = c(\"XX\",\"YY\",\"ZZ\"))\r\ndf<- ds %>%\r\n filter(year >= 2014 & year <= 2020 & type %in% c(\"XX\", \"YY\") & sector == \"ABC\" & identifier %in% list_identifiers & type == \"LE\" & val == \"M\") %>%\r\n select(period, obs_value) %>%\r\ncollect()\r\n```\r\n\u00a0\r\n\r\nIf I run the code above without \"filter\", I do not have any problem. I guess there is something wrong in the filtering expression.\r\n\r\n\u00a0\r\n\r\nUnfortunately, I cannot reproduce the exact code neither the problem. The dataset is very large and I did not understand the precise source of the error. Eveything I know is that my R Studio crashes and that this code worked perfectly in the older version of the package.\r\n\r\nAlso, please note that I disabled multithreading with :\r\n```java\n\r\noptions(arrow.use_threads = FALSE)\n```\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2021-08-23T13:57:45.000Z",
+        "updated_at": "2021-09-24T08:24:22.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-09-24T08:24:21.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-24T13:21:13.613Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13694?focusedCommentId=17403795) by Neal Richardson (npr):*\nIt will be hard for us to debug this if you can't isolate a reproducible example. Only other thing I can suggest is to try \r\n\r\n```Java\n\r\nset_cpu_count(1)\r\nset_io_thread_count(1)\r\n```\r\n\r\nIt seems there are other places that have separate multithreading controls. See if setting one of these makes the crash stop, that might give us a clue."
+        },
+        {
+            "created_at": "2021-08-24T15:24:02.528Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13694?focusedCommentId=17403873) by Pal (palgal):*\nMany thanks `[~npr]` for your prompt reply. I would be delighted if I could replicate the issue, but unfortunately the dataset I use is very large and I cannot share it.\r\n\r\nI tested with your settings, but it does not change and RStudio keeps crashing. If I isolate some filtering expressions, for instance, I only run\r\n\r\n\u00a0\r\n```java\n\r\ndf<- ds %>%\r\n filter(year >= 2014 & year <= 2020 & type %in% c(\"XX\", \"YY\") & type == \"LE\" & val == \"M\") %>%\r\n select(period, obs_value) %>%\r\ncollect()\n```\r\n\u00a0\r\n\r\nthis works without error. However, if add to the code\r\n```java\n\r\nidentifier %in% list_identifiers & sector %in% (list_sectors)\r\n```\r\nthen I have a crash. Please note that list_identifiers is a large list (approx. 168MB), but list_sectors it is not. With the version 4.0.1, the code run smoothly.\r\n\r\nIs there a way I can get the RStudio Log (I have a basic user account) ?\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-08-24T16:51:36.224Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13694?focusedCommentId=17403941) by Neal Richardson (npr):*\nWhen does it crash: when you call filter() or when you call collect()? Does it require both identifier %in% and sector %in% to crash (i.e. if you add one or the other it is fine, but it crashes with both)? \r\n\r\nAlso, it looks like you're running 32-bit R. Is there a reason you can't run the 64-bit R? I would guess that it works on 64-bit."
+        },
+        {
+            "created_at": "2021-08-25T07:37:59.348Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13694?focusedCommentId=17404254) by Pal (palgal):*\nMany thanks `[~npr]`.\r\n\r\nRegarding your first question on whether the crash occurs on filter or collect, it looks like that it happen when collect() is invoked. If I only run\r\n```java\n\r\ndf<- ds %>%\r\n filter(year >= 2014 & year <= 2020 & type %in% c(\"XX\", \"YY\") & type == \"LE\" & val == \"M\")\n```\r\nI do not have a crash. However, if I add collect(), then the crash occurs.\r\n\r\nOn your second point, the crash does not require both filtering expressions (identifier %in% or sector %in%). I've tested all combinations, with no change in behaviour.\r\n\r\n\u00a0\r\n\r\nConcerning your third point, I confirm you that I am running R 64bit as following :\r\n```java\n\r\n> Sys.info()[[\"machine\"]]\r\n\r\n[1] \"x86-64\"\r\n```\r\n\u00a0\r\n\r\nFinally, I've tested the same code and the same dataset on a Mac 64bit. I have no crash there.\r\n\r\nHere is what I found out in the Security and Maintenance Control Panel (after R/ RStudio crashes):\r\n```java\n\r\nFaulting Module Name : C:\\Users\\Public\\R\\4.0\\RPackages\\arrow\\libs\\x64\\arrow.dll\r\nException Code : 0xc0000005\r\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-08-26T01:04:41.230Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13694?focusedCommentId=17404817) by Weston Pace (westonpace):*\nPotentially related: ARROW-13761"
+        },
+        {
+            "created_at": "2021-08-26T07:00:30.244Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13694?focusedCommentId=17405004) by Pal (palgal):*\nThanks `[~westonpace]`. I can reproduce the issue described on [ARROW-13761](https://issues.apache.org/jira/browse/ARROW-13761)\r\n\r\nIt does crash on my Mac also, while the first issue only crashes on Windows (to the best of my knowledge)."
+        },
+        {
+            "created_at": "2021-08-30T05:42:19.812Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13694?focusedCommentId=17406570) by Pal (palgal):*\nAnyone who can help me to debug and solve this please ?"
+        },
+        {
+            "created_at": "2021-09-24T08:23:17.111Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13694?focusedCommentId=17419647) by Pal (palgal):*\nThe issue seems resolved in\u00a0ARROW-13761.\u00a0I do not encounter anymore the problem by installing the latest version of the package (nighly build Sept. 23rd, 2021). If I go back to its Cran version, then the fatal crash occurs. I guess that the issue is closed. Many thanks for the work done."
+        }
+    ]
+}

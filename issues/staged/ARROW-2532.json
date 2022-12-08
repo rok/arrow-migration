@@ -1,0 +1,44 @@
+{
+    "issue": {
+        "title": "[C++] Add chunked builder classes",
+        "body": "***Note**: This issue was originally created as [ARROW-2532](https://issues.apache.org/jira/browse/ARROW-2532). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI think it would be useful to have chunked builders for list, string and binary types. A chunked builder would produce a chunked array as output, circumventing the 32-bit offset limit of those types. There's some special-casing scatterred around our Numpy conversion routines right now.",
+        "created_at": "2018-05-01T16:47:03.000Z",
+        "updated_at": "2019-05-31T00:43:26.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2018-05-14T16:47:37.704Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2532?focusedCommentId=16474457) by Antoine Pitrou (apitrou):*\nSee PARQUET-1239 for an example where this comes up."
+        },
+        {
+            "created_at": "2018-12-12T10:12:01.391Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2532?focusedCommentId=16718728) by Antoine Pitrou (apitrou):*\n`[~wesmckinn]` I have been thinking about this a bit. I think there are several possible designs:\r\n\r\n1. An entirely duplicate class hierarchy and implementation. The main downside is obviously the development work, and later maintenance to try to keep the interfaces consistent as one of the hierarchies evolves.\n1. A refactor of the current ArrayBuilder classes to take a template type that implements either chunking or raising CapacityError. Very heavy in terms of implementation, but is conceptually \"clean\" and avoids code duplication.\n1. A set of \"heavy\" wrappers that redefine all overloads of `Append` and `AppendValues`, but delegate some of the work to an underlying ArrayBuilder.\n1. A set of \"light-weight\" wrappers that define templated `Append` and `AppendValues` methods that simply redirect to an underlying ArrayBuilder, but catch `CapacityError` to finalize the current chunk and try again.\n1. A set of \"very thin\" wrappers that only have a couple methods for space reservation. So `ChunkedBuilder::Reserve` would either reserve some space on the underlying ArrayBuilder, or finalize the current chunk and reserve space in the new chunk. Actual appending would need the user to call the underlying ArrayBuilder directly, taking care to sequence calls to the ChunkedBuilder and the ArrayBuilder carefully: you must first ask the ChunkedBuilder for space reservation, then append on the ArrayBuilder.\n   \n   The fifth approach is probably the most light-weight in terms of implementation. The main downside is it requires a bit more care from the user in how they interact with the two builders.\n   \n   Specialized implementations will be needed for binary, list and struct arrays, and I'm not sure what we can do for dictionary arrays.\n   \n   To make testing easier, we should ideally make the maximum chunk size parametrizable.\n"
+        },
+        {
+            "created_at": "2018-12-12T16:03:36.400Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2532?focusedCommentId=16719127) by Wes McKinney (wesm):*\nNot sure if this comment is prompted by my working on https://issues.apache.org/jira/browse/ARROW-3762 but I'm running into the need for this also.\r\n\r\nFor the time being, I have implemented very simple ChunkedBinaryBuilder, ChunkedStringBuilder for this: https://github.com/wesm/arrow/blob/ARROW-3762/cpp/src/arrow/columnar/builder_binary.h#L239 (I took the liberty of reorganizing the builder code a little bit). I think these count as Option 4 as you've listed them. I have made them internal for now so that we have the option to do something more involved as you are describing. \r\n\r\nMy plan this week is to do the bare minimum of work (which is already quite a lot) for now to resolve ARROW-3762 and ARROW-2970.\r\n\r\nWhat do you think we need beyond chunked builders for binary and string? There is also the issue of chunked fields in a struct, where the other fields have to be split up after the fact. "
+        },
+        {
+            "created_at": "2018-12-12T16:17:41.221Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2532?focusedCommentId=16719140) by Antoine Pitrou (apitrou):*\nThere are lists too. I think if we want to encourage use of chunked arrays, we may want chunked primitive builders too."
+        },
+        {
+            "created_at": "2018-12-12T16:26:12.846Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2532?focusedCommentId=16719148) by Wes McKinney (wesm):*\nLet's take a closer look after I get my patches up for those issues (as I've taken the butcher's blade to builder.h/builder\\*.cc).\r\n\r\nI think that introducing chunking into the base ArrayBuilder would introduce too much API complexity for simple use cases \u2013 so having as minimal-as-possible builders that produce single arrays is a good thing. I would say we should define the public API that we desire for chunked builders and work backwards to the most efficient and easiest-to-maintain (in terms of code duplication or lack thereof) implementation.\r\n\r\nI was surprised to see that the chunked binary builder I implemented outperformed the non-chunked benchmark on identical data (unless I made a mistake in the implementation). This suggests that we might want to use chunking more liberally in data ingest code (CSV, Parquet, etc.) \u2013 e.g. capping array chunks at 8-16MB or so."
+        },
+        {
+            "created_at": "2018-12-12T16:28:34.720Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2532?focusedCommentId=16719150) by Antoine Pitrou (apitrou):*\nYes, resizing data is not free, limiting chunk size to some application-specific heuristic makes sense."
+        },
+        {
+            "created_at": "2018-12-21T04:57:18.219Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2532?focusedCommentId=16726440) by Wes McKinney (wesm):*\nLooking at this a little bit. From a \"cleanness\" point of view I think we should explore option 2 a bit more thoroughly. If we introduced a \"growth strategy\" template argument then this could theoretically be done with good code reuse. \r\n\r\nThere are some questions like how to handle the differing output type. In the chunking case, its a vector of arrays. In the non-chunking case, it's a single array. So you'd have something like:\r\n\r\n```Java\n\r\nclass Int16Builder : public ArrayBuilder, public internal::NonChunkedBuilder<Int16Type> {\r\n public:\r\n  using _Impl = internal::NonChunkedBuilder<Int16Type>;\r\n\r\n  using _Impl::Append;\r\n  using _Impl::AppendValues;\r\n  // etc\r\n\r\n  // Implement the ArrayBuilder public API\r\n  Status Finish(std::shared_ptr<Array>* out) override;\r\n};\r\n```\r\n\r\nI've suffered enough from `extern template` visibility issues that I'd like to avoid going down that rabbit hole if it can be avoided\r\n\r\nObviously this is not urgent work \u2013 I place it in the bucket of future performance optimization (I would guess that chunking at the 16MB/32MB granularity will improve the performance of many applications)"
+        }
+    ]
+}

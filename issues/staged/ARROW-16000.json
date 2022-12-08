@@ -1,0 +1,105 @@
+{
+    "issue": {
+        "title": "[C++][Dataset] Support Latin-1 encoding",
+        "body": "***Note**: This issue was originally created as [ARROW-16000](https://issues.apache.org/jira/browse/ARROW-16000). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn ARROW-15992 a user is reporting issues with trying to read in files with Latin-1 encoding.\u00a0 I had a look through the docs for the Dataset API and I don't think this is currently supported.",
+        "created_at": "2022-03-22T11:02:15.000Z",
+        "updated_at": "2022-09-07T05:02:30.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-09-06T20:32:22.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-22T12:30:12.451Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17510462) by David Li (lidavidm):*\nAFAIK, support for encodings isn't done in C++ at all (the C++ CSV reader has no such option, nor does Datasets) - it's done in the bindings by providing a file object wrapper that converts the encoding on the fly (e.g. <https://github.com/apache/arrow/blob/778b1772fd20766e52b2bdccbd37668726f67e0c/r/src/io.cpp#L368-L374>). This works for reading individual files, but probably doesn't work so well for datasets\u2026I wonder if what we need is a filesystem wrapper that'll decode different encodings.\r\n\r\nOr I suppose we could just hardcode this into the CSV Datasets support."
+        },
+        {
+            "created_at": "2022-03-22T13:10:26.595Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17510484) by Nicola Crane (thisisnic):*\n`[~lidavidm]` OK, thanks for pointing this out; I've dug deeper into this and it looks like there's a function, `{}MakeReencodeInputStream{`}, in the R package which handles this for the single file CSV reading.\u00a0 Perhaps it might be possible to reuse that function for Datasets."
+        },
+        {
+            "created_at": "2022-07-15T15:03:10.652Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17567275) by Joost Hoozemans (joosthooz):*\nHi,\r\n\r\nI've come across a similar issue when using pyarrow.dataset on non-utf8 data. Using read_csv works, because a transcoding is performed on the fly using python codecs. But when using multi-file datasets, doing it that way would mean everything would have to go through a single python interpreter. And then it will still not work for other language bindings. Can we add transcoding on the C++ side?"
+        },
+        {
+            "created_at": "2022-07-15T18:17:07.979Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17567345) by David Li (lidavidm):*\n`[~westonpace]` `[~apitrou]` what do you think about (optionally?) depending on something like icu to support transcoding? It's a rather heavyweight dependency for just CSV, I suppose, but bindings at the Python/R layer mean we're subject to interop overhead and the interpreter lock."
+        },
+        {
+            "created_at": "2022-07-15T19:16:02.035Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17567364) by Antoine Pitrou (apitrou):*\nI would want to know first if there's actual contention due to the Python GIL and/or interpreter overhead.\r\n\r\nIn C++ the basic building block is `TransformInputStream`: https://arrow.apache.org/docs/cpp/api/io.html#transforming-input-wrapper , https://github.com/apache/arrow/blob/master/cpp/src/arrow/io/transform.h (sadly, it seems this lacks docstrings; my bad). It should be easy for a normally skilled C++ developer to use it to wrap their transcoding library of choice (some might want to use ICU, others libiconv, etc.).\r\n\r\nI think it would be ideal if we offered an optional header-only that would wrap ICU in a `TransformInputStream`, without actually requiring ICU to be present when compiling Arrow. Perhaps this can be through templates?\r\n\r\nAlso datasets needs to grow a dedicated configuration option to wrap all input streams, perhaps.\r\n"
+        },
+        {
+            "created_at": "2022-07-15T19:50:36.313Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17567372) by David Li (lidavidm):*\nSounds reasonable. Maybe we should implement the option in Python/R first, and based on that, see if we need to push it down further. I wonder if the option should be at the filesystems layer (probably not?), dataset layer (probably, maybe as part of CsvFileFormat or CsvFragmentReadOptions), or CSV options layer (possibly) though."
+        },
+        {
+            "created_at": "2022-07-15T19:51:21.533Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17567374) by David Li (lidavidm):*\nAh, but we're going to need some sort of C++ side hook to even make this possible."
+        },
+        {
+            "created_at": "2022-07-15T20:36:43.020Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17567384) by Antoine Pitrou (apitrou):*\nCsvFragmentReadOptions sounds like a reasonable place to me."
+        },
+        {
+            "created_at": "2022-07-18T17:16:29.534Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17568127) by Weston Pace (westonpace):*\nI agree with Antoine's suggestion of `CsvFragmentReadOptions`.  This is essentially the same problem we have with compression too right?  We can auto-detect compression based on the file extension but if the compression doesn't match the file extension (or the file extension doesn't indicate compression) we have no way of wrapping the stream with a decompression transform.  It sounds like this solution might solve both problems."
+        },
+        {
+            "created_at": "2022-07-18T18:23:32.963Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17568154) by David Li (lidavidm):*\nThe comparison to compression is a good one. I agree it seems reasonable to put it there too."
+        },
+        {
+            "created_at": "2022-07-20T13:02:19.970Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17569009) by Joost Hoozemans (joosthooz):*\nThanks everyone for the advice. What makes CsvFragmentScanOptions the preferred place over csv.ReadOptions? CsvFragmentScanOptions right now doesn't directly store any properties itself, it only carries a csv.ConvertOptions and csv.ReadOptions. And compression and encoding sound like properties of a whole file, not a fragment (although I don't know if that is what Fragment means here).\r\n\r\nWould it make sense as first attempt for me to add a TransformInputStream to CsvFragmentScanOptions or ReadOptions? Because then I can create 1 in python in the same way read_csv does it (with\u00a0MakeTransformInputStream, with a callback into en/decode functions in a python library). Then we can see if there is a performance problem. Then later we could add functionality that creates a TransformInputStream in c++ world with a callback to some external library as Antoine suggested"
+        },
+        {
+            "created_at": "2022-07-20T13:22:26.179Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17569018) by Antoine Pitrou (apitrou):*\nWhen using the CSV reader directly, no additional option is needed since you can pass whichever InputStream you want.\r\nIt's only with datasets that the user doesn't create the InputStream themselves, so some option must be made available to customize the stream wrapping strategy."
+        },
+        {
+            "created_at": "2022-07-20T13:47:09.915Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17569033) by Antoine Pitrou (apitrou):*\nSo to be clear, I'm suggesting something like this:\r\nhttps://gist.github.com/pitrou/2c99e971c01d324fdf72b632ffacae7d\r\n"
+        },
+        {
+            "created_at": "2022-07-20T19:28:54.729Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17569152) by Weston Pace (westonpace):*\nFor more context.  A `fragment` is a term introduced by the datasets API.  The goal of the datasets API is to read data in from a collection on independently scannable fragments (in practice, fragment usually equals file).\r\n\r\nThe scanning process has its own set of options, ScanOptions, (e.g. use_threads, batch size, projection, etc.) which are independent of the file format.  Each file reader has its own set of options (e.g. ReadOptions) and it's completely unaware of any dataset scanner.\r\n\r\nNow, pretend you want to scan a collection of CSV files with a custom delimiter (e.g. |).  It doesn't make sense for delimiter to be a property of scan options because it is specific to CSV.\r\n\r\nAs a result, we have ScanOptions::fragment_scan_options.  This is an interface that each format provides an implementation for, which can be provided for the scan.\r\n\r\nSo, to read a CSV file with a custom delimiter, you just create ParseOptions with the correct delimiter.  To read a dataset of CSV files with a custom delimiter you first create scan options for the scan itself, and then a ParseOptions with the custom delimiter, and then link them via ScanOptions::fragment_scan_options."
+        },
+        {
+            "created_at": "2022-07-20T19:30:34.030Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17569153) by Weston Pace (westonpace):*\nAlso, an arbitrary \"input stream transformation callback\" could also be a property of ScanOptions now that I think about it.  This might be more useful once we support scanning JSON files.  This could be used if the JSON files are compressed to add a decompressor to the stream."
+        },
+        {
+            "created_at": "2022-07-20T19:46:55.456Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17569157) by Antoine Pitrou (apitrou):*\nIdeally it could, except that a FileSource is suppose to provide a RandomAccessFile, not an InputStream. A transformation callback can only work for those file formats (CSV for the moment, JSON later on) that read files in a purely streaming manner."
+        },
+        {
+            "created_at": "2022-07-26T11:36:07.675Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17571364) by Joost Hoozemans (joosthooz):*\nHi all,\r\n\r\nWhile working on this I'm running into the following challenge: when creating a CsvFileFormat, the encoding is forced to utf8 by this line https://github.com/apache/arrow/blob/bbf249e056315af0a18d5c0834de9adef117a25f/python/pyarrow/_csv.pyx#L310\r\n\r\n>>> from pyarrow import dataset as ds\r\n>>> from pyarrow import csv as csv\r\n>>> f=ds.CsvFileFormat(read_options=csv.ReadOptions(encoding=\"cp1252\"), parse_options=csv.ParseOptions(delimiter='|'))\r\n>>> f.default_fragment_scan_options.read_options.encoding\r\n'utf8'\r\n\r\nSo when creating a dataset with that object, the code there does not know what encoding the user originally specified, and it cannot create the transform wrapper. Right now I'm working around this by just adding an additional 'encoding' parameter to dataset, but that is not a solution."
+        },
+        {
+            "created_at": "2022-07-26T11:43:38.517Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17571368) by Joost Hoozemans (joosthooz):*\nHi all,\r\n\r\nI opened a PR with some WIP changes, and would be happy to receive comments.\r\n\r\n<https://github.com/apache/arrow/pull/13709>\r\n\r\nOn the Python side, I don't know how to include some code from io.pxi into _dataset.pyx, so I duplicated some code there. It segfaults during this function <https://github.com/apache/arrow/pull/13709/files#diff-704d642afd62c0e9577833149c45e3c9df38a31fc0f478eee5b68b359a9075baR1257>\r\n\r\nDoes anyone have any tips for debugging Cython?"
+        },
+        {
+            "created_at": "2022-07-26T12:56:37.596Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17571402) by David Li (lidavidm):*\ngdb works for me as usual; you'll have to place breakpoints and such in the generated Cython code, but that's not too bad since the Cython compiler annotates the output with the corresponding source line. "
+        },
+        {
+            "created_at": "2022-07-26T13:01:52.177Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17571406) by David Li (lidavidm):*\nHmm, so CsvFileFormat stores only a C++ CCsvFileFormat and so there's no Python version of the ReadOptions to preserve the encoding. Not sure what a good way to fix that will be\u2026"
+        },
+        {
+            "created_at": "2022-07-28T20:09:21.325Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17572632) by Joost Hoozemans (joosthooz):*\nI pushed some code that works but still relies on that workaround, now I need a way of storing the encoding. Maybe I wrap something around the ReadOptions."
+        },
+        {
+            "created_at": "2022-09-06T20:32:22.223Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16000?focusedCommentId=17600970) by David Li (lidavidm):*\nIssue resolved by pull request 13820\n<https://github.com/apache/arrow/pull/13820>"
+        }
+    ]
+}

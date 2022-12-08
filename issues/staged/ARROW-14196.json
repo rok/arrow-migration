@@ -1,0 +1,65 @@
+{
+    "issue": {
+        "title": "[C++][Parquet] Default to compliant nested types in Parquet writer",
+        "body": "***Note**: This issue was originally created as [ARROW-14196](https://issues.apache.org/jira/browse/ARROW-14196). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn C++ there is already an option to get the \"compliant_nested_types\" (to have the list columns follow the Parquet specification), and ARROW-11497 exposed this option in Python.\r\n\r\nThis is still set to False by default, but in the source it says \"TODO: At some point we should flip this.\", and in ARROW-11497 there was also some discussion about what it would take to change the default.\r\n\r\ncc `[~emkornfield]` `[~apitrou]`\r\n\r\n",
+        "created_at": "2021-10-01T13:45:56.000Z",
+        "updated_at": "2022-11-15T20:56:56.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Parquet",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-10-01T14:05:53.308Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14196?focusedCommentId=17423302) by Joris Van den Bossche (jorisvandenbossche):*\nSome relevant quotes from the ARROW-11497:\r\n\r\n> [Micah] I think the main reason it isn't enabled by default is it breaks round trips for arrow data.  This could potentially be fixed on the reader side as well.  \r\n\r\n>> [Antoine] Perhaps we could convert the field name at the Arrow<->Parquet boundary.\r\n> [Micah] This should be possible but it potentially needs another flag.  I think in the short term plumbing the additional flag through to python makes sense and we can figure out a longer term solution if this becomes a larger problem.\r\n\r\n>> [Antoine] It should simply be the default (and obviously right) behaviour. Am I missing something?\r\n> [Micah] Backwards compatibility?  It might be possible to make some inferences (haven't thought about it deeply).  But I think if we were reading a conforming java produced parquet file then we would get different column names if we transformed on the border (maybe there can be some rules around Arrow metadata being present).  I think we can make the default to be conforming behavior, but we should give users some level of control to preserve the old behavior.\r\n\r\n\u2014\r\n\r\nI am not super familiar, but so the simplest option is to just switch the default of the `compliant_nested_types` option in ArrowWriterProperties. What would be the (possible backwards incompatible) consequences of that?  \r\nWe would start writing a different Parquet file (but actually following the spec). But I suppose that also when reading such a file, you would then get a different name for the sub-lists (which can impact selecting a sublist with a nested field reference?) \r\nTo avoid having a breaking change on the read path, we could by default also convert the names at the Parquet->Arrow boundary (like the `compliant_nested_types`  option already does on the Arrow->Parquet boundary). However, doing that can _also_ break code for people currently already reading compliant parquet files .."
+        },
+        {
+            "created_at": "2021-10-01T14:18:20.771Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14196?focusedCommentId=17423307) by Antoine Pitrou (apitrou):*\nOne possible investigation would be to write two different files, one with the option turned on, the other with the option turned off, and find out whether they are readable by 1) current version of Arrow 2) past versions of Arrow."
+        },
+        {
+            "created_at": "2021-10-01T14:31:39.944Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14196?focusedCommentId=17423310) by Joris Van den Bossche (jorisvandenbossche):*\nI wrote this with the latest pyarrow (master):\r\n\r\n```python\n\r\ntable = pa.table({'a': [[1, 2], [3, 4, 5]]})\r\npq.write_table(table, \"test_nested_noncompliant.parquet\")\r\npq.write_table(table, \"test_nested_compliant.parquet\", use_compliant_nested_type=True)\r\n```\r\n\r\nIn the latest pyarrow they both read fine, but so have different names (which can impact eg nested field refs):\r\n\r\n```python\n\r\n>>> pq.read_table(\"test_nested_noncompliant.parquet\")\r\npyarrow.Table\r\na: list<item: int64>\r\n  child 0, item: int64\r\n\r\n>>> pq.read_table(\"test_nested_compliant.parquet\")\r\npyarrow.Table\r\na: list<element: int64>\r\n  child 0, element: int64\r\n```\r\n\r\nSo eg doing `pq.read_table(\"test_nested_noncompliant.parquet\", columns=[\"a.list.item\"], use_legacy_dataset=True)` for works the noncompliant file, but doesn't select anything with the compliant file.\r\n\r\nThose files also read fine (and result in the same difference in list field names) with older versions of Arrow (tested down to Arrow 1.0). "
+        },
+        {
+            "created_at": "2021-10-01T15:01:07.953Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14196?focusedCommentId=17423323) by Antoine Pitrou (apitrou):*\nIs it really common to read only a list's child column without the list column itself? Otherwise we can live with the minor compatibility break, IMHO."
+        },
+        {
+            "created_at": "2021-10-01T15:01:48.060Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14196?focusedCommentId=17423324) by Antoine Pitrou (apitrou):*\nI'm also surprised that a non-existing column name wouldn't return an error instead of selecting nothing?"
+        },
+        {
+            "created_at": "2021-10-01T15:09:45.450Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14196?focusedCommentId=17423328) by Joris Van den Bossche (jorisvandenbossche):*\n> I'm also surprised that a non-existing column name wouldn't return an error instead of selecting nothing?\r\n\r\nWith the new datasets API, it actually raises an error if a column name is not found. With the legacy implementation (or the plain `ParquetFile` interface), it ignores those. \r\n(and I was using use_legacy_dataset=True because with Datasets we don't yet support selecting nested fields ..)"
+        },
+        {
+            "created_at": "2021-10-02T07:53:07.094Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14196?focusedCommentId=17423486) by Truc Lam Nguyen (trucnguyenlam):*\n[~judah.rand]\u00a0sorry that I don't really understand your comment, could you please explain a little bit more? thanks"
+        },
+        {
+            "created_at": "2021-10-08T03:37:31.570Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14196?focusedCommentId=17425933) by Micah Kornfield (emkornfield):*\nYeah, I think it is really only the name change that I'm concerned about.\u00a0 https://issues.apache.org/jira/browse/ARROW-13151\u00a0has another example where people where trying to reference things by path that was broken for other reasons.\r\n\r\n\u00a0\r\n\r\nA few item that don't really solve all cases but would make things better or at least adaptable to the long term:\r\n\r\n1.\u00a0 Add an option that translates \"compliant nest type\" name back to the arrow's naming schema.\r\n\r\n2.\u00a0 Make it possible to select columns by eliding the list name components.\r\n\r\n\u00a0\r\n\r\nAnother question that is dataset specific, is if one file was written with compliant nested types and one was not, and both where read in the same dataset are the results sane (schema's get unified?)"
+        },
+        {
+            "created_at": "2021-10-08T03:47:05.829Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14196?focusedCommentId=17425937) by Micah Kornfield (emkornfield):*\nI think similar to other default changes we have discussed, a very public advertisement of the intended change and consequences would be good.\u00a0 At some point we should just bite the bullet.\u00a0 I think with the first feature (take a compliant nested type and rename it on read) it would give users a temporary fallback."
+        },
+        {
+            "created_at": "2021-10-08T03:50:18.485Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14196?focusedCommentId=17425938) by Micah Kornfield (emkornfield):*\nAlso CC `[~jpivarski]` \u00a0on thoughts on how this might impact awkward arrays and ways to mitigate."
+        },
+        {
+            "created_at": "2021-10-08T12:51:50.045Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14196?focusedCommentId=17426167) by Jim Pivarski (jpivarski):*\nIf it's changing a default, I can just set the option explicitly, right?\n\nIf it's changing how columns are named in the file (currently \"fieldA.list.fieldB.list\", etc.), then that would require adjustment on my side, but it would be an adjustment that depends on how the file was written, not the pyarrow version, right? If so, I'd have to support both naming conventions because both would exist in the wild.\n\nIf there is a change that Awkward Array has to adjust to, then now may be a good time to do it because we're going to be rewriting the \"from_parquet\" function soon, as part of integrating with Dask\n\nhttps://github.com/ContinuumIO/dask-awkward\n\nadopting fsspec, and using pyarrow's Dataset API (to replace our manual implementation). If there's something that we can set to get the new behavior, we can turn that on now while developing the new version and be ready for the change."
+        },
+        {
+            "created_at": "2021-10-11T15:53:32.577Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14196?focusedCommentId=17427218) by Joris Van den Bossche (jorisvandenbossche):*\n> 2.  Make it possible to select columns by eliding the list name components.\r\n\r\nCurrently, I think the C++ API only deals with column indices? (at least for the Python bindings, the translation of column names to field indices happens in Python) For Python that should be relatively straightforward to implement. Opened ARROW-14286 for this. \r\n\r\n> If so, I'd have to support both naming conventions because both would exist in the wild.\r\n\r\n`[~jpivarski]` yes, but that's already the case right now as well. Parquet files written by (py)arrow will use a different name for the list element compared to parquet files written by other tools (that's actually what we are trying to harmonize). So if you select a subfield of a list field by name, you already need to take into account potentially different names at the moment. "
+        }
+    ]
+}

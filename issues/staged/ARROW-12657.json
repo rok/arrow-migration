@@ -1,0 +1,46 @@
+{
+    "issue": {
+        "title": "[C++][Python][Compute] String hex to numeric conversion and bit shifting",
+        "body": "***Note**: This issue was originally created as [ARROW-12657](https://issues.apache.org/jira/browse/ARROW-12657). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi Apache Arrow Community,\r\n\r\nthanks for the great work on this project - it is really a game changer. I've started to use it more frequently since more and more compute kernels became available.\r\n\r\nHowever, I have a current requirement which I can't fulfill, yet. More concretely, I have hex values as strings. I need to convert them to numeric type (int) and apply bit shifting.\r\n\r\nCurrently, I can't find a way to do so. I tried type casts (string to int) like\u00a0\r\n```java\n\r\nimport pyarrow as pa\r\n\r\narray = pa.array([\"0x2001591\", \"0x2000848\", \"0x2000123\"])\r\narray.cast(pa.uint32())\n```\r\nHowever this results in\u00a0_ArrowInvalid: Failed to parse string: '0x2000123' as a scalar of type uint32._\u00a0\r\n\r\nMoreover, I will need to apply bit shifting once converted. I'm not sure if there is anything comparable in the compute kernels, yet.\r\n\r\nThanks for any help in advance.\r\n\u00a0\r\n\u00a0",
+        "created_at": "2021-05-05T12:27:04.000Z",
+        "updated_at": "2021-09-16T10:12:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-09-16T10:12:13.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-26T20:56:38.747Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12657?focusedCommentId=17405462) by Eduardo Ponce (edponce):*\nGenerally, compute functions in Arrow perform a single type of operation. This request can be resolved via two independent compute functions:\r\n \\* Conversion of hex string to numeric output\r\n \\* Bit shifting of numeric input\r\n\r\nArrow already contains [compute functions for bit shifting numeric inputs](https://arrow.apache.org/docs/cpp/compute.html#bit-wise-functions), so only the hex conversion is missing. "
+        },
+        {
+            "created_at": "2021-08-26T21:45:19.212Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12657?focusedCommentId=17405482) by Eduardo Ponce (edponce):*\nThe inverse operation, commonly called **hex()** converts an integer into a hex string.\r\n\r\nThere are several things to consider for the hex-to-number conversion:\r\n Python/numpy use [type casting for hex conversion to integers](https://docs.python.org/3/library/functions.html#int). Only **int()** supports hex conversion, but not **int32()**, **int64()**, etc.\r\n```python\n\r\nint('0xa', base=16)      # 'base' option is mandatory\r\nint('0xA', base=16)      # case-insensitive\r\nint('a', base=16)        # '0x' is optional\r\nint('000000a', base=16)  # if '0x' is not given, any number of '0's to the left of the first non-zero value are ignored\r\nint('     a\\t', base=16) # left/right whitespace are ignored\r\n```\r\nR uses a [function for hex conversion](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/numeric)\r\n```r\n\r\nas.numeric('0xa')       # equivalently, as.integer('0xa')\r\nas.numeric('0XA')       # case-insensitive\r\nas.numeric('0xa')       # '0x' is mandatory, there is no 'base' option\r\nas.numeric('000000xa')  # Warning: returns NA. '0's to the left are not supported\r\nas.numeric('0xa')       # left/right whitespace are ignored\r\n```\r\nSQL uses a [conversion function for hex-to-number](https://www.w3schools.com/SQL/func_sqlserver_convert.asp)\r\n```sql\n\r\nSELECT CONVERT(int, 0xa)\r\nSELECT CONVERT(int, 0XA)     -- case-insensitive\r\nSELECT CONVERT(int, 0xa)     -- '0x' is mandatory, there is no 'base' option\r\nSELECT CONVERT(int, 0000xa)  -- Error. '0's to the left are not supported\r\nSELECT CONVERT(int, '0xa')   -- Error. Literal strings are not supported\r\n```"
+        },
+        {
+            "created_at": "2021-08-26T22:11:12.486Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12657?focusedCommentId=17405491) by Eduardo Ponce (edponce):*\nAlso, Arrow already supports some hex parsing support by [HexEncode](https://github.com/apache/arrow/blob/master/cpp/src/arrow/util/string.cc#L30) and [ParseHexValue in util/string.cc](https://github.com/apache/arrow/blob/master/cpp/src/arrow/util/string.cc#L76) (and [related PR](https://github.com/apache/arrow/pull/5993))."
+        },
+        {
+            "created_at": "2021-09-01T00:57:53.654Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12657?focusedCommentId=17407734) by William Malpica (wmalpica):*\nThe ParseHexValue function takes in only two char at time and outputs a uint_8. We could reuse this, but it gets fairly awkward if your string has an odd number of hex digits. I think it would be better to implement something more flexible"
+        },
+        {
+            "created_at": "2021-09-02T01:53:06.964Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12657?focusedCommentId=17408470) by Eduardo Ponce (edponce):*\nBased on the different hex formats supported by other tools, I would suggest to support case-insensitive (including '0x') and make it optional. The reason for making it optional is that the function name already states that it is a hex value, so forcing '0x' seems redundant but acceptable."
+        },
+        {
+            "created_at": "2021-09-02T02:35:38.589Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12657?focusedCommentId=17408488) by Eduardo Ponce (edponce):*\nAfter reviewing the PR, noticed that the string parsing is done along the unsigned parsing, so not having prefix of '0x' would require to first traverse the string and validate it as a hex string. Also, in addition to the implicit hex parsing, we could consider adding a kernel **hex_to_str** that would basically be a wrapper over this (but will need to check/add '0x'). This would allow hex values stored without the prefix be parsed correctly."
+        },
+        {
+            "created_at": "2021-09-16T10:12:13.597Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12657?focusedCommentId=17416029) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 11161\n<https://github.com/apache/arrow/pull/11161>"
+        }
+    ]
+}

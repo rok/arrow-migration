@@ -1,0 +1,197 @@
+{
+    "issue": {
+        "title": "[Python] Error casting decimal(38, 4) to int64",
+        "body": "***Note**: This issue was originally created as [ARROW-3329](https://issues.apache.org/jira/browse/ARROW-3329). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nGit issue LInk :\u00a0https://github.com/apache/arrow/issues/2627\r\n\r\nI want to cast pyarrow table column from decimal(38,4) to int64.\r\n\r\ncol.cast(pa.int64())\r\n\r\nError:\r\n File \"pyarrow/table.pxi\", line 443, in pyarrow.lib.Column.cast\r\n File \"pyarrow/error.pxi\", line 89, in pyarrow.lib.check_status\r\n pyarrow.lib.ArrowNotImplementedError: No cast implemented from decimal(38, 4) to int64\r\n\r\nPython version : 3.6.5\r\n Pyarrow version : 0.10.0\r\n\r\nis it not implemented yet or I am not using it correctly? If not implemented yet, then any work around to cast columns?",
+        "created_at": "2018-09-25T21:57:34.000Z",
+        "updated_at": "2020-07-06T15:22:28.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-04-23T15:29:57.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-09-27T00:37:52.417Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=16629576) by Diego Argueta (yiannisliodakis):*\nThis isn't a bug, it's a mathematical issue. Let me explain:\r\n\r\nTo store a number with X digits of precision (in base 10) you need a number with at least `log2(X)` bits in it.\r\n\r\nSo 38 digits of precision in base 10 requires `log2(38)` bits to represent in binary. `log2(38)` is a little under 127, meaning you need your storage to be at least 127 bits long to store a `decimal(38, 4)` losslessly. The error message isn't exactly the most helpful, but it _is_ correct. There's no way to cast a decimal of that size to a 64-bit integer.\r\n\r\nFor future reference, a 64-bit integer can hold at most 19 digits of precision."
+        },
+        {
+            "created_at": "2018-09-27T09:59:54.808Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=16630093) by Wes McKinney (wesm):*\nWell, we _could_ cast, and truncate values as we do with other downcasts"
+        },
+        {
+            "created_at": "2019-04-15T15:49:25.433Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=16818085) by AdrianC (AdiC):*\nSimilar issue occurs when casting from decimal(2,0) to decimal(10,2), from decimal(2,0) to string, from decimal(2,0) to int64, or from decimal(2,0) to float64. Precision should not be an issue in any of these cases.\r\n\r\nOccurs on python 2.7/ pyarrow 0.13"
+        },
+        {
+            "created_at": "2020-02-02T16:26:58.375Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17028473) by Jacek Pliszka (jacek.pliszka):*\nWould it be possible to implement at least easy corner cases?\r\n\r\ndecimal(N, 0) to int\r\n\r\ndecimal(P, S) to decimal(P-K, S-K) where K <= S\u00a0 with option of error if fractions are lost"
+        },
+        {
+            "created_at": "2020-02-04T20:46:33.398Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17030117) by Wes McKinney (wesm):*\nYou're welcome to contribute this, yes"
+        },
+        {
+            "created_at": "2020-02-11T21:20:28.335Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17034846) by Jacek Pliszka (jacek.pliszka):*\nI've started work but got stuck - posted question to dev arrow list.\r\n\r\ncasting from Decimal128 to Int64 otherwise seems simple enough."
+        },
+        {
+            "created_at": "2020-02-12T00:45:22.190Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17034951) by Jacek Pliszka (jacek.pliszka):*\nOK, I've resolved the issue but now arrived at probably the clue of the issues.\r\n\r\n\u00a0\r\n\r\nLooks like at lowest level casting kernel knows nothing about scale, am I reading it correctly?\r\n\r\n\u00a0\r\n\r\nSo either we need to pass scale there or apply it somewhere above. Is there any suggestion for that?\r\n\r\n\u00a0\r\n\r\nIf indeed scale is not know - maybe it can be passed in CastOptions?\r\n\r\n\u00a0Like\r\n\r\ndecimal_scale_shift\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-02-12T18:10:06.578Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17035562) by Jacek Pliszka (jacek.pliszka):*\nThe key question is whether CastFunctor in cast.cc has access to scale\r\nof the decimal? If yes how?\r\n\r\nIf not - these are the options I've came up with:\r\n\r\nLet's assume Decimal128Type value is n\r\n\r\nThen I expect that base call\r\n.cast('int64') will return overflow for n beyond int64 values, value otherwise\r\n\r\nOption 1:\r\n\r\n.cast('int64', decimal_scale=s) would calculate n/10\\*\\*s and return\r\noverflow if it is beyond int64, value otherwise\r\n\r\nOption 2:\r\n\r\n.cast('int64', bytes_group=0) would return n & 0x00000000FFFFFFFF\r\n.cast('int64', bytes_group=1) would return (n >> 64) & 0x00000000FFFFFFFF\r\n.cast('int64') would have default value bytes_group=0\r\n\r\nOption 3:\r\n\r\ncast has no CastOptions but we add multiply compute kernel and have\r\nsomething like this instead:\r\n\r\n.compute('multiply', 10\\*\\*-s).cast('int64')"
+        },
+        {
+            "created_at": "2020-02-12T20:38:39.898Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17035695) by Jacek Pliszka (jacek.pliszka):*\nInfo from Wes: there is information about scale, example is:\r\n\r\n\u00a0\r\n\r\n<https://github.com/apache/arrow/blob/220c43789fc0e2b6b623c30a18e5464ffa9f1e82/cpp/src/arrow/compute/kernels/cast.cc#L521>\r\n\r\n\u00a0\r\n\r\nAsked about rescaling anyway as it still may be of some use\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-02-14T20:13:49.437Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17037266) by Jacek Pliszka (jacek.pliszka):*\nRaised simple PR - all tests green but **continuous-integration/appveyor/pr** which did not start.\r\n\r\n\u00a0\r\n\r\nWhat to do?\r\n\r\n\u00a0\r\n\r\nSimple decimal -> decimal and decimal -> int64 were implemented.\r\n\r\n\u00a0\r\n\r\nThe one that is missing is some kind of raw cast that could be used instead of scaling..."
+        },
+        {
+            "created_at": "2020-02-14T20:31:44.726Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17037278) by Jacek Pliszka (jacek.pliszka):*\nOK, above was just for C++.\r\n\r\n\u00a0\r\n\r\nNow I would need some help in building Python. I am getting\r\n\r\n\u00a0\r\n\r\n```\r\n\r\nCMake Error at /usr/share/cmake/Modules/FindPackageHandleStandardArgs.cmake:146 (message):\r\n Could NOT find Arrow (missing: ARROW_INCLUDE_DIR ARROW_LIB_DIR\r\n ARROW_FULL_SO_VERSION ARROW_SO_VERSION)\r\n\r\n```\r\n\r\nThis is strange as I've just build arrow lib.. Do I need to set all these vars? How?\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-02-17T11:23:43.229Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17038265) by Wes McKinney (wesm):*\nHave you set `$ARROW_HOME` to the installed location of the C++ libraries? This is documented in https://github.com/apache/arrow/blob/master/docs/source/developers/python.rst"
+        },
+        {
+            "created_at": "2020-03-18T11:05:26.945Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17061625) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 6427\n<https://github.com/apache/arrow/pull/6427>"
+        },
+        {
+            "created_at": "2020-03-18T13:44:10.953Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17061737) by Jacek Pliszka (jacek.pliszka):*\nIt is resolved in C++.\r\n\r\nNow I need to work on Python part.\r\n\r\nThank you to your work! What is left of my contribution is now mostly braces. :)"
+        },
+        {
+            "created_at": "2020-03-25T18:15:57.505Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17066950) by Wes McKinney (wesm):*\n[~jacek.pliszka] do you think you'll be able to tackle this in the next week or less?"
+        },
+        {
+            "created_at": "2020-03-25T18:58:33.116Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17066990) by Antoine Pitrou (apitrou):*\nIt works here:\r\n```python\n\r\n>>> arr = pa.array([Decimal(\"1234\")], type=pa.decimal128(19,10))                                                                                             \r\n>>> arr                                                                                                                                                      \r\n<pyarrow.lib.Decimal128Array object at 0x7efbbeadea60>\r\n[\r\n  1234.0000000000\r\n]\r\n>>> arr.cast(pa.int16())                                                                                                                                     \r\n<pyarrow.lib.Int16Array object at 0x7efbbeadec20>\r\n[\r\n  1234\r\n]\r\n```\r\n\r\n[~jacek.pliszka] I assume you want to add some tests? Or is it something else?"
+        },
+        {
+            "created_at": "2020-03-25T19:07:13.577Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17066999) by Jacek Pliszka (jacek.pliszka):*\nOh, it works, great. \r\n\r\nSome tests would be good - unfortunately I am still not able to compile it.\r\n\r\nI've made some progress but it will take me some more time."
+        },
+        {
+            "created_at": "2020-03-25T19:13:13.818Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17067002) by Jacek Pliszka (jacek.pliszka):*\nWell, maybe we can close it - tests in C++ do conver all options.\r\n\r\nDo nulls work in Python as well? Options?"
+        },
+        {
+            "created_at": "2020-03-25T19:15:41.674Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17067004) by Antoine Pitrou (apitrou):*\n```python\n\r\n>>> arr = pa.array([Decimal(\"1234\"), None], type=pa.decimal128(19,10))                                                           \r\n>>> arr                                                                                                                          \r\n<pyarrow.lib.Decimal128Array object at 0x7efbbf54f520>\r\n[\r\n  1234.0000000000,\r\n  null\r\n]\r\n>>> arr.cast(pa.int16())                                                                                                         \r\n<pyarrow.lib.Int16Array object at 0x7efbc115d440>\r\n[\r\n  1234,\r\n  null\r\n]\r\n>>> arr.cast(pa.int8())                                                                                                          \r\nTraceback (most recent call last):\r\n  File \"<ipython-input-6-464d8b755a6a>\", line 1, in <module>\r\n    arr.cast(pa.int8())\r\n  File \"pyarrow/array.pxi\", line 674, in pyarrow.lib.Array.cast\r\n    check_status(Cast(_context(), self.ap[0], type.sp_type,\r\n  File \"pyarrow/error.pxi\", line 84, in pyarrow.lib.check_status\r\n    raise ArrowInvalid(message)\r\nArrowInvalid: Integer value out of bounds\r\n\r\n>>> arr.cast(pa.int8(), safe=False)                                                                                              \r\n<pyarrow.lib.Int8Array object at 0x7efbbe9d9b40>\r\n[\r\n  -46,\r\n  null\r\n]\r\n```\r\n"
+        },
+        {
+            "created_at": "2020-03-25T19:21:45.789Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17067012) by Wes McKinney (wesm):*\nI think we should have some basic \"it works\" tests at the Python level"
+        },
+        {
+            "created_at": "2020-03-25T19:23:08.866Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17067015) by Wes McKinney (wesm):*\n[~jacek.pliszka] can you show us what is going wrong when you are trying to follow the source build instructions in \r\n\r\nhttps://github.com/apache/arrow/blob/master/docs/source/developers/python.rst\r\n\r\n? Please be sure to clean out all temporary files from the git repository with `git clean -fdx .`"
+        },
+        {
+            "created_at": "2020-03-25T19:36:35.538Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17067041) by Jacek Pliszka (jacek.pliszka):*\nI will follow them again tommorrow."
+        },
+        {
+            "created_at": "2020-03-25T20:45:27.820Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17067081) by Wes McKinney (wesm):*\nThanks. It's our intention that these instructions work consistently if followed faithfully, so if something doesn't work for you it's important that we are able to debug it and fix the documentation. "
+        },
+        {
+            "created_at": "2020-03-26T07:48:52.289Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17067449) by Jacek Pliszka (jacek.pliszka):*\n1. I am Fedora pip user so I need to adjust some commands\n1. \u00a0this step <https://github.com/apache/arrow/blob/master/docs/source/developers/python.rst#environment-setup-and-build>\u00a0\u00a0 ends in arrow repo directory while this step <https://github.com/apache/arrow/blob/master/docs/source/developers/python.rst#using-pip> states \"Now, let's create a Python virtualenv with all Python dependencies in the same folder as the repositories and a target installation folder:\"\u00a0 going up to repos dir (above arrow) I end up with error on cmake - <PRE>CMake Error: The source directory \"/data/no_backup/git/arrow/cpp/build\" does not appear to contain CMakeLists.txt.\n    Specify --help for usage, or press the help button on the CMake GUI.</PRE>\u00a0 solution is to do cd .. but then pushd hierarchy possibly breaks\n1. After cd .. cmake works i assume this is enough for python parquet testing\n   ```java\n   \n   cmake -DCMAKE_INSTALL_PREFIX=$ARROW_HOME       -DCMAKE_INSTALL_LIBDIR=lib       -DARROW_FLIGHT=OFF       -DARROW_GANDIVA=OFF       -DARROW_ORC=OFF       -DARROW_WITH_BZ2=ON       -DARROW_WITH_ZLIB=ON       -DARROW_WITH_ZSTD=ON       -DARROW_WITH_LZ4=ON       -DARROW_WITH_SNAPPY=ON       -DARROW_WITH_BROTLI=ON       -DARROW_PARQUET=ON       -DARROW_PYTHON=ON       -DARROW_PLASMA=OFF       -DARROW_BUILD_TESTS=ON\n   \n   ```\n   Then make -j4 fails on\u00a0\n   ```java\n   \n   // In file included from /data/no_backup/git/arrow/cpp/src/arrow/ipc/json_integration.cc:29:\n   /data/no_backup/git/arrow/cpp/src/arrow/ipc/json_internal.h:26:10: fatal error: rapidjson/document.h: No such file or directory\n      26 | #include <rapidjson/document.h>      // IWYU pragma: export\n   \n   ```\n   installed rapidjson-devel rpm - then it worked\n   \n1. \u00a0After pushd arrow/python\n   ```java\n   \n   // python setup.py build_ext --inplace\n   ```\n   Fails with Could NOT find Arrow (missing: ARROW_FULL_SO_VERSION ARROW_SO_VERSION)\u00a0 I mentioned a month ago/ ARROW_HOME is set to the dist directory in repos (so next to arrow repo). Full error message\n   ```\n   \n   -- Build output directory: /data/no_backup/git/arrow/python/build/release\n   CMake Error at cmake_modules/FindArrow.cmake:359 (file):\n     file failed to open for reading (No such file or directory):    /data/no_backup/git/arrow/dist/include/arrow/util/config.h\n   Call Stack (most recent call first):\n     cmake_modules/FindArrowPython.cmake:46 (find_package)\n     CMakeLists.txt:210 (find_package)\n   CMake Error at /usr/share/cmake/Modules/FindPackageHandleStandardArgs.cmake:146 (message):\n     Could NOT find Arrow (missing: ARROW_FULL_SO_VERSION ARROW_SO_VERSION)\n     (found version \"0.0.0\")\n   Call Stack (most recent call first):\n     /usr/share/cmake/Modules/FindPackageHandleStandardArgs.cmake:393 (_FPHSA_FAILURE_MESSAGE)\n     cmake_modules/FindArrow.cmake:412 (find_package_handle_standard_args)\n     cmake_modules/FindArrowPython.cmake:46 (find_package)\n     CMakeLists.txt:210 (find_package)\n   -- Configuring incomplete, errors occurred!\n   See also \"/data/no_backup/git/arrow/python/CMakeFiles/CMakeOutput.log\".\n   See also \"/data/no_backup/git/arrow/python/CMakeFiles/CMakeError.log\".\n   error: command 'cmake' failed with exit status 1\n   ```\n   \n   Looks like it is looking in /data/no_backup/git/arrow/dist/include/arrow/util/config.h while config.h went to /data/no_backup/git/dist/include/arrow/util/config.h\n   \n   \u00a0\n   \n   Then I did ugly hack with ls -s\u00a0 and compiling went further\n   ```java\n   \n   -- Finished cmake for pyarrow\n   -- Running cmake --build for pyarrow\n   cmake --build . --config release --\n   Error: could not load cache\n   error: command 'cmake' failed with exit status 1\n   ```\n   \u00a0"
+        },
+        {
+            "created_at": "2020-03-26T16:07:11.796Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17067808) by Wes McKinney (wesm):*\nCan you please use the conda method? The virtualenv / pip method has not been actively maintained. "
+        },
+        {
+            "created_at": "2020-03-26T18:03:23.743Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17067909) by Jacek Pliszka (jacek.pliszka):*\nNot in the near future, sorry.\u00a0 I had some bad experience with conda and I can not afford breaking other things in the next weeks."
+        },
+        {
+            "created_at": "2020-03-26T22:11:12.684Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17068090) by Wes McKinney (wesm):*\nIt's easy and safe to install an isolated conda that does not impact your system\r\n\r\nInstall miniconda locally:\r\n\r\n```Java\n\r\nMINICONDA_URL=\"https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh\"\r\nwget -O miniconda.sh $MINICONDA_URL\r\nbash miniconda.sh -b -p $HOME/local-miniconda\r\nrm -f miniconda.sh\r\n```\r\n\r\nThen when you want to use conda in a bash/zsh terminal:\r\n\r\n```Java\n\r\n. $HOME/local-miniconda/etc/profile.d/conda.sh\r\n```\r\n\r\nThat's it. I ran these commands just now in a matter of seconds. Can be used without affecting any of your system packages. Then you should be able to follow the conda instructions in our documentation."
+        },
+        {
+            "created_at": "2020-03-27T13:20:56.422Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17068688) by Jacek Pliszka (jacek.pliszka):*\nOK, tried that but there are errors there too\r\n\r\n1 it also is inconsistent with pushd arrow\r\n\r\n2 pushd arrow/cpp/build before cmake should be without build\r\n1. libbz2 is missing even though it was not missing with pip\n   \n1. same error at the end\n   \n   python setup.py build_ext -~~inplace\n   \n   -~~ Running cmake --build for pyarrow\n    cmake --build . -~~config release -~~\n    Error: could not load cache\n    error: command 'cmake' failed with exit status 1"
+        },
+        {
+            "created_at": "2020-03-27T18:31:04.359Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17068969) by Wes McKinney (wesm):*\nYou need to clean temporary files out of the python/ directory with `git clean -fdx python`. This should be added to the documentation"
+        },
+        {
+            "created_at": "2020-03-28T15:57:36.962Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17069931) by Jacek Pliszka (jacek.pliszka):*\nBut at what point shall I do it ?\r\n\r\nRunning it at the end just prior to setup.py changes nothing in my case"
+        },
+        {
+            "created_at": "2020-03-30T17:09:25.806Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17071154) by Wes McKinney (wesm):*\nHere are the commands I use when building the Python library\r\n\r\n```Java\n\r\npushd $ARROW_ROOT/python\r\nrm -rf build/\r\npython setup.py build_ext --inplace\r\npopd\r\n```\r\n\r\nFor maximum reproducibility I've found it's best to remove `build/` before rebuilding.   "
+        },
+        {
+            "created_at": "2020-03-30T18:46:56.569Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17071203) by Jacek Pliszka (jacek.pliszka):*\nSame result - I believe I need some time to go slowly step by step.\r\n```java\n\r\n-- Finished cmake for pyarrow\r\n-- Running cmake --build for pyarrow\r\ncmake --build . --config release --\r\nError: could not load cache\r\nerror: command 'cmake' failed with exit status 1\r\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-03-30T22:58:42.287Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17071322) by Wes McKinney (wesm):*\nYou might try reproducing the issue in a Dockerfile or delete your Arrow clone and try from a fresh git clone. I'm not familiar with this error occurring unless there are CMakeCache.txt files leftover from failed build attempts. I'll give up trying to help more and will make sure the Python developer instructions are reviewed in the near future and perhaps provide a minimal Docker setup showing a from-scratch build using either the virtualenv strategy or conda strategy"
+        },
+        {
+            "created_at": "2020-03-31T18:34:22.577Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17072066) by Jacek Pliszka (jacek.pliszka):*\nI did start from fresh git clone. Thank you for help anyway. Good docker file would be great.\r\n\r\nWhat do we do with Python tests?\r\n\r\nFor me the most effective would be to add them in 0.17.1, alternative is to write them blindly and see Jenkins errors or to debug the above which would take most time but I will correct instructions too and maybe prepare docker file for Fedora."
+        },
+        {
+            "created_at": "2020-03-31T18:39:14.587Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17072070) by Antoine Pitrou (apitrou):*\nWe do have a docker-compose setup. For example:\r\n\r\n```bash\n\r\n$ docker-compose pull ubuntu-python\r\nPulling ubuntu-python ... done\r\n$ docker-compose run --rm ubuntu-python\r\n[...]\r\n```"
+        },
+        {
+            "created_at": "2020-03-31T22:20:02.784Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17072210) by Wes McKinney (wesm):*\nRight, the docker-compose setup would be a good way for you to develop locally since these tasks work 100% as we run them daily in CI. "
+        },
+        {
+            "created_at": "2020-04-01T20:57:42.864Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17073177) by Jacek Pliszka (jacek.pliszka):*\nTried. Unfortunately I am running Fedora 31 which has cgroups v2 so docker does not work without going back to v1. And podman-compose does not work as not all options are implemented...\r\n\r\nEither I will go back to debugging the original method or install Debian in virtual machine and then use docker."
+        },
+        {
+            "created_at": "2020-04-05T11:52:27.626Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17075802) by Jacek Pliszka (jacek.pliszka):*\nWith new instructions build works great so I can work on tests. Thank you."
+        },
+        {
+            "created_at": "2020-04-05T19:55:07.983Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17075915) by Jacek Pliszka (jacek.pliszka):*\nAdded python tests to my branch - waiting for tests to finish - when they are OK I will raise pull request.\r\n\r\n<https://github.com/JacekPliszka/arrow/tree/ARROW-3329>\r\n\r\n\u00a0\r\n\r\nHowever there are 3 issues left that I would like to postpone for later:\r\n\r\n- python cast does not distinguish between truncation and overflow \n- no overflow implemented for decimal to decimal cast\n- cast while constructing is still failing\n  \n  But overall I believe it works fine so I am for including it in 0.17.0 and fixing above later.\n  \n  \u00a0"
+        },
+        {
+            "created_at": "2020-04-06T12:55:52.840Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17076316) by Jacek Pliszka (jacek.pliszka):*\nPull request with Python tests https://github.com/apache/arrow/pull/6846"
+        },
+        {
+            "created_at": "2020-04-16T07:36:46.746Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17084624) by Jacek Pliszka (jacek.pliszka):*\nAny chance of getting the PR accepted?\u00a0 This is basically just 4 small fixes of other stuff to pass tests + Python unit tests."
+        },
+        {
+            "created_at": "2020-04-16T08:41:45.090Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17084669) by Antoine Pitrou (apitrou):*\nSorry, we've been busy with the release process lately. I'll take a look soon."
+        },
+        {
+            "created_at": "2020-04-16T08:45:18.668Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17084671) by Jacek Pliszka (jacek.pliszka):*\nThanks. I forgot to add there are 2 FIXME - one is related to inconsistent exception returned and the other to missing Decimal overflow handling.\r\n\r\nBoth things should be fixed elsewhere, I believe."
+        },
+        {
+            "created_at": "2020-04-23T15:29:57.824Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17090698) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 6846\n<https://github.com/apache/arrow/pull/6846>"
+        },
+        {
+            "created_at": "2020-04-23T15:32:12.259Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3329?focusedCommentId=17090700) by Antoine Pitrou (apitrou):*\nThank you [~jacek.pliszka] for doing this. The PR unexpected uncovered two issues: ARROW-8567 and ARROW-8568."
+        }
+    ]
+}

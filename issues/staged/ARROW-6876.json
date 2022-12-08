@@ -1,0 +1,77 @@
+{
+    "issue": {
+        "title": "[Python] Reading parquet file with many columns becomes slow for 0.15.0",
+        "body": "***Note**: This issue was originally created as [ARROW-6876](https://issues.apache.org/jira/browse/ARROW-6876). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi,\r\n\r\n\u00a0\r\n\r\nI just noticed that reading a parquet file becomes really slow after I upgraded to 0.15.0 when using pandas.\r\n\r\n\u00a0\r\n\r\nExample:\r\n\r\n**With 0.14.1**\r\n In [4]: %timeit df = pd.read_parquet(path)\r\n 2.02 s \u00b1 47.5 ms per loop (mean \u00b1 std. dev. of 7 runs, 1 loop each)\r\n\r\n**With 0.15.0**\r\n In [5]: %timeit df = pd.read_parquet(path)\r\n 22.9 s \u00b1 478 ms per loop (mean \u00b1 std. dev. of 7 runs, 1 loop each)\r\n\r\n\u00a0\r\n\r\nThe file is about 15MB in size. I am testing on the same machine using the same version of python and pandas.\r\n\r\n\u00a0\r\n\r\nHave you received similar complain? What could be the issue here?\r\n\r\n\u00a0\r\n\r\nThanks a lot.\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\nEdit1:\r\n\r\nSome profiling I did:\r\n\r\n0.14.1:\r\n\r\n![image-2019-10-14-18-12-07-652.png](https://issues.apache.org/jira/secure/attachment/12982982/image-2019-10-14-18-12-07-652.png)\r\n\r\n\u00a0\r\n\r\n0.15.0:\r\n\r\n![image-2019-10-14-18-10-42-850.png](https://issues.apache.org/jira/secure/attachment/12982981/image-2019-10-14-18-10-42-850.png)\r\n\r\n\u00a0",
+        "created_at": "2019-10-14T17:07:38.000Z",
+        "updated_at": "2019-11-28T09:36:14.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-10-16T17:59:15.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-14T17:12:03.343Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6876?focusedCommentId=16951164) by Joris Van den Bossche (jorisvandenbossche):*\nThanks for the report. Would you be able to share a script that reproduces it (that writes a parquet file that has the issue, or otherwise share a file)? \r\nWhat's the schema of the data?"
+        },
+        {
+            "created_at": "2019-10-14T17:15:21.491Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6876?focusedCommentId=16951168) by Bob (dorafmon):*\n`[~jorisvandenbossche]` \u00a0sorry I cannot share the data with you because they contain our IP. Something I can share with is:\r\n\r\n\u00a0\r\n\r\nIn [6]: df.shape\r\nOut[6]: (61, 31835)\r\n\r\n\u00a0\r\n\r\nAll fields are just pain floats, I believe you can create a dataframe just like this with no difficulties?\r\n\r\n\u00a0\r\n\r\nOne thing to note is that in our dataframe we use multilevel columns. But I suppose that is not an issue?\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-10-14T17:17:27.551Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6876?focusedCommentId=16951172) by Bob (dorafmon):*\n`[~jorisvandenbossche]` \u00a0seems you guys started calling this function which caused the issue:\r\n\r\n\u00a0\r\n\r\n<https://github.com/apache/arrow/blob/master/python/pyarrow/_parquet.pyx#L1118>"
+        },
+        {
+            "created_at": "2019-10-14T17:21:57.701Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6876?focusedCommentId=16951175) by Joris Van den Bossche (jorisvandenbossche):*\nThanks, if it is just floats, I'll try to reproduce based on that description. But it's probably related to the fact that you have a very wide dataframe (n columns >> n rows). In general, the parquet is not very suited for that kind of data (also in 0.14 the 2 seconds to read is very slow). But that said, it's still a performance regression compared to 0.14 that is worth looking into."
+        },
+        {
+            "created_at": "2019-10-14T17:24:41.427Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6876?focusedCommentId=16951176) by Bob (dorafmon):*\n`[~jorisvandenbossche]` \u00a0thanks. let me know if I can help. We are very special in this case I think, Also I am not sure if the multilevel columns thing adds any complexity \u2013 seems parquet do not handle this very well?"
+        },
+        {
+            "created_at": "2019-10-14T17:25:49.083Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6876?focusedCommentId=16951177) by Bob (dorafmon):*\nI also tried fastparquet as an engine and it just thrown an error to me when reading the file.. Seems it just cannot decode the file."
+        },
+        {
+            "created_at": "2019-10-14T18:12:16.244Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6876?focusedCommentId=16951214) by Joris Van den Bossche (jorisvandenbossche):*\nSmall reproducer:\r\n\r\n```Java\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq \r\ntable = pa.table({'c' + str(i): np.random.randn(10) for i in range(10000)})  \r\npq.write_table(table, \"test_wide.parquet\")\r\nres = pq.read_table(\"test_wide.parquet\")\r\n```"
+        },
+        {
+            "created_at": "2019-10-14T20:37:18.440Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6876?focusedCommentId=16951339) by Wes McKinney (wesm):*\nMarked this for 0.15.1"
+        },
+        {
+            "created_at": "2019-10-16T17:59:15.260Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6876?focusedCommentId=16953057) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 5653\n<https://github.com/apache/arrow/pull/5653>"
+        },
+        {
+            "created_at": "2019-11-26T14:20:53.304Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6876?focusedCommentId=16982524) by Axel (axelg):*\nHi, I am still experiencing some very slow load times with version 0.15.1.\r\n\r\nWith the reproducer above:\r\n\r\n`0.14.1:`\r\n`282 ms \u00b1 10.3 ms per loop (mean \u00b1 std. dev. of 7 runs, 1 loop each)`\r\n\r\n`0.15.1`\r\n\r\n`5.06 s \u00b1 288 ms per loop (mean \u00b1 std. dev. of 7 runs, 1 loop each)`\r\n\r\n\u00a0\r\n\r\nFrom reading the github issue, I expected it to be slower than 0.14.1 but not by this much."
+        },
+        {
+            "created_at": "2019-11-27T14:29:34.348Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6876?focusedCommentId=16983565) by Joris Van den Bossche (jorisvandenbossche):*\n`[~axelg]` would you be able to share a reproducible example ? (eg the data, or code that creates a dummy dataset with the same characteristics that shows the problem)"
+        },
+        {
+            "created_at": "2019-11-27T14:31:39.603Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6876?focusedCommentId=16983575) by Axel (axelg):*\nSure! For the numbers above I used the exact same example you posted above.\r\n\r\n\r\nimport pyarrow as paimport pyarrow.parquet as pq \r\ntable = pa.table({'c' + str(i): np.random.randn(10) for i in range(10000)})  \r\npq.write_table(table, \"test_wide.parquet\")\r\nres = pq.read_table(\"test_wide.parquet\")\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-11-27T14:50:17.109Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6876?focusedCommentId=16983593) by Joris Van den Bossche (jorisvandenbossche):*\nAh, sorry, missed the \"With the reproducer above:\" in your message. \r\n\r\nI see a similar difference locally, it's indeed not the speed-up that `[~wesm]` reported on the PR: https://github.com/apache/arrow/pull/5653#issuecomment-541901845 (this might depend on the machine / number of cores ?)"
+        },
+        {
+            "created_at": "2019-11-27T17:10:46.635Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6876?focusedCommentId=16983719) by Wes McKinney (wesm):*\nI think there is another JIRA for follow up investigation, can we move the discussion there? "
+        },
+        {
+            "created_at": "2019-11-28T09:35:33.767Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6876?focusedCommentId=16984268) by Joris Van den Bossche (jorisvandenbossche):*\nThe open issue about this is ARROW-7059"
+        }
+    ]
+}

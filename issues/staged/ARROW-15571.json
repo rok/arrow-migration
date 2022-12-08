@@ -1,0 +1,96 @@
+{
+    "issue": {
+        "title": "[C++] Add min/max binary scalar kernels to execution engine",
+        "body": "***Note**: This issue was originally created as [ARROW-15571](https://issues.apache.org/jira/browse/ARROW-15571). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe list of execution engine's binary scalar kernels currently available in `cpp/src/arrow/compute/kernels/scalar_arithmetic.cc` does not cover the common minimum and maximum functions.",
+        "created_at": "2022-02-04T15:26:48.000Z",
+        "updated_at": "2022-05-12T20:42:48.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-04T15:47:24.281Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17487142) by Rok Mihevc (rokm):*\nMin and max are covered in https://github.com/apache/arrow/blob/master/cpp/src/arrow/compute/kernels/aggregate_basic.cc and square root can be done with power to 0.5 https://github.com/apache/arrow/blob/master/cpp/src/arrow/compute/kernels/scalar_arithmetic.cc#L445."
+        },
+        {
+            "created_at": "2022-02-04T15:48:28.323Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17487143) by David Li (lidavidm):*\nMin/max are available as aggregations: <https://arrow.apache.org/docs/dev/cpp/compute.html#aggregations> and there are also element-wise min/max: <https://arrow.apache.org/docs/dev/cpp/compute.html#comparisons>\r\n\r\nSquare root is indeed not available, though power is: <https://arrow.apache.org/docs/dev/cpp/compute.html#arithmetic-functions> (presumably, a dedicated sqrt would be faster, though)"
+        },
+        {
+            "created_at": "2022-02-04T16:22:24.168Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17487158) by Yaron Gvili (rtpsw):*\nSorry, I should have been cleared in the title that I'm referring to floating point scalars. Are the aggregate operations good for operating on floating point scalars, rather than arrays? Is power good for operating on floating points, rather than integers? I'm relatively new to Arrow, so I may have missed a couple of things."
+        },
+        {
+            "created_at": "2022-02-04T16:24:57.153Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17487164) by David Li (lidavidm):*\nLooking at the PR you're looking for a row-wise min/max? In which case that is implemented on floating point values, yes. (It will also work given scalar values.)\r\n\r\nPower also works on floating point values."
+        },
+        {
+            "created_at": "2022-02-04T16:51:39.670Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17487181) by Yaron Gvili (rtpsw):*\nOK regarding power working on floating point values. This [SO](https://stackoverflow.com/questions/17417490/difference-between-sqrtx-and-powx-0-5) suggests sqrt(x ) would be faster and a bit more accurate than pow(x, 0.5), so there is room for a sqrt operation.\r\n\r\nRegarding my goal, it is to apply the operations to a single column with best performance in Arrow. Here's an example for how I'm currently invoking the code in my PR:\r\n\r\n\u00a0\r\n```java\n\r\nProjectNodeOptions(\r\n  \u00a0 {call(\"minimum\",\r\n  \u00a0 \u00a0 \u00a0 {call(\"maximum\",\r\n  \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 {call(\"square_root\",\r\n  \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 {field_ref(\"column_0\")}),\r\n  \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 literal(low_threshold)}),\r\n  \u00a0 \u00a0 \u00a0 literal(high_threshold)})},\r\n  \u00a0 {\"result_0\"})\n```\r\nNote that the above is `using namespace arrow::compute` and that \"column_0\" is of type double. How should I achieve the same functionality with the existing operations? If the solution involves aggregate operations, do they provide best performance, as compared to (the missing) scalar operations?\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-02-04T17:14:24.822Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17487186) by Rok Mihevc (rokm):*\nIn pyarrow 7.0.0 that would be something like this? :\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.compute as pc\r\n\r\nlow_threshold = 1\r\nhigh_threshold = 3\r\n\r\narr = pa.array([1, 2, 3])\r\npc.min_element_wise(pc.max_element_wise(pc.power(arr, 0.5), low_threshold), high_threshold)\r\n```\r\n<pyarrow.lib.DoubleArray object at 0x126795a00>\r\n[\r\n1,\r\n1.4142135623730951,\r\n1.7320508075688772\r\n]\r\n\r\n\u00a0\r\n\r\nPlease note these are element-wise min-max ops not aggregate ones."
+        },
+        {
+            "created_at": "2022-02-04T17:44:23.053Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17487199) by Yaron Gvili (rtpsw):*\nThe code seems reasonable for a Python setting, but I'm targeting the C++ execution engine (specifically, projection using an expression), and would like to get best performance. My guess is scalar operations are faster than aggregate ones for scalar use cases of the kind I described. Otherwise, it's not clear to me why some operation, such as Add, is implemented as both a scalar and an aggregate one."
+        },
+        {
+            "created_at": "2022-02-04T17:54:37.523Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17487204) by David Li (lidavidm):*\nI think we're missing some terminology here.\r\n\r\nNote the Python functions are the exact same as the C++ ones. Rok's example can be translated to C++ and they both use the same implementation under the hood.\r\n\r\nScalar functions operate on array and scalar values. \"Scalar\" just means that they operate elementwise.\r\n\r\nAggregate functions reduce multiple values to one. It seems they are not what you are looking for here. However, again, note that min/max both have aggregate versions (min(array) -> scalar) and scalar versions (min(array, array) -> array or min(scalar, array) -> array or ...). So I think Rok's suggestion is what you are looking for.\r\n\r\nIf performance is not up to par in benchmarks, then there is opportunity to optimize. (The scalar min/max kernels do some extra work because they take any number of arguments, for instance - though I don't recall if they have specializations for binary inputs.)"
+        },
+        {
+            "created_at": "2022-02-04T17:55:00.730Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17487207) by Rok Mihevc (rokm):*\nPython maps directly to c++ kernels here and it's less verbose.\r\n\r\nPerhaps take a look at <https://github.com/apache/arrow/blob/master/cpp/src/arrow/compute/kernels/scalar_compare_test.cc#L1228> and <https://github.com/apache/arrow/blob/master/cpp/src/arrow/compute/kernels/scalar_arithmetic_test.cc#L932> to get c++ implementation start."
+        },
+        {
+            "created_at": "2022-02-04T18:15:51.954Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17487214) by Yaron Gvili (rtpsw):*\nOK, I'll try to set up and report back on a benchmark comparing the suggested operations and the ones in my PR."
+        },
+        {
+            "created_at": "2022-02-05T21:01:49.486Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17487559) by Yaron Gvili (rtpsw):*\nRunning the benchmark code below on my CPU \"Intel(R) Core(TM) i7-10875H CPU @ 2.30GHz\" showed the minimum/maximum operations in my PR are faster when operating on a single array/column. For an array of size 1M the speed-up factor was ~1.5 and even higher for shorter arrays.\r\n\r\n\u00a0\r\n```java\n\r\n#include <iostream>\r\n#include <chrono>\r\n\r\n#include <arrow/api.h>\r\n#include <arrow/compare.h>\r\n#include <arrow/datum.h>\r\n#include <arrow/compute/api.h>\r\n\r\nuint64_t get_time() {\r\n\u00a0 return std::chrono::high_resolution_clock::now().time_since_epoch().count();\r\n}\r\n\r\narrow::Status RunMain(int argc, char **argv) {\r\n\u00a0 constexpr int n = 1000000;\r\n\u00a0 arrow::DoubleBuilder builder;\r\n\u00a0 builder.Reserve(n);\r\n\u00a0 for (int i=0; i<n; i++) {\r\n\u00a0 \u00a0 builder.UnsafeAppend(1.0*i/n);\r\n\u00a0 }\r\n\u00a0 auto maybe_array = builder.Finish();\r\n\u00a0 if (!maybe_array.ok()) {\r\n\u00a0 \u00a0 return arrow::Status::Invalid(\"array building failed\");\r\n\u00a0 }\r\n\u00a0 std::shared_ptr<arrow::Array> array = *maybe_array;\r\n\u00a0 std::shared_ptr<arrow::Scalar> low_threshold = std::make_shared<arrow::DoubleScalar>(0.1);\r\n\u00a0 std::shared_ptr<arrow::Scalar> high_threshold = std::make_shared<arrow::DoubleScalar>(0.8);\r\n\r\n\u00a0 uint64_t t;\r\n\r\n \u00a0t = get_time();\r\n\u00a0 ARROW_ASSIGN_OR_RAISE(arrow::Datum max0, arrow::compute::CallFunction(\"max_element_wise\", {array, low_threshold}));\r\n\u00a0 ARROW_ASSIGN_OR_RAISE(arrow::Datum min0, arrow::compute::CallFunction(\"min_element_wise\", {max0, high_threshold}));\r\n\u00a0 uint64_t t0 = get_time() - t;\r\n\r\n  t = get_time();\r\n\u00a0 ARROW_ASSIGN_OR_RAISE(arrow::Datum max1, arrow::compute::CallFunction(\"maximum\", {array, low_threshold}));\r\n\u00a0 ARROW_ASSIGN_OR_RAISE(arrow::Datum min1, arrow::compute::CallFunction(\"minimum\", {max1, high_threshold}));\r\n\u00a0 uint64_t t1 = get_time() - t;\r\n\r\n\u00a0 if (!arrow::ArrayEquals(*min0.make_array(), *min1.make_array())) {\r\n\u00a0 \u00a0 return arrow::Status::Invalid(\"result arrays are not equal\");\r\n\u00a0 }\r\n\u00a0 std::cout << \"timing: \" << t0 << \" vs \" << t1 << \" (speed-up factor \" << (1.0 * t0 / t1) << \")\" << std::endl;\r\n\r\n\u00a0 return arrow::Status::OK();\r\n}\u00a0\r\n\u00a0\u00a0\r\nint main(int argc, char **argv) {\r\n\u00a0 arrow::Status st = RunMain(argc, argv);\r\n\u00a0 if (!st.ok()) {\r\n\u00a0 \u00a0 std::cerr << st << std::endl;\r\n\u00a0 \u00a0 return 1;\r\n\u00a0 }\r\n\u00a0 return 0;\r\n} \n```\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-02-05T21:07:32.824Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17487561) by David Li (lidavidm):*\nThanks for the code. That's not surprising, considering the elementwise min/max are variadic (and don't really specialize any cases). We could dispatch to the specialized case for when we have only two arguments, though (and we could add this benchmark to the upstream benchmarks to track the improvement)."
+        },
+        {
+            "created_at": "2022-02-05T21:12:27.930Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17487562) by Yaron Gvili (rtpsw):*\nA [comment in the PR](https://github.com/apache/arrow/pull/12338#issuecomment-1030529616) reports on a benchmark showing sqrt(x ) being much faster than pow(x, 0.5)."
+        },
+        {
+            "created_at": "2022-02-05T21:13:36.435Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17487565) by David Li (lidavidm):*\nThat also makes a lot of sense! We should definitely have sqrt."
+        },
+        {
+            "created_at": "2022-02-05T21:21:29.154Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17487569) by Yaron Gvili (rtpsw):*\nSounds good. Please advise on what I should add to the PR, like what to cover in unit tests. To keep the PR tight, could the dispatching be deferred to a separate one?"
+        },
+        {
+            "created_at": "2022-02-06T09:07:20.514Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17487648) by Yibo Cai (yibocai):*\nBetter to separate \"sqrt\" and \"elementwise min/max\" to two PRs. They are very different.\r\nMaybe rename this Jira (and related PR) to \"sqrt\" only, and create a new Jira for \"improve elementwise min/max for special cases\"?"
+        },
+        {
+            "created_at": "2022-02-06T11:19:20.364Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17487692) by Yaron Gvili (rtpsw):*\nI'm good with splitting the issue; I'll get to that a bit later.\r\n\r\nIn the meantime, something I just noticed: \"min_element_wise\" is equivalent to \"minimum_checked\", both ignoring a single NaN input, but not to \"minimum\", which returns a single NaN input (the same applies to the corresponding max functions). Are there existing min/max operations that have this latter behavior?"
+        },
+        {
+            "created_at": "2022-02-07T13:19:33.582Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17488098) by David Li (lidavidm):*\nThere are no operations that return NaN instead of null in this case. It could perhaps be added as an option (that would also be a separate JIRA)"
+        },
+        {
+            "created_at": "2022-02-07T14:01:58.772Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17488129) by Yaron Gvili (rtpsw):*\nSince plenty of NaN values exist, I find returning an input NaN value more user-friendly than returning a null, which just drops information, which can always be done in a later step. However, if there is a convention that other operations conform to on this issue, then it should probably be followed on."
+        },
+        {
+            "created_at": "2022-02-08T15:03:18.080Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15571?focusedCommentId=17488923) by Yaron Gvili (rtpsw):*\nSplit the sqrt part to ARROW-15614"
+        }
+    ]
+}

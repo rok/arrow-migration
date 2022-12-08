@@ -1,0 +1,54 @@
+{
+    "issue": {
+        "title": "[Python][Dataset] Support using dataset API in pyarrow.parquet with a minimal ParquetDataset shim",
+        "body": "***Note**: This issue was originally created as [ARROW-8039](https://issues.apache.org/jira/browse/ARROW-8039). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAssemble a minimal ParquetDataset shim backed by `pyarrow.dataset.*`. Replace the existing ParquetDataset with the shim by default, allow opt-out for users who need the current ParquetDataset\r\n\r\nThis is mostly exploratory to see which of the python tests fail",
+        "created_at": "2020-03-09T16:43:34.000Z",
+        "updated_at": "2020-12-22T11:25:06.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2020-04-09T13:58:11.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-03-10T00:09:19.862Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8039?focusedCommentId=17055470) by Neal Richardson (npr):*\nWe might focus this by saying that the objective is to satisfy the `.read()` method of ParquetDataset and to at least support the `filters` argument to the init method (with the bonus feature that you can filter on any column, not just partition keys, as an incentive to use the new code). This would exclude supporting object attributes like \"pieces\", which we could address separately for dask et al..\r\n\r\nSee https://arrow.apache.org/docs/python/generated/pyarrow.parquet.ParquetDataset.html and https://arrow.apache.org/docs/python/parquet.html#partitioned-datasets-multiple-files. "
+        },
+        {
+            "created_at": "2020-03-10T18:59:31.071Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8039?focusedCommentId=17056284) by Joris Van den Bossche (jorisvandenbossche):*\n> We might focus this by saying that the objective is to satisfy the .read() method of ParquetDataset and to at least support the filters argument to the init method (with the bonus feature that you can filter on any column, not just partition keys, as an incentive to use the new code).\r\n\r\nIf that is the goal, I think this should be trivial. Which isn't to say it's not useful! Being able to run part of the tests with might discover issues. I did something similar for the read_table function at https://github.com/apache/arrow/pull/6303 (the utility code to convert old-format filters to the new expressions might be useful here as well). In case this issue is not yet started, I could also add this to that PR tomorrow.   \r\nThis would also stress test the manifest / dataset discovery part (which has a custom python implementation, so that would be useful to compare to what the datasets API does), but not sure the tests for this are very extensive.\r\n\r\n> This would exclude supporting object attributes like \"pieces\", which we could address separately for dask et al..\r\n\r\nYes, but this are the hard parts (and the parts that dask extensively uses). So it's mostly for those parts that we will need to decide whether we want to try to create an API-compatible shim, or rather try to provide the necessary features to be able to migrate to the new API.\r\n"
+        },
+        {
+            "created_at": "2020-03-10T19:05:29.356Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8039?focusedCommentId=17056289) by Neal Richardson (npr):*\nRight, my thought was that we'd solve the Dask problem a different way, like you already started exploring."
+        },
+        {
+            "created_at": "2020-03-10T22:33:21.342Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8039?focusedCommentId=17056479) by Joris Van den Bossche (jorisvandenbossche):*\nSo a more specific comment here: if basically the only thing that such a ParquetDataset would support is a \"read()\" function, I am not sure what the benefit of such a ParquetDataset class would be compared to the  `parquet.read_table` function (which also supports reading with column selection / row filter) (when designing a new API).\r\n\r\nAnd supporting this in `read_table` I actually already did in https://github.com/apache/arrow/pull/6303"
+        },
+        {
+            "created_at": "2020-03-10T22:47:06.524Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8039?focusedCommentId=17056487) by Neal Richardson (npr):*\nAh, good call. That sounds reasonable to me (as someone who is not a user). And it looks like it is trivial enough to promote only read_table and not mention ParquetDataset in https://arrow.apache.org/docs/python/parquet.html#partitioned-datasets-multiple-files. \r\n\r\nSo the idea would be that read_table would be the function that gets the new Dataset option, and ParquetDataset would be unchanged (just no longer encouraged for use). \r\n\r\n`[~wesm]` thoughts?"
+        },
+        {
+            "created_at": "2020-03-10T23:07:12.014Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8039?focusedCommentId=17056496) by Joris Van den Bossche (jorisvandenbossche):*\n> So the idea would be that read_table would be the function that gets the new Dataset option, and ParquetDataset would be unchanged (just no longer encouraged for use).\r\n\r\nThat would be an option, yes.\r\n\r\nTo give some context from dask's usage: they actually do _not_ use the ParquetDataset.read() method. They use a lot of other things of the class: get the partitioning information, the pieces, the metadata, etc, but not read the full dataset. For reading, they use ParquetDatasetPiece.read().\r\n\r\nNow, dask's usage is maybe not typical, so it would be good to check some other places on how ParquetDataset gets used.\r\n\r\nFor example on StackOverflow:\r\n \\* Top answer on reading partitioned dataset on S3 uses ParquetDataset().reade().to_pandas(): <https://stackoverflow.com/questions/45043554/how-to-read-a-list-of-parquet-files-from-s3-as-a-pandas-dataframe-using-pyarrow/48809552#48809552>\r\n \\* Some other, less popular S3 related questions that also mention ParquetDataset with basically the same usage pattern\r\n\r\nNow, there might still be value in having a two-step way (creating the dataset, and reading) instead of a 1 step `read_table`, since the former allows to do some inspection of the dataset before reading it. \r\nBut this is what the `pyarrow.dataset.Dataset` already provides. So the question is if a ParquetDataset then is needed? \r\n\r\nI suppose such a subclass might be useful to directly expose the parquet specific things (eg without needing to specify `format=\"parquet\"`, or by exposing ParquetFileFormatOptions directly in the constructor of ParquetDataset, etc). I think something like this _is_ useful, but then I would rather model it after dataset.Dataset, to make it consistent with that new API, rather than model it after parquet.ParquetDataset (which would introduce an inconsistencies with the new API), maybe just with a `read()` method for basic backwards compatibility (but for the rest following the API of dataset.Dataset)"
+        },
+        {
+            "created_at": "2020-03-10T23:14:07.829Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8039?focusedCommentId=17056510) by Wes McKinney (wesm):*\nIf it were possible to maintain backward compatibility for simple use cases (with a FutureWarning) for a period of time that would seem ideal. As long we're on a path to address the use cases with the new code. It seems fine if `ParquetDataset` eventually goes away entirely"
+        },
+        {
+            "created_at": "2020-03-23T15:52:57.288Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8039?focusedCommentId=17064894) by Joris Van den Bossche (jorisvandenbossche):*\nI expanded my existing PR for `read_table` (https://github.com/apache/arrow/pull/6303) with a small ParquetDataset shim, that at least should have the basic `ParquetDataset(..).read()` work. \r\n\r\nRight now I added a `use_dataset=False/True` keyword (with a default of False), so you can opt in to use the new dataset API under the hood (and to allow me to use this in the tests). But the final end user API we want to provide for this should still be discussed."
+        },
+        {
+            "created_at": "2020-04-09T13:58:11.624Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8039?focusedCommentId=17079369) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 6303\n<https://github.com/apache/arrow/pull/6303>"
+        }
+    ]
+}

@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Rust] When used as a crate dependency, arrow-flight is rebuilt on every invocation of cargo build",
+        "body": "***Note**: This issue was originally created as [ARROW-9600](https://issues.apache.org/jira/browse/ARROW-9600). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen used as a crate dependency, arrow-flight is rebuilt on every invocation of cargo build\r\n# **Repro**:\r\n\r\nCreate a new repo, add `arrow=1.0.0` as a dependency, and then run `cargo build`\r\n\r\n**Expected behavior:** After the first successful invocation of `cargo build`, arrow-flight will not recompile if no other changes are made.\r\n\r\n**Actual behavior**: After every invocation of `cargo build`, arrow-flight is recompiled, even when nothing has changed\r\n# Example\r\n\r\n\u00a0\r\n Create a new crate\r\n```java\n\r\n alamb@ip-192-168-0-129 arrow_rebuilds % cargo new too_many_rebuilds --bin\r\n cargo new too_many_rebuilds --bin\r\n Created binary (application) `too_many_rebuilds` package\r\n```\r\nAdd arrow as a dependency in Cargo.toml:\r\n```java\n\r\n diff --git a/Cargo.toml b/Cargo.toml\r\n index a239680..44ed358 100644\r\n \u2014 a/Cargo.toml\r\n +++ b/Cargo.toml\r\n @@ -5,3 +5,6 @@ authors = [\"alamb <andrew@nerdnetworks.org>\"]\r\n edition = \"2018\"\r\n# See more keys and their definitions at [https://doc.rust-lang.org/cargo/reference/manifest.html]\r\n +\r\n +[dependencies]\r\n +arrow = \"1.0.0\"\r\n```\r\nNow, all invocations of `cargo build` will rebuild arrow, even though nothing in the code has changed:\r\n```java\n\r\n alamb@ip-192-168-0-129 too_many_rebuilds % cargo build\r\n cargo build\r\n Compiling arrow-flight v1.0.0\r\n Compiling arrow v1.0.0\r\n Compiling too_many_rebuilds v0.1.0 (/Users/alamb/Software/bugs/arrow_rebuilds/too_many_rebuilds)\r\n Finished dev [unoptimized + debuginfo] target(s) in 8.70s\r\n alamb@ip-192-168-0-129 too_many_rebuilds % cargo build\r\n cargo build\r\n Compiling arrow-flight v1.0.0\r\n Compiling arrow v1.0.0\r\n Compiling too_many_rebuilds v0.1.0 (/Users/alamb/Software/bugs/arrow_rebuilds/too_many_rebuilds)\r\n Finished dev [unoptimized + debuginfo] target(s) in 8.65s\r\n```\r\nYou can see what is happening by checking out a fresh copy of arrow/master (no Cargo.log) and running `cargo build` \u2013 you'll see your local checkout has changes in rust/arrow-flight/src/arrow.flight.protocol.rs:\r\n```java\n\r\n alamb@ip-192-168-0-129 arrow % cd rust/arrow\r\n cd rust/arrow\r\n alamb@ip-192-168-0-129 arrow % git status\r\n git status\r\n On branch master\r\n Your branch is up to date with 'origin/master'.\r\n\r\nnothing to commit, working tree clean\r\n alamb@ip-192-168-0-129 arrow % cargo build\r\n cargo build\r\n Compiling futures-task v0.3.5\r\n ...\r\n Compiling arrow v2.0.0-SNAPSHOT (/Users/alamb/Software/arrow/rust/arrow)\r\n Finished dev [unoptimized + debuginfo] target(s) in 21.76s\r\n alamb@ip-192-168-0-129 arrow %\r\n\r\nalamb@ip-192-168-0-129 arrow % git status\r\n git status\r\n On branch master\r\n Your branch is up to date with 'origin/master'.\r\n\r\nChanges not staged for commit:\r\n (use \"git add <file>...\" to update what will be committed)\r\n (use \"git restore <file>...\" to discard changes in working directory)\r\n modified: ../arrow-flight/src/arrow.flight.protocol.rs\r\n\r\nno changes added to commit (use \"git add\" and/or \"git commit -a\")\r\n```\r\n1. Root Cause Analysis\n   \n   The issue is that the build.rs of arrow-flight calls `tonic_build` to auto generate `rust/arrow-flight/src/arrow.flight.protocol.rs`, which is also checked in (first done in <https://github.com/apache/arrow/commit/ec84b7b8102f227295f865c420496830c66a6281>).\n   \n   This file and the version of tonic were updated on <https://github.com/apache/arrow/commit/7b49cbc23f22ed99eebf85cc0b9acb1f0d3f832f> on July 11, 2020\n   \n   It turns out that the output of \"tonic_build\" depends on not only on the version of tonic, but also on the version of proc-macro2, and the version of proc-macro2 is not specifically pinned. \n   \n   `proc-macro2 = \"1.0.19\"` was released on July 19, 2020 (<https://crates.io/crates/proc-macro2/1.0.19>) and it appears to subtlety changes the resulting output of arrow.flight.protocol.rs; Thus the output no longer matches what is checked in. This means that anyone without a Cargo.lock file that pins proc-macro2 to 1.0.18 would get 1.0.19 and thus also a local modification during build.\n   \n   # Workaround\n   If we pin Cargo.toml to use proc-macro2 1.0.18 the local modification stops.\n    ```Java\n   \n    proc-macro2 = \"1.0.18\"\n    \n   ```\n   \n   \u00a0",
+        "created_at": "2020-07-30T14:21:53.000Z",
+        "updated_at": "2020-08-03T16:06:22.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-08-03T16:06:13.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-07-30T14:32:37.243Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9600?focusedCommentId=17167967) by Andy Grove (andygrove):*\nThanks for filing this, and thanks for the workaround too. I have been seeing the same thing."
+        },
+        {
+            "created_at": "2020-07-30T14:45:47.418Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9600?focusedCommentId=17167969) by Andrew Lamb (alamb):*\nNo problems!\r\n"
+        },
+        {
+            "created_at": "2020-07-30T21:04:08.252Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9600?focusedCommentId=17168221) by Andy Grove (andygrove):*\nIssue resolved by pull request 7867\n<https://github.com/apache/arrow/pull/7867>"
+        },
+        {
+            "created_at": "2020-08-03T16:06:13.315Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9600?focusedCommentId=17170146) by Andy Grove (andygrove):*\nIssue resolved by pull request 7893\n<https://github.com/apache/arrow/pull/7893>"
+        }
+    ]
+}

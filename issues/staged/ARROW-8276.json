@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[C++][Dataset] Scanning a Fragment does not take into account the partition columns",
+        "body": "***Note**: This issue was originally created as [ARROW-8276](https://issues.apache.org/jira/browse/ARROW-8276). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFollow-up on ARROW-8061, the `to_table` method doesn't work for fragments created from a partitioned dataset.\r\n\r\n(will add a reproducer later)\r\n\r\ncc `[~bkietz]`",
+        "created_at": "2020-03-30T16:35:55.000Z",
+        "updated_at": "2020-04-15T19:36:33.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-04-02T15:33:12.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-03-30T16:51:52.536Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8276?focusedCommentId=17071140) by Joris Van den Bossche (jorisvandenbossche):*\nReproducer in python:\r\n\r\n```Java\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nimport pyarrow.dataset as ds\r\n\r\nimport pathlib\r\n\r\n\r\n# create small partitioned dataset\r\ntable = pa.table({'col1': [1, 2, 3]})\r\n\r\nbasedir = pathlib.Path(\".\")\r\ndataset_dir = basedir / \"test_partitioned_fragment\"\r\ndataset_dir.mkdir(exist_ok=True)\r\n\r\n(dataset_dir / \"A=0\").mkdir(exist_ok=True)\r\n(dataset_dir / \"A=1\").mkdir(exist_ok=True)\r\npq.write_table(table, dataset_dir / \"A=0\" / \"data.parquet\")\r\npq.write_table(table, dataset_dir / \"A=1\" / \"data.parquet\")\r\n\r\n# read it with the datasets API\r\ndataset = ds.dataset(str(dataset_dir), format=\"parquet\", partitioning=\"hive\")\r\n\r\ndataset.schema\r\ndataset.to_table()\r\n\r\n# reading one fragment fails\r\nfragments = list(dataset.get_fragments())\r\nfragments[0].to_table()\r\n```\r\n\r\ngives:\r\n\r\n```Java\n\r\nArrowInvalid: Schema at index 0 was different: \r\ncol1: int64\r\nA: int32\r\nvs\r\ncol1: int64\r\n```"
+        },
+        {
+            "created_at": "2020-04-02T15:33:12.163Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8276?focusedCommentId=17073828) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 6765\n<https://github.com/apache/arrow/pull/6765>"
+        },
+        {
+            "created_at": "2020-04-15T19:20:21.179Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8276?focusedCommentId=17084327) by Francois Saint-Jacques (fsaintjacques):*\n`[~jorisvandenbossche]` \u00a0 I'm refactoring this part with ARROW-8065, I don't think `get_fragments` should do any column projection. It should just return fragments from a dataset. On the other side, `dataset.scan` and `dataset.to_table` should do said transformation."
+        },
+        {
+            "created_at": "2020-04-15T19:36:33.907Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8276?focusedCommentId=17084332) by Joris Van den Bossche (jorisvandenbossche):*\nFully agreed. \r\nIn my mind, all the `columns`/ `filters` keywords in constructing fragments right now were temporary hacks to get the desired functionality because fragments were still tied to the scan context. \r\n\r\n(But the partition column should still be included in the schema of the fragment, which was the original issue here, right? The above snippet is supposed to work?).  "
+        }
+    ]
+}

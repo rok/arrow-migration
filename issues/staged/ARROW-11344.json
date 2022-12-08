@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "[Python] Data of struct fields are our-of-order in parquet files created by the write_table() method",
+        "body": "***Note**: This issue was originally created as [ARROW-11344](https://issues.apache.org/jira/browse/ARROW-11344). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi,\r\n\r\nWe found an out-of-order issue with the 'struct' data type recently, would like to know if you can help to root cause it.\r\n```java\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\ndf = pd.read_csv('./test_struct.csv')\r\nprint(df.dtypes)\r\ndf['full_name'] = df.apply(lambda x: {\"package\": x['file_package'], \"name\": x[\"file_name\"]}, axis=1)\r\nmy_df = df.drop(['file_package', 'file_name'], axis=1)\r\n\r\nfile_fields = [('package', pa.string()), ('name', pa.string()),]\r\nmy_schema = pa.schema([pa.field('full_name', pa.struct(file_fields)),\r\n                       pa.field('fruit_name', pa.string())])\r\nmy_table = pa.Table.from_pandas(my_df, schema = my_schema)\r\nprint('Table schema:')\r\nprint(my_table.schema)\r\n\r\npq.write_table(my_table, './test_struct_200.parquet')\r\n```\r\nThe above code (attached as test_struct_200.py) runs with the following python packages:\r\n```java\n\r\nPandas Version = 1.1.3\r\nPyArrow Version = 2.0.0\r\n```\r\nThen I use parquet-tools (1.11.1) to read the file, but get the following output:\r\n```java\n\r\n$ java -jar parquet-tools-1.11.1.jar head -n 2181 test_struct_200.parquet\r\n...\r\nfull_name:\r\n.package = fruit.zip\r\n.name = apple.csv\r\nfruit_name = strawberry\r\n\r\nfull_name:\r\n.package = fruit.zip\r\n.name = apple.csv\r\nfruit_name = strawberry\r\n\r\nfull_name:\r\n.package = fruit.zip\r\n.name = apple.csv\r\nfruit_name = strawberry\r\n```\r\n(BTW, you can also view the parquet file with <http://parquet-viewer-online.com/>)\r\n\r\nThe output is supposed to be (refer to test_struct.csv) :\r\n```java\n\r\n$ java -jar parquet-tools-1.11.1.jar head -n 2181 test_struct_200.parquet\r\n...\r\nfull_name:\r\n.package = fruit.zip\r\n.name = strawberry.csv\r\nfruit_name = strawberry\r\n\r\nfull_name:\r\n.package = fruit.zip\r\n.name = strawberry.csv\r\nfruit_name = strawberry\r\n\r\nfull_name:\r\n.package = fruit.zip\r\n.name = strawberry.csv\r\nfruit_name = strawberry\r\n```\r\nAs a comparison, the following code (attached as test_struct_200_flat.py) would generate a parquet file with the same data of test_struct.csv:\r\n```java\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\ndf = pd.read_csv('./test_struct.csv')\r\nprint(df.dtypes)\r\nmy_schema = pa.schema([pa.field('file_package', pa.string()),\r\n                       pa.field('file_name', pa.string()),\r\n                       pa.field('fruit_name', pa.string())])\r\nmy_table = pa.Table.from_pandas(df, schema = my_schema)\r\nprint('Table schema:')\r\nprint(my_table.schema)\r\n\r\npq.write_table(my_table, './test_struct_200_flat.parquet')\r\n```\r\nI also attached the two parquet files for your references.",
+        "created_at": "2021-01-22T06:58:38.000Z",
+        "updated_at": "2022-10-11T13:44:17.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-01-22T15:36:45.806Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11344?focusedCommentId=17270222) by Weston Pace (westonpace):*\nThank you for creating such a detailed test case.\u00a0 I have run your test against pyarrow 2.0.0 and I can confirm I get the same results that you do.\u00a0 Luckily, when I ran your test against the latest code I did not see this error and I confirmed that the full_name.name column aligned with the fruit_name column.\u00a0 We have recently fixed issues related to structs such as ARROW-10493 and my assumption is that you encountered one of those.\r\n\r\nWe are on the verge of releasing 3.0.0.\u00a0 There is an RC available at (<https://bintray.com/apache/arrow/python-rc/3.0.0-rc2#files/python-rc/3.0.0-rc2)> if you would like to test this behavior out yourself sooner.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-01-26T03:39:57.172Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11344?focusedCommentId=17271792) by Chen Ming (acan):*\n`[~westonpace]` \u00a0Thank you for the information. And very happy to see 3.0.0 has been released to PyPI this morning. From my quick test with the example data, the issue has been fixed by PyArrow 3.0.0.\r\n\r\nWe want to do more testing (with our production data), so I would like to keep this Jira in open state for a few more days."
+        },
+        {
+            "created_at": "2021-01-26T13:05:59.750Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11344?focusedCommentId=17272092) by Joris Van den Bossche (jorisvandenbossche):*\nI think it would be good to still extract a test case from your example to add to the test suite, if possible."
+        }
+    ]
+}

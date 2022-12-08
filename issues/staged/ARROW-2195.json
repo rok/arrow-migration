@@ -1,0 +1,74 @@
+{
+    "issue": {
+        "title": "[Plasma] Segfault when retrieving RecordBatch from plasma store",
+        "body": "***Note**: This issue was originally created as [ARROW-2195](https://issues.apache.org/jira/browse/ARROW-2195). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIt can be reproduced with the following script:\r\n\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.plasma as plasma\r\n\r\ndef retrieve1():\r\n    client = plasma.connect('test', \"\", 0)\r\n\r\n    key = \"keynumber1keynumber1\"\r\n    pid = plasma.ObjectID(bytearray(key,'UTF-8'))\r\n\r\n    [buff] = client .get_buffers([pid])\r\n    batch = pa.RecordBatchStreamReader(buff).read_next_batch()\r\n\r\n    print(batch)\r\n    print(batch.schema)\r\n    print(batch[0])\r\n\r\n    return batch\r\n\r\nclient = plasma.connect('test', \"\", 0)\r\n\r\ntest1 = [1, 12, 23, 3, 21, 34]\r\ntest1 = pa.array(test1, pa.int32())\r\n\r\nbatch = pa.RecordBatch.from_arrays([test1], ['FIELD1'])\r\n\r\nkey = \"keynumber1keynumber1\"\r\npid = plasma.ObjectID(bytearray(key,'UTF-8'))\r\nsink = pa.MockOutputStream()\r\nstream_writer = pa.RecordBatchStreamWriter(sink, batch.schema)\r\nstream_writer.write_batch(batch)\r\nstream_writer.close()\r\n\r\nbff = client.create(pid, sink.size())\r\n\r\nstream = pa.FixedSizeBufferWriter(bff)\r\nwriter = pa.RecordBatchStreamWriter(stream, batch.schema)\r\nwriter.write_batch(batch)\r\nclient.seal(pid)\r\n\r\nbatch = retrieve1()\r\nprint(batch)\r\nprint(batch.schema)\r\nprint(batch[0])\r\n```\r\n\u00a0\r\n\r\nPreliminary backtrace:\r\n\r\n\u00a0\r\n\r\n```Java\n\r\n\r\nCESS (code=1, address=0x111138158)\r\n\r\n\u00a0 \u00a0\u00a0frame #0: 0x000000010e6457fc lib.so`__pyx_pw_7pyarrow_3lib_10Int32Value_1as_py(_object*, _object*) + 28\r\n\r\nlib.so`__pyx_pw_7pyarrow_3lib_10Int32Value_1as_py:\r\n\r\n->\u00a0\u00a00x10e6457fc <+28>: movslq (%rdx,%rcx,4), %rdi\r\n\r\n\u00a0 \u00a0\u00a00x10e645800 <+32>: callq\u00a0\u00a00x10e698170\u00a0\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0\u00a0; symbol stub for: PyInt_FromLong\r\n\r\n\u00a0 \u00a0\u00a00x10e645805 <+37>: testq\u00a0\u00a0%rax, %rax\r\n\r\n\u00a0 \u00a0\u00a00x10e645808 <+40>: je\u00a0\u00a0 \u00a0\u00a00x10e64580c\u00a0\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0\u00a0; <+44>\r\n\r\n(lldb)\u00a0bt\r\n * thread #1: tid = 0xf1378e, 0x000000010e6457fc lib.so`__pyx_pw_7pyarrow_3lib_10Int32Value_1as_py(_object*, _object*) + 28, queue = 'com.apple.main-thread', stop reason = EXC_BAD_ACCESS (code=1, address=0x111138158)\r\n\r\n\u00a0\u00a0* frame #0: 0x000000010e6457fc lib.so`__pyx_pw_7pyarrow_3lib_10Int32Value_1as_py(_object*, _object*) + 28\r\n\r\n\u00a0 \u00a0\u00a0frame #1: 0x000000010e5ccd35 lib.so`__Pyx_PyObject_CallNoArg(_object*) + 133\r\n\r\n\u00a0 \u00a0\u00a0frame #2: 0x000000010e613b25 lib.so`__pyx_pw_7pyarrow_3lib_10ArrayValue_3__repr__(_object*) + 933\r\n\r\n\u00a0 \u00a0\u00a0frame #3: 0x000000010c2f83bc libpython2.7.dylib`PyObject_Repr + 60\r\n\r\n\u00a0 \u00a0\u00a0frame #4: 0x000000010c35f651 libpython2.7.dylib`PyEval_EvalFrameEx + 22305\r\n\r\n```",
+        "created_at": "2018-02-21T19:11:27.000Z",
+        "updated_at": "2018-04-11T21:04:19.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++ - Plasma",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-04-04T17:54:23.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-03-05T15:13:41.950Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2195?focusedCommentId=16386184) by Antoine Pitrou (apitrou):*\nThe returned `BatchRecord` doesn't keep the `PlasmaBuffer` alive. In turn, `PlasmaBuffer.__dealloc__` calls `self.client.release(self.object_id)`. If you remove that line, the program runs fine."
+        },
+        {
+            "created_at": "2018-03-05T15:43:32.822Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2195?focusedCommentId=16386229) by Antoine Pitrou (apitrou):*\nThe detailed explanation here is that the C++ shared_ptr is passed around, not the Python wrapper. So `PlasmaBuffer.__dealloc__` is called even though there are still C++ exports of the underlying data, particularly in the `BatchRecord` object.\r\n\r\nIncidentally, it seems `ForeignBuffer` will have the same problem: when the C++ shared_ptr is passed around, the original Python object won't be kept alive. Instead, perhaps we need to be able to add destructors to an arbitrary C++ Buffer object, for example:\r\n\r\n```c++\n\r\nStatus Buffer::AddDestructor(std::function<void()>&& destructor);\r\n```\r\n\r\nThen it will be possible to keep a Python object alive as long as the corresponding C++ buffer is alive:\r\n\r\n```c++\n\r\nStatus AddBufferPayload(std::shared_ptr<Buffer> buffer, PyObject* ref)\r\n{\r\n  RETURN_NOT_OK(buffer->AddDestructor([&ref]() { Py_DECREF(ref); }));\r\n  Py_INCREF(ref);\r\n  return Status::OK();\r\n}\r\n```\r\n\r\n```python\n\r\ndef foreign_buffer(addr, size, base):\r\n    cdef shared_ptr[CBuffer] buffer = make_shared[CBuffer](\r\n        <uint8_t*>c_addr, c_size)\r\n    AddBufferPayload(buffer, base)\r\n    return pyarrow_wrap_buffer(buffer)\r\n```\r\n\r\n```python\n\r\ncdef class _PlasmaObjectKeepAlive:\r\n    cdef:\r\n        ObjectID object_id\r\n        PlasmaClient client\r\n\r\n    def __cinit__(self, ObjectID object_id, PlasmaClient client):\r\n        self.object_id = object_id\r\n        self.client = client\r\n\r\n    def __dealloc__(self):\r\n        \"\"\"\r\n        Notify Plasma that the object is no longer needed.\r\n\r\n        If the plasma client has been shut down, then don't do anything.\r\n        \"\"\"\r\n        self.client.release(self.object_id)\r\n\r\ncdef class PlasmaClient:\r\n\r\n    cdef _make_plasma_buffer(self, ObjectID object_id,\r\n                             shared_ptr[CBuffer] buffer, int64_t size):\r\n        AddBufferPaylod(buffer, _PlasmaObjectKeepAlive(object_id, self)\r\n        return pyarrow_wrap_buffer(buffer)\r\n\r\n```\r\n\r\ncc `[~xhochy]`"
+        },
+        {
+            "created_at": "2018-03-05T15:55:21.711Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2195?focusedCommentId=16386257) by Wes McKinney (wesm):*\nInstead of adding a dtor to the base `Buffer` we can instead create an `arrow::ForeignBuffer` subclass with the extra dtor member"
+        },
+        {
+            "created_at": "2018-03-05T15:58:30.632Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2195?focusedCommentId=16386262) by Antoine Pitrou (apitrou):*\nThat would indeed solve the ForeignBuffer issue, but not the Plasma issue, right? That is, the solution only applies when the buffer is created from Python..."
+        },
+        {
+            "created_at": "2018-03-05T16:02:33.346Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2195?focusedCommentId=16386267) by Wes McKinney (wesm):*\nRight probably need to make Plasma buffers work like the `MemoryMap` in https://github.com/apache/arrow/blob/master/cpp/src/arrow/io/file.cc#L593 that manages the lifetime of the mapped memory created by the `MemoryMappedFile` class"
+        },
+        {
+            "created_at": "2018-03-06T13:33:00.248Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2195?focusedCommentId=16387768) by Antoine Pitrou (apitrou):*\n> Right probably need to make Plasma buffers work like the `MemoryMap` in <https://github.com/apache/arrow/blob/master/cpp/src/arrow/io/file.cc#L593> that manages the lifetime of the mapped memory created by the `MemoryMappedFile` class\r\nRight now it seems C++ users are supposed to call `PlasmaClient::Release` explicitly when they are done with an object. Doing it automatically risks introducing double (or early) releases, am I wrong?"
+        },
+        {
+            "created_at": "2018-03-06T20:04:57.813Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2195?focusedCommentId=16388442) by Wes McKinney (wesm):*\nadding `[~robertnishihara]` also"
+        },
+        {
+            "created_at": "2018-03-12T03:53:39.402Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2195?focusedCommentId=16394791) by Wes McKinney (wesm):*\nMoving to 0.10.0"
+        },
+        {
+            "created_at": "2018-03-29T09:37:58.114Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2195?focusedCommentId=16418664) by Antoine Pitrou (apitrou):*\nI think the right thing to do here is to add a new `PlasmaClient::GetAuto` method that returns automatically-releasing buffers.\r\n\r\nThe one caveat is that the buffers must keep a pointer to the plasma client, so the caller must guarantee that the client stays alive long enough. Unfortunately, the `PlasmaClient` constructor/factory currently doesn't return a `shared_ptr`..."
+        },
+        {
+            "created_at": "2018-03-29T10:02:26.841Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2195?focusedCommentId=16418687) by Antoine Pitrou (apitrou):*\nBy the way, does anyone know how to build the GPU extensions for Plasma?"
+        },
+        {
+            "created_at": "2018-03-29T11:04:39.500Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2195?focusedCommentId=16418768) by Antoine Pitrou (apitrou):*\nOk, apparently I just had to pass `ARROW_GPU=ON` to cmake after installing the CUDA toolkit :)"
+        },
+        {
+            "created_at": "2018-03-29T12:33:13.454Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2195?focusedCommentId=16418904) by Antoine Pitrou (apitrou):*\nThe Create() behavior is specific enough to warrant its own issue."
+        },
+        {
+            "created_at": "2018-03-29T12:41:01.515Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2195?focusedCommentId=16418917) by Antoine Pitrou (apitrou):*\nOpened ARROW-2363 for Create()."
+        },
+        {
+            "created_at": "2018-04-04T17:54:23.654Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2195?focusedCommentId=16425927) by Philipp Moritz (pcmoritz):*\nIssue resolved by pull request 1807\n<https://github.com/apache/arrow/pull/1807>"
+        }
+    ]
+}

@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[R] Type function names don't match type names",
+        "body": "***Note**: This issue was originally created as [ARROW-6338](https://issues.apache.org/jira/browse/ARROW-6338). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI noticed this while working on documentation for ARROW-5505, trying to show how you could pass an explicit schema definition to make a table. For a few types, the name of the type that gets printed (and comes from the C++ library) doesn't match the name of the function you use to specify the type in a schema:\r\n```r\n\r\n> tab <- to_arrow(data.frame(\r\n+   a = 1:10,\r\n+   b = as.numeric(1:10),\r\n+   c = sample(c(TRUE, FALSE, NA), 10, replace = TRUE),\r\n+   d = letters[1:10],\r\n+   stringsAsFactors = FALSE\r\n+ ))\r\n> tab$schema\r\narrow::Schema \r\na: int32\r\nb: double\r\nc: bool\r\nd: string \r\n# Alright, let's make that schema\r\n> schema(a = int32(), b = double(), c = bool(), d = string())\r\nError in bool() : could not find function \"bool\"\r\n# Hmm, ok, so bool --> boolean()\r\n> schema(a = int32(), b = double(), c = boolean(), d = string())\r\nError in string() : could not find function \"string\"\r\n# string --> utf8()\r\n> schema(a = int32(), b = double(), c = boolean(), d = utf8())\r\nError: type does not inherit from class arrow::DataType\r\n# Wha?\r\n> double()\r\nnumeric(0)\r\n# Oh. double is a base R function.\r\n> schema(a = int32(), b = float64(), c = boolean(), d = utf8())\r\narrow::Schema \r\na: int32\r\nb: double\r\nc: bool\r\nd: string \r\n```\r\nIf you believe this switch statement is correct, these three, along with float and half_float, are the only mismatches:\u00a0<https://github.com/apache/arrow/blob/master/r/R/R6.R#L81-L109>\r\n\r\n```r\n\r\n> schema(b = float64(), c = boolean(), d = utf8(), e = float32(), f = float16())\r\narrow::Schema \r\nb: double\r\nc: bool\r\nd: string\r\ne: float\r\nf: halffloat \r\n```\r\n\r\nI can\u00a0add aliases (i.e. another function that does the same thing) for bool, string, float, and halffloat, and I can add some magic so that double() (and even integer()) work inside the schema() function. But in looking into the C++ side to confirm where these alternate type names were coming from, I saw some inconsistencies. For example, https://github.com/apache/arrow/blob/master/cpp/src/arrow/type.h#L773-L788 suggests that the StringType should report its name as \"utf8\". But the ToString method here https://github.com/apache/arrow/blob/master/cpp/src/arrow/type.cc#L191 has it report as \"string\". It's unclear why those should report differently.",
+        "created_at": "2019-08-23T17:08:01.000Z",
+        "updated_at": "2019-08-27T08:37:34.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-27T08:37:33.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-08-23T17:30:58.796Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6338?focusedCommentId=16914484) by Francois Saint-Jacques (fsaintjacques):*\nThe names you want to follow are the factory functions:\r\n\r\n- https://github.com/apache/arrow/blob/master/cpp/src/arrow/type_fwd.h#L208-L245\n- https://github.com/apache/arrow/blob/master/cpp/src/arrow/type.h#L1358-L1509\n  \n  As for inconsistencies between ToString(), type_name(), name(), I think it's worth reconciling, `[~pitrou]`."
+        },
+        {
+            "created_at": "2019-08-23T17:58:13.427Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6338?focusedCommentId=16914516) by Ben Kietzman (bkietz):*\n`[~npr]` `[~wesmckinn]` I don't think those names are used for anything but error logging purposes; IE nothing at protocol level depends on them and it should be safe to just change them in C++\r\n\r\nRan this query for all usages of DataType::name and came up with nothing but error messages (those should be changed to use ToString, which is more informative than name.)\r\n\r\n```Java\n\r\n$ for f in `ls cpp/src/arrow/**/*.cc`\r\ndo\r\nclang-query-7 -h -p=cpp/build/compile_commands.json -c='match cxxMemberCallExpr(callee(functionDecl(hasName(\"DataType::name\"))))' $f >> locations\r\ndone\r\n$ cat locations | grep '\"root\" binds here' | uniq\r\n/home/bkietz/arrow/cpp/src/arrow/ipc/json_internal.cc:365:70: note: \"root\" binds here\r\n/home/bkietz/arrow/cpp/src/arrow/ipc/json_internal.cc:1418:70: note: \"root\" binds here\r\n/home/bkietz/arrow/cpp/src/arrow/python/arrow_to_pandas.cc:1907:70: note: \"root\" binds here\r\n/home/bkietz/arrow/cpp/src/arrow/record_batch.cc:107:51: note: \"root\" binds here\r\n/home/bkietz/arrow/cpp/src/arrow/record_batch.cc:108:66: note: \"root\" binds here\r\n```"
+        },
+        {
+            "created_at": "2019-08-23T18:01:24.530Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6338?focusedCommentId=16914517) by Neal Richardson (npr):*\nWe are using those factory functions currently:\u00a0<https://github.com/apache/arrow/blob/master/r/R/R6.R#L281-L376>\r\n\r\nThe point is that the factory function names don't always match the type names, and I'm curious if there's a good reason for that mismatch."
+        },
+        {
+            "created_at": "2019-08-25T17:10:15.886Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6338?focusedCommentId=16915298) by Ben Kietzman (bkietz):*\nWhen writing the C API \"double\" can't be used because it's reserved, so we use \"float64\" for the DataType factory and \"DoubleArray\", \"DoubleType\", \"Type::DOUBLE\" everywhere else because those variations are not reserved. Similarly, when deciding what string to return from DoubleType::name(), \"double\" was chosen just because that's what one calls a 64 bit floating point number in C. I don't believe it would break anything to amend DoubleType::name() to return \"float64\" instead."
+        },
+        {
+            "created_at": "2019-08-27T08:37:33.177Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6338?focusedCommentId=16916517) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 5198\n<https://github.com/apache/arrow/pull/5198>"
+        }
+    ]
+}

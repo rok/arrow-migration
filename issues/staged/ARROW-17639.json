@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[R] infer_type() fails for lists where the first element is NULL",
+        "body": "***Note**: This issue was originally created as [ARROW-17639](https://issues.apache.org/jira/browse/ARROW-17639). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n- Works\n  reticulate::py_run_string(\"\n  import pandas as pd\n  df = pd.DataFrame( \\{'col1': [[1,2], None, [3,4]]}\n  )\n  df.to_parquet('/tmp/test1.parquet')\n  \")\n  df1 <- arrow::read_parquet(\"/tmp/test1.parquet\")\n  arrow::write_parquet(df1, tempfile(fileext = \".parquet\"))\n  \n   \\* Fails in arrow 9.0; works in arrow 5.0\n  reticulate::py_run_string(\"\n  import pandas as pd\n  df = pd.DataFrame( \\{'col1': [None, [1,2], [3,4]]}\n  )\n  df.to_parquet('/tmp/test2.parquet')\n  \")\n  df2 <- arrow::read_parquet(\"/tmp/test2.parquet\")\n  arrow::write_parquet(df2, tempfile(fileext = \".parquet\"))",
+        "created_at": "2022-09-07T00:37:31.000Z",
+        "updated_at": "2022-09-12T12:21:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-09-12T10:12:57.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-07T08:06:20.331Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17639?focusedCommentId=17601186) by Nicola Crane (thisisnic):*\nIt looks like this results from the call to `as_arrow_table()` within `write_parquet()`.  A simpler reprex:\r\n\r\n\r\n```r\n\r\ndf2 <- tibble::tibble(x = list(NULL, 1, 2))\r\nas_arrow_table(df2)\r\n# Error: Cannot infer type from vector\r\n```\r\n\r\nUnder the hood, it looks like specifically, it's the call to `Table__from_dots()` on a df containing a list column in which the first element is NULL."
+        },
+        {
+            "created_at": "2022-09-07T11:08:49.263Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17639?focusedCommentId=17601250) by Nicola Crane (thisisnic):*\nThis is indeed a bug, and thanks for reporting it `[~dmedw01]`.  It's due to how we infer types of lists - will get a PR up to fix this soon.  A temporary workaround would be to reorder the list so that the first element is never NULL, though I can see that this is not ideal."
+        },
+        {
+            "created_at": "2022-09-07T13:31:16.351Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17639?focusedCommentId=17601308) by Nicola Crane (thisisnic):*\nActually, here's a better workaround (thanks @paleolimbot for this suggestion);\r\n\r\n```r\n\r\ndf2 <- tibble::tibble(x = list(NULL, 1, 2))\r\n# manually specify the schema of the list column\r\ndf_to_save <- as_arrow_table(df2, schema = schema(x = list_of(int32())))\r\narrow::write_parquet(df_to_save, tempfile(fileext = \".parquet\"))\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-09-12T10:12:57.306Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17639?focusedCommentId=17603031) by Nicola Crane (thisisnic):*\nIssue resolved by pull request 14062\n<https://github.com/apache/arrow/pull/14062>"
+        }
+    ]
+}

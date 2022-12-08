@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Python] Order of columns in pyarrow.feather.read_table",
+        "body": "***Note**: This issue was originally created as [ARROW-17360](https://issues.apache.org/jira/browse/ARROW-17360). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nxref <https://github.com/pandas-dev/pandas/issues/47944>\r\n\r\n\u00a0\r\n```java\n\r\nIn [1]: df = pd.DataFrame({\"a\": [1, 2, 3], \"b\": [\"a\", \"b\", \"c\"]})\r\n\r\n# pandas main branch / 1.5\r\nIn [2]: df.to_orc(\"abc\")\r\n\r\nIn [3]: pd.read_orc(\"abc\", columns=['b', 'a'])\r\nOut[3]:\r\n   a  b\r\n0  1  a\r\n1  2  b\r\n2  3  c\r\n\r\nIn [4]: import pyarrow.orc as orc\r\n\r\nIn [5]: orc_file = orc.ORCFile(\"abc\")\r\n\r\n# reordered to a, b\r\nIn [6]: orc_file.read(columns=['b', 'a']).to_pandas()\r\nOut[6]:\r\n   a  b\r\n0  1  a\r\n1  2  b\r\n2  3  c\r\n\r\n# reordered to a, b\r\nIn [7]: orc_file.read(columns=['b', 'a'])\r\nOut[7]:\r\npyarrow.Table\r\na: int64\r\nb: string\r\n----\r\na: [[1,2,3]]\r\nb: [[\"a\",\"b\",\"c\"]] \n```",
+        "created_at": "2022-08-09T18:59:05.000Z",
+        "updated_at": "2022-11-09T18:53:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-11-09T10:55:28.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-20T11:20:08.866Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17360?focusedCommentId=17621017) by Alenka Frim (alenka):*\nThank you for reporting!\r\n\r\nI would say this is not the expected behaviour. If we look at the `parquet` or `feather` format the `read` methods preserve the ordering of selected columns:\r\n```python\n\r\nimport pyarrow as pa\r\ntable = pa.table({\"a\": [1, 2, 3], \"b\": [\"a\", \"b\", \"c\"]})\r\n\r\nimport pyarrow.parquet as pq\r\npq.write_table(table, 'example.parquet')\r\npq.read_table('example.parquet', columns=['b', 'a'])\r\n# pyarrow.Table\r\n# b: string\r\n# a: int64\r\n# ----\r\n# b: [[\"a\",\"b\",\"c\"]]\r\n# a: [[1,2,3]]\r\n\r\nimport pyarrow.feather as feather\r\nfeather.write_feather(table, 'example_feather')\r\nfeather.read_table('example_feather', columns=['b', 'a'])\r\n# pyarrow.Table\r\n# b: string\r\n# a: int64\r\n# ----\r\n# b: [[\"a\",\"b\",\"c\"]]\r\n# a: [[1,2,3]]\r\n```\r\nFWIU looking at the code in [pyarrow/_orc.pyx](https://github.com/apache/arrow/blob/962121062e4b13c148f24a6d4fa4b1a2f1be0d88/python/pyarrow/_orc.pyx#L379-L382) and [arrow/adapters/orc/adapter.cc](https://github.com/apache/arrow/blob/183517c8baad039c0100687c8a405bd4d8b404a7/cpp/src/arrow/adapters/orc/adapter.cc#L336-L341) I think the behaviour comes from [Apache ORC](https://github.com/apache/orc/blob/7f7362bdcecfd48e5ff9f4a3255100e3ea724f6f/c%2B%2B/include/orc/Reader.hh#L158-L165) and can therefore be open as an issue there (about following order in the original schema).\r\n\r\nNevertheless there are two options we have to make this work correctly:\r\n \\* add a re-ordering in `pyarrow` as it is done for [feather implementation](https://github.com/apache/arrow/blob/0f91e684ddda3dfd11d376c2755bbc3071c3099d/python/pyarrow/feather.py#L280-L281).\r\n \\* Even better would be if `pandas` uses the new `dataset` API to read `orc` files like so:\r\n```python\n\r\nimport pyarrow.dataset as ds\r\ndataset = ds.dataset(\"example.orc\", format=\"orc\")\r\ndataset.to_table(columns=['b', 'a'])\r\n# pyarrow.Table\r\n# b: string\r\n# a: int64\r\n# ----\r\n# b: [[\"a\",\"b\",\"c\"]]\r\n# a: [[1,2,3]]\r\n```"
+        },
+        {
+            "created_at": "2022-10-20T12:14:28.728Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17360?focusedCommentId=17621059) by Joris Van den Bossche (jorisvandenbossche):*\nFor reference, we had a similar issue for Feather, where the underlying C++ reader always follows the order of the schema (ARROW-8641). And there we solved this by reordering the columns on the Python side in `pyarrow.feather.read_table` (as Alenka linked above)."
+        },
+        {
+            "created_at": "2022-10-27T11:04:51.937Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17360?focusedCommentId=17625032) by Alenka Frim (alenka):*\nUnfortunately the easy solution for reordering the columns in pyarrow isn't feasible as `pyarrow.Table.select()` with \"dotted path\" doesn't work but \"dotted path\" can be used when selecting a column with `{}ORCF.read(){`}:\r\n```java\n\r\n>       result4 = orc_file.read(columns=[\"struct.middle.inner\"])\r\n\r\nopt/conda/envs/arrow/lib/python3.8/site-packages/pyarrow/tests/test_orc.py:584: \r\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \r\nopt/conda/envs/arrow/lib/python3.8/site-packages/pyarrow/orc.py:189: in read\r\n    table = table.select(columns)\r\npyarrow/table.pxi:3053: in pyarrow.lib.Table.select\r\n    ???\r\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \r\n\r\n>   ???\r\nE   KeyError: 'Field \"struct.middle.inner\" does not exist in table schema'\r\n```\r\nTo close this issue I will add information to the `orc.read_table()` docstrings that we always follow the order of the file.\r\n\r\n**A workaround for a user with ordering issue:**\r\n \\* add `.select(columns= ['b', 'a']))` after reading the `Table` from the orc file\r\n\r\n_I still think a better solution would be that pandas starts using the new dataset API as mentioned above._"
+        },
+        {
+            "created_at": "2022-11-09T10:55:28.325Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17360?focusedCommentId=17630990) by Joris Van den Bossche (jorisvandenbossche):*\nIssue resolved by pull request 14528\n<https://github.com/apache/arrow/pull/14528>"
+        }
+    ]
+}

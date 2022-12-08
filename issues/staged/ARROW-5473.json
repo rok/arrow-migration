@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[C++] Build failure on googletest_ep on Windows when using Ninja",
+        "body": "***Note**: This issue was originally created as [ARROW-5473](https://issues.apache.org/jira/browse/ARROW-5473). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI consistently get this error when trying to use Ninja locally:\r\n\r\n```Java\n\r\n-- extracting...\r\n     src='C:/Users/wesmc/code/arrow/cpp/build/googletest_ep-prefix/src/release-1.8.1.tar.gz'\r\n     dst='C:/Users/wesmc/code/arrow/cpp/build/googletest_ep-prefix/src/googletest_ep'\r\n-- extracting... [tar xfz]\r\n-- extracting... [analysis]\r\n-- extracting... [rename]\r\nCMake Error at googletest_ep-stamp/extract-googletest_ep.cmake:51 (file):\r\n  file RENAME failed to rename\r\n\r\n    C:/Users/wesmc/code/arrow/cpp/build/googletest_ep-prefix/src/ex-googletest_ep1234/googletest-release-1.8.1\r\n\r\n  to\r\n\r\n    C:/Users/wesmc/code/arrow/cpp/build/googletest_ep-prefix/src/googletest_ep\r\n\r\n  because: Directory not empty\r\n\r\n\r\n\r\n[179/623] Building CXX object src\\arrow\\CMakeFiles\\arrow_static.dir\\array\\builder_dict.cc.obj\r\nninja: build stopped: subcommand failed.\r\n```\r\n\r\nI'm running within cmdr terminal emulator so it's conceivable there's some path modifications that are causing issues.\r\n\r\nThe CMake invocation is\r\n\r\n```Java\n\r\ncmake -G \"Ninja\" ^          -DCMAKE_BUILD_TYPE=Release ^          -DARROW_BUILD_TESTS=on ^          -DARROW_CXXFLAGS=\"/WX /MP\" ^\r\n     -DARROW_FLIGHT=off -DARROW_PARQUET=on -DARROW_GANDIVA=ON -DARROW_VERBOSE_THIRDPARTY_BUILD=on     ..\r\n```\r\n",
+        "created_at": "2019-05-31T19:05:24.000Z",
+        "updated_at": "2020-04-03T01:11:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-04-03T01:11:54.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-05-31T19:06:43.651Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5473?focusedCommentId=16853341) by Wes McKinney (wesm):*\nThe suspicious line is https://github.com/apache/arrow/blob/master/cpp/cmake_modules/ThirdpartyToolchain.cmake#L1259"
+        },
+        {
+            "created_at": "2019-06-03T13:26:25.206Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5473?focusedCommentId=16854593) by Antoine Pitrou (apitrou):*\nI think that line is necessary to workaround a CMake bug when non-existent directories are referenced."
+        },
+        {
+            "created_at": "2019-06-03T13:26:57.651Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5473?focusedCommentId=16854594) by Antoine Pitrou (apitrou):*\nSee e.g. https://gitlab.kitware.com/cmake/cmake/issues/15052"
+        },
+        {
+            "created_at": "2019-07-12T20:25:51.339Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5473?focusedCommentId=16884144) by Ben Kietzman (bkietz):*\nI've seen this too, I can usually work around it by explicitly building just googletest_ep then building the rest of the project"
+        },
+        {
+            "created_at": "2019-08-14T18:40:20.064Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5473?focusedCommentId=16907533) by Wes McKinney (wesm):*\nThis is still an issue AFAICT. "
+        },
+        {
+            "created_at": "2019-08-14T18:41:24.151Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5473?focusedCommentId=16907536) by Wes McKinney (wesm):*\nAs Ben said the workaround of doing\r\n\r\n```Java\n\r\nninja googletest_ep\r\nninja\r\n```\r\n\r\nworks. It definitely suggests there is something misconfigured in CMake, though"
+        },
+        {
+            "created_at": "2020-01-13T00:48:50.848Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5473?focusedCommentId=17013937) by Renat Valiullin (rip.nsk@gmail.com):*\nthe following change fixes issue for me:\r\n\r\n\u2014 a/cpp/cmake_modules/ThirdpartyToolchain.cmake\r\n+++ b/cpp/cmake_modules/ThirdpartyToolchain.cmake\r\n@@ -1412,7 +1412,7 @@ macro(build_gtest)\r\n set(GTEST_CMAKE_CXX_FLAGS \"${GTEST_CMAKE_CXX_FLAGS} -DGTEST_CREATE_SHARED_LIBRARY=1\")\r\n endif()\r\n \r\n- set(GTEST_PREFIX \"${CMAKE_CURRENT_BINARY_DIR}/googletest_ep-prefix/src/googletest_ep\")\n  + set(GTEST_PREFIX \"${CMAKE_CURRENT_BINARY_DIR}/googletest_ep-prefix\")\n   set(GTEST_INCLUDE_DIR \"${GTEST_PREFIX}/include\")\n   \n   set(_GTEST_RUNTIME_DIR ${BUILD_OUTPUT_ROOT_DIRECTORY})"
+        },
+        {
+            "created_at": "2020-04-02T17:26:01.347Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5473?focusedCommentId=17073925) by Wes McKinney (wesm):*\nThis has been occurring in the last week, seen in build failures here\r\n\r\nhttps://github.com/apache/arrow/pull/6813\r\n\r\nWe should try [~rip.nsk@gmail.com]'s proposed fix"
+        },
+        {
+            "created_at": "2020-04-03T01:11:54.192Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5473?focusedCommentId=17074182) by Wes McKinney (wesm):*\nIssue resolved by pull request 6816\n<https://github.com/apache/arrow/pull/6816>"
+        }
+    ]
+}

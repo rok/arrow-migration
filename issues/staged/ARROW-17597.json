@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[R][C++] Why is read_csv_arrow so much slower when using S3 path notation?",
+        "body": "***Note**: This issue was originally created as [ARROW-17597](https://issues.apache.org/jira/browse/ARROW-17597). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nConsider these two mechanisms for reading from a public bucket.\u00a0 I was struck to see that using S3 path notation was consistently over 20 times slower than using the https address directly.\u00a0 I could imagine a small overhead for using S3, but compared to other operations this seems something weird is going on here:\r\n\r\n\r\n\r\n```java\n\r\nlibrary(arrow)\r\ntarge <- s3_bucket(\"neon4cast-targets\", endpoint_override=\"data.ecoforecast.org\", anonymous=TRUE)\r\n\r\nbench::bench_time({ # 58.6 seconds\r\n\u00a0 ex1 <- read_csv_arrow(targe$path(\"terrestrial_30min/terrestrial_30min-targets.csv.gz\"))\r\n})\r\n\r\nbench::bench_time({ # 2.7 sec\r\n\u00a0 ex2 <- read_csv_arrow(\"https://data.ecoforecast.org/neon4cast-targets/terrestrial_30min/terrestrial_30min-targets.csv.gz\")\r\n})\r\n \n```",
+        "created_at": "2022-09-01T20:53:55.000Z",
+        "updated_at": "2022-10-27T19:15:06.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-06T12:12:17.292Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17597?focusedCommentId=17600742) by Nicola Crane (thisisnic):*\nI had a look into this in terms of profiling it to see where the issue lies, and it appears to be in the C++ where we call the `Read` method of the TableReader object.\r\n\r\n`[~apitrou]` - any ideas what this could be?"
+        },
+        {
+            "created_at": "2022-09-06T12:43:46.772Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17597?focusedCommentId=17600752) by Antoine Pitrou (apitrou):*\nWell, I suppose time is spent in S3 accesses?\r\n\r\nHow does `read_csv_arrow(\"https://data.ecoforecast.org/neon4cast-targets/terrestrial_30min/terrestrial_30min-targets.csv.gz\")` work exactly? What is handling the HTTPS URL?"
+        },
+        {
+            "created_at": "2022-09-06T14:51:05.027Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17597?focusedCommentId=17600811) by Nicola Crane (thisisnic):*\nHmm, that's a point; is accessing data via the S3 URI going to be inherently slower than accessing it via https? I tried googling this but didn't find the answer.\r\n\r\nIn terms of handling the https URL, there's a function in the R code that creates a FileSystem object by calling fs___FileSystemFromUri, and then (as it's compressed) makes it into a CompressedInputStream object.\r\n\r\nOne difference I can see is that in the first example, the stream object is a RandomAccessFile object, and in the second example it's an InputStream, so I guess those examples are using [completely different interfaces](https://arrow.apache.org/docs/cpp/io.html) for reading the data?\r\n"
+        },
+        {
+            "created_at": "2022-09-06T14:55:12.932Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17597?focusedCommentId=17600812) by Neal Richardson (npr):*\nhttps URLs are handled by R connections, not the arrow filesystem library: https://github.com/apache/arrow/blob/master/r/R/io.R#L249"
+        },
+        {
+            "created_at": "2022-09-06T15:35:08.130Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17597?focusedCommentId=17600838) by Carl Boettiger (cboettig):*\n\u00a0Just a note, but I think the additional latency in S3 version here is not nearly as significant if the csv file is not compressed.\u00a0 Reading directly from http is unsurprisingly a deal faster compressed than uncompressed, so it is weird that it adds latency here."
+        },
+        {
+            "created_at": "2022-09-06T16:39:55.935Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17597?focusedCommentId=17600882) by Antoine Pitrou (apitrou):*\n> is accessing data via the S3 URI going to be inherently slower than accessing it via https? \r\n\r\nI honestly have no idea. Ideally it shouldn't (S3 works over HTTPS after all) but I suppose many factors may come into play that I don't know about...\r\n\r\n`[~npr]` Is there a doc somewhere for R connections?"
+        },
+        {
+            "created_at": "2022-09-06T21:27:07.138Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17597?focusedCommentId=17601015) by Weston Pace (westonpace):*\nI get pretty similar results.\r\n\r\n>60 seconds for s3_bucket.\r\n\r\n~4 seconds with curl.\r\n\r\nFor an additional data point I tried downloading from the S3 server with minio client (mc) and got anywhere from 7 to 10 seconds.  So it appears there is some overhead associated with S3 but not enough to explain the big gap."
+        }
+    ]
+}

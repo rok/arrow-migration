@@ -1,0 +1,50 @@
+{
+    "issue": {
+        "title": "[Python] Limit the size of the repr for large Tables",
+        "body": "***Note**: This issue was originally created as [ARROW-14798](https://issues.apache.org/jira/browse/ARROW-14798). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe new repr is nice that it shows a preview of the data, but this can also become very long flooding your console output for larger tables.\r\n\r\nWe already default to 10 preview cols, but each column can still consist of many chunks. So it might be good to also limit it to 2 chunks? \r\n\r\nThe ChunkedArray.to_string method already has a `window` keyword, but that seems to control both the number of elements to show per chunk as the number of chunks (while it would be nice to limit eg to 2 chunks but show up to 10 elements for each chunk).\r\n\r\ncc `[~amol-]`",
+        "created_at": "2021-11-23T14:23:49.000Z",
+        "updated_at": "2022-02-25T09:31:43.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-02-24T17:22:03.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-12-01T00:02:34.099Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14798?focusedCommentId=17451449) by Will Jones (willjones127):*\nWhat do you think of adding an `inner_window` field to `{}PrettyPrintOptions{`}? Then in the case of chunked_array, `window` would refer to number of chunks to show and `inner_window` would refer to elements to show within those chunks.\r\n\r\ncc `[~uwe]` \u00a0\r\n\r\nExample of table with repr that's a little too long as-is:\r\n\r\n```python\n\r\nimport pyarrow\r\nimport string\r\n\r\ndef print_table(size: int, chunks: int):\r\n    t = pyarrow.table({\r\n        name: pyarrow.chunked_array([range(size) for _ in range(chunks)])\r\n        for name in string.ascii_lowercase\r\n    })\r\n    print(t)\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-12-01T07:59:27.291Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14798?focusedCommentId=17451587) by Joris Van den Bossche (jorisvandenbossche):*\nYes, it indeed sounds as a good start to distinguish both aspects with separate options"
+        },
+        {
+            "created_at": "2022-01-07T21:53:50.244Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14798?focusedCommentId=17470902) by Will Jones (willjones127):*\nThe thing about inner window is it only helps at one level. Another way to think about the problem is that we care more about seeing primitive elements than about container elements. So we could instead have `container_window` and `{}window{`}, where the latter only applies to primitives.\r\n\r\nSo the `window` and `inner_window` would work like:\r\n```python\n\r\n// window: 1, inner_window: 3\r\n>>> pa.chunked_array([[list(range(10))] * 10] * 10)# 10 chunks, 10 elements, 10 list-elements\r\n[[[0, 1, 2,...,7, 8, 9], [0, 1, 2,...,7, 8, 9], [0, 1, 2,...,7, 8, 9],...,[0, 1, 2,...,7, 8, 9], [0, 1, 2,...,7, 8, 9], [0, 1, 2,...,7, 8, 9]],\r\n ...,\r\n[[0, 1, 2,...,7, 8, 9], [0, 1, 2,...,7, 8, 9], [0, 1, 2,...,7, 8, 9],...,[0, 1, 2,...,7, 8, 9], [0, 1, 2,...,7, 8, 9], [0, 1, 2,...,7, 8, 9]]]\r\n// container_window: 1, window: 4\r\n>>> pa.chunked_array([[['a'] * 10] * 10] * 10) # 10 chunks, 10 elements, 10 list-elements\r\n[[[0, 1, 2, 3, ..., 6, 7, 8, 9], ...,[0, 1, 2, 3, ..., 6, 7, 8, 9]], ..., [[[0, 1, 2, 3, ..., 6, 7, 8, 9], ...,[0, 1, 2, 3, ..., 6, 7, 8, 9]]]\r\n```"
+        },
+        {
+            "created_at": "2022-01-07T21:57:57.339Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14798?focusedCommentId=17470904) by Will Jones (willjones127):*\nAnother issue I notice is that most column types will appear as one line in a Table repr, except a struct column will display child arrays across multiple lines (like it would when the array is printed on its own).\r\n\r\n```python\n\r\n>>> pa.table({'arr': pa.array([{'x': 1}, {'x': 2}, {'x': 3}]),\r\n...           'arr2': pa.array([1, 2, 3])})\r\npyarrow.Table\r\narr: struct<x: int64>\r\n  child 0, x: int64\r\narr2: int64\r\n----\r\narr: [  -- is_valid: all not null  -- child 0 type: int64\r\n    [\r\n      1,\r\n      2,\r\n      3\r\n    ]]\r\narr2: [[1,2,3]]\r\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-01-18T19:55:18.026Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14798?focusedCommentId=17478158) by Krisztian Szucs (kszucs):*\nPostponing to 8.0."
+        },
+        {
+            "created_at": "2022-01-18T20:45:07.209Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14798?focusedCommentId=17478194) by Joris Van den Bossche (jorisvandenbossche):*\nCan we keep this on 7.0.0? (or keep ARROW-15329 on 7.0.0?)\r\n\r\nThe table repr is basically unusable right now unless you are using small test data"
+        },
+        {
+            "created_at": "2022-01-18T20:48:54.334Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14798?focusedCommentId=17478196) by Krisztian Szucs (kszucs):*\nWe can, though I wouldn't like to block the release on this issue since it is an improvement (it could even count as a new feature)."
+        },
+        {
+            "created_at": "2022-02-24T17:22:03.685Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14798?focusedCommentId=17497577) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 12091\n<https://github.com/apache/arrow/pull/12091>"
+        }
+    ]
+}

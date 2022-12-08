@@ -1,0 +1,152 @@
+{
+    "issue": {
+        "title": "[C++] Investigate radix sort for integer arrays",
+        "body": "***Note**: This issue was originally created as [ARROW-10899](https://issues.apache.org/jira/browse/ARROW-10899). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFor integer arrays with a non-tiny range of values, we currently use a stable sort. It may be faster to use a radix sort instead.\r\n",
+        "created_at": "2020-12-14T08:28:24.000Z",
+        "updated_at": "2021-07-10T16:52:58.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-02-05T18:22:44.899Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17279881) by Kirill Lykov (klykov):*\nSounds interesting to me, I would like to have a look. Could give some more details from where to start? I mean:\r\n- where exactly this sorting happens,\n- are there existing benchmarks for this sorting (if not, what is the best place to add them)"
+        },
+        {
+            "created_at": "2021-02-06T13:43:43.490Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17280197) by Yibo Cai (yibocai):*\n`[~apitrou]`, please correct me if I missed somthing.\r\n\r\nCode: [vector_sort.cc](https://github.com/apache/arrow/blob/master/cpp/src/arrow/compute/kernels/vector_sort.cc)\r\nUnit test: [vector_sort_test.cc](https://github.com/apache/arrow/blob/master/cpp/src/arrow/compute/kernels/vector_sort_test.cc)\r\nBenchmark: [vector_sort_benchmark.cc](https://github.com/apache/arrow/blob/master/cpp/src/arrow/compute/kernels/vector_sort_benchmark.cc)\r\n\r\nPlease note current code supports sorting multiple columns, so looks a bit complex.\r\nI think we can start with single array sorter. Specifically, below code line calling std::stable_sort\r\nhttps://github.com/apache/arrow/blob/a321cdedb75b27b669995065ffe5596b3cfb3ae4/cpp/src/arrow/compute/kernels/vector_sort.cc#L378"
+        },
+        {
+            "created_at": "2021-02-06T20:02:42.153Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17280272) by Kirill Lykov (klykov):*\nThanks for the clarification, I will check it out next week."
+        },
+        {
+            "created_at": "2021-02-09T16:14:47.630Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17281864) by Kirill Lykov (klykov):*\n1. From the paper \"Fast Sort on CPUs and GPUs: A Case for Bandwidth Oblivious SIMD Sort\" by Satish et al:\r\n They compare, beside other things, performance of radix sort and merge sort using intrinsics.\r\n Both implementations are highly optimized for simd architecture and radix has many not obvious improvements to make it more cache-friendly.\r\n Radix sort performance depends on the key size because the longer key we have the more passes we need to do. Radix is bandwidth-bound starting at 48-bits keys.\r\n Further, Satish et al report that merge sort is 1.7X slower than radix sort on 32- bit keys, but becomes comparable in performance to radix on 64-bit keys and 1.3X better on 128-bit keys.\r\n Their conclusion is that \"bandwidth-oblivious SIMD friendly merge sort, should, therefore, be the sorting method of choice for future databases\".\r\n\r\n2. I haven't found a good opensource radix sort for CPUs. There is one in boost called spread sort, looks promising. Alternatively one could implement Satish paper but this code will be difficult to support\u00a0"
+        },
+        {
+            "created_at": "2021-02-09T17:31:09.411Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17281908) by Antoine Pitrou (apitrou):*\n`[~klykov]` Feel free to experiment, but note that adding SIMD into the mix will add a layer of complication. \r\nFor a non-SIMD implementation, my intuition is that a radix sort could be significantly faster on large data than the current merge sort (a.k.a `std::stable_sort`)."
+        },
+        {
+            "created_at": "2021-02-09T20:33:29.926Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17282023) by Kirill Lykov (klykov):*\nYour intuition is correct, at least for int32_t key. I benchmarked separately from arrow std::sort, std::stable_sort, boost::spreadsort, myNaiveRadixSort. And surprisingly to me even naive radix sort is faster than std sorts. But boost's spread sort is better. Y-axis is kMilliseconds, X-axis is number of elements in the array. It suggests to use boost::spreadsort\r\n\r\n ![Screen Shot 2021-02-09 at 17.48.13.png](https://issues.apache.org/jira/secure/attachment/13020269/Screen+Shot+2021-02-09+at+17.48.13.png)"
+        },
+        {
+            "created_at": "2021-02-09T20:36:08.754Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17282026) by Antoine Pitrou (apitrou):*\nNote that we need a stable sort, which spreadsort apparently isn't."
+        },
+        {
+            "created_at": "2021-02-09T20:41:55.338Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17282030) by Kirill Lykov (klykov):*\nRight, I will check also spinsort from boost. I would add why spreadsort is not stable \u2013 if array is small or integer doesn't fit to boost::uintmax_t, it uses pbsort which is unstable. If everything is fine it is using radix sort, which is what we want.\r\n One solution is to implement stable_spinsort which will use something else instead of pbsort.\u00a0\r\n\r\nBelow is the plot for these sorting algorithms for int64_t (one above is for int32_t).\r\n\r\n![Screen Shot 2021-02-10 at 10.58.23.png](https://issues.apache.org/jira/secure/attachment/13020283/Screen+Shot+2021-02-10+at+10.58.23.png)\r\n\r\nLooks like stable spinsort is not better than std::stable_sort and this is expected.\u00a0\r\n I believe that if we want to use primarily keys shorter or equal to 64 bits, it makes sense to look into a-la spreadsort implementation. For that, it is possible to reuse some code from boost::sort::spreadsort::details bu[t this is might be](https://github.com/boostorg/sort/blob/develop/include/boost/sort/spreadsort/detail/integer_sort.hpp) a bad idea since it is not part of the public interface."
+        },
+        {
+            "created_at": "2021-02-10T10:13:22.611Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17282355) by Antoine Pitrou (apitrou):*\nEven a radix sort is not necessarily stable. You have to be careful when implementing it: see https://en.wikipedia.org/wiki/Radix_sort\r\n\r\nAlso, I assume your benchmarks are on random data? Data is very often not randomly distributed. On real-world data, a int32 or int64 column doesn't necessarily span the whole int32 or int64 range, for example.\r\n\r\nPerhaps heuristics would need to be devised, based on the input range and the input size you would either use a radix sort (which is O\\(n\\)) or a comparison-based sort such as spinsort (which is O\\(n log n\\))."
+        },
+        {
+            "created_at": "2021-02-10T14:27:13.074Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17282484) by Kirill Lykov (klykov):*\nOn a higher level I honestly thought that I will easily find a suitable opensource sort implementation. So did just basic benchmarking. I think I will create a separate repo just for benchmarking existing sorting algorithms alone together with candidate implementation.\u00a0"
+        },
+        {
+            "created_at": "2021-02-11T07:08:35.756Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17282886) by Michal Nowakiewicz (michalno):*\nI don't have any good advice on open source radix sort, but let me share some general thoughts about radix sort implementation:\r\n1. Regarding SIMD. It seems to me that unstable radix sort should be relatively simple to implement using AVX-512 instruction set (AVX2 is a bit more challenging, since it is missing for instance scatter instruction for memory stores). Stable radix sort is a bit harder with SIMD but still doable. Is it worth it? I believe that the majority of the cost in radix sort is in the data movement (memory stores to non-consecutive addresses), especially if the data does not fit into CPU cache. SIMD will not help with that. But it will cut the cost of everything else. I would expect visible improvement but nothing close to 2x speedup. It's probably something better left for later.\n1. Regarding papers. <http://www.cs.columbia.edu/~orestis/sigmod14I.pdf>\u00a0- This paper may be a bit too much - it focuses on SIMD, parallel processing, optimizing for multiple NUMA nodes and it goes into a lot of depth and touches some other topics as well - but at the time it was published it looked to me like a pretty good implementation. There may be something interesting in their results and conclusions, even though they tested their solution on much bigger data sets.\n1. Regarding MSB (most significant bits first) vs LSB (least significant bits first) radix sort. MSB should be faster on larger data (compared to the size of CPU cache), more cache-friendly, and can be implemented as a stable sort.\n1. Regarding hybrid sorting. I imagine that a good solution would be to run MSB radix sort at first, producing a set of data partitions based on the highest bits of the sort key. Once the partitions get small enough (e.g. fit L1 cache) I would guess that radix sort is no longer the best solution for sorting data (it should get more advantage over comparison based sorting when the input set is large). At that point\u00a0a different sorting algorithm could be better suited, so any sort_of_choice can be called on the data within radix partition. If radix sort is faster on small arrays (thousands of elements) - great - but if it isn't, then using another sort method for small partitions seems like a good idea.\n1. Regarding data distribution. I think that data distribution is pretty important in designing and testing radix sort. For instance, if we sort 1 million 64-bit uniformly distributed integers, even though the space of potential values is huge, there are at most 1 million unique values. If I had to sort 1M of 64-bit integers I would consider doing it using range partitioning: a) use a small sample of data (e.g. every Nth value for a double digit N) to compute a histogram (sort the sample, using any kind of sort, divide into K equal size buckets after sorting for range partitioning later into K ranges); b) use range partitioning based on the histogram to split data into multiple ranges; c) continue the two previous steps recursively until the partition size is small and then call a sort_of_choice function on that partition. Histogram based range partitioning should take care of data skew and create approximately equal sized partitions. That means that for 1M values, in order to get down to 1K elements partitions, about 1K partitions need to be generated. That can be done for instance as a single pass of range partitioning with 1024 partitions or two passes with 32 partitions each. Even though a single round of range partitioning (bucket sort) is obviously more expensive than pure radix sort pass (extra histogram and finding a range for each value given range boundaries) it seems to me like a good candidate, since it lowers the total number of partitioning steps that are needed (compared to pure radix sort of 64-bit integers that would use something like 8 passes of 8-bit radix partitioning phases). And SIMD can definitely help performance-wise in finding the right bucket for each value using range boundaries."
+        },
+        {
+            "created_at": "2021-04-05T13:16:31.079Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17314850) by Kirill Lykov (klykov):*\nI added a repository to put there some experiments i've done for the earlier added plots: <https://github.com/KirillLykov/int-sort-bmk>\r\n\r\nUnfortunately, I couldn't achieve a fast progress on this ticket and since it is not my main activity I decided to freeze it on my side.\r\nBy fast progress I mean delivering a stable non-comparison-based sorting algorithm which is faster than std::stable_sort.\r\nNaiveradix sort which is implemented there is much slower on int64_t as one might find by looking into the plots in scripts/imgs.\r\n\r\n\r\nThe last thing that I was trying to do is to modify boost's integer_sort to make it stable (as unstable version is really fast).\r\nTo simplify experiments with integer_sort I've extracted it in one separate file called <https://github.com/KirillLykov/int-sort-bmk/blob/master/src/boost_spread_sort.h>\r\nOne can find that integer_sort sometimes relies on\u00a0pdqsort. This can be replaced with stable_sort.\r\nA more interesting part of the code which I think makes integer_sort unstable is <https://github.com/KirillLykov/int-sort-bmk/blob/master/src/boost_spread_sort.h#L210>\r\nI think in-place version can be replaced with non-in-place."
+        },
+        {
+            "created_at": "2021-04-05T13:41:35.139Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17314867) by Antoine Pitrou (apitrou):*\nThanks for the update `[~klykov]`. It will be useful if someone else takes up this issue."
+        },
+        {
+            "created_at": "2021-04-09T17:04:57.831Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17318133) by Antoine Pitrou (apitrou):*\nInteresting read here: https://travisdowns.github.io/blog/2019/05/22/sorting.html"
+        },
+        {
+            "created_at": "2021-04-11T09:23:16.104Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17318707) by Kirill Lykov (klykov):*\nThanks for the reference to the blog, I read all of his posts.\u00a0\r\n\r\nI've checked with my benchmarks Travis' final radix_sort7 version, see below.\r\nIt rocks! \r\n\r\n![all_random_wholeRange.png](https://issues.apache.org/jira/secure/attachment/13024620/all_random_wholeRange.png)\r\n\r\nThere is no license file in his repo, so I cannot share my experiments.\r\n\r\nThere might be several ways to proceed. It looks it would be good to ask Travis to contribute to Arrow. What do you think? \r\n\r\nI've added issue to his repo to add license at this point, see https://github.com/travisdowns/sort-bench/issues/1"
+        },
+        {
+            "created_at": "2021-04-12T14:15:18.366Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17319476) by Antoine Pitrou (apitrou):*\nI don't know if Travis would be interested, as plumbing work would probably dominate the actual optimization work (but I don't know what his interests are). That said, it probably doesn't hurt to ask him :-)\r\n"
+        },
+        {
+            "created_at": "2021-04-12T14:15:55.432Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17319478) by Antoine Pitrou (apitrou):*\nAlso, AFAIU his radix sort implementation is simply a left-to-right (most significant digit first) radix sort, so should be stable unless there is a bug."
+        },
+        {
+            "created_at": "2021-04-12T14:57:44.915Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17319494) by Kirill Lykov (klykov):*\nRight, I agree that it is stable. \r\nFrom performance prospective, the main difference with naive implementation of Cormen's pseudo code:\r\n1) Skip unnecessary iterations (if all the numbers have current bits (8 bits in Travis code) set to the same value). Gives ~36%\r\n2) Instead of using offset array use array of pointers which takes into account these offsets. So instead of `out[offset[(value>>shift)&bitmask]]=123 `do `pOut[(value>>shift)&bitmask] = 123` where pOut is precomputed to be `&out[0] + offset[]`. Gives ~24%\r\n\r\nHe also uses `__builtin_prefetch` from gcc library, I'm not sure if it is portable. It might give 12% performance on some large datasets.\r\n\r\nI will write to Travis directly. Probably, he will like to contribute a version of this sort and I will do plumbing"
+        },
+        {
+            "created_at": "2021-04-19T08:48:55.874Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17324878) by Kirill Lykov (klykov):*\nUpdates, I've contacted Travis and he wrote that he has a lack of time to work on it yet it seems interesting to him. He mentioned also that MSD implementation might be better for bandwidth. \r\n\r\nI'm thinking about the way to proceed. One option might be\r\n1. Travis will create a PR just with his radix sort implementation\r\n2. I will add tests and benchmarks to his PR\r\n\r\nOne thing which kind of worries me is that sorting requires quite intense ad-hoc testing and benchmarking, are we fine with adding all these to the Arrow repository?"
+        },
+        {
+            "created_at": "2021-04-19T09:26:07.530Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17324903) by Antoine Pitrou (apitrou):*\nI'm not sure we need intense benchmarking. Admittedly, it's better to test sorting on all kinds of input (almost sorted, random, etc.). However, we don't necessarily need that if we just want to find a cutoff point between radix sorting and `std::stable_sort` (which is probably a merge sort with fallback to a simpler sort for small sizes)."
+        },
+        {
+            "created_at": "2021-04-26T17:17:23.710Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17332609) by Kirill Lykov (klykov):*\nI'm continuing experiments with MSD sort.\r\nI'm using gist as log for optimizations\r\n <https://gist.github.com/KirillLykov/c641e63adfd68591bafbdb342f75d141>\r\n\r\nPlease ignore code style sine it is for experiments.\r\nEach comment in this gist is an iteration of optimization.\r\nPlease let me know someone has ideas to try. I was planing try to get rid of recursion by using stack explicitly. Don't see any other big things to do with it.\r\n\r\n\r\n\r\n![all_random_wholeRange.png](https://issues.apache.org/jira/secure/attachment/13024620/all_random_wholeRange.png)\r\n\r\nIdea by `[~michalno]` to use another sorting algorithm if the size of the subarray to sort is smaller than some level surprisingly doesn't work well on my array (for now only uniform distribution)."
+        },
+        {
+            "created_at": "2021-04-26T17:50:01.206Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17332650) by Antoine Pitrou (apitrou):*\nYou should probably bench against `radix_sort6` because `radix_sort7` merely adds an explicit prefetch which is a bit orthogonal."
+        },
+        {
+            "created_at": "2021-04-26T18:02:07.861Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17332655) by Kirill Lykov (klykov):*\nActually, I don't see significant effect of prefetch in my benchmarks. Probably, because I use clang. Now wondering how it is compiling. So it might be considered as radix_sort6."
+        },
+        {
+            "created_at": "2021-05-09T14:56:19.702Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17341526) by Kirill Lykov (klykov):*\nDo we have some information about distribution of integers? And also are they signed/unsigned?\r\n\r\nI've did some more benchmarking and plots [https://github.com/KirillLykov/int-sort-bmk.](https://github.com/KirillLykov/int-sort-bmk)\r\n In short, radix sort is almost always performs better than std::stable_sort.\r\n But there are some cases when stable_sort is better \u2013 sorted sequence, all elements are equal.\r\n\r\nAnother observation is that it\u00a0 looks like LSD implementation is faster than MSD implementation.\u00a0\r\n Yet it is possible to have almost the same performance using MSD/LSD hybrid algorithm if we think that MSD is better for memory bandwidth.\r\n\r\nThe question is how to measure memory bandwidth consumption, I employed LLC-cache-misses events.\u00a0"
+        },
+        {
+            "created_at": "2021-05-10T12:46:43.707Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17341891) by Antoine Pitrou (apitrou):*\nWe can't presume anything about the distribution of integers. It could be anything. Also, they may be signed or unsigned (but I don't think that makes a lot of difference, does it?).\r\n\r\nDo note that we need a stable sort, so I don't think using LSD can work."
+        },
+        {
+            "created_at": "2021-05-10T12:47:42.351Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17341893) by Antoine Pitrou (apitrou):*\nThanks a lot for running these benchmarks, by the way. It seems that `std::stable_sort` is already quite good on several cases."
+        },
+        {
+            "created_at": "2021-05-10T13:55:39.436Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17341925) by Kirill Lykov (klykov):*\nI believe that the LSD implementation by Travis is stable by construction, I will recheck it.\r\n Regarding stable_sort \u2013 i'm trying to find a way to rely on stable_sort instead of radix sort for particular types of distribution.\r\nThese checks are done in boost::spread_sort but I haven't got the math behind yet.\r\nIn particular, they detect is sequence is sorted and find min/max values.\r\nFrom that they can conclude if the sequence is bucket sorted or it is not sorted but better to be handled by another algorithm."
+        },
+        {
+            "created_at": "2021-06-09T11:24:16.859Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17359990) by Kirill Lykov (klykov):*\nI have to drop this ticket but if someone will take it, I will be glad to assist.\r\nBelow is a summary of the research I did.\r\n\r\nFirst of all I couldn't find ready to use stable radix sort implementation which is fast and generic.\r\nboost::spread_sort is the best available implementation of in-place radix sort because it designed to perform well on all the inputs.\r\nOn the contrary, vanilla radix sort will perform poorly on some types of distributions as shown on the plot below.\r\nspread_sort performs better for two reasons:\r\n- it detect some cases when radix sort will perform poorly and relies on boost's pdqsort sorting algorithm\n- it uses adaptive size of the radix rather than fixed\n  \n  What makes spreadsort unstable is that it sometimes relies on pdqsort which is unstable and that it is in-place sort.\n  Hence, it is possible to make it stable by replacing calls to pdqsort to stable_sort and by using additional buffer instead of doing in-place sorting.\n  Another argument for starting from spread sort code is that it is tested on different platforms (so less risk for surprises), it works with different datatypes.\n  \n  ![differentdistrib.png](https://issues.apache.org/jira/secure/attachment/13026596/differentdistrib.png)\n  \n  Beside of developing a new efficient implementation of adaptive radix sort, there is also work need to be done to integrate this sort. Since right now a custom comparator is used with std::stable_sort.\n  \n  Having in mind also extensive testing/bmk (different distributions, different data types) and profiling, I would estimate this task for 80-120h"
+        },
+        {
+            "created_at": "2021-06-09T11:36:11.357Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17359997) by Antoine Pitrou (apitrou):*\nThanks for the investigation! Were you able to check on the claim that Travis' LSD sort is stable?"
+        },
+        {
+            "created_at": "2021-06-09T14:26:49.344Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17360115) by Kirill Lykov (klykov):*\nLSD sort is stable.\r\nDo you want to try with Travis' LSD sort implementation?\r\nIf yes, we can discuss what shall be done. Like I can change the style of the code, make it templated, support negative, etc. \r\n\r\nMaking perfect adaptive stable generic radix looks like too time consuming task for me, but adapting LSD is simpler.\r\n\r\nYet about bandwidth. \r\nTravis wrote me that he originally wanted to have two posts \u2013 one about LSD and another about MSD. And he prefers MSD due to lower bandwidth consumption.\r\nIt sounds logical by looking to algorithms themselfs \u2013 LSD will visit all the radixes anyway while MSD will build a tree of recursive calls which generally speaking is not balanced so makes less memory operations.\r\nI tried to estimate bandwidth by using LLC-misses in perf, results are in the table there https://github.com/KirillLykov/int-sort-bmk#msd-vs-lsd-radix-sort\r\nYet MSD is more complicated to implement and less performant, so if doing MSD-like approach I would go with adaptive MSD like one from boost\r\nWhat do you think about this?\r\n"
+        },
+        {
+            "created_at": "2021-06-09T15:08:13.536Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17360141) by Antoine Pitrou (apitrou):*\nGood question about bandwidth!\r\n\r\nA possible solution for the bandwidth issue may be to 1) run a LSD radix sort on small-sized chunks (for example 64kB or 128kB, to fit in L2) 2) run a merge sort on the resulting sorted chunks. I'm not sure what the performance would be."
+        },
+        {
+            "created_at": "2021-06-09T15:38:35.475Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17360162) by Kirill Lykov (klykov):*\nWell, it looks like it is called \"wolf sort\" (https://github.com/scandum/wolfsort).\r\nI compared the implementation of Igor with Travis lsd and stable sort on uniformly distributed uint64_t from the range 0..1e9, see   \r\n\r\n![uniform_1B_wolf.png](https://issues.apache.org/jira/secure/attachment/13026616/uniform_1B_wolf.png) \r\n\r\nI don't know if his implementation is good/bad. \r\nI just took it and made it a bit more typed to be compiled by C++ compiler, see https://github.com/KirillLykov/int-sort-bmk/blob/wolfSortCheck/ branch if really interested"
+        },
+        {
+            "created_at": "2021-06-09T17:39:19.357Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17360244) by Antoine Pitrou (apitrou):*\nHa, the search space for sorting algorithms looks a bit crowded :-)\r\n\r\nGenerally speaking, I don't think there's a need to press forward on this issue. But your experiments and findings are extremely useful and will probably serve us in the future, so thanks a lot!"
+        },
+        {
+            "created_at": "2021-07-10T16:52:58.158Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10899?focusedCommentId=17378494) by Antoine Pitrou (apitrou):*\nAlso worth taking a look at https://github.com/scandum/quadsort , even if it's not radix-based."
+        }
+    ]
+}

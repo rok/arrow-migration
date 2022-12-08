@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] ListType doesn't preserve field name after pickle and unpickle",
+        "body": "***Note**: This issue was originally created as [ARROW-12762](https://issues.apache.org/jira/browse/ARROW-12762). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHere is a small reproducer:\r\n```python\n\r\nimport pandas as pd\r\nfrom pyspark.sql import SparkSession\r\nimport pyarrow.parquet as pq\r\nimport pickle\r\n\r\ndf = pd.DataFrame(\r\n    {\r\n        \"A\": [\r\n            [\"aa\", \"bb \"],\r\n            [\"c\"],\r\n            [\"d\", \"ee\", \"\", \"f\"],\r\n            [\"ggg\", \"H\"],\r\n            [\"\"],\r\n        ]\r\n    }\r\n)\r\n\r\nspark = SparkSession.builder.appName(\"GenSparkData\").getOrCreate()\r\nspark_df = spark.createDataFrame(df)\r\nspark_df.write.parquet(\"list_str.pq\", \"overwrite\")\r\n\r\nds = pq.ParquetDataset(\"list_str.pq\")\r\nassert pickle.loads(pickle.dumps(ds.schema)) == ds.schema # PASSES\r\nassert pickle.loads(pickle.dumps(ds.schema.to_arrow_schema())) == ds.schema.to_arrow_schema() # FAILS\r\n```",
+        "created_at": "2021-05-12T20:03:27.000Z",
+        "updated_at": "2021-07-13T12:41:02.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-07-13T12:40:50.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-05-17T11:35:08.585Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12762?focusedCommentId=17346100) by Joris Van den Bossche (jorisvandenbossche):*\n`[~jjgalvez]` thanks for opening the issue. \r\n\r\nI can't reproduce this without pyspark; when writing the pandas dataframe to parquet with pyarrow, it seems to work:\r\n\r\n```Java\n\r\nIn [11]: import pyarrow.parquet as pq\r\n\r\nIn [12]: tabe = pa.table(df)\r\n\r\nIn [13]: pq.write_table(table, \"test_list_str.parquet\")\r\n\r\nIn [14]: ds = pq.ParquetDataset(\"test_list_str.parquet\")\r\n\r\nIn [15]: pickle.loads(pickle.dumps(ds.schema)) == ds.schema\r\nOut[15]: True\r\n\r\nIn [16]: pickle.loads(pickle.dumps(ds.schema.to_arrow_schema())) == ds.schema.to_arrow_schema()\r\nOut[16]: True\r\n```\r\n\r\nCould you try to check what the difference is between the schemas before and after pickling? (eg if you print both, do you see a difference? Or it's schema.metadata?)"
+        },
+        {
+            "created_at": "2021-05-18T14:32:46.029Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12762?focusedCommentId=17346938) by Juan Galvez (jjgalvez):*\nThanks Joris. Here is some more information that I get when printing the schemas:\r\n\r\n\u00a0\r\n\r\nprint(ds.schema)\r\n```java\n\r\n<pyarrow._parquet.ParquetSchema object at 0x7f580da7bec0>\r\nrequired group field_id=0 spark_schema {\r\n  optional group field_id=1 A (List) {\r\n    repeated group field_id=2 list {\r\n      optional binary field_id=3 element (String);\r\n    }\r\n  }\r\n}\r\n```\r\nprint(ds.schema.to_arrow_schema())\r\n```java\n\r\nA: list<element: string>\r\n  child 0, element: string\r\n    -- field metadata --\r\n    PARQUET:field_id: '3'\r\n  -- field metadata --\r\n  PARQUET:field_id: '1'\r\n-- schema metadata --\r\norg.apache.spark.version: '3.1.1'\r\norg.apache.spark.sql.parquet.row.metadata: '{\"type\":\"struct\",\"fields\":[{\"' + 109\r\n```\r\nprint(pickle.loads(pickle.dumps(ds.schema.to_arrow_schema())))\r\n```java\n\r\nA: list<item: string>\r\n  child 0, item: string\r\n  -- field metadata --\r\n  PARQUET:field_id: '1'\r\n-- schema metadata --\r\norg.apache.spark.version: '3.1.1'\r\norg.apache.spark.sql.parquet.row.metadata: '{\"type\":\"struct\",\"fields\":[{\"' + 109\r\n```\r\nThere is a difference between the last two, which is where the error is probably coming from. But I'm not sure what it means.\r\n\r\n\u00a0\r\n\r\nHopefully this helps.\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-05-19T07:45:53.314Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12762?focusedCommentId=17347376) by Joris Van den Bossche (jorisvandenbossche):*\n`[~jjgalvez]` thanks, that helps.\r\n\r\nLooking at both schemas, there is one difference: the name that is used for the field inside the list column (\"element\" vs \"item\").\r\n\r\nBy default, Arrow uses \"item\", but you can manually specify a different name as well when constructing a list type:\r\n\r\n```Java\n\r\n>>> pa.list_(pa.int64())\r\nListType(list<item: int64>)\r\n\r\n>>> pa.list_(pa.field(\"element\", pa.int64()))\r\nListType(list<element: int64>)\r\n```\r\n\r\nWhen writing Parquet files, Arrow also uses this \"item\", while the official Parquet format says this should be \"element\". There was recently a PR to add an option to write a compliant parquet file: https://github.com/apache/arrow/pull/9489\r\n\r\nNow, so that is the reason I couldn't replicate it. If I explicitly write a compliant Parquet file (as you probably had with pyspark as well), I indeed can reproduce it. \r\n\r\nSo the underlying reason is that pickling/unpickling doesn't preserve the list field name. A smaller reproducer without parquet:\r\n\r\n```Java\n\r\n>>> list_type = pa.list_(pa.field(\"element\", pa.int64()))\r\n>>> list_type\r\nListType(list<element: int64>)\r\n\r\n>>> pickle.loads(pickle.dumps(list_type))\r\nListType(list<item: int64>)\r\n```"
+        },
+        {
+            "created_at": "2021-05-19T07:50:56.485Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12762?focusedCommentId=17347381) by Joris Van den Bossche (jorisvandenbossche):*\nThis should be a relatively easy fix by pickling the value_field instead of value_type at https://github.com/apache/arrow/blob/aa37d197a63a7efbc0660f9cea2f75cc08c30587/python/pyarrow/types.pxi#L279-L280"
+        },
+        {
+            "created_at": "2021-05-19T13:27:53.900Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12762?focusedCommentId=17347681) by Juan Galvez (jjgalvez):*\nThank you `[~jorisvandenbossche]` for diagnosing, this makes sense."
+        },
+        {
+            "created_at": "2021-07-13T12:40:50.892Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12762?focusedCommentId=17379865) by David Li (lidavidm):*\nIssue resolved by pull request 10704\n<https://github.com/apache/arrow/pull/10704>"
+        }
+    ]
+}

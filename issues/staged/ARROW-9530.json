@@ -1,0 +1,80 @@
+{
+    "issue": {
+        "title": "[C++] Add option to disable jemalloc background thread on Linux",
+        "body": "***Note**: This issue was originally created as [ARROW-9530](https://issues.apache.org/jira/browse/ARROW-9530). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe noticed that after we upgraded pyarrow to version 0.17.1 from 0.9.0 we now get two unwanted side effects just by linking in arrow libs into our c++ build.\u00a0 We link arrow libs into one of our low level core libraries so now all of our applications are affected by these side effects:\r\n\r\n1) a\u00a0\"jemalloc_bg_thd\" thread is spawned on dlinit before we ever hit main\r\n\r\n2) all our apps are now hitting valgrind leak warnings due to a (potential) leak in jemalloc code:\r\n\r\n==33515== 656 bytes in 1 blocks are possibly lost in loss record 1 of 1\r\n==33515== at 0x402E9EA: calloc (vg_replace_malloc.c:752)\r\n==33515== by 0x4011F44: _dl_allocate_tls (in /usr/lib64/ld-2.17.so)\r\n==33515== by 0x5DFF9C0: pthread_create@@GLIBC_2.2.5 (in /usr/lib64/libpthread-2.17.so)\r\n==33515== by 0x589186B: je_arrow_private_je_pthread_create_wrapper (background_thread.c:48)\r\n==33515== by 0x589186B: background_thread_create_signals_masked (background_thread.c:365)\r\n==33515== by 0x589186B: background_thread_create_locked (background_thread.c:573)\r\n==33515== by 0x5891A47: je_arrow_private_je_background_thread_create (background_thread.c:598)\r\n==33515== by 0x400F502: _dl_init (in /usr/lib64/ld-2.17.so)\r\n==33515== by 0x40011A9: ??? (in /usr/lib64/ld-2.17.so)",
+        "created_at": "2020-07-20T15:06:07.000Z",
+        "updated_at": "2021-07-23T14:47:17.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-07-22T15:52:46.316Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9530?focusedCommentId=17162902) by Uwe Korn (uwe):*\nPlease report this issue to jemalloc where this should be solved."
+        },
+        {
+            "created_at": "2020-07-27T20:59:32.026Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9530?focusedCommentId=17165962) by Wes McKinney (wesm):*\nI think you can also use a suppressions file for valgrind to squelch this warning so that your valgrind builds don't fail. "
+        },
+        {
+            "created_at": "2020-07-27T21:27:19.232Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9530?focusedCommentId=17165965) by Rob Ambalu (robambalu):*\nyup im less concerned about valgrind since we can suppress, but the extra thread in every single app is a nuisance"
+        },
+        {
+            "created_at": "2020-12-13T14:11:40.452Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9530?focusedCommentId=17248590) by Sebastian Dressler (sdressler):*\n`[~uwe]`: IMHO that statement is not correct, since `arrow/cpp/src/arrow/memory_pool.cc` defines:\r\n\r\n```Java\n\r\n#undef USE_JEMALLOC_BACKGROUND_THREAD\r\n#ifndef __APPLE__\r\n// ARROW-6977: jemalloc's background_thread isn't always enabled on macOS\r\n#define USE_JEMALLOC_BACKGROUND_THREAD\r\n#endif\r\n```\r\n\r\nI agree with `[~robambalu]` and think there should be an option to disable these on `_dl_init`. Please also see [this comment](https://github.com/jemalloc/jemalloc/issues/1884#issuecomment-662740143) from David Goldblatt on the very same subject where he clearly states:\r\n\r\n> Background threads are off by default in the standard configuration\r\n\r\nI am currently using libarrow for a project with PostgreSQL where multiple processes are used per default and I would like to see these background threads gone. Most notably because I am specifically using `arrow::system_memory_pool`\u00a0and disable threads wherever possible. Still, there are threads spawned."
+        },
+        {
+            "created_at": "2020-12-17T18:04:18.722Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9530?focusedCommentId=17251255) by Wes McKinney (wesm):*\nI reopened the JIRA and renamed it suitably. We've found that using the background thread yields the most intuitive \"out of the box\" experience for users, and users who are sensitive to having a thread spawned are not representative of the plurality / majority of users. Please feel free to submit a PR"
+        },
+        {
+            "created_at": "2020-12-17T18:06:18.930Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9530?focusedCommentId=17251256) by Sebastian Dressler (sdressler):*\n`[~wesm]` great, thanks! PR goes on GitHub, I assume?"
+        },
+        {
+            "created_at": "2020-12-28T16:46:47.336Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9530?focusedCommentId=17255641) by Antoine Pitrou (apitrou):*\n`[~sdressler]` Yes, you should open the PR to <https://github.com/apache/arrow/>\r\n\r\nFeel free to ask any development-related questions here or on your PR."
+        },
+        {
+            "created_at": "2021-01-10T19:35:05.848Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9530?focusedCommentId=17262261) by William Volkman (wvolkman):*\nJust shifted from 1.0.0 to current and well having 18% of your system used while nothing is running I think would be noticeable.\u00a0\r\n\r\n` 47377 - E 3% jemalloc_bg_thd`\r\n` 47399 - E 3% jemalloc_bg_thd`\r\n` 47332 - E 3% jemalloc_bg_thd`\r\n` 47354 - E 3% jemalloc_bg_thd`\r\n` 47374 - E 2% jemalloc_bg_thd`\r\n` 47396 - E 2% jemalloc_bg_thd`\r\n` 47330 - E 2% jemalloc_bg_thd`\r\n` 47352 - E 2% jemalloc_bg_thd`"
+        },
+        {
+            "created_at": "2021-01-11T08:31:24.641Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9530?focusedCommentId=17262478) by Antoine Pitrou (apitrou):*\n`[~wvolkman]` I'm not sure I understand what you mean. Can you explain?"
+        },
+        {
+            "created_at": "2021-01-11T13:09:07.418Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9530?focusedCommentId=17262633) by Rob Ambalu (robambalu):*\nfwiw I'm not seeing this behavior, threads are at 0% when they arent in use\r\n\r\nThey are still a nuisance though"
+        },
+        {
+            "created_at": "2021-01-11T13:12:20.067Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9530?focusedCommentId=17262635) by Antoine Pitrou (apitrou):*\nNote that you'll soon be able to change the default memory pool implementation at runtime:\r\n\r\n<https://github.com/apache/arrow/pull/9105>\r\n\r\n(I have no idea whether mimalloc also uses a background thread, btw)"
+        },
+        {
+            "created_at": "2021-01-13T01:31:57.492Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9530?focusedCommentId=17263828) by William Volkman (wvolkman):*\nI have some airflow tasks with python code that call pyarrow to create parquet files.  These open the parquet_writer, add some tables to them, close and the handle goes out of scope so should be available for GC.\r\n\r\nI've just shut them down and restarted.  Though they have not done any work the jemalloc_bg_thd processes are all taking 3 to 4 percent of the CPU.\r\n\r\nThe reason I commented was to point out that it is not as if they are not taking any resources when idle.  Look forward to the release with your runtime controls.\r\n"
+        },
+        {
+            "created_at": "2021-01-13T09:37:46.457Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9530?focusedCommentId=17264014) by Antoine Pitrou (apitrou):*\nInteresting. I suggest you report this issue to the jemalloc project itself, because we are unlikely to be able to diagnose it: https://github.com/jemalloc/jemalloc/"
+        },
+        {
+            "created_at": "2021-05-04T11:24:13.962Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9530?focusedCommentId=17338920) by Weston Pace (westonpace):*\nI've submitted a PR.\u00a0 It doesn't allow you to prevent the background threads from starting up at all but you can shut them down which should address both the valgrind issue and any concerns about performance impact of those threads."
+        },
+        {
+            "created_at": "2021-05-04T13:11:31.169Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9530?focusedCommentId=17338979) by Rob Ambalu (robambalu):*\nIIRC, and according to comments in this thread, the background thread is spawned before main is hit during dl init.\u00a0 If that is the case, I dont see how I would be able to call a method to disable it in time."
+        },
+        {
+            "created_at": "2021-05-11T19:11:30.388Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9530?focusedCommentId=17342818) by Weston Pace (westonpace):*\nAfter some attempt to solve this programmatically it seems that jemalloc's configuration is a bit tricky (some options must be set at startup time) and any fix would be complex and/or hacky.\u00a0 Instead, it would be better to add a CMake option to disable Arrow's `malloc_conf` variable so that users that care about fine-tuning jemalloc can get Arrow out of the way and set it via MALLOC_CONF (or their own malloc_conf)."
+        }
+    ]
+}

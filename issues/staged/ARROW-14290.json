@@ -1,0 +1,72 @@
+{
+    "issue": {
+        "title": "[C++] String comparison in between ternary kernel",
+        "body": "***Note**: This issue was originally created as [ARROW-14290](https://issues.apache.org/jira/browse/ARROW-14290). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nString comparisons in C++ will use order by unicode. This may not be suitable in many language applications, for example when using characters from languages that use more than ASCII.\u00a0\u00a0 Sorting algorithms can often allow for the use of custom comparison functions.\u00a0 It would be helpful to allow for this for the between kernel as well.\u00a0 Initial work on the between kernel is being tracked in https://issues.apache.org/jira/browse/ARROW-9843",
+        "created_at": "2021-10-11T17:38:05.000Z",
+        "updated_at": "2022-07-12T14:04:50.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-10-11T18:52:23.144Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14290?focusedCommentId=17427318) by Antoine Pitrou (apitrou):*\nIs this different from ARROW-12046 ?"
+        },
+        {
+            "created_at": "2021-10-12T04:10:26.623Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14290?focusedCommentId=17427434) by Benson Muite (baksmj):*\nYes, initial implementation does not allow for comparison of strings with keys, which is important for many applications. As you pointed out, a related issue for sorting is https://issues.apache.org/jira/browse/ARROW-12046"
+        },
+        {
+            "created_at": "2021-10-12T07:37:38.035Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14290?focusedCommentId=17427505) by Antoine Pitrou (apitrou):*\nAh, so this is a request to allow a custom comparison or key function (I suspect the latter)? If so, can you make the title clearer?"
+        },
+        {
+            "created_at": "2021-10-12T07:38:24.566Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14290?focusedCommentId=17427506) by Antoine Pitrou (apitrou):*\nBy the way, does it need to be a specific option? You may also compute the desired key column and sort/compare based on it..."
+        },
+        {
+            "created_at": "2021-10-12T07:38:43.984Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14290?focusedCommentId=17427507) by Antoine Pitrou (apitrou):*\ncc `[~lidavidm]` for insight."
+        },
+        {
+            "created_at": "2021-10-12T19:22:56.065Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14290?focusedCommentId=17427887) by David Li (lidavidm):*\nAgreed, I'm not sure it's worth trying to allow custom comparison/key functions (I suspect even if we did, internally, we'd just compute a key column anyways). Could you provide perhaps an example of the use case? Unicode seems like it would cover multiple languages, unless you mean supporting non-Unicode encodings (e.g. Shift-JIS or Big5 or something)."
+        },
+        {
+            "created_at": "2021-10-13T05:50:56.253Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14290?focusedCommentId=17428021) by Benson Muite (baksmj):*\nThe order given by Unicode may not match text application.\u00a0 Unicode has a [collation algorithm](https://www.unicode.org/reports/tr10/)\u00a0 motivating examples they give in <https://www.unicode.org/reports/tr10/#Example_Differences_Table> for developing this include\r\n \\* In Swedish z < \u00f6 but in German \u00f6 < z\r\n \\* In a German Dictionary of < \u00f6f but in a German Phonebook \u00f6f < of\r\n\r\nBeing able to do fast sorting and comparison on text is important in a database and the unicode encodings do not give orderings that matche all applications.\u00a0 Thus, we want to enable application developers to choose an ordering appropriate for their applications, ideally without re-implementing comparison and sorting.\u00a0 It may be the case that language plugins or extensions are easier to support. An internal lookup table is ok, but the table size may vary from ~20 to ~5000 rows for a single language. If one needs to work with Emojis, things get more interesting.\u00a0 UTF8 can encode 1,112,064 code points and there are cases where two code points are used to encode one item, so something complete may have very poor worst case running time.\u00a0 One may also want to use another text encoding, for example UTF32, EUC-KR, SJIS, EUC-JP - especially since then sorting, searching and comparisons can then be done more efficiently. An interface that allows returning of a comparison may allow flexibility to adapt for different circumstances.\u00a0 Arrow allows for flexible schema, so optimizations may be possible which are not possible with a regular column."
+        },
+        {
+            "created_at": "2021-10-13T06:30:52.976Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14290?focusedCommentId=17428038) by Benson Muite (baksmj):*\nSome of the issues on ordering are discussed in <https://en.wikipedia.org/wiki/Alphabetical_order#Similar_orderings>\r\n\r\nAn example sorting program for multilingual dictionaries is [Msort](http://www.billposer.org/Software/msort.html) available under GPL3, but the description should give some idea of flexibility that may be required."
+        },
+        {
+            "created_at": "2021-10-13T08:49:26.509Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14290?focusedCommentId=17428090) by Antoine Pitrou (apitrou):*\n> An interface that allows returning of a comparison may allow flexibility to adapt for different circumstances.  Arrow allows for flexible schema, so optimizations may be possible which are not possible with a regular column.\r\n\r\nWhich optimizations do you have in mind? I'm not sure that calling a function pointer O(n log n) times is generally better than computing an additional column in O\\(n) time.\r\n\r\nAlso, the function pointer has to be \"dynamically typed\" since its exact signature will depend on the datatype being sorted. Perhaps this is solvable using a base class and some virtual methods..."
+        },
+        {
+            "created_at": "2021-10-13T10:31:08.280Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14290?focusedCommentId=17428134) by Benson Muite (baksmj):*\nColumn stores are great for vectorization\u00a0 [as explained in this tutorial,](http://nms.csail.mit.edu/~stavros/pubs/tutorial2009-column_stores.pdf) though maybe there is something better.\u00a0 My expectation is that the ordering comparison would use data that can be cached since it may be faster to stream all the data being compared O( column length ) and do a lookup O( log dictionary size ) for a total of O( column length \\* log alphabet size) operations, rather than stream the lookups past a small section of the data O(column length \\* alphabet size).. This depends on relative data sizes and constants determined by the hardware and software implementations though.\r\n\r\nFor numeric data, temporal data and text data where UTF8 encoding is sufficient for comparison, nothing special is needed and hardware support should be good.\u00a0 For text data where the ordering used by UTF8 is not appropriate, being able to either call a separate column of data or call a separate table organized as a tree or call a separate function is helpful.\u00a0 Calling a separate column of data would fit well within Arrow, but there may be situations where this is inappropriate and it may be good to allow for this."
+        },
+        {
+            "created_at": "2021-10-13T18:35:59.664Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14290?focusedCommentId=17428407) by Weston Pace (westonpace):*\nIf a user has custom comparison function that they need to run on a column of strings, then they could just create a new kernel function.\r\n\r\nIf a user has a column of data that always needs to be compared in some consistent and unique way (e.g. they have a column of alphanumeric data and the less/greater operations should apply a \"natural sort\" when comparing strings with numbers) then the correct answer I believe is an extension type.\r\n\r\nIf a user needs to apply some kind of non-scalar comparison function (e.g. consuming an entire column at once, managing some kind of independent cache, converting data from column-major to row-major, etc.) then they can create a custom execution node.\r\n\r\nSo we have several extension points already.  I'm not sure what value there is in creating another one.  It is not clear to me how this would be different or more user friendly.  I agree that a single, concrete example is probably a good starting point."
+        },
+        {
+            "created_at": "2021-10-13T18:52:55.023Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14290?focusedCommentId=17428430) by Antoine Pitrou (apitrou):*\nAn extension type requires to rewrite all desired kernels, which is rather heavy-handed."
+        },
+        {
+            "created_at": "2021-10-13T19:22:07.964Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14290?focusedCommentId=17428457) by Weston Pace (westonpace):*\nHmm, fair point.  A similar conversation happened in the discussion of intervals.  In general, we decided we do not want to allow intervals to be comparable.  However, some frontends may want to emulate postgres, which does allow for comparable intervals.  The hope was those frontends could cast those intervals to \"postgres\" intervals for comparability.  So it might be nice if the solution could extend beyond just strings (but maybe 2 instances does not make a pattern and we can solve the interval thing elsewhere).\r\n\r\nOne challenge is that the comparison functions are used implicitly by quite a few kernels (e.g. max, min, partition, select_k, etc.).  In addition, if these custom rules affect equality (this might be the case given we are talking about unicode) then we have to worry about hashing and all of the kernels / nodes that rely on hashing internally (dictionary encode, group by, etc.)"
+        },
+        {
+            "created_at": "2022-07-12T14:04:50.080Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14290?focusedCommentId=17565778) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] Make dataset.dataset() accept a list of directories as source",
+        "body": "***Note**: This issue was originally created as [ARROW-15270](https://issues.apache.org/jira/browse/ARROW-15270). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently, if I partition a dataset as shown below, a directory `partitioned` is created along with `2001, 2002, 2003, 2004` as subdirectories. But then, if I wanted to only read the partitions corresponding to years `{}2001, 2002{`}, I wouldn't have a straightforward way of doing so.\r\n\r\n```python\n\r\n>>> table = pa.table({'month': [1, 2, 3, 4, 5], 'year': [2001, 2002, 2003, 2004, 2004]})\r\n>>> table\r\npyarrow.Table\r\nmonth: int64\r\nyear: int64\r\n----\r\nmonth: [[1,2,3,4,5]]\r\nyear: [[2001,2002,2003,2004,2004]]\r\n>>> ds.write_dataset(data=table, base_dir=\"partitioned\", format=\"ipc\", partitioning=ds.partitioning(pa.schema([(\"year\", pa.int64())])))\r\n>>> f = fs.SubTreeFileSystem(base_path='partitioned', base_fs=fs.LocalFileSystem())\r\n>>> ds.dataset(source=['2001','2002'], filesystem=f, format=\"ipc\")\r\nTraceback (most recent call last):\r\n\u00a0 File \"<stdin>\", line 1, in <module>\r\n\u00a0 File \"/Users/userr2232/Documents/misc/first-julia-nn/lib/python3.9/site-packages/pyarrow/dataset.py\", line 683, in dataset\r\n\u00a0 \u00a0 return _filesystem_dataset(source, **kwargs)\r\n\u00a0 File \"/Users/userr2232/Documents/misc/first-julia-nn/lib/python3.9/site-packages/pyarrow/dataset.py\", line 423, in _filesystem_dataset\r\n\u00a0 \u00a0 fs, paths_or_selector = _ensure_multiple_sources(source, filesystem)\r\n\u00a0 File \"/Users/userr2232/Documents/misc/first-julia-nn/lib/python3.9/site-packages/pyarrow/dataset.py\", line 344, in _ensure_multiple_sources\r\n\u00a0 \u00a0 raise IsADirectoryError(\r\nIsADirectoryError: Path 2001 points to a directory, but only file paths are supported. To construct a nested or union dataset pass a list of dataset objects instead.\n```\r\n\r\nSince `dataset.write_dataset()` produces this file structure, maybe `dataset.dataset()` should accept a list of directories as `source`?\r\n\r\n\u00a0",
+        "created_at": "2022-01-06T15:40:52.000Z",
+        "updated_at": "2022-01-06T16:35:08.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-01-06T16:35:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-01-06T15:55:11.215Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15270?focusedCommentId=17469991) by Will Jones (willjones127):*\nThe current way to filter the partitions is to use the `filter` parameter in `to_table`. See: https://arrow.apache.org/docs/python/dataset.html#filtering-data\r\n\r\n```python\n\r\nds.dataset(source=\"partitioned\", format=\"ipc\")\\\r\n  .to_table(filter=(ds.field(\"year\") == 2001) | (ds.field(\"year\") == 2002))\r\n```\r\n\r\nWould that work for you?"
+        },
+        {
+            "created_at": "2022-01-06T16:10:47.663Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15270?focusedCommentId=17470009) by Reynaldo Rojas Zelaya (userr2232):*\nThat does not work. The files were saved only with `month` as a field.\r\n```java\n\r\n>>> ds.dataset(source=\"partitioned\", format=\"ipc\").to_table()\r\npyarrow.Table\r\nmonth: int64\r\n----\r\nmonth: [[1],[2],[3],[4,5]]\n```\r\nThe reason I'm suggesting this feature is because I think that \\`dataset.dataset()` should, in some kind of way, be an inverse operation to \\`dataset.write_dataset()`.\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-01-06T16:24:35.760Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15270?focusedCommentId=17470020) by Will Jones (willjones127):*\n> The files were saved only with month as a field.\r\n\r\nThe datasets API is meant to populate the partition fields when it loads your data. The problem is that you are using \"directory partitioning\", so you need to pass in the partitioning schema when loading. (Hive-style partitions, like `year=2021/`, don't require this.)\r\n\r\nTry this:\r\n\r\n```python\n\r\nimport pyarrow.dataset as ds\r\nimport pyarrow as pa\r\n\r\ntable = pa.table({'month': [1, 2, 3, 4, 5], 'year': [2001, 2002, 2003, 2004, 2004]})\r\n\r\npartitioning = ds.partitioning(pa.schema([(\"year\", pa.int64())]))\r\n\r\nds.write_dataset(\r\n    data=table, \r\n    base_dir=\"partitioned\", \r\n    format=\"ipc\", \r\n    partitioning=partitioning\r\n)\r\n\r\nmy_ds = ds.dataset(\r\n    \"partitioned\", \r\n    format=\"ipc\", \r\n    partitioning=partitioning\r\n)\r\nmy_ds.to_table(filter=(ds.field(\"year\") == 2001) | (ds.field(\"year\") == 2002))\r\n```"
+        },
+        {
+            "created_at": "2022-01-06T16:30:00.566Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15270?focusedCommentId=17470028) by Will Jones (willjones127):*\n> The reason I'm suggesting this feature is because I think that `dataset.dataset()`\u00a0should, in some kind of way, be an inverse operation to\u00a0`{}dataset.write_dataset(){`}.\r\n\r\nI think it _is_ intended to be just like that, just perhaps not quite as you are expecting.\r\n\r\nIt might make sense to allow `dataset.dataset()` to take a list of directories, but I think the behavior would be different. It would likely create a Union dataset by separately performing dataset discovery in each directory you pass. For the use case you are showing, that has two disadvantages: (1) It may be slower than just doing the discovery process once; (2) It won't materialize the year column in the resulting table."
+        },
+        {
+            "created_at": "2022-01-06T16:30:28.012Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15270?focusedCommentId=17470029) by Reynaldo Rojas Zelaya (userr2232):*\nThat works! Thank you :)"
+        },
+        {
+            "created_at": "2022-01-06T16:34:06.881Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15270?focusedCommentId=17470034) by Reynaldo Rojas Zelaya (userr2232):*\nYes, I think you are right about that. I will close the issue since this use case is not the best."
+        }
+    ]
+}

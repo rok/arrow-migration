@@ -1,0 +1,69 @@
+{
+    "issue": {
+        "title": "[Python] Dataset Scanner is single-threaded only",
+        "body": "***Note**: This issue was originally created as [ARROW-9458](https://issues.apache.org/jira/browse/ARROW-9458). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI'm not sure this is a misunderstanding, or a compilation issue (flags?) or an issue in the C++ layer.\r\n\r\nI have 1000 parquet files with a total of 1 billion rows (1 million rows each file, ~20 columns). I wanted to see if I could go through all rows 1 of 2 columns efficiently (vaex use case).\r\n\r\n\u00a0\r\n```java\n\r\nimport pyarrow.parquet\r\nimport pyarrow as pa\r\nimport pyarrow.dataset as ds\r\nimport glob\r\nds = pa.dataset.dataset(glob.glob('/data/taxi_parquet/data_*.parquet'))\r\nscanned = 0\r\nfor scan_task in ds.scan(batch_size=1_000_000, columns=['passenger_count'], use_threads=True):\r\n    for record_batch in scan_task.execute():\r\n        scanned += record_batch.num_rows\r\nscanned\r\n```\r\nThis only seems to use 1 cpu.\r\n\r\nUsing a threadpool from Python:\r\n```java\n\r\n# %%timeit\r\nimport concurrent.futures\r\npool = concurrent.futures.ThreadPoolExecutor()\r\nds = pa.dataset.dataset(glob.glob('/data/taxi_parquet/data_*.parquet'))\r\ndef process(scan_task):\r\n    scan_count = 0\r\n    for record_batch in scan_task.execute():\r\n        scan_count += len(record_batch)\r\n    return scan_count\r\nsum(pool.map(process, ds.scan(batch_size=1_000_000, columns=['passenger_count'], use_threads=False)))\r\n```\r\nGives me a similar performance, again, only 100% cpu usage (=1 core/cpu).\r\n\r\npy-spy (profiler for Python) shows no GIL, so this might be something at the C++ layer.\r\n\r\nAm I 'holding it wrong' or could this be a bug? Note that IO speed is not a problem on this system (it actually all comes from OS cache, no disk read observed)\r\n\r\n\u00a0",
+        "created_at": "2020-07-14T08:44:23.000Z",
+        "updated_at": "2020-07-14T20:25:12.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-07-14T20:25:04.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-07-14T11:49:47.369Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9458?focusedCommentId=17157306) by Joris Van den Bossche (jorisvandenbossche):*\nRegarding your first example, that it doesn't do this in parallel _automatically_ is expected (in principle reading a row group could also be done in parallel, but since in the datasets project different scan tasks can be run in parallel, I suppose reading a single row group is limited to one thread to avoid oversubscription, not fully sure about this).\r\n\r\nTo quote the `Dataset.scan()` docstring:\r\n\r\n> It produces a stream of ScanTasks which is meant to be a unit of work\n> to be dispatched. The tasks are not executed automatically, the user is\n> responsible to execute and dispatch the individual tasks, so custom\n> local task scheduling can be implemented.\r\n\r\nThe `Scanner.scan()` (which is used under the hood) is a bit more explicit:\r\n\r\n> The caller is responsible to dispatch/schedule said tasks. Tasks should\n> be safe to run in a concurrent fashion and outlive the iterator.\r\n\r\nBut the `use_threads` argument to `Dataset.scan()` is thus certainly confusing. I need to check to be sure, but AFAIK this keyword is only used when using the `to_table` method (which does automatic execution of the scan tasks).\r\n\r\nBut, so since the `scan` method is meant to do this task execution yourself, your second example should be a target use case. So if that is not working, that's something to further investigate."
+        },
+        {
+            "created_at": "2020-07-14T11:55:38.598Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9458?focusedCommentId=17157308) by Joris Van den Bossche (jorisvandenbossche):*\nAh, and forgot to note: we are experimenting with plugging `pyarrow.dataset` into dask's `dd.read_parquet`, and there it is certainly achieving parallelism (so probably not a fundamental issue at the C++ layer). We are not using the scanner interface, but it's executing `fragment.to_table(...., use_threads=False)` for all fragments on the different cores/workers."
+        },
+        {
+            "created_at": "2020-07-14T12:47:15.075Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9458?focusedCommentId=17157337) by Joris Van den Bossche (jorisvandenbossche):*\n`[~maartenbreddels]` how big are the row groups in your parquet files?\r\n\r\nI am experimenting a bit with a local version of the taxi data as well, and I see that each scan task maps to a single row group, and not a single parquet file. In my case, this gave a _lot_ of tasks, where each task doesn't take much time (only around 2-3 ms). Possibly too small to overcome python overhead from running them in parallel? (but I would need to rewrite the parquet files to test this, and that it is not an issue with the scanner).\r\n\r\nWhen using fragments manually (which map to single parquet files), I do see parallelization."
+        },
+        {
+            "created_at": "2020-07-14T12:47:18.076Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9458?focusedCommentId=17157338) by Maarten Breddels (maartenbreddels):*\n\u00a0\r\n\r\nRunning this (now with all columns)\r\n```java\n\r\nimport pyarrow as pa\r\nimport pyarrow.dataset as ds\r\nimport concurrent.futures\r\nimport glob\r\npool = concurrent.futures.ThreadPoolExecutor()\r\nds = pa.dataset.dataset(glob.glob('/data/taxi_parquet/data_*.parquet'))\r\ndef process(scan_task):\r\n    scan_count = 0\r\n    for record_batch in scan_task.execute():\r\n        scan_count += len(record_batch)\r\n    return scan_count\r\nsum(pool.map(process, ds.scan(batch_size=1_000_000, use_threads=False)))\n```\r\nThe output of py-spy is:\r\n\r\n\u00a0\r\n\r\n![image-2020-07-14-14-31-29-943.png](https://issues.apache.org/jira/secure/attachment/13007621/image-2020-07-14-14-31-29-943.png)\r\n\r\nAnd it takes 5 minutes.\r\n\r\nIndeed, if I run similarly with to_table()\r\n\r\n\u00a0\r\n```java\n\r\nimport pyarrow as pa\r\nimport pyarrow.dataset as ds\r\nimport concurrent.futures\r\nimport glob\r\npool = concurrent.futures.ThreadPoolExecutor()\r\nds = pa.dataset.dataset(glob.glob('/data/taxi_parquet/data_*.parquet'))\r\ndef process(f):\r\n    scan_count = 0\r\n    return len(f.to_table(use_threads=False))\r\nsum(pool.map(process, ds.get_fragments()))\r\n```\r\nI see much better cpu usage (although it seems to have difficulty getting started):\r\n\r\n![image-2020-07-14-14-38-16-767.png](https://issues.apache.org/jira/secure/attachment/13007623/image-2020-07-14-14-38-16-767.png)\r\n\r\n\u00a0\r\n\r\nAnd it takes 30 seconds (sometimes 16... seem very irregular).\r\n\r\nchanging the last part to use_threads=True, i.e.:\r\n```java\n\r\ndef process(f):\r\n    scan_count = 0\r\n    return len(f.to_table(use_threads=True))\r\nsum(pool.map(process, ds.get_fragments()))\r\n```\r\nspeeds it up to 9 seconds.\r\n\r\nNote that I have 1000 files/fragments.\r\n\r\nI hope this info gives some clues.\r\n\r\n\u00a0\r\n\r\nMy best guess is that the path using the scanner/execute path has a lock/mutex at the c++ layer avoiding the effective use of multithreading.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-07-14T12:51:05.891Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9458?focusedCommentId=17157340) by Maarten Breddels (maartenbreddels):*\nDid you set ?\r\nbatch_size=1_000_000"
+        },
+        {
+            "created_at": "2020-07-14T13:12:29.171Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9458?focusedCommentId=17157349) by Joris Van den Bossche (jorisvandenbossche):*\n> Did you set ? batch_size=1_000_000\r\n\r\nThe batch size is a max size, not a minimum size. So if your row groups are smaller, it doesn't change anything, I presume.\r\n\r\nNow, in the meantime made a second version of the dataset with much larger row groups: and that confirms what you see as well, no parallelization with scan tasks, while it works when using fragment.to_table."
+        },
+        {
+            "created_at": "2020-07-14T13:30:11.192Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9458?focusedCommentId=17157365) by Joris Van den Bossche (jorisvandenbossche):*\nIt might be we are not releasing the GIL in the ScanTask's execute method: https://github.com/apache/arrow/blob/6d7e4ecbaf4c9c90e2df326ad46233dc5dcfcc7a/python/pyarrow/_dataset.pyx#L1817-L1818"
+        },
+        {
+            "created_at": "2020-07-14T13:34:30.516Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9458?focusedCommentId=17157372) by Maarten Breddels (maartenbreddels):*\nYes, in my case, the row groups are 1_000_000 rows, 1 rowgroup per file, setting the batch_size higher does not affect the batch size indeed.\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-07-14T13:41:21.588Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9458?focusedCommentId=17157374) by Maarten Breddels (maartenbreddels):*\nIndeed, seeing a massive speedup. Too bad py-spy didn't notice :("
+        },
+        {
+            "created_at": "2020-07-14T13:52:14.650Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9458?focusedCommentId=17157387) by Maarten Breddels (maartenbreddels):*\nlet me know if you want to do the honors yourself, otherwise, I can open a PR tonight"
+        },
+        {
+            "created_at": "2020-07-14T13:55:00.442Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9458?focusedCommentId=17157390) by Joris Van den Bossche (jorisvandenbossche):*\nHow do you release the GIL with a yielding for loop?\r\n\r\n(since we are about to cut a release (probably tomorrow), the sooner the better ;))"
+        },
+        {
+            "created_at": "2020-07-14T15:04:05.705Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9458?focusedCommentId=17157445) by Ben Kietzman (bkietz):*\nThis looks like it might be a systemic problem with using a `CIterator` as the range of a for loop (which we do elsewhere in `_dataset.pyx`). (In a follow up) Ideally we could provide a wrapper to do lock acquisition and release transparently whenever we need to interact with a `CIterator`:\r\n\r\n```python\n\r\nfor maybe_batch in Iterate(self.task.Execute()):\r\n    yield pyarrow_wrap_batch(GetResultValue(move(maybe_batch))) \r\n```"
+        },
+        {
+            "created_at": "2020-07-14T20:25:05.047Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9458?focusedCommentId=17157659) by Wes McKinney (wesm):*\nIssue resolved by pull request 7756\n<https://github.com/apache/arrow/pull/7756>"
+        }
+    ]
+}

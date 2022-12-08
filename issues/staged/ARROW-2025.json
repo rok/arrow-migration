@@ -1,0 +1,30 @@
+{
+    "issue": {
+        "title": "[Python/C++] HDFS Client disconnect closes all open clients",
+        "body": "***Note**: This issue was originally created as [ARROW-2025](https://issues.apache.org/jira/browse/ARROW-2025). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn the python library, if an instance of `HadoopFileSystem` is garbage collected, all other existing instances become invalid. I haven't checked with a C++ only example, but from reading the cython code I can't see how cython is responsible, so I think this is a bug in the C++ library.\r\n\r\n\u00a0\r\n```java\n\r\n>>> import pyarrow as pa\r\n>>> h = pa.hdfs.connect()\r\n18/01/24 16:54:25 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable\r\n18/01/24 16:54:26 WARN shortcircuit.DomainSocketFactory: The short-circuit local reads feature cannot be used because libhadoop cannot be loaded.\r\n>>> h.ls(\"/\")\r\n['/benchmarks', '/hbase', '/tmp', '/user', '/var']\r\n>>> h2 = pa.hdfs.connect()\r\n>>> del h  # close one client\r\n>>> h2.ls(\"/\")  # all filesystem operations now fail\r\nhdfsListDirectory(/): FileSystem#listStatus error:\r\nIOException: Filesystem closedjava.io.IOException: Filesystem closed\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 at org.apache.hadoop.hdfs.DFSClient.checkOpen(DFSClient.java:865)\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 at org.apache.hadoop.hdfs.DFSClient.listPaths(DFSClient.java:2106)\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 at org.apache.hadoop.hdfs.DFSClient.listPaths(DFSClient.java:2092)\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 at org.apache.hadoop.hdfs.DistributedFileSystem.listStatusInternal(DistributedFileSystem.java:743)\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 at org.apache.hadoop.hdfs.DistributedFileSystem.access$600(DistributedFileSystem.java:113)\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 at org.apache.hadoop.hdfs.DistributedFileSystem$16.doCall(DistributedFileSystem.java:808)\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 at org.apache.hadoop.hdfs.DistributedFileSystem$16.doCall(DistributedFileSystem.java:804)\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 at org.apache.hadoop.fs.FileSystemLinkResolver.resolve(FileSystemLinkResolver.java:81)\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 at org.apache.hadoop.hdfs.DistributedFileSystem.listStatus(DistributedFileSystem.java:804)\r\nTraceback (most recent call last):\r\n\u00a0 File \"<stdin>\", line 1, in <module>\r\n\u00a0 File \"/opt/conda/lib/python3.6/site-packages/pyarrow/hdfs.py\", line 88, in ls\r\n\u00a0\u00a0\u00a0 return super(HadoopFileSystem, self).ls(path, detail)\r\n\u00a0 File \"io-hdfs.pxi\", line 248, in pyarrow.lib.HadoopFileSystem.ls\r\n\u00a0 File \"error.pxi\", line 79, in pyarrow.lib.check_status\r\npyarrow.lib.ArrowIOError: HDFS: list directory failed\r\n>>> h2.is_open  # The python object still thinks it's open\r\nTrue\r\n```",
+        "created_at": "2018-01-24T17:14:54.000Z",
+        "updated_at": "2018-01-25T01:33:17.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-01-25T01:33:14.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-01-24T17:31:03.618Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2025?focusedCommentId=16337932) by Jim Crist (jim.crist):*\nLooking closer, I think this may be due to the libhdfs fs cache. From <https://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-hdfs/LibHdfs.html:>\r\n\r\n\u00a0\r\n\r\n> The Hadoop FS implementation includes an FS handle cache which caches based on the URI of the namenode along with the user connecting. So, all calls to `hdfsConnect` will return the same handle but calls to `hdfsConnectAsUser` with different users will return different handles. But, since HDFS client handles are completely thread safe, this has no bearing on concurrency.\r\n\r\n\u00a0\r\n\r\nGiven this, I think we need to refcount on handles somehow, otherwise calling disconnect on an equivalent filesystem handle will close for all of them."
+        },
+        {
+            "created_at": "2018-01-24T17:41:49.984Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2025?focusedCommentId=16337955) by Jim Crist (jim.crist):*\nActually, we should just use `hdfsBuilderSetForceNewInstance` to prevent this cacheing. Users can cache on their own as needed."
+        },
+        {
+            "created_at": "2018-01-25T01:33:14.198Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2025?focusedCommentId=16338561) by Wes McKinney (wesm):*\nIssue resolved by pull request 1499\n<https://github.com/apache/arrow/pull/1499>"
+        }
+    ]
+}

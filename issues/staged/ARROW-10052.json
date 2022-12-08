@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[Python] Incrementally using ParquetWriter keeps data in memory (eventually running out of RAM for large datasets)",
+        "body": "***Note**: This issue was originally created as [ARROW-10052](https://issues.apache.org/jira/browse/ARROW-10052). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis ticket refers to the discussion between me and `[~emkornfield]` \u00a0on the MailingList: \"Incrementally using ParquetWriter without keeping entire dataset in memory (large than memory parquet files)\" (not yet available on the mail archives)\r\n\r\nOriginal post:\r\n> Hi,\n> I'm trying to write a large parquet file onto disk (larger then memory) using PyArrows ParquetWriter and write_table, but even though the file is written incrementally to disk it still appears to keeps the entire dataset in memory (eventually getting OOM killed). Basically what I am trying to do is:\n> with pq.ParquetWriter(\n> output_file,\n> arrow_schema,\n> compression='snappy',\n> allow_truncated_timestamps=True,\n> version='2.0', \u00a0# Highest available schema\n> data_page_version='2.0', \u00a0# Highest available schema\n> ) as writer:\n> for rows_dataframe in function_that_yields_data():\n> writer.write_table(\n> pa.Table.from_pydict(\n> rows_dataframe,\n> arrow_schema\n> )\n> )\n> Where I have a function that yields data and then write it in chunks using write_table.\u00a0\n> Is it possible to force the ParquetWriter to not keep the entire dataset in memory, or is it simply not possible for good reasons?\n> I\u2019m streaming data from a database and writes it to Parquet. The end-consumer has plenty of ram, but the machine that does the conversion doesn\u2019t.\u00a0\n> Regards,\n> Niklas\r\nMinimum example (I can't attach as a file for some reason) <https://gist.github.com/bivald/2ddbc853ce8da9a9a064d8b56a93fc95>\r\n\r\nLooking at it now when I've made a minimal example I see something I didn't see/realize before which is that while the memory usage is increasing it doesn't appear to be linear to the file written. This indicates (I guess) that it isn't actually storing the written dataset, but something else.\u00a0",
+        "created_at": "2020-09-21T09:12:47.000Z",
+        "updated_at": "2020-11-18T12:46:33.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-11-18T12:46:33.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-21T15:02:51.216Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10052?focusedCommentId=17199439) by Wes McKinney (wesm):*\n`[~jorisvandenbossche]` or `[~uwe]` do you know what might be going on?"
+        },
+        {
+            "created_at": "2020-09-24T10:42:12.901Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10052?focusedCommentId=17201440) by Antoine Pitrou (apitrou):*\nI'm not sure there's anything surprising. Running this thing a bit (in debug mode!), I see that RSS usage grows by 500-1000 bytes for each column chunk (that is, each column in a row group).\r\n\r\nThis seems to be simply the Parquet file metadata accumulating before it can be written at the end (when the ParquetWriter is closed).  `format::FileMetadata` has a vector of `format::RowGroup` (one per row group). `format::RowGroup` has a vector of `format::Column` (one per column). Each `format::Column` holds non-trivial information: file name, column metadata (itself potentially large).\r\n\r\nSo, basically you should write only large row groups to Parquet files. Writing 100 rows at a time makes the Parquet format completely inadequate. Replace that with at least 10000 or 100000 rows, IMHO."
+        },
+        {
+            "created_at": "2020-09-24T10:43:42.555Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10052?focusedCommentId=17201442) by Antoine Pitrou (apitrou):*\nAnd, regardless of the row group size, if you grow a Parquet file by keeping the ParquetWriter in memory, memory usage will also grow a bit because of this accumulating file metadata. I see no way around that, other than avoiding this appending pattern."
+        },
+        {
+            "created_at": "2020-09-24T10:45:25.590Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10052?focusedCommentId=17201444) by Antoine Pitrou (apitrou):*\nTo speak about the original usage (streaming data from a database to a Parquet file), this seems like the kind of use case where you may want to write several Parquet files as a dataset. Perhaps `[~bkietz]` can advise.\r\n\r\nBut in any case, don't write Parquet files with 100 rows per row group, because the metadata overhead will be huge."
+        },
+        {
+            "created_at": "2020-09-24T20:35:15.671Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10052?focusedCommentId=17201759) by Ben Kietzman (bkietz):*\nToo-small row groups result in excessive metadata overhead per row group, but the larger a row group is the less specific its statistics are. When reading from parquet with a filter, row groups can be skipped entirely if their statistics indicate that they contain no matching rows. My tentative recommendation for row group size is 16k-32k to support efficient filtered reading.\r\n\r\nI would additionally recommend writing multiple files to a directory. Both `pyarrow.parquet.read_table` and `pyarrow.dataset.dataset` support reading multiple files natively.\r\n\r\nScanning can be further optimized by partitioning the dataset, allowing entire files to be filtered out. Writing a partititioned multifile dataset can be accomplished with `pyarrow.dataset.write_dataset`. This is not yet capable of writing larger-than-memory datasets, but that functionality should be available before 2.0. "
+        },
+        {
+            "created_at": "2020-10-22T09:03:38.320Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10052?focusedCommentId=17218880) by Joris Van den Bossche (jorisvandenbossche):*\nIs there anything actionable for Arrow? (if not, I think we can close this issue)  \r\nRe-reading the comments here, it seems not, and alternatives to overcome the limitation have been suggested."
+        },
+        {
+            "created_at": "2020-10-22T12:23:54.983Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10052?focusedCommentId=17218975) by Niklas B (bivald):*\nWe can close it soon, is it okay if I have it open for a few more days while debugging? I'm running with row_group_size as 10000 and are seeing memory the writer using about 3GB memory (for a 3GB parq file, 9000 columns x 300 000 rows).\u00a0"
+        },
+        {
+            "created_at": "2020-11-18T12:46:23.416Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10052?focusedCommentId=17234575) by Niklas B (bivald):*\nClosing this, I think the memory usage is OK\u00a0"
+        }
+    ]
+}

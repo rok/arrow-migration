@@ -1,0 +1,75 @@
+{
+    "issue": {
+        "title": "[C#] Cannot round-trip record batch with PyArrow",
+        "body": "***Note**: This issue was originally created as [ARROW-12100](https://issues.apache.org/jira/browse/ARROW-12100). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHas anyone ever tried to round-trip a record batch between Arrow C# and PyArrow? I can't get PyArrow to read the data correctly.\r\n\r\nFor context, I'm trying to do Arrow data-frames inter-process communication between C# and Python using shared memory (local TCP/IP is also an alternative). Ideally, I wouldn't even have to serialise the data and could just share the Arrow in-memory representation directly, but I'm not sure this is even possible with Apache Arrow. Full source code as attachment.\r\n\r\n**C#**\r\n```c#\n\r\nusing (var stream = sharedMemory.CreateStream(0, 0, MemoryMappedFileAccess.ReadWrite))\r\n{\r\n    var recordBatch = /* ... */\r\n\r\n    using (var writer = new ArrowFileWriter(stream, recordBatch.Schema, leaveOpen: true))\r\n    {\r\n        writer.WriteRecordBatch(recordBatch);\r\n        writer.WriteEnd();\r\n    }\r\n}\r\n```\r\n\r\n**Python**\r\n```python\n\r\nshmem = open_shared_memory(args)\r\naddress = get_shared_memory_address(shmem)\r\nbuf = pa.foreign_buffer(address, args.sharedMemorySize)\r\nstream = pa.input_stream(buf)\r\nreader = pa.ipc.open_stream(stream)\r\n```\r\n\r\nUnfortunately, it fails with the following error: `pyarrow.lib.ArrowInvalid: Expected to read 1330795073 metadata bytes, but only read 1230`.\r\n\r\nI can see that the memory content starts with `ARROW1\\x00\\x00\\xff\\xff\\xff\\xff\\x08\\x01\\x00\\x00\\x10\\x00\\x00\\x00`. It seems that using the API calls above, PyArrow reads \"ARRO\" as the length of the metadata.\r\n\r\nI assume I'm using the API incorrectly. Has anyone got a working example?",
+        "created_at": "2021-03-26T16:56:29.000Z",
+        "updated_at": "2021-04-13T15:11:20.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C#",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-03-30T11:26:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-03-26T17:23:20.621Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12100?focusedCommentId=17309589) by Antoine Pitrou (apitrou):*\nThere are two slightly different IPC formats: the file format and the stream format. It seems you're writing the file format from C# (\"new ArrowFileWriter\") and trying to read the result as an IPC stream (\"pa.ipc.open_stream\").\r\n\r\nYou should probably use the `ArrowStreamWriter` class on the C# side, rather `ArrowFileWriter`."
+        },
+        {
+            "created_at": "2021-03-26T17:28:21.077Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12100?focusedCommentId=17309594) by Tanguy Fautre (GPSnoopy):*\n`[~apitrou]` Thanks for the explanation, I didn't realise there was a difference between the two.\r\n\r\nI've replaced `ArrowFileWriter` with `ArrowStreamWriter`, but I now get the following error in Python: `OSError: Unexpected null field Field.children in flatbuffer-encoded metadata`."
+        },
+        {
+            "created_at": "2021-03-26T17:42:54.981Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12100?focusedCommentId=17309605) by Antoine Pitrou (apitrou):*\nHmm, interesting. This may be an incompatibility in the C# writer. Can you share your schema or even the code generating the data?"
+        },
+        {
+            "created_at": "2021-03-26T17:43:09.926Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12100?focusedCommentId=17309606) by Antoine Pitrou (apitrou):*\ncc `[~eerhardt]`"
+        },
+        {
+            "created_at": "2021-03-26T21:18:20.502Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12100?focusedCommentId=17309738) by Tanguy Fautre (GPSnoopy):*\nLatest version : [ArrowSharedMemory_20210326_2.zip](ArrowSharedMemory_20210326_2.zip) "
+        },
+        {
+            "created_at": "2021-03-27T13:56:41.967Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12100?focusedCommentId=17309952) by Antoine Pitrou (apitrou):*\nIn the middle term, the C# implementation should really be part of our integration testing routine, to avoid issues such as this one.\r\n\r\nIn the short term, though, I think we can relax the following check to allow \"null children member\" to be synonymous to \"empty children array\":\r\n\r\n<https://github.com/apache/arrow/blob/master/cpp/src/arrow/ipc/metadata_internal.cc#L757>\r\n\r\n`[~wesm]` What do you think?"
+        },
+        {
+            "created_at": "2021-03-29T14:17:06.941Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12100?focusedCommentId=17310686) by Antoine Pitrou (apitrou):*\n`[~GPSnoopy]` Is there a way to compile and test your example on Linux?"
+        },
+        {
+            "created_at": "2021-03-29T15:15:25.213Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12100?focusedCommentId=17310720) by Tanguy Fautre (GPSnoopy):*\nNot at the moment, I was just toying with a shared memory approach using memory maps. The C# and Python APIs are quite different for Linux. I might give it a go though."
+        },
+        {
+            "created_at": "2021-03-29T15:39:11.324Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12100?focusedCommentId=17310734) by Tanguy Fautre (GPSnoopy):*\nMind you, for the specifically reproducing this bug, it's just easier to just write to a file and read it from Python.\r\n\r\nHere is a version that just does that. I've just tested it on Ubuntu 20.04 as well: [ArrowSharedMemory_20210329.zip](ArrowSharedMemory_20210329.zip).\r\n\r\nYou can run it just by typing `dotnet run` (assuming you've got dotnet-sdk-5 installed). Don't forget to change the hard-coded path to your python virtual environment in `Program.cs`.\r\n"
+        },
+        {
+            "created_at": "2021-03-29T16:19:19.133Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12100?focusedCommentId=17310763) by Antoine Pitrou (apitrou):*\nThank you, I can confirm now that we can easily workaround it on the C++ side."
+        },
+        {
+            "created_at": "2021-03-29T19:50:54.476Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12100?focusedCommentId=17310949) by Wes McKinney (wesm):*\nIt seems okay to treat a null field as a length-0 list of children. That said, I think for the C# implementation to be suitable for any real world production use, it really needs to participate in the integration tests more formally. "
+        },
+        {
+            "created_at": "2021-03-30T11:26:08.129Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12100?focusedCommentId=17311439) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 9837\n<https://github.com/apache/arrow/pull/9837>"
+        },
+        {
+            "created_at": "2021-04-09T20:11:26.395Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12100?focusedCommentId=17318272) by Eric Erhardt (eerhardt):*\nSorry for the delay - my day job has kept me super busy.\r\n\r\nI found the change that broke this - <https://github.com/apache/arrow/commit/3e71ea0e3f20ae3b883882d61f394fdca9577eb1.>\u00a0The change in C# unintentionally went from an \"empty\" vector of tables to a `null` vector of tables for children of fields. I agree the \"correct\" fix here is that C++ checks for nullptr. It does for the other vector of tables - like it does for [`metadata`\u00a0](https://github.com/apache/arrow/blob/c0ce2b1cdb0a2db6becc763f4b402238491b2eba/cpp/src/arrow/ipc/metadata_internal.cc#L791-L792)\r\n\r\nI think it is time to get C# implementation into the integration tests. Can someone give me a pointer to how to enable that?"
+        },
+        {
+            "created_at": "2021-04-13T15:11:20.074Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12100?focusedCommentId=17320245) by Antoine Pitrou (apitrou):*\nThere is a JSON representation format that the C# implementation needs to understand. It is described in https://arrow.apache.org/docs/format/Integration.html , but you may get more insight by running the integration tests themselves (the current ones) and look the generated JSON files\r\n\r\nIntegration testing uses an internal tool written in Python named Archery (see here for install instructions: https://arrow.apache.org/docs/developers/archery.html). You'll find the Archery bits related to integration testing in the `dev/archery/archery/integration` directory: https://github.com/apache/arrow/tree/master/dev/archery/archery/integration. \r\n\r\nThe C# implementation needs to expose endpoints (command line APIs) for four functionalities:\r\n- JSON to Arrow: read a JSON file and convert it to an Arrow IPC file\n- Validate: read both a JSON file and a Arrow IPC file, and check that the contents are equal\n- File to stream: read an Arrow IPC file and convert it to an Arrow IPC stream\n- Stream to file: read an Arrow IPC stream and convert it to an Arrow IPC file\n  \n  You need to add a definition for those endpoints to the Archery file for the C# implementation (see the various `tester_*.py` files in the directory mentioned earlier).\n  \n  Also, unless you're supporting each and every functionality, you'll probably need to add skips, for example here: https://github.com/apache/arrow/blob/master/dev/archery/archery/integration/datagen.py#L1512 and there: https://github.com/apache/arrow/blob/master/dev/archery/archery/integration/runner.py#L129\n  \n  Feel free to ask any more questions."
+        }
+    ]
+}

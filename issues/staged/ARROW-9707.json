@@ -1,0 +1,62 @@
+{
+    "issue": {
+        "title": "[Rust] [DataFusion] Re-implement threading model",
+        "body": "***Note**: This issue was originally created as [ARROW-9707](https://issues.apache.org/jira/browse/ARROW-9707). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe current threading model is very simple and does not scale. We currently use 1-2 dedicated threads per partition and they all run simultaneously, which is a huge problem if you have more partitions than logical or physical cores.\r\n\r\nThis task is to re-implement the threading model so that query execution uses a fixed (configurable) number of threads. Work will be broken down into stages and tasks and each in-process executor (running on a dedicated thread) will process its queue of tasks.\r\n\r\nThis process will be driven by a scheduler.",
+        "created_at": "2020-08-12T15:25:40.000Z",
+        "updated_at": "2020-11-14T16:00:09.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Component: Rust - DataFusion",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2020-11-14T16:00:09.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-08-12T16:59:51.654Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9707?focusedCommentId=17176481) by Wes McKinney (wesm):*\nI'll be curious what approach you take to prevent IO steps from blocking CPU work, we still haven't sorted out how we're dealing with that broadly in C++"
+        },
+        {
+            "created_at": "2020-08-12T17:12:00.073Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9707?focusedCommentId=17176493) by Andy Grove (andygrove):*\nOne approach I accidentally stumbled on was to have a dedicated thread\nreading from disk and then have other operators running with async and\nusing channels to send batches from the disk reader to the downstream\noperators. This is roughly how things are implemented today in DataFusion\n(but not leveraging async).\n\nThe advantage of this approach is that the reader thread is at least\nrunning in parallel to downstream operators processing previous batches.\nThe downside of course is having a dedicated thread per operator that reads\nfrom disk.\n\nI would be interested in making the Parquet crate async so that we can test\nasync end to end (even though I've been told that async is not good for\nfile io) but unfortunately the work to do that is non-trivial.\n\nOn Wed, Aug 12, 2020 at 11:00 AM Wes McKinney (Jira) <jira@apache.org>\n\n"
+        },
+        {
+            "created_at": "2020-08-12T18:11:25.008Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9707?focusedCommentId=17176522) by Andrew Lamb (alamb):*\n`[~andygrove]` I am also very interested in this change (it is something we have been studying / thinking about this with `[~pauldix]`. What you have outlined (a fixed and configurable number of threads) is exactly our use case. I would enjoy collaborating with you if you have any need "
+        },
+        {
+            "created_at": "2020-08-12T19:28:20.648Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9707?focusedCommentId=17176552) by Andy Grove (andygrove):*\n`[~alamb]` That would be great. I think `[~jorgecarleitao]` may also be interested. I have already prototyped this out but would welcome a design review before making the changes in DataFusion. I will start a Google doc for us to discuss this and will post a link here soon."
+        },
+        {
+            "created_at": "2020-08-12T22:38:23.728Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9707?focusedCommentId=17176635) by Andy Grove (andygrove):*\nHere's the Google doc: https://docs.google.com/document/d/1NUiIKxgdiKrEv1H4JXVmk_nxq-eG9et7LKPD91Du-Io/edit?usp=sharing"
+        },
+        {
+            "created_at": "2020-09-14T16:37:35.595Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9707?focusedCommentId=17195581) by Jorge Leit\u00e3o (jorgecarleitao):*\nSold! Feel free to assign issues directly to me if you need help, even if just writing tests or documentation :)"
+        },
+        {
+            "created_at": "2020-09-24T10:33:30.130Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9707?focusedCommentId=17201435) by Jorge Leit\u00e3o (jorgecarleitao):*\nI thought a bit about this, and I have an hypothesis: the core pattern in DataFusion today is:\r\n1. `ExecutionPlan` is an iterator of\u00a0`RecordBatchReader` via the function `build`\n1. `RecordBatchReaders` is an iterator of\u00a0`RecordBatch` via `next_batch`\n1. `ExecutionPlan` 's\u00a0`size_hint` is given by `output_partitioning`\n1. `RecordBatchReaders`'s `size_hint`\u00a0 is unknown, as it typically comes from scaning through a file\n   \n   If this hypothesis holds, IMO we could convert `ExecutionPlan` to allow an `IntoIter<Item=IntoIter<Item=RecordBatch>>`\n   \n   which would allow to flatten the iterator over a set of threads. Threads switch context during I/O, e.g. when a thread finishes reading a block of batches in a CSV, it can switch to execute whatever it is happening in another place.\n   \n   This will also give more visibility to a scheduler, as it has all the necessary information it needs to schedule tasks.\n   \n   [this answer in SO](https://stackoverflow.com/a/53176418/931303) uses IntoIter of IntoIter to implement a generic (single-threaded) `merge_sort`. This would also allow other architectures, as they would offload whole partitions to different processes. In our context, something like this (all static for now\n   \n   \n   ```java\n   \n   fn merge_sorted<IterT: 'static + Send, IterIterT, T: 'static + Ord + Clone + fmt::Debug + Send>(arrays: IterIterT) -> Vec<T>\n   where\n       IterT: IntoIterator<Item = T>,\n       IterIterT: IntoIterator<Item = IterT>,\n   {\n       let all_values = Arc::new(Mutex::new(vec![]));\n       let threads: Vec<JoinHandle<()>> = arrays.into_iter().map(|array| {\n           let mutex_clone = Arc::clone(&all_values);\n           thread::spawn(move || {\n               let mut values: Vec<T> = array.into_iter().collect();\n               values.sort(); // this is wrong, but all information is available to do it\n               mutex_clone.lock().unwrap().extend_from_slice(&values);\n           })\n       }).collect();\n       for thread in threads {\n           thread.join().unwrap()\n       }\n       let result = all_values.lock().unwrap().clone();\n       result\n   }\n   ```"
+        },
+        {
+            "created_at": "2020-09-24T18:29:23.530Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9707?focusedCommentId=17201716) by Andrew Lamb (alamb):*\n`[~jorgecarleitao]` \u2013 I like this proposal. The one thing I always come back to is \"where is `thread::spawn`called\" \u2013 is it called inside the plan (in which case we could end up spawning a lot of threads based on how many input partitions the data had.\r\n\r\nI wonder if there is some way to use a thread-pool here (or maybe that is a straightforward extension to what you are proposing)."
+        },
+        {
+            "created_at": "2020-09-24T20:51:09.496Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9707?focusedCommentId=17201762) by Adam Lippai (alippai):*\nSpeaking about the thread pools, my last suggestion wasn't accepted (or declined): <https://docs.google.com/document/d/1_wc6diy3YrRgEIhVIGzrO5AK8yhwfjWlmKtGnvbsrrY/edit#heading=h.4f9v08zbs2z3>\r\n\r\nThe use-case might be different, but recently Bevy created a rust task scheduler using context-specific threadpools: <https://bevyengine.org/news/bevy-0-2/>\r\n\r\nMy understanding is that Bevy and the linked GDocs (DAG vs 2-3 staged pipeline vs generic threadpool) is similar approach and I find it the most generic (but acceptable) solution.\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-10-16T10:45:19.618Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9707?focusedCommentId=17215335) by Andrew Lamb (alamb):*\nFWIW now that DataFusion uses `async` \u2013 https://github.com/apache/arrow/pull/8285 \u2013 I think the number of threads issue cited in this PR is a non-issue (as DataFusion no longer launches its own threads)"
+        },
+        {
+            "created_at": "2020-11-14T16:00:09.927Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9707?focusedCommentId=17232058) by Andy Grove (andygrove):*\nClosing this is as invalid because things have changed a lot since this was filed and we have now moved away from explicit thread management (mostly)."
+        }
+    ]
+}

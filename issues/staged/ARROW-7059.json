@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[Python] Reading parquet file with many columns is much slower in 0.15.x versus 0.14.x",
+        "body": "***Note**: This issue was originally created as [ARROW-7059](https://issues.apache.org/jira/browse/ARROW-7059). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nReading Parquet files with large number of columns still seems to be very slow in 0.15.1 compared to 0.14.1. I using the same test used in\u00a0ARROW-6876 except I set `use_threads=False` to make for an apples-to-apples comparison with respect to # of CPUs.\r\n\r\n\r\n```Java\n\r\nimport numpy as np\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\ntable = pa.table(\\{'c' + str(i): np.random.randn(10) for i in range(10000)})\r\npq.write_table(table, \"test_wide.parquet\")\r\nres = pq.read_table(\"test_wide.parquet\")\r\nprint(pa.__version__)\r\n%time res = pq.read_table(\"test_wide.parquet\", use_threads=False)\r\n```\r\n\r\n**In 0.14.1 with use_threads=False:**\r\n\r\n`0.14.1`\r\n`CPU times: user 515 ms, sys: 9.3 ms, total: 524 ms`\r\n`Wall time: 525 ms`\r\n\\*\\*\r\n\r\n**In 0.15.1 with** **use_threads=False** **:**\r\n\r\n`0.15.1`\r\n`CPU times: user 9.89 s, sys: 37.8 ms, total: 9.93 s`\r\n`Wall time: 9.93 s`",
+        "created_at": "2019-11-04T22:07:50.000Z",
+        "updated_at": "2020-01-14T20:26:09.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-01-14T20:26:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-11-05T04:13:10.357Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7059?focusedCommentId=16967226) by Wes McKinney (wesm):*\nI can confirm that the performance in 0.15.0/0.15.1 is slower. I'm not able to spend any more time on this issue myself so improvements for the many-columns case will have to come from new volunteers. For what it's worth, more than 1000 columns or so is considered to be an off-label use case for Parquet files "
+        },
+        {
+            "created_at": "2019-11-05T17:17:45.117Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7059?focusedCommentId=16967688) by Eric Kisslinger (ekisslinger):*\nI found this work around which might help in troubleshooting the issue. Using ParquetFile.reader.read_column() to read all the columns individually is much faster than ParquetFile.reader.read_all().\r\n\r\n`import numpy as np`\r\n`import pyarrow as pa`\r\n`import pyarrow.parquet as pq`\r\n`width = 10000`\r\n`table = pa.table(\\{'c' + str(i): np.random.randn(10) for i in range(width)})`\r\n`pq.write_table(table, \"test_wide.parquet\")`\r\n`pf = pq.ParquetFile(\"test_wide.parquet\")`\r\n`print('--- Using ParquetFile.reader.read_all() ---')`\r\n`%time res = pf.reader.read_all(use_threads=False)`\r\n\r\n`def work_around():`\r\n`\u00a0 \u00a0 arrays = [pf.reader.read_column(i) for i in range(width)]`\r\n`\u00a0 \u00a0 return pa.Table.from_arrays(arrays, names=pf.schema.names)`\r\n\r\n`print('--- Using ParquetFile.reader.read_column() ---')`\r\n`%time res = work_around()`\r\n`assert table.equals(res)`\r\n\r\n**Output:**\r\n\r\n`--- Using ParquetFile.reader.read_all() ---`\r\n`CPU times: user 10.2 s, sys: 27.2 ms, total: 10.3 s`\r\n`Wall time: 10.3 s`\r\n`--- Using ParquetFile.reader.read_column() ---`\r\n`CPU times: user 149 ms, sys: 9.02 ms, total: 158 ms`\r\n`Wall time: 158 ms`"
+        },
+        {
+            "created_at": "2019-11-05T23:40:39.821Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7059?focusedCommentId=16967950) by Wes McKinney (wesm):*\nI'm sure that some rudimentary usage of `perf` will reveal where work is required. "
+        },
+        {
+            "created_at": "2019-11-06T16:26:08.083Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7059?focusedCommentId=16968488) by Eric Kisslinger (ekisslinger):*\nThanks for the suggestion. I was unfamiliar with perf. Here are call graphs of the 10,000 column read_all() test using 0.14.1 and 0.15.1. The big difference seems to be with malloc related calls. 0.14.1 spends 0.51% of time calling `new` and\u00a00.75% `_int_free`. Whereas, 0.15.1 spends 39.51% and 25.40% respectively.\r\n\r\n**0.14.1**\r\n\r\n![image-2019-11-06-08-19-11-662.png](https://issues.apache.org/jira/secure/attachment/12985082/image-2019-11-06-08-19-11-662.png)\r\n\r\n**0.15.1**\r\n\r\n![image-2019-11-06-08-25-05-885.png](https://issues.apache.org/jira/secure/attachment/12985090/image-2019-11-06-08-25-05-885.png)"
+        },
+        {
+            "created_at": "2019-11-06T17:53:50.621Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7059?focusedCommentId=16968557) by Eric Kisslinger (ekisslinger):*\nIn\u00a0<https://github.com/apache/arrow/blob/2ce62df589d1517348e500c96a493b24e8f866e3/cpp/src/parquet/arrow/reader.cc>\u00a0it appears that a new ReaderContext() object is created each time a column is read. While I don't claim to understand the inner workings of reader.cc I thought this might explain the large amount of time spent in malloc related calls.\r\n\r\n![image-2019-11-06-09-23-54-372.png](https://issues.apache.org/jira/secure/attachment/12985094/image-2019-11-06-09-23-54-372.png)"
+        },
+        {
+            "created_at": "2019-11-06T20:50:04.449Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7059?focusedCommentId=16968701) by Francois Saint-Jacques (fsaintjacques):*\nYes, that's an O(|columns|^2) issue, the same we faced in the CSV reader columns options actually. Note how `GetColumn` doesn't set `ctx->include_leaves` like `GetFieldReader` (hence the speed difference).\r\n\r\nThanks for digging into this."
+        },
+        {
+            "created_at": "2019-11-06T21:16:25.660Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7059?focusedCommentId=16968718) by Eric Kisslinger (ekisslinger):*\nnp. For completeness I also noticed what may be a similar issue here:\r\n\r\n![image-2019-11-06-13-16-05-102.png](https://issues.apache.org/jira/secure/attachment/12985115/image-2019-11-06-13-16-05-102.png)\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-11-07T00:46:33.912Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7059?focusedCommentId=16968828) by Wes McKinney (wesm):*\nWe should ensure that we have both ASV and C++ benchmarks that hits this path when this is addressed. We aren't actively tracking the benchmarks but hopefully we will someday"
+        },
+        {
+            "created_at": "2020-01-14T20:26:08.966Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7059?focusedCommentId=17015371) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 6181\n<https://github.com/apache/arrow/pull/6181>"
+        }
+    ]
+}

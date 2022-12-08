@@ -1,0 +1,36 @@
+{
+    "issue": {
+        "title": "[JS] decimal toString does not support negative values",
+        "body": "***Note**: This issue was originally created as [ARROW-6575](https://issues.apache.org/jira/browse/ARROW-6575). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe main description is here:\u00a0<https://github.com/apache/arrow/issues/5397>\r\n\r\nAlso, I have a simple test case (slightly changed generate-test-data.js and generated-data-validators):\r\n```java\n\r\nexport const decimal = (length = 2, nullCount = length * 0.2 | 0, scale = 0, precision = 38) => vectorGenerator.visit(new Decimal(scale, precision), length, nullCount);\r\n\r\nfunction fillDecimal(length: number) {\r\n    // const BPE = Uint32Array.BYTES_PER_ELEMENT; // 4\r\n    const array = new Uint32Array(length);\r\n    // const max = (2 ** (8 * BPE)) - 1;\r\n    // for (let i = -1; ++i < length; array[i] = rand() * max * (rand() > 0.5 ? -1 : 1));\r\n    array[0] = 0;\r\n    array[1] = 1286889712;\r\n    array[2] = 2218195178;\r\n    array[3] = 4282345521;\r\n    array[4] = 0;\r\n    array[5] = 16004768;\r\n    array[6] = 3587851993;\r\n    array[7] = 126217744;\r\n    return array;\r\n}\r\n```\r\nand the expected value should be\r\n```java\n\r\nexpect(vector.get(0).toString()).toBe('-1000000000000000000000000000000000000');\r\nexpect(vector.get(1).toString()).toBe('1000000000000000000000000000000000000');\r\n```\r\nHowever, the actual first value is\u00a0339282366920938463463374607431768211456 which is wrong! The second value is correct by the way.\r\n\r\nI believe the bug is in the function called\u00a0\r\n\r\nfunction decimalToString<T extends BN<BigNumArray>>(a: T) because it cannot return a negative value at all.\r\n\r\n[arrow/js/src/util/bn.ts](https://github.com/apache/arrow/blob/d54425de19b7dbb2764a40355d76d1c785cf64ec/js/src/util/bn.ts#L99)\r\n\r\nLine 99\u00a0",
+        "created_at": "2019-09-17T01:36:47.000Z",
+        "updated_at": "2022-10-21T01:14:16.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: JavaScript",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2019-09-21T04:47:48.195Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6575?focusedCommentId=16934909) by Paul Taylor (paul.e.taylor):*\n`[~zad]` Yeah I couldn't figure out how to propagate the sign bit through the decimal conversion. I'd be happy to review a PR if you know the right way to do it."
+        },
+        {
+            "created_at": "2019-09-25T17:07:09.274Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6575?focusedCommentId=16937913) by Andong Zhan (zad):*\nI will make a PR to share our walkaround solution soon."
+        },
+        {
+            "created_at": "2021-04-24T23:58:05.210Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6575?focusedCommentId=17331339) by Dominik Moritz (domoritz):*\n`[~zad]` do you have time to work on a fix?"
+        },
+        {
+            "created_at": "2021-04-26T16:30:01.422Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6575?focusedCommentId=17332575) by Andong Zhan (zad):*\n`[~domoritz]` \u00a0unfortunately, I don't have time to do it at least in 30 days. Our walkaround is not a good solution to share to the public also."
+        },
+        {
+            "created_at": "2022-10-21T01:08:55.228Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6575?focusedCommentId=17621431) by Jonathan Swenson (jswenson):*\nIs this the correct method to use? It appears as though this still does not support negative numbers, and perhaps also does not support non-zero scale.\u00a0\r\n\r\nIf so, this is still present in 9.0.0.\u00a0\r\n\r\nFrom the implementation in the c++ source, I believe there are two missing pieces.\u00a0\r\n\r\n+ handling of negative values. (determine if negative and negate before rendering) \u2013 [determine if negative](https://github.com/apache/arrow/blob/master/cpp/src/arrow/util/basic_decimal.h#L125)\u00a0| [negation ](https://github.com/apache/arrow/blob/master/cpp/src/arrow/util/basic_decimal.cc#L377-L385)\u00a0\r\n\r\n+ scaling values appropriately (insert the decimal place / prepend leading zeros as necessary). [implementation](https://github.com/apache/arrow/blob/master/cpp/src/arrow/util/decimal.cc#L328-L386)\r\n\r\n\u00a0\r\n\r\nThe conversion to integer string is implemented in c++ [here](https://github.com/apache/arrow/blob/master/cpp/src/arrow/util/decimal.cc#L685-L698) which includes checking if negative before rendering.\u00a0\r\n\r\n\u00a0\r\n\r\nI see values like:\r\n\r\n+\u00a0 101 (with scale 10, precision 13) renders as `1010000000000` \u2013 where I expect this as `101.0000000000`\r\n\r\n+ -101 (with scale 10, precision 13) renders as `340282366920938500000000000000000000000` - I expect this as `-101.0000000000`\r\n\r\nI'm not really a Javascript expert, but a similar approach to the negation check and flipping appears to work, but I'm fairly confident I'm missing some edge cases.\r\n\r\n\u00a0\r\n\r\nGeneral algorithm:\r\n\r\n+ check to see if the high bits are negative\u00a0\r\n\r\n+ if so, number is negative (prepend with \"-\") and add 1 to each \"chunk\" and handle overflows appropriately.\u00a0\r\n\r\n+ render the string using current implementation.\u00a0\r\n\r\n+ place decimal place (or prepend with 0s) based on the scale.\u00a0"
+        }
+    ]
+}

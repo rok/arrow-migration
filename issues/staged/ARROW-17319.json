@@ -1,0 +1,56 @@
+{
+    "issue": {
+        "title": "[Python] pyarrow seems to set default CPU affinity to 0 on shutdown, crashes if CPU 0 is not available",
+        "body": "***Note**: This issue was originally created as [ARROW-17319](https://issues.apache.org/jira/browse/ARROW-17319). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI get the following traceback when exiting python after loading `pyarrow.parquet`\r\n\r\n```Java\n\r\nPython 3.8.10 (default, Jun 22 2022, 20:18:18) \r\n[GCC 9.4.0] on linux\r\nType \"help\", \"copyright\", \"credits\" or \"license\" for more information.\r\n>>> os.getpid()\r\n25106\r\n>>> import pyarrow.parquet\r\n>>> \r\nFatal error condition occurred in /opt/vcpkg/buildtrees/aws-c-io/src/9e6648842a-364b708815.clean/source/event_loop.c:72: aws_thread_launch(&cleanup_thread, s_event_loop_destroy_async_thread_fn, el_group, &thread_options) == AWS_OP_SUCCESS\r\nExiting Application\r\n################################################################################\r\nStack trace:\r\n################################################################################\r\n/tmp/venv/lib/python3.8/site-packages/pyarrow/libarrow.so.900(+0x200af06) [0x7f831b2b3f06]\r\n/tmp/venv/lib/python3.8/site-packages/pyarrow/libarrow.so.900(+0x20028e5) [0x7f831b2ab8e5]\r\n/tmp/venv/lib/python3.8/site-packages/pyarrow/libarrow.so.900(+0x1f27e09) [0x7f831b1d0e09]\r\n/tmp/venv/lib/python3.8/site-packages/pyarrow/libarrow.so.900(+0x200ba3d) [0x7f831b2b4a3d]\r\n/tmp/venv/lib/python3.8/site-packages/pyarrow/libarrow.so.900(+0x1f25948) [0x7f831b1ce948]\r\n/tmp/venv/lib/python3.8/site-packages/pyarrow/libarrow.so.900(+0x200ba3d) [0x7f831b2b4a3d]\r\n/tmp/venv/lib/python3.8/site-packages/pyarrow/libarrow.so.900(+0x1ee0b46) [0x7f831b189b46]\r\n/tmp/venv/lib/python3.8/site-packages/pyarrow/libarrow.so.900(+0x194546a) [0x7f831abee46a]\r\n/lib/x86_64-linux-gnu/libc.so.6(+0x468a7) [0x7f831c6188a7]\r\n/lib/x86_64-linux-gnu/libc.so.6(on_exit+0) [0x7f831c618a60]\r\n/lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0xfa) [0x7f831c5f608a]\r\n \n```\r\n\r\nTo replicate this; one needs to make sure that CPU 0 isn't available to schedule tasks on.  In HPC our environment, that happens due to slurm using cgroups to constrain CPU usage.\r\n\r\nOn a linux workstation, one should be able to:\r\n1) open python as a normal user\r\n2) get the pid\r\n3) as root:\r\n```Java\n\r\ncd /sys/fs/cgroup/cpuset/\r\nmkdir pyarrow\r\ncd pyarrow\r\necho 0 > cpuset.mems\r\necho 1 > cpuset.cpus # sets the cgroup to only have access to cpu 1\r\necho $PID > tasks\r\n```\r\nThen, in the python enviroment:\r\n```Java\n\r\nimport pyarrow.parquet\r\nexit()\r\n```\r\nWhich should trigger the crash.\r\n\r\nSadly, I couldn't track down which `aws-c-common` and `aws-c-io` are being used for the 9.0.0 py38 manylinux wheels. (libarrow.so.900 has BuildID[sha1]=dd6c5a2efd5cacf09657780a58c40f7c930e4df1)",
+        "created_at": "2022-08-05T11:44:28.000Z",
+        "updated_at": "2022-09-21T01:59:07.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-08-05T11:56:57.646Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17319?focusedCommentId=17575804) by Mike Gevaert (mgevaert):*\nIs it possible that an old version of `aws-c-io` is being used, from before this patch:\r\nhttps://github.com/awslabs/aws-c-io/pull/455"
+        },
+        {
+            "created_at": "2022-08-05T14:46:39.132Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17319?focusedCommentId=17575882) by Antoine Pitrou (apitrou):*\nWow, I had no idea the AWS SDK was going that. Decidedly a brittle piece of software :-("
+        },
+        {
+            "created_at": "2022-08-05T14:46:50.910Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17319?focusedCommentId=17575884) by Antoine Pitrou (apitrou):*\ncc `[~kou]`"
+        },
+        {
+            "created_at": "2022-08-05T15:11:02.205Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17319?focusedCommentId=17575901) by Kouhei Sutou (kou):*\nYes. We use v0.10.7 because we use vcpkg 38bb87c for building wheels:\r\n\r\n- https://github.com/apache/arrow/blob/master/.env#L96\n- https://github.com/microsoft/vcpkg/blob/38bb87c5571555f1a4f64cb4ed9d2be0017f9fc1/ports/aws-c-io/vcpkg.json\n  \n  It seems that the latest aws-c-io in vcpkg still use v0.10.7: https://github.com/microsoft/vcpkg/blob/master/ports/aws-c-io/vcpkg.json\n  \n  Could you send a pull request to vcpkg to update aws-c-io? Then we can update our vcpkg version to use more recent aws-c-io."
+        },
+        {
+            "created_at": "2022-08-08T07:46:45.743Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17319?focusedCommentId=17576600) by Mike Gevaert (mgevaert):*\n> Could you send a pull request to vcpkg to update aws-c-io? Then we can update our vcpkg version to use more recent aws-c-io.\r\n\r\nSure, I can give that a try."
+        },
+        {
+            "created_at": "2022-08-08T11:05:58.137Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17319?focusedCommentId=17576710) by Mike Gevaert (mgevaert):*\nI have the PR open to vcpkg here:\r\nhttps://github.com/microsoft/vcpkg/pull/26230"
+        },
+        {
+            "created_at": "2022-08-10T07:33:26.775Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17319?focusedCommentId=17577835) by Mike Gevaert (mgevaert):*\n`[~kou]` The VCPKG change got merged, I have created a PR in arrow:\r\nhttps://github.com/apache/arrow/pull/13835\r\n\r\nI'm not sure what I have to do with the comment `Please also update the crossbow configuration in order to keep the github [...]`"
+        },
+        {
+            "created_at": "2022-09-02T11:23:38.947Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17319?focusedCommentId=17599432) by Mike Gevaert (mgevaert):*\nping.\r\n\r\nIt looks like the package isn't building w/ vcpkg - I'm not knowledgeable about that ecosystem, so I'm not sure I can debug this."
+        },
+        {
+            "created_at": "2022-09-02T21:10:41.419Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17319?focusedCommentId=17599715) by Kouhei Sutou (kou):*\nSorry. I missed this.\r\n\r\nWe don't need to do anything for \"Please also update the crossbow configuration in order to keep the github ...\" in the pull request. It's a task after we merge the pull request.\r\n\r\nOur CI jobs use new vcpkg revision in the pull request: https://github.com/apache/arrow/pull/13835#issuecomment-1210326357\r\n\r\nBut it failed in patching phase:\r\n\r\nhttps://github.com/ursacomputing/crossbow/runs/7762521768?check_suite_focus=true#step:6:65\r\n\r\n```\n\r\nerror: patch failed: ports/snappy/portfile.cmake:4\r\nerror: ports/snappy/portfile.cmake: patch does not apply\r\nChecking patch ports/snappy/snappy-disable-bmi.patch...\r\n```\r\n\r\nWe need to confirm that the failed patch https://github.com/apache/arrow/blob/master/ci/vcpkg/ports.patch#L89-L125 is still needed. If it's no longer needed, we can remove the failed patch from our patch set."
+        },
+        {
+            "created_at": "2022-09-20T13:14:49.542Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17319?focusedCommentId=17607186) by Mike Gevaert (mgevaert):*\n> We need to confirm that the failed patch https://github.com/apache/arrow/blob/master/ci/vcpkg/ports.patch#L89-L125 is still needed.\r\n\r\nI had a look at the vcpkg; and it seems they added a patch to make snappy build w/ clang, but otherwise the version and such is the same. I think the patch is thus still needed; so I added the change to diff, so hopefully it applies properly now."
+        }
+    ]
+}

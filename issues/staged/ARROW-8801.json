@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] Memory leak on read from parquet file with UTC timestamps using pandas",
+        "body": "***Note**: This issue was originally created as [ARROW-8801](https://issues.apache.org/jira/browse/ARROW-8801). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nGiven dump.py script\u00a0\r\n\r\n\u00a0\r\n```java\n\r\nimport pandas as pd\r\nimport numpy as np\r\n\r\n\r\nx = pd.to_datetime(np.random.randint(0, 2**32, size=2**20), unit='ms', utc=True)\r\npd.DataFrame({'x': x}).to_parquet('data.parquet', engine='pyarrow', compression=None)\r\n```\r\nand load.py script\r\n\r\n\u00a0\r\n```java\n\r\nimport sys\r\nimport pandas as pd\r\n\r\ndef foo(engine):\r\n\u00a0 \u00a0 for _ in range(2**9):\r\n\u00a0 \u00a0 \u00a0 \u00a0 pd.read_parquet('data.parquet', engine=engine)\r\n\u00a0 \u00a0 print('Done')\r\n\u00a0 \u00a0 input()\r\n\r\nfoo(sys.argv[1])\r\n```\r\nrunning first \"python dump.py\" and then \"python\u00a0load.py pyarrow\", on my machine python memory usage stays at 4+ GB while it waits for input. If using \"python load.py fastparquet\" instead, it is about 100 MB, so it should be a pyarrow issue instead of a pandas issue. The leak disappears if \"utc=True\" is removed from dump.py, in which case the timestamp is timezone-unaware.\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2020-05-14T14:53:21.000Z",
+        "updated_at": "2020-06-23T13:32:42.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-06-23T13:32:42.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-05-18T07:59:48.830Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8801?focusedCommentId=17110005) by Joris Van den Bossche (jorisvandenbossche):*\nFrom a quick test, this is not related to parquet (reading with pyarrow instead of with pandas doesn't show the issue), but rather due to the pyarrow-to-pandas conversion (doing a loop with just `table.to_pandas()` does show a memory increase)\r\n\r\n```Java\n\r\nx = pd.to_datetime(np.random.randint(0, 2**32, size=2**20), unit='ms', utc=True)     \r\ntable = pa.table(pd.DataFrame({'x': x}))                                                                                                                                                                   \r\n\r\nfor _ in range(2**8): \r\n    table.to_pandas() \r\n```\r\n\r\nDid you get the same issue on pyarrow 0.16 (since you mentioned you tested that as well), or is it only present since 0.17?"
+        },
+        {
+            "created_at": "2020-05-18T08:10:01.624Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8801?focusedCommentId=17110020) by Joris Van den Bossche (jorisvandenbossche):*\nAnother observation: with setting `split_blocks=True`, I don't see the issue (so it might be related to the introduction of that keyword)"
+        },
+        {
+            "created_at": "2020-05-18T11:47:13.987Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8801?focusedCommentId=17110177) by Rauli Ruohonen (rauli):*\n>\u00a0Did you get the same issue on pyarrow 0.16 (since you mentioned you tested that as well), or is it only present since 0.17?\r\n\r\nYes. Both 0.17.0 and 0.16.0 leak memory, both with my example code and yours."
+        },
+        {
+            "created_at": "2020-06-23T01:01:56.648Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8801?focusedCommentId=17142509) by Wes McKinney (wesm):*\nI'm looking at this. I don't see a difference between split_blocks=False/True. "
+        },
+        {
+            "created_at": "2020-06-23T13:32:42.990Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8801?focusedCommentId=17142926) by Wes McKinney (wesm):*\nIssue resolved by pull request 7522\n<https://github.com/apache/arrow/pull/7522>"
+        }
+    ]
+}

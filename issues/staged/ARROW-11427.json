@@ -1,0 +1,70 @@
+{
+    "issue": {
+        "title": "[C++] Arrow uses AVX512 instructions even when not supported by the OS",
+        "body": "***Note**: This issue was originally created as [ARROW-11427](https://issues.apache.org/jira/browse/ARROW-11427). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n**Update**: Azure (D2_v2) VM no longer spins-up with\u00a0Xeon Platinum 8171m, so I'm unable to test it with other OS's.\u00a0 Azure VM's are assigned different type of CPU's of same \"class\" depending on availability. I will try my \"luck\" later.\r\n\r\nVM's w/ Xeon Platinum 8171m running on Azure (D2_v2) start crashing after upgrading from pyarrow 2.0 to pyarrow 3.0. However, this only happens when reading parquet files larger than 4096 bits!?\r\n\r\nWindows closes Python with exit code 255 and produces this:\r\n\r\n\u00a0\r\n```java\n\r\nFaulting application name: python.exe, version: 3.8.3150.1013, time stamp: 0x5ebc7702 Faulting module name: arrow.dll, version: 0.0.0.0, time stamp: 0x60060ce3 Exception code: 0xc000001d Fault offset: 0x000000000047aadc Faulting process id: 0x1b10 Faulting application start time: 0x01d6f4a43dca3c14 Faulting application path: D:\\SvcFab\\_App\\SomeApp.FabricType_App32\\SomeApp.Fabric.Executor.ProcessActorPkg.Code.1.0.218-prod\\Python38\\python.exe Faulting module path: D:\\SvcFab\\_App\\SomeApp.FabricType_App32\\temp\\Executions\\50cfffe8-9250-4ac7-8ba8-08d8c2bb3edf\\.venv\\lib\\site-packages\\pyarrow\\arrow.dll\n```\r\n\u00a0\r\n\r\nTested on:\r\n\n|OS|Xeon Platinum 8171m or 8272CL|Other CPUs|\r|\n|-|-|-|-|\n|Windows Server 2012 Data Center|Fail|OK|\r|\n|Windows Server 2016 Data Center|\u00a0OK|OK|\r|\n|Windows Server 2019 Data Center|\u00a0|\u00a0|\r|\n|Windows 10|\u00a0|OK|\r<br>\r<br>\u00a0\r<br>\r<br>Example code (Python):\u00a0\r<br>```java<br>\r<br>import\u00a0numpy\u00a0as\u00a0np\r<br>import\u00a0pandas\u00a0as\u00a0pd\r<br>\r<br>data_len = 2**5\r<br>data\u00a0=\u00a0pd.DataFrame(\r<br>    {\"values\":\u00a0np.arange(0.,\u00a0float(data_len),\u00a0dtype=float)},\r<br>    index=np.arange(0,\u00a0data_len,\u00a0dtype=int)\r<br>)\r<br>\r<br>data.to_parquet(\"test.parquet\")\r<br>data\u00a0=\u00a0pd.read_parquet(\"test.parquet\",\u00a0engine=\"pyarrow\")  # fails here!\r<br>```|\n",
+        "created_at": "2021-01-29T13:26:42.000Z",
+        "updated_at": "2021-02-05T16:20:57.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-02-05T16:20:50.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-01-29T14:40:20.772Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11427?focusedCommentId=17274481) by Antoine Pitrou (apitrou):*\nCan the same file be read on other machines? For example, does it work on Linux or macOS?"
+        },
+        {
+            "created_at": "2021-01-31T20:41:11.451Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11427?focusedCommentId=17275977) by Wes McKinney (wesm):*\nDidn't we start bundling the Visual Studio runtime in this release but not beforehand? If I had to guess what might be the culprit. "
+        },
+        {
+            "created_at": "2021-02-01T10:24:38.253Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11427?focusedCommentId=17276238) by Antoine Pitrou (apitrou):*\nCould you try setting the environment variable `ARROW_USER_SIMD_LEVEL=none` and try again?\r\n\r\n(you can try with other values: \"sse4_2\", \"avx\", \"avx2\")"
+        },
+        {
+            "created_at": "2021-02-01T14:33:06.353Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11427?focusedCommentId=17276370) by Ali Cetin (ali.cetin):*\nI have done some more testing. Seems like Skylake processors suffer from this (Xeon Platinum 8171M and Xeon Platinum 8272CL tested).\r\n\n|ARROW_USER_SIMD_LEVEL|Status|\r|\n|-|-|-|\n|default|Fail|\r|\n|none|OK|\r|\n|sse4_2|OK|\r|\n|avx|OK|\r|\n|avx2|OK|\r|\n|\"dummy\"|Fail - same Windows error dialog as \"default\", but with an error message in terminal as well.|\r<br>\r<br>I hope this was useful.|\n"
+        },
+        {
+            "created_at": "2021-02-01T16:24:07.411Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11427?focusedCommentId=17276444) by Antoine Pitrou (apitrou):*\nI've tried your reproducer script on a AVX512-enabled Skylake CPU (on Linux) and it worked fine.\r\n\r\nIs it possible for you to look at the VM configuration and see whether AVX512 is activated?"
+        },
+        {
+            "created_at": "2021-02-01T19:46:53.307Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11427?focusedCommentId=17276608) by Ali Cetin (ali.cetin):*\nAs you can see above, I have also tried it on Windows Server 2016, which worked fine. So, we can narrow it down to Windows Server 2012 + Xeon Platinum (Sky Lake/Cascade Lake) + AVX512 combo issue."
+        },
+        {
+            "created_at": "2021-02-01T19:54:46.659Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11427?focusedCommentId=17276613) by Antoine Pitrou (apitrou):*\nThank you very much for the investigation [~ali.cetin] !\r\n\r\nIt seems that indeed Windows Server 2012 may not support AVX512: <https://github.com/embree/embree/issues/184>\r\n\r\nWe can probably try to detect such situations to avoid crashing."
+        },
+        {
+            "created_at": "2021-02-01T20:17:17.781Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11427?focusedCommentId=17276628) by Ali Cetin (ali.cetin):*\nYeah, that would explain why Broadwell CPUs works fine, which don't have AVX512.\r\n\r\nBtw, what would you recommend to set\u00a0ARROW_USER_SIMD_LEVEL to (as an hotfix)? avx2?\r\n\r\nHappy to help! Keep up the good work!"
+        },
+        {
+            "created_at": "2021-02-01T20:35:32.196Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11427?focusedCommentId=17276639) by Antoine Pitrou (apitrou):*\nYes, `ARROW_USER_SIMD_LEVEL=avx2` is a good fallback."
+        },
+        {
+            "created_at": "2021-02-02T19:39:52.391Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11427?focusedCommentId=17277421) by Antoine Pitrou (apitrou):*\n(removed previous post, sorry)\r\n\r\n[~ali.cetin] Can you try to install the following wheel and see it if fixes the issue?\r\n\r\n<https://github.com/ursacomputing/crossbow/releases/download/build-27-github-wheel-windows-cp38/pyarrow-3.1.0.dev112-cp38-cp38-win_amd64.whl>\r\n\r\nAlso, it will allow you to inspect the current SIMD level, like this:\r\n```java\n\r\n$ python -c \"import pyarrow as pa; print(pa.runtime_info())\"\r\nRuntimeInfo(simd_level='avx2', detected_simd_level='avx2')\r\n```\r\n\r\nYou should get \"avx2\" on Windows Server 2012, and \"avx512\" on Windows Server 2016."
+        },
+        {
+            "created_at": "2021-02-02T20:00:15.475Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11427?focusedCommentId=17277432) by Ali Cetin (ali.cetin):*\nCool. I can give it a try in the coming days."
+        },
+        {
+            "created_at": "2021-02-05T08:41:51.367Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11427?focusedCommentId=17279467) by Ali Cetin (ali.cetin):*\n`[~apitrou]`, I have tested the fix in WS2012 and WS2016. I can verify that it works. It defaults to avx2 in WS2012 and avx512 in WS2016.\u00a0(y)"
+        },
+        {
+            "created_at": "2021-02-05T16:20:50.171Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11427?focusedCommentId=17279781) by Neal Richardson (npr):*\nIssue resolved by pull request 9398\n<https://github.com/apache/arrow/pull/9398>"
+        }
+    ]
+}

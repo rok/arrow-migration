@@ -1,0 +1,60 @@
+{
+    "issue": {
+        "title": "[C++] Implement hashing, dictionary-encoding for StructArray",
+        "body": "***Note**: This issue was originally created as [ARROW-3978](https://issues.apache.org/jira/browse/ARROW-3978). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis is a central requirement for hash-aggregations such as\r\n\r\n```Java\n\r\nSELECT AGG_FUNCTION(expr)\r\nFROM table\r\nGROUP BY expr1, expr2, ...\r\n```\r\n\r\nThe materialized keys in the GROUP BY section form a struct, which can be incrementally hashed to produce dictionary codes suitable for computing aggregates or any other purpose. \r\n\r\nThere are a few subtasks related to this, such as efficiently constructing a record (that can be hashed quickly) to identify each \"row\" in the struct. Maybe we should start with that first",
+        "created_at": "2018-12-09T21:30:41.000Z",
+        "updated_at": "2022-08-02T06:09:46.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2019-04-23T15:51:14.849Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3978?focusedCommentId=16824273) by Antoine Pitrou (apitrou):*\nTo implement this efficiently, we would need to split the computation of hash values (for an array or morsel) from their use in hashing kernels. It is probably possible to hash struct values efficiently, simply by first hashing the underlying child arrays, then by combining the results."
+        },
+        {
+            "created_at": "2019-04-23T15:57:50.795Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3978?focusedCommentId=16824279) by Wes McKinney (wesm):*\nThere's different approaches. You might want to look at what an existing columnar database engine like Clickhouse or Dremio is doing for hashing tuples (aka structs). One approach is to \"pivot\" or \"recordize\" the data from columnar to record format (similar to NumPy's struct dtype memory layout, but it would need to be generalized of course to account for varbinary, nulls, and nested data \u2013 nested data would have to be recursively flattened). \r\n\r\nNB the same code paths involved with hashing structs will need to be used for hash joins, hash aggregations, and other algorithms. \r\n\r\n`[~jnadeau]` do you have any advice for us or pointers to literature about this topic?"
+        },
+        {
+            "created_at": "2019-04-24T19:22:51.434Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3978?focusedCommentId=16825451) by Jacques Nadeau (jnadeau):*\nHere is some info about what we found worked well. Note that it doesn't go into a lot of detail about the pivot\u00a0algorithm beyond the basic concepts of fixed and variable vectors.\r\n\r\n<https://docs.google.com/document/d/1Yk6IvDL28IzEjqcqSkFdevRyMrC8_kwzEatHvcOnawM/edit>\r\n\r\n\u00a0\r\n\r\nMain idea around pivot:\u00a0\r\n \\* separate fixed and variable and have each continguous\r\n \\* coalesce bits for nullability and values together at the start of the data structure (save space, increase likelihood of mismatch early)\r\n \\* include length of variable in fixed container to\u00a0reduce likelihood of jumping to variable container.\r\n \\* Have specialized cases that look at actual existence of nulls for each word and fork behavior based on that to improve performance of common case where things are mostly null or not null.\r\n\r\nThe latest code for the Arrow pivot algorithms specifically that we use can be found here:\r\n\r\nPivots:\u00a0<https://github.com/dremio/dremio-oss/blob/master/sabot/kernel/src/main/java/com/dremio/sabot/op/common/ht2/Pivots.java>\r\n\r\nUnpivots:\u00a0<https://github.com/dremio/dremio-oss/blob/master/sabot/kernel/src/main/java/com/dremio/sabot/op/common/ht2/Unpivots.java>\r\n\r\nHash Table:\u00a0<https://github.com/dremio/dremio-oss/blob/master/sabot/kernel/src/main/java/com/dremio/sabot/op/common/ht2/LBlockHashTable.java>\r\n\r\nWe'd be happy to donate this code/algo to the community\u00a0as it would probably serve as a good\u00a0foundation.\r\n\r\n\u00a0\r\n\r\nNote the doc is probably somewhat out of date with the actual implementation as it was written early on in development.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-05-31T14:21:04.118Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3978?focusedCommentId=16853069) by Francois Saint-Jacques (fsaintjacques):*\nClickHouse also uses the pivot method, see\r\n \\* <https://github.com/yandex/ClickHouse/blob/d4f474cd196c1b7dff65f8507e87b380f64e2b53/dbms/src/Common/ColumnsHashing.h#L513-L540>\r\n \\* https://github.com/yandex/ClickHouse/blob/d4f474cd196c1b7dff65f8507e87b380f64e2b53/dbms/src/Interpreters/AggregationCommon.h#L231-L243\r\n \\* https://github.com/yandex/ClickHouse/blob/d4f474cd196c1b7dff65f8507e87b380f64e2b53/dbms/src/Columns/ColumnVector.cpp#L32-L45"
+        },
+        {
+            "created_at": "2019-06-11T20:38:31.368Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3978?focusedCommentId=16861479) by Wes McKinney (wesm):*\nMoving out of 0.14.0, but don't let that stop anyone from working on this"
+        },
+        {
+            "created_at": "2021-06-09T13:22:46.130Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3978?focusedCommentId=17360064) by Wes McKinney (wesm):*\n`[~bkietz]` `[~michalno]` seems like this could be supported pretty soon using the new hash table machinery? "
+        },
+        {
+            "created_at": "2021-06-14T18:13:18.643Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3978?focusedCommentId=17363122) by Michal Nowakiewicz (michalno):*\nIt sounds like this is already implemented as part of hash group by, but we should probably add a documentation about how it works exactly. \r\nAlso, currently only 32-bit hash is implemented, but we need to add 64-bit hashing as well.\u00a0"
+        },
+        {
+            "created_at": "2021-06-14T18:14:46.733Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3978?focusedCommentId=17363123) by Antoine Pitrou (apitrou):*\nWhat do you mean with \"32-bit hash\"?"
+        },
+        {
+            "created_at": "2021-06-15T15:14:47.800Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3978?focusedCommentId=17363702) by Ben Kietzman (bkietz):*\n> seems like this could be supported pretty soon using the new hash table machinery? \r\n\r\nCorrect, and I'd say we should try replacing everything in `vector_hash.cc` with usage of `Grouper` then compare benchmarks. I think we'd probably get a performance win for dictionary encoding primitives as well as support for dictionary encoding structs"
+        },
+        {
+            "created_at": "2022-06-15T19:03:15.891Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3978?focusedCommentId=17554759) by Aldrin Montana (octalene):*\nI am picking up ARROW-8991 today. `[~bkietz]` `[~apitrou]` , I assume that this issue is mostly using new mechanisms and then \"exposing an interface\". I need to build up my understanding, but the \"exposing an interface\" portion may be addressed by ARROW-8991.\r\n\r\nI just wanted to ping here and double check that it makes sense to take this while I work on ARROW-8991. I also wanted to check if there's anything in particular I should look at that hasn't already been mentioned in previous comments."
+        },
+        {
+            "created_at": "2022-08-02T06:09:46.615Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3978?focusedCommentId=17574066) by Aldrin Montana (octalene):*\nI just wanted to note here that I am trying to handle nested types for ARROW-8991. I realize now that StructArray would be included in that umbrella, so when ARROW-8991 is complete, this would be partially completed.\r\n\r\nI don't know the dictionary-encoding infrastructure, but if I get around to that half then I'll pick up this issue."
+        }
+    ]
+}

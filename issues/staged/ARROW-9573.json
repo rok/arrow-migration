@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Python] Parquet doesn't load when partitioned column starts with '_'",
+        "body": "***Note**: This issue was originally created as [ARROW-9573](https://issues.apache.org/jira/browse/ARROW-9573). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen the loading parquet with partitioned column that starts with an underscore '_', nothing is loaded. No exceptions are raised either. Loading this parquet have worked for me in pyarrow 0.17.1, but not working anymore in pyarrow 1.0.0.\r\n\r\nOn the other hand, loading parquet with a partitioned column starting with '_' is possible by using the `use_legacy_dataset` option. Also, when the column that starts with an underscore is not a partitioned column, loading parquet seems to work as expected.\r\n\r\n```python\n\r\n>>> import pyarrow as pa\r\n>>> import pyarrow.parquet as pq\r\n>>> import pandas as pd\r\n>>> df1 = pd.DataFrame(data={'_COL_1': [1, 2], 'COL_2': [3, 4], 'COL_3': [5, 6]})\r\n>>> table1 = pa.Table.from_pandas(df1)\r\n>>> pq.write_to_dataset(table1, partition_cols=['_COL_1', 'COL_2'], root_path='test_parquet1')\r\n>>> df_pq1 = pq.read_table('test_parquet1')\r\n>>> df_pq1\r\npyarrow.Table\r\n>>> len(df_pq1)\r\n0\r\n>>> df_pq1_legacy = pq.read_table('test_parquet1', use_legacy_dataset=True)\r\npyarrow.Table\r\nCOL_3: int64\r\n_COL_1: dictionary<values=int64, indices=int32, ordered=0>\r\nCOL_2: dictionary<values=int64, indices=int32, ordered=0>\r\n>>> len(df_pq1_legacy)\r\n2\r\n>>> df2 = pd.DataFrame(data={'COL_1': [1, 2], 'COL_2': [3, 4], '_COL_3': [5, 6]})\r\n>>> table2 = pa.Table.from_pandas(df2)\r\n>>> pq.write_to_dataset(table2, partition_cols=['COL_1', 'COL_2'], root_path='test_parquet2')\r\n>>> df_pq2 = pq.read_table('test_parquet2')\r\n>>> df_pq2\r\npyarrow.Table\r\n_COL_3: int64\r\nCOL_1: int32\r\nCOL_2: int32\r\n>>> len(df_pq2)\r\n2\r\n```",
+        "created_at": "2020-07-27T19:00:20.000Z",
+        "updated_at": "2020-08-06T16:11:11.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-08-06T16:11:06.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-07-27T19:13:59.635Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9573?focusedCommentId=17165920) by Ben Kietzman (bkietz):*\nIn `pyarrow.dataset` when reading we currently ignore directories which begin with \".\" or \"_\" by default. I'll make a patch overriding this default for `read_table`"
+        },
+        {
+            "created_at": "2020-07-27T19:27:00.097Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9573?focusedCommentId=17165926) by Tonnam Balankura (tonnamb):*\nThank you `[~bkietz]` for looking into this!"
+        },
+        {
+            "created_at": "2020-07-27T19:37:06.923Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9573?focusedCommentId=17165931) by Ben Kietzman (bkietz):*\nHmmm, that fix won't be acceptable; we **do** ignore directories beginning with \".\" or \"_\" in legacy `pq.read_table` but evidently not when the directory parses as a hive partition expression. In `pyarrow.dataset` paths are filtered by the ignored prefixes before being parsed for partition information, so recovering this behavior will be difficult. `[~jorisvandenbossche]`"
+        },
+        {
+            "created_at": "2020-08-03T06:04:59.168Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9573?focusedCommentId=17169745) by Tonnam Balankura (tonnamb):*\nThank you `[~bkietz]` for taking a look. Seems like [legacy pq.read_table](https://github.com/apache/arrow/blob/master/python/pyarrow/parquet.py#L970) pushes filtered files if no filtered directories are found.\r\n\r\nIf I understand correctly, with the new dataset API, [discovery.cc](https://github.com/apache/arrow/blob/master/cpp/src/arrow/dataset/discovery.cc#L184) handles the logic of ignoring directories that starts with \".\" and \"_\". I presume that modifying the C++ code to behave like the legacy `pq.read_table` is not the preferred approach.\r\n\r\nOne partial solution I can think of is to add the `ignore_prefixes` option to `read_table` and `_ParquetDatasetV2` (and passing the option to `ds.dataset`) to allow users to set it when calling `read_table`. Maybe that would help users with the loading parquet with a partitioned column that starts with an underscore. Do you think that could work?"
+        },
+        {
+            "created_at": "2020-08-03T12:07:22.624Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9573?focusedCommentId=17169966) by Joris Van den Bossche (jorisvandenbossche):*\n> we **do** ignore directories beginning with \".\" or \"_\" in legacy `pq.read_table` but evidently not when the directory parses as a hive partition expression\r\n\r\nIndeed, that's done here:  https://github.com/apache/arrow/blob/9fd11c4e64d05ccb3a11ae891af7e57c815b9379/python/pyarrow/parquet.py#L1022-L1024. So a \"private\" directory is only skipped if it has no \"=\" in it. A logic that is hive-specific and thus indeed seems difficult to generalize in the datasets API.\r\n\r\n> One partial solution I can think of is to add the `ignore_prefixes` option to `read_table` \r\n\r\nThat could indeed be a way to give the user some more control (and might be useful to expose anyway). \r\nThat still won't solve a default roundtrip of course, and also won't fix the case where the user specifies the partitioning names explicitly. Both would still require a user action (to specify this keyword), but not sure it is possible to solve this without such user action.\r\n\r\n"
+        },
+        {
+            "created_at": "2020-08-06T02:46:44.797Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9573?focusedCommentId=17171873) by Tonnam Balankura (tonnamb):*\n`[~jorisvandenbossche]`, thank you for the explanation and the link to the hive-specific logic.\r\n\r\n`[~bkietz]`, thank you for opening the PR that expose the `ignore_prefixes` option! Looking forward to using it once it is reviewed and released."
+        },
+        {
+            "created_at": "2020-08-06T16:11:06.769Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9573?focusedCommentId=17172503) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 7900\n<https://github.com/apache/arrow/pull/7900>"
+        }
+    ]
+}

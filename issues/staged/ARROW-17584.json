@@ -1,0 +1,36 @@
+{
+    "issue": {
+        "title": "[Go] Unable to build with tinygo",
+        "body": "***Note**: This issue was originally created as [ARROW-17584](https://issues.apache.org/jira/browse/ARROW-17584). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI was hoping to use TinyGo to build WASM binaries with Arrow.  TinyGo can generate builds that are [1% the size](https://tinygo.org/getting-started/overview/#:~:text=The%20only%20difference%20here%2C%20is,used%2C%20and%20the%20associated%20runtime.&text=In%20this%20case%20the%20Go,size%20(251k%20before%20stripping)!) of those generated with Go (significant for applications hosted on the web).\r\n\r\nArrow's use of `reflect.SliceHeader` fields limits the portability of the code.  For example, the `Len` and `Cap` fields are assumed to be `int` here: https://github.com/apache/arrow/blob/go/v9.0.0/go/arrow/bitutil/bitutil.go#L158-L159\r\n\r\nGo's [reflect package warns](https://github.com/golang/go/blob/go1.19/src/reflect/value.go#L2675-L2685) that the SliceHeader \"cannot be used safely or portably and its representation may change in a later release.\"\r\n\r\nAttempts to build a WASM binary using the github.com/apache/arrow/go/v10 module result in failures like this:\r\n```Java\n\r\ntinygo build -tags noasm -o test.wasm ./main.go\r\n```\r\n```Java\n             \r\n# github.com/apache/arrow/go/v10/arrow/bitutil\r\n../../go/pkg/mod/github.com/apache/arrow/go/v10@v10.0.0-20220831082949-cf27001da088/arrow/bitutil/bitutil.go:158:10: invalid operation: h.Len / uint64SizeBytes (mismatched types uintptr and int)\r\n../../go/pkg/mod/github.com/apache/arrow/go/v10@v10.0.0-20220831082949-cf27001da088/arrow/bitutil/bitutil.go:159:10: invalid operation: h.Cap / uint64SizeBytes (mismatched types uintptr and int)\r\n```\r\n\r\nThis happens because TinyGo uses `uintptr` for the corresponding types: https://github.com/tinygo-org/tinygo/blob/v0.25.0/src/reflect/value.go#L773-L777\r\n\r\nThis feels like an issue with TinyGo, and it has been ticketed there multiple times (see https://github.com/tinygo-org/tinygo/issues/1284).  They lean on the warnings in the Go sources that use of the SliceHeader fields makes code unportable and suggest changes to the libraries that do not heed this warning.\r\n\r\nI don't have a suggested fix or alternative for Arrow's use of SliceHeader fields, but I'm wondering if there would be willingness on the part of this package to make WASM builds work with TinyGo.  Perhaps the TinyGo authors could also offer suggested changes.",
+        "created_at": "2022-08-31T16:08:31.000Z",
+        "updated_at": "2022-09-14T21:43:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Go",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-08-31T17:39:47.872Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17584?focusedCommentId=17598533) by Matthew Topol (zeroshade):*\n`[~tschaub]` So far we've been keeping the N-2 concept for support, as `unsafe.Slice` was introduced in go1.17 it would make sense for us to bump our required version to go1.17 and convert our references to the sliceheader to instead use `unsafe.Slice`. Can you check / confirm whether or not `unsafe.Slice` works correctly with TinyGo such that it would be a viable alternative?"
+        },
+        {
+            "created_at": "2022-09-01T20:27:33.498Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17584?focusedCommentId=17599144) by Tim Schaub (tschaub):*\n`[~zeroshade]` - it looks like things should work with `unsafe.Slice`.  I found that tinygo also does not yet implement `map.LoadAndDelete` for `sync`, but I've proposed adding that here https://github.com/tinygo-org/tinygo/pull/3118\r\n\r\nI started to put together a change that converts the casting functions to use `unsafe.Slice`, but I'm struggling with what the appropriate len/cap should be.\r\n\r\nFor example, I was assuming `bytesTOUint64` in arrow/bitutil/bitutil.go might look something like this:\r\n\r\n```go\n\r\nfunc bytesToUint64(b []byte) []uint64 {\r\n\treturn unsafe.Slice((*uint64)(unsafe.Pointer(&b[0])), len(b)/uint64SizeBytes)\r\n}\r\n```\r\n\r\nBut I'm uncertain if that is the correct length/capacity.  If you have thoughts on the correct implementation, I would be happy to put together a pull request that changes this and the other casting functions."
+        },
+        {
+            "created_at": "2022-09-01T20:56:30.964Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17584?focusedCommentId=17599149) by Matthew Topol (zeroshade):*\nFrom what I've been able to determine about it, the value for the second parameter should be the number of values of the resulting type. So, to use your example:\r\n\r\n```go\n\r\nfunc bytesToUint64(b []byte) []uint64 {\r\n        return unsafe.Slice((*uint64)(unsafe.Pointer(&b[0])), len(b)/uint64SizeBytes)\r\n}\r\n```\r\n\r\nWould be the correct implementation (no need to bother with pulling the SliceHeader in this case.\r\n\r\nIf you're up for putting together a pull request that would be fantastic. Go for it and just tag me on the PR when you file it and I'll give it a review. Thanks much!"
+        },
+        {
+            "created_at": "2022-09-01T21:19:26.294Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17584?focusedCommentId=17599154) by Tim Schaub (tschaub):*\nThanks, `[~zeroshade]`.  Looks like I edited my comment to avoid the use of SliceHeader at about the same time you left your comment :)\r\n\r\nI think there are still issues with the changes (tests are failing for me), but I put up a draft PR: https://github.com/apache/arrow/pull/14026"
+        },
+        {
+            "created_at": "2022-09-08T14:35:17.556Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17584?focusedCommentId=17601857) by Matthew Topol (zeroshade):*\nHey `[~tschaub]` I figured out the issue you ran into on the draft PR and commented as such with how to fix them :)"
+        }
+    ]
+}

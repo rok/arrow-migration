@@ -1,0 +1,125 @@
+{
+    "issue": {
+        "title": "[Python] read_csv from python is slow on some work loads",
+        "body": "***Note**: This issue was originally created as [ARROW-10308](https://issues.apache.org/jira/browse/ARROW-10308). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi!\r\n\r\nI've noticed that `pyarrow.csv.read_csv` can be slow on real workloads, processing data around 0.5GiB/s. \"Real workloads\" means many string, float, and all-null columns, and large file size (5-10GiB), though the file size didn't matter to much.\r\n\r\nMoreover, profiling a little a bit with py-spy, it seems that maybe 30-50% of the time is spent on shared pointer lock mechanisms (though I'm not sure if this is to be trusted). I've attached the dumps in svg format.\r\n\r\nI've also attached a script and a Dockerfile to run a benchmark, which reproduces the speeds I see. Building the docker image and running it on a large Azure machine, I get speeds around 0.3-1.0 GiB/s, and it's mostly around 0.5GiB/s.\r\n\r\nThis is all also available here:\u00a0https://github.com/drorspei/arrow-csv-benchmark",
+        "created_at": "2020-10-14T18:19:33.000Z",
+        "updated_at": "2021-03-02T18:40:49.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-10-14T18:26:32.951Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17214163) by Antoine Pitrou (apitrou):*\nTwo things:\r\n1) you are using a Python file object (a `BytesIO` object). This will unnecessarily reduce performance. Instead you should use an Arrow native file object (for example `pyarrow.BufferReader`).\r\n2) depending on the CSV file size and structure, it can be beneficial to change the CSV read block size in `pyarrow.csv.ReadOptions`: https://arrow.apache.org/docs/python/generated/pyarrow.csv.ReadOptions.html\r\n"
+        },
+        {
+            "created_at": "2020-10-14T18:37:50.838Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17214190) by Dror Speiser (drorspei):*\nThanks for the quick response!\r\n\r\n1) Sorry, I should have made this more explicit: while the benchmark uses BytesIO, I was experiencing these speeds when calling `pd.read_csv(\"/path/to/my.csv\")`. Does pyarrow use `BufferReader` in this case?\r\n\r\n2) Thanks for the tip, I'll try this out and report back if the numbers change."
+        },
+        {
+            "created_at": "2020-10-14T18:39:20.028Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17214192) by Antoine Pitrou (apitrou):*\n1) No, it uses native file objects in that case.\r\n\r\n2) Thank you, don't hesitate to report the numbers!"
+        },
+        {
+            "created_at": "2020-10-14T20:24:07.677Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17214255) by Dror Speiser (drorspei):*\nThe bad news: the default `block_size` of 1MB, and the default use of native file objects, are not so good for my workloads. Moreover, I don't know what's going on with the speeds O_O\r\n\r\nThe good news: I now know how to consistently get around 1.8GiB/s speed for my workload.\r\n\r\nAttached is a csv with all the numbers: 220 runs = (5 rounds) x (2 buffer types) x (11 block sizes) x (2 times everything)\u00a0[arrow-csv-benchmark-times.csv](arrow-csv-benchmark-times.csv)\r\n\r\nAnd also a scatter plot.\u00a0  ![arrow-csv-benchmark-plot.png](https://issues.apache.org/jira/secure/attachment/13013595/arrow-csv-benchmark-plot.png)\r\n\r\nNote that the x-axis is log in base 2 of the block size.\r\n\r\nDo you think there's a place for changing the defaults of `block_size` and buffer objects for local paths?"
+        },
+        {
+            "created_at": "2020-10-14T20:26:45.893Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17214257) by Antoine Pitrou (apitrou):*\nThe adequate block size is heavily dependent on various characteristics, so it's not really possible to provide a one-size-fits-all default value.\r\n\r\nAs for \"buffer objects for local paths\", I guess I don't really understand the question.\r\n\r\nAlso: when you say \"1.8GiB/s speed\", this is in single-thread or multi-thread mode? If the latter how many CPU cores are active?"
+        },
+        {
+            "created_at": "2020-10-14T20:26:47.637Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17214258) by Dror Speiser (drorspei):*\nAlso, given the suggested results in the profiling I did, there still is the possibility of winning 30-50% performance for the defaults, if it's really about lock synchronisation."
+        },
+        {
+            "created_at": "2020-10-14T20:27:50.031Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17214259) by Dror Speiser (drorspei):*\nI'm running in multi-thread, with 48 vcpus. htop shows them all lighting up when running the benchmark.\r\n\r\nFor buffer objects: for most cases it would be faster to read entire files and then use BufferReader, though there's a higher chance of maxing out on available ram."
+        },
+        {
+            "created_at": "2020-10-14T20:29:14.988Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17214260) by Antoine Pitrou (apitrou):*\nIf you really have 400 columns in your file, you may want to try a much larger block size, e.g. 32 MB."
+        },
+        {
+            "created_at": "2020-10-14T20:35:18.817Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17214269) by Dror Speiser (drorspei):*\nYup, the graph confirms that block size in the range 32-100 MB is a good choice for my files.\r\n\r\nBut it still only gets to 1.8 GiB/s, which is slower than my SSD (2+ GiB/s). Is this reasonable? Are you not expecting the processing to be at least as fast as reading the files?"
+        },
+        {
+            "created_at": "2020-10-14T21:00:55.172Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17214276) by Antoine Pitrou (apitrou):*\nProcessing a CSV file can be costly. On a 12-core 24-thread machine with a 64 MiB block size, I get around 1.5 GiB/s.\r\n\r\nProfiling at the C++ level, it seems that the main bottlenecks are:\r\n \\* CSV parsing itself (finding boundaries, escape characters etc.): 22% of total CPU time\r\n \\* Building up double arrays (most of which is converting from string to double): 53% of total CPU time\r\n \\* Building up string arrays: 19% of total CPU time\r\n\r\nIf you're generating the data yourself (as opposed to getting it from a third party), I would really recommend using Parquet rather than CSV.\r\n\r\n "
+        },
+        {
+            "created_at": "2020-10-14T21:24:26.201Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17214287) by Antoine Pitrou (apitrou):*\nAlso, if you're interested in only some of the columns, you can also reduce the processing time using `ConvertOptions.include_columns`: https://arrow.apache.org/docs/python/generated/pyarrow.csv.ConvertOptions.html\r\n\r\nBut really, consider using Parquet if you can. It's a highly optimized binary format."
+        },
+        {
+            "created_at": "2020-10-16T13:26:00.088Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17215393) by Dror Speiser (drorspei):*\nThanks for the suggestions :)\u00a0I am indeed getting the files from a third party, and I'm converting them to parquet on arrival using arrow. I'm actually content with 0.5 GiB/s. I'm here because I saw a tweet by Wes Mckinney saying that the csv parser in arrow is \"extremely fast\". I tweeted back my results and he suggested that I open an issue.\r\n\r\nI would like to note that the numbers don't quite add up. If the cpu usage is totally accounted for by the operations of parsing and building arrays, then that would mean that a single processor is doing between 0.06 to 0.13 GiB/s, which is very slow.\r\n\r\nWhen I run the benchmark without threads I get 0.3 GiB/s, which is reasonable for a single processor. But, it also means that the 48 vcpus I have are very far from achieving a linear speedup, which is in line with my profiling (though the attached images are block size of 1 mb). Do you see a linear speedup on your machine?\r\n\r\nAs for processing csv's being costly in general, I'm not familiar enough with other libraries to say, but I am familiar with the simdjson library that claims to parse json files at over 2 GiB/s, on a single core. I'm looking at the code of both projects, hoping I'll be able to contribute something from simdjson to the csv parser in arrow."
+        },
+        {
+            "created_at": "2020-10-16T13:34:03.335Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17215396) by Wes McKinney (wesm):*\nI do think we should be doing better here than we are so it merits some analysis to see if some default options should change. The results do strike me as peculiar"
+        },
+        {
+            "created_at": "2020-10-16T13:52:50.548Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17215401) by Antoine Pitrou (apitrou):*\n\"vcpu\" doesn't mean anything precise unfortunately. What is the CPU model and how many **physical** cores are allocated to the virtual machine?\r\n\r\n> I am familiar with the simdjson library that claims to parse json files at over 2 GiB/s, on a single core\r\n\r\nIt all depends what \"parsing\" entails, what data it is tested on, and what is done with the data once parsed.\r\n\r\nOn our internal micro-benchmarks, the Arrow CSV parser runs at around 600 MB/s (on a single core), but that's data-dependent. I tend to test on data with narrow column values since that's what \"big data\" often looks like, and that's the most difficult case for a CSV parser. It's possible that better speeds can be achieved on larger column values (such as large binary strings).\r\n\r\nBut parsing isn't sufficient, then you have to convert the data to Arrow format, which also means you switch from a row-oriented format to a column-oriented format. That part probably hits quite hard on the memory and cache subsystem."
+        },
+        {
+            "created_at": "2020-10-16T14:09:07.045Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17215407) by Antoine Pitrou (apitrou):*\nFor the record, on a 12-core 24-thread CPU, I get between 8x and 10x scaling from single-core to multi-core. This is far from linear scaling, but not horrific either."
+        },
+        {
+            "created_at": "2020-10-16T16:20:31.077Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17215483) by Dror Speiser (drorspei):*\nYeah, Azure doesn't tell me how many physical cores are at my disposal, which makes it hard to compare between setups. But even if it's 12 cpus with hyperthreading and bad advertising, there is still a gap to be explained between single thread and multi thread performance.\r\n\r\nI offer to work on a benchmark that measures reading csvs of different sizes and compositions, for a variety of block sizes, and run it on a few different machines sizes on AWS (tiny to xlarge) and Azure, and report here the results.\r\n\r\nAntoine, do you think this is a good idea? Do you have input on what csv compositions are found in the wild? You said that narrow columns is common, how would you quantify this? Personally I work with finance and real estate data; I can create \"data profiles\" for what I see in my own workloads and share."
+        },
+        {
+            "created_at": "2020-10-16T17:09:29.884Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17215519) by Antoine Pitrou (apitrou):*\n> Antoine, do you think this is a good idea? Do you have input on what csv compositions are found in the wild?\r\n\r\nYes, that sounds like a very good idea. Instead of generating data, I think it's better to use actual data. You can find a variety of real-world datasets here:\r\n <https://github.com/awslabs/open-data-registry>\r\n\r\nA commonly used dataset for demonstration and benchmarking purposes is the New York taxi dataset:\r\n <https://www1.nyc.gov/site/tlc/about/tlc-trip-record-data.page>\r\n\r\nYou may also find datasets of Twitter messages, which would be more text-heavy and therefore would stress the CSV reader a bit differently.\r\n\r\nGenerally, for multi-thread benchmarking, you want files that are at least 1GB long. It may be possible to take a smaller file and replicate its contents a number times to reach the desired size, though."
+        },
+        {
+            "created_at": "2020-10-17T22:25:39.046Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17216056) by Antoine Pitrou (apitrou):*\nFor the record, another set of CSV datasets here:\r\n\r\n<https://github.com/p-ranav/csv2#results-as-of-23-apr-2020>"
+        },
+        {
+            "created_at": "2020-10-18T13:36:10.857Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17216196) by Wes McKinney (wesm):*\nIt occurred to me that the 48 vcpu machine is likely a dual-socket machine which may have NUMA issues, so the performance issue may arise from the fact that our software is not NUMA-aware. "
+        },
+        {
+            "created_at": "2021-02-24T01:51:28.481Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17289489) by Dror Speiser (drorspei):*\nHow about I run a benchmark of multiple file sizes, compositions, and block\nsizes, on a few types of machines on AWS (from tiny to some xlarge)?\n\nWe might get lucky and there's a simple default that increases speed all\naround.\n\n\n\n"
+        },
+        {
+            "created_at": "2021-02-25T16:02:40.966Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17291016) by Diana Clarke (dianaclarke):*\nHi Dror,\r\n\r\nProfiling different file sizes, compositions, and block sizes on various AWS instances would be fantastic. Based on that\u00a0data, perhaps we could come up with a better default value for `ReadOptions.block_size`.\r\n\r\nI ran your benchmark on my local machine yesterday, experimenting with different block sizes, and for this particular case, defaulting the\u00a0`block_size` to `None` was definitely not optimal.\r\n\r\nIncidentally, I'm currently working on a continuous\u00a0benchmarking\u00a0framework to run Arrow benchmarks on each commit (to safeguard against regressions), but also\u00a0to do this kind of research.\r\n\r\nThe continuous\u00a0benchmarking repo isn't quite ready to be made public, but once it is, we can collaborate and add your benchmark to it. It'll be fun!\r\n\r\nThanks for taking the time to run these benchmarks, and for sharing\u00a0your code and results.\r\n\r\nMuch\u00a0appreciated,\r\n\r\n--diana\r\n\r\nPS. Were you able to find out if the\u00a048 vcpu machine was NUMA enabled?"
+        },
+        {
+            "created_at": "2021-02-27T19:37:35.306Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17292214) by Dror Speiser (drorspei):*\nHi Diana,\r\n\r\nCool!\r\n\r\nI've created a small benchmark that spins up EC2 instances, downloads a NY Taxi dataset, and runs read_csv with different block sizes. I'll upload the raw data tomorrow, but meanwhile here is a draft basic analysis notebook on the data that I already have:\r\n\r\n<https://github.com/drorspei/arrow-csv-benchmark/blob/ec2-block-size/analysis.ipynb>\r\n\r\nIf you look in the containing branch, you will find two files: a script, and a supporting file for boto code.\r\n\r\nI'll be super glad to collaborate whenever I can :)\r\n\r\nAs for NUMA enabled, I think I was running Azure's E48_as_v4, which I see in the table on this page:\r\n\r\n<https://docs.microsoft.com/en-us/azure/virtual-machines/linux/compute-benchmark-scores>\r\n\r\nThere's a column \"NUMA Nodes\" which says \"6\". I'm not familiar with NUMA, so I don't know what this means. Is there something I could run on the machine to check?"
+        },
+        {
+            "created_at": "2021-03-01T13:14:07.573Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17292872) by Antoine Pitrou (apitrou):*\n\"NUMA\", as in \"non-uniform memory access\" means that different CPU cores will have varying latencies to different parts of memory. \"Six NUMA nodes\" therefore means there are six different groups of cores with distinct memory access latencies.\r\n\r\nNote that \"memory\" is to be taken in a wide sense and can also include some shared caches. For example, on my CPU (a AMD Zen 2 CPU), the L3 cache is private to clusters of 4 CPU cores (and my CPU has 12 CPU cores)."
+        },
+        {
+            "created_at": "2021-03-01T13:16:27.112Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17292874) by Antoine Pitrou (apitrou):*\n`[~drorspei]` The data is very interesting, thank you.  I don't want to create homework for you, but **if** you're willing to run other benchmarks, there are various open datasets listed here, many of them are probably in the form of CSV files: https://github.com/awslabs/open-data-registry\r\n\r\nSince the optimal block size is most probably dependent on the file structure, it would be interesting to have similar analysis as you did, but for different kinds of CSV files."
+        },
+        {
+            "created_at": "2021-03-01T13:59:56.930Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17292895) by Dror Speiser (drorspei):*\nYeah for sure; I went into the open registry when you posted it the first time, and it's definitely _the thing_ to do: go over all of them, and measure.\r\n\r\nLooking at some random files there, it's not trivial to discern what items are csv files, so it's manual work to register each data item in the registry, making this task feel more Sisyphean, even though in the long run (and even in the short run) most of the time will still be spent on other things...\r\n\r\nI've now run the ny taxi benchmark with duplicating the columns axis, in contrast to duplicating the rows axis, and I think this changes things a bit. I'm starting to think that the optimal block size is going to depend on the number of columns. Is this something you would expect from the implementation?\r\n\r\nSpeaking of the implementation, we were talking about the parallelization. I read your implementation to get a better idea of what is happening. So, almost all the algorithm is parallel, but there is one step that isn't: chunking. Given that it processes data slower than reading from disk, on the larger machines this should then be the bottleneck of read_csv. I've implemented a second version of the chunker that uses a lookup table and simd operations (only x86) to apply the state changes, basically copying the code from this blog post:\r\n\r\n<https://branchfree.org/2018/05/25/say-hello-to-my-little-friend-sheng-a-small-but-fast-deterministic-finite-automaton/>\r\n\r\nThe chunker speed indeed went up, but I didn't see performance gains overall, so I let it go for the time being.\r\n\r\nI think the next step in boosting the speed (other than adaptive default block size) is to make the chunker run in parallel. The sheng blog post references this paper that shows a way to do this:\r\n\r\n<https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/asplos302-mytkowicz.pdf>\r\n\r\nBut, take all of this with a large grain of salt. I don't have a profile output to really show that the chunker is the bottleneck, so maybe it's not."
+        },
+        {
+            "created_at": "2021-03-02T18:39:11.474Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17293912) by Antoine Pitrou (apitrou):*\nHmm, I'm a bit surprised by your assessment of chunking. Unless you're enabling `ParseOptions::newlines_in_values`, chunking is basically a linear search for an end-of-line character (you can look for `NewlineBoundaryFinder` in `src/arrow/util`). So it should be extremely fast. I'd be curious of a case where this chunking is the bottleneck.\r\n\r\nTo answer your other question, I do think that optimal block size is going to depend on the number of columns. Basically, you want a single block to contain enough rows so that administration overhead is minimal compared to converting actual column batches. But of course, if the block size grows too much, the CPU caches will be less efficient and parallelization may also suffer from a coarser-grained partition of data. I can't think of a simple formula that can integrate all these concerns and compute the ideal block size for a given situation, so I think it's best to let users experiment.\r\n\r\n(that said, we **can** change the default block size if we decide that another value, e.g. 4 MB, is more likely to be close to the optimum in most cases)"
+        },
+        {
+            "created_at": "2021-03-02T18:40:49.195Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10308?focusedCommentId=17293914) by Antoine Pitrou (apitrou):*\nThat said, feel free to post your chunker reimplementation somewhere. That may be useful for later experiments."
+        }
+    ]
+}

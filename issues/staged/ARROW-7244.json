@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Python] Inconsistent behavior with reading in S3 parquet objects",
+        "body": "***Note**: This issue was originally created as [ARROW-7244](https://issues.apache.org/jira/browse/ARROW-7244). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe are piloting using pyarrow to reaching parquet files from AWS S3.\r\n\r\n\u00a0\r\n\r\nWe got it working in combination with s3fs as the filesystem. However, we are seeing very inconsistent results when reading in parquet objects with\r\n\r\ns3=s3fs.S3FileSystem()\r\n\r\nParquetDataset(url, filesystem=s3)\r\n\r\n\u00a0\r\n\r\nThe read inconsistently throws this error:\r\n\r\n\u00a0\r\n\r\n[ERROR] OSError: Passed non-file path: s3://bucket/schedule/sxaup/fms_db_aub/adn_master/trunc/20191122024436.parquet\r\nTraceback (most recent call last):\r\n\u00a0\u00a0File \"/var/task/file_check.py\", line 35, in lambda_handler\r\n\u00a0\u00a0\u00a0\u00a0main(event, context)\r\n\u00a0\u00a0File \"/var/task/file_check.py\", line 260, in main\r\n\u00a0\u00a0\u00a0\u00a0validate_resp['object_type'])\r\n\u00a0\u00a0File \"/opt/python/utils.py\", line 80, in schema_check\r\n\u00a0\u00a0\u00a0\u00a0stage_pya_dataset = ParquetDataset(full_URL_stage, filesystem=s3)\r\n\u00a0\u00a0File \"/opt/python/lib/python3.7/site-packages/pyarrow/parquet.py\", line 1030, in __init__\r\n\u00a0\u00a0\u00a0\u00a0open_file_func=partial(_open_dataset_file, self._metadata)\r\n\u00a0\u00a0File \"/opt/python/lib/python3.7/site-packages/pyarrow/parquet.py\", line 1229, in _make_manifest\r\n\u00a0\u00a0\u00a0\u00a0.format(path))\r\n\r\n\u00a0\r\n\r\nAs you can see, the path is valid and sometimes works, others times does not (no modification of the file between those successful and error runs). Does ParquetDataset actually open the file and validate it and so the error is in regards to the data?\r\n\r\n\u00a0\r\n\r\nWilling to do any troubleshooting for get this solved.",
+        "created_at": "2019-11-22T19:58:47.000Z",
+        "updated_at": "2021-08-05T16:08:45.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-08-05T16:08:45.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-11-22T20:18:22.919Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7244?focusedCommentId=16980485) by William Tardio (nojohnny101):*\nI have narrowed down when it fails and when it doesn't, however it doesn't reveal why it is doing this.\r\n\r\n\u00a0\r\n\r\nWhen a lambda runs and loads the pyarrrow and all its dependencies into the root python directory, it always works 100% of the time. If the lambda spins down and I run it again (waiting long enough to get a cold start again), then it works 100% of the time.\r\n\r\n\u00a0\r\n\r\nIf I do multiple executions back to back, whereas it uses the same \"hot\" environment, it works for the first execution (immediately after the \"cold start\") but then fails every time after that with new parquet files coming in. Very strange."
+        },
+        {
+            "created_at": "2019-11-22T20:19:03.707Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7244?focusedCommentId=16980486) by Wes McKinney (wesm):*\nI can't comment directly on the s3fs interop question. Our general plan moving forward is to use our native C++ S3 implementation, but this is not ready for production yet as far as I'm aware\r\n\r\nPlease note that this library is not at all optimized (yet) for Amazon S3 so please do not draw any conclusions regarding performance or scalability based on your experiments. For example, the new behavior discussed in PARQUET-1698 will make a big difference for S3 users\r\n\r\ncc `[~fsaintjacques]` `[~apitrou]`"
+        },
+        {
+            "created_at": "2019-11-22T21:04:04.636Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7244?focusedCommentId=16980504) by William Tardio (nojohnny101):*\nThanks `[~wesm]` \u00a0for the look. Does the stack trace give any hints? I looked into it and tried to follow along\u00a0 _make_manifest() but couldn't see anything obvious."
+        },
+        {
+            "created_at": "2019-11-22T21:19:54.720Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7244?focusedCommentId=16980511) by William Tardio (nojohnny101):*\nThis is driving me crazy, because it is not consistent. I looked into parquet.py of the pyarrow library and it is failing when it checks the path passed in using \"isfile()\". I have no idea why this would work for a first run but not a second."
+        },
+        {
+            "created_at": "2019-11-24T02:21:36.509Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7244?focusedCommentId=16980950) by William Tardio (nojohnny101):*\nI have narrowed down the issue to s3fs that pyarrow opens. Specifically another dependent library called\u00a0fsspec. I'm not sure if this bug appears in other scenarios, but for me, it only happens upon any subsequent executions after a first successful one and it occurs because of corrupt cache.\r\n\r\nPlease see here for more details:\u00a0https://github.com/dask/s3fs/issues/253"
+        },
+        {
+            "created_at": "2020-04-24T19:24:23.443Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7244?focusedCommentId=17091841) by Harini Kannan (harinikannan):*\nAny update on this ? I'm seeing the same error pop up randomly when I have a lambda function triggering on new parquet files in an S3 bucket which reads the parquet files using ParquetDataset(). Or is there any workaround for this ?"
+        },
+        {
+            "created_at": "2021-08-05T16:08:45.537Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7244?focusedCommentId=17394153) by Antoine Pitrou (apitrou):*\nWe are using our own S3 filesystem implementation now, so I'm assuming this issue no longer exists.\r\n\r\nIf you still encounter it (or a similar one) with a recent version of Arrow, please open a new JIRA!"
+        }
+    ]
+}

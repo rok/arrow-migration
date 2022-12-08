@@ -1,0 +1,24 @@
+{
+    "issue": {
+        "title": "[C++] GCS: report common prefixes as directories",
+        "body": "***Note**: This issue was originally created as [ARROW-17097](https://issues.apache.org/jira/browse/ARROW-17097). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI got confused at the behavior differences between S3 and GCS, only to realize GCS only reports special directory markers as \"directories\" and not the common prefixes. This can have the effect of making a directory look empty in GCS, when it in fact has many folders (see example below).\r\n\r\nWe currently use the [ListObjects](https://github.com/googleapis/google-cloud-cpp/blob/e0228233949873be9cba87ae4e37554e1ff0474d/google/cloud/storage/client.h#L974) method, but perhaps it would be more appropriate to use the [ListObjectsWithPrefix](https://github.com/googleapis/google-cloud-cpp/blob/e0228233949873be9cba87ae4e37554e1ff0474d/google/cloud/storage/client.h#L1006). Since they are returned in the [same API call](https://cloud.google.com/storage/docs/json_api/v1/objects/list), it shouldn't add much overhead.\r\n```r\n\r\nlibrary(arrow)\r\n\r\nbucket <- gs_bucket(\"voltrondata-labs-datasets\", retry_limit_seconds = 3, anonymous = TRUE)\r\ns3_bucket <- s3_bucket(\"voltrondata-labs-datasets\", endpoint_override = \"https://storage.googleapis.com\")\r\n\r\n# We did not create directory markers when uploading the data\r\n# https://github.com/apache/arrow/pull/11842#discussion_r764204767\r\n\r\n# The directory appears empty to GCSFileSystem...\r\nbucket$ls(\"nyc-taxi\")\r\n#> character(0)\r\n\r\n# ... but S3FileSystem knows otherwise!\r\ns3_bucket$ls(\"nyc-taxi\")\r\n#>  [1] \"nyc-taxi/year=2009\" \"nyc-taxi/year=2010\" \"nyc-taxi/year=2011\"\r\n#>  [4] \"nyc-taxi/year=2012\" \"nyc-taxi/year=2013\" \"nyc-taxi/year=2014\"\r\n#>  [7] \"nyc-taxi/year=2015\" \"nyc-taxi/year=2016\" \"nyc-taxi/year=2017\"\r\n#> [10] \"nyc-taxi/year=2018\" \"nyc-taxi/year=2019\" \"nyc-taxi/year=2020\"\r\n#> [13] \"nyc-taxi/year=2021\" \"nyc-taxi/year=2022\"\r\n\r\n# Using GCS API, we only get files!\r\nbucket$ls(\"nyc-taxi\", recursive = TRUE)\r\n#>   [1] \"nyc-taxi/year=2009/month=1/part-0.parquet\" \r\n#>   [2] \"nyc-taxi/year=2009/month=10/part-0.parquet\"\r\n#> ...\r\n#> [157] \"nyc-taxi/year=2022/month=1/part-0.parquet\" \r\n#> [158] \"nyc-taxi/year=2022/month=2/part-0.parquet\"\r\n\r\n# Using S3 API, we can get directories!\r\ns3_bucket$ls(\"nyc-taxi\", recursive = TRUE)\r\n#>   [1] \"nyc-taxi/year=2009\"                        \r\n#>   [2] \"nyc-taxi/year=2009/month=1\"                \r\n#>   [3] \"nyc-taxi/year=2009/month=1/part-0.parquet\" \r\n#>   [4] \"nyc-taxi/year=2009/month=10\"               \r\n#>   [5] \"nyc-taxi/year=2009/month=10/part-0.parquet\"\r\n#>   [6] \"nyc-taxi/year=2009/month=11\"               \r\n#> ...\r\n#> [329] \"nyc-taxi/year=2022/month=2\"                \r\n#> [330] \"nyc-taxi/year=2022/month=2/part-0.parquet\"\r\n```",
+        "created_at": "2022-07-15T23:19:57.000Z",
+        "updated_at": "2022-10-20T04:49:22.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-07-15T23:26:10.133Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17097?focusedCommentId=17567421) by Will Jones (willjones127):*\n`[~coryan]` You maybe have had good reason for implementing differently in\u00a0https://github.com/apache/arrow/pull/11842 but I thought I might ask :)"
+        },
+        {
+            "created_at": "2022-07-16T14:04:44.697Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17097?focusedCommentId=17567490) by Carlos O'Ryan (coryan):*\nThe details are a bit fuzzy at the moment.\u00a0 At a high level, all approaches to simulate folders over GCS will fail, but will fail in different ways.\u00a0 You can make something like `ListObjects()` return directory markers\u00a0 for common prefixes, but then trying to call `GetFileInfo()` on those markers will fail.\u00a0 Or will need to be very expensive.\u00a0 In hindsight, I should have written a design doc outlining the tradeoffs and the decisions, but I did not realize when I started the project that the API (and tests) that there would be so many.\r\n\r\n\u00a0"
+        }
+    ]
+}

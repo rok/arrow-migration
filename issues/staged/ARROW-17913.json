@@ -1,0 +1,63 @@
+{
+    "issue": {
+        "title": "feather.read_table 150x slower when reading columns in newer versions",
+        "body": "***Note**: This issue was originally created as [ARROW-17913](https://issues.apache.org/jira/browse/ARROW-17913). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n### Description\r\n\r\nPerformance when reading columns using `feather.read_table` on Arrow 7.0.0-9.0.0 is drastically slower than it was in 6.0.0.\r\n\r\nProfiling the code below shows that the bottleneck is somewhere in the `read_names` function of `pyarrow._feather.FeatherReader`.\r\n\r\n##### Example\r\n\r\nSetup code:\r\n\r\n```Java\n\r\nimport pandas as pd\r\nfrom pyarrow import feather\r\n\r\nrows, cols = (1_000_000, 10)\r\ndata = {f'c{c}': range(rows) for c in range(cols)}\r\ndf = pd.DataFrame(data=data)\r\n\r\nfeather.write_feather(df, 'test.feather', compression=\"uncompressed\")\n``` \r\n\r\nBenchmarks Arrow 9.0.0:\r\n\r\n```Java\n\r\n%timeit feather.read_table('test.feather', memory_map=True)\r\n%timeit feather.read_table('test.feather', columns=list(df.columns), memory_map=True)\r\n\r\n> 178 \u00b5s \u00b1 1.23 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 10000 loops each)\r\n33.8 ms \u00b1 964 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 10 loops each)\r\n```\r\n\r\nBenchmarks Arrow 6.0.0:\r\n\r\n```Java\n\r\n%timeit feather.read_table('test.feather', memory_map=True)\r\n%timeit feather.read_table('test.feather', columns=list(df.columns), memory_map=True)\r\n\r\n> 173 \u00b5s \u00b1 2.12 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 10000 loops each)\r\n224 \u00b5s \u00b1 12.1 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 1000 loops each)\r\n```\r\n",
+        "created_at": "2022-10-02T22:04:11.000Z",
+        "updated_at": "2022-10-20T18:28:26.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-03T14:42:49.252Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17913?focusedCommentId=17612323) by Joris Van den Bossche (jorisvandenbossche):*\nI am not directly sure what <=6.0 did differently, but looking at the current implementation this is somewhat expected (it might still be that it can be implemented in a better way, of course): when specifying columns, it will read each column separately from the MemoryMappedFile (instead doing a single ReadAt call), and copying each read chunk in a single output buffer, and thus because of this copy the memory-mapping basically has no effect in this case (https://github.com/apache/arrow/blob/ec579df631deaa8f6186208ed2a4ebec00581dfa/cpp/src/arrow/io/file.h#L182-L185)\r\n\r\nThis can also be seen when you compare timings with and without memory mapping (with `memory_map=False`, there is no difference anymore between manually selecting all columns or not):\r\n\r\n```Java\n\r\nIn [5]: %timeit feather.read_table('test.feather', columns=list(df.columns), memory_map=True)\r\n29.4 ms \u00b1 541 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 10 loops each)\r\n\r\nIn [6]: %timeit feather.read_table('test.feather', columns=list(df.columns), memory_map=False)\r\n35.3 ms \u00b1 234 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 10 loops each)\r\n\r\nIn [7]: %timeit feather.read_table('test.feather', memory_map=True)\r\n239 \u00b5s \u00b1 1.08 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 1,000 loops each)\r\n\r\nIn [8]: %timeit feather.read_table('test.feather', memory_map=False)\r\n35 ms \u00b1 428 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 10 loops each)\r\n```\r\n\r\nNow, I would have assumed that it is not needed that all buffers of all columns live in a single body, so I am not 100% sure why it is needed to copy each field to a single output."
+        },
+        {
+            "created_at": "2022-10-03T14:50:18.229Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17913?focusedCommentId=17612326) by Joris Van den Bossche (jorisvandenbossche):*\nThe `ReadFieldsSubset` that does this copying of each field into a single body, was added in https://github.com/apache/arrow/pull/11486 / ARROW-12683 (which would match the observation that this changed in 6.0 -> 7.0)\r\n\r\nI suppose before that change, we always loaded the full record batch in memory even when only reading a subset of the fields. As long as you are memory mapping, that might actually be OK, but if you are accessing data eg from S3, you want to read only those buffers that you need to avoid too much IO.\r\n\r\ncc @David Li"
+        },
+        {
+            "created_at": "2022-10-03T14:53:13.985Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17913?focusedCommentId=17612327) by David Li (lidavidm):*\nI guess the issue is that we need to know whether the I/O is expected to be high-latency or low-latency. There isn't a single universal implementation we can have.\r\n\r\nOr, we need to introduce something like ReadRangeCache (without the caching part) pervasively. And we should probably figure out a variety of scenarios to test. I think this is just one symptom of a wider problem; but maybe the 'smarts' should be moved into a higher layer, and the core reader reverted to the 'obvious' implementation. Also CC `[~westonpace]`"
+        },
+        {
+            "created_at": "2022-10-03T15:49:47.281Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17913?focusedCommentId=17612341) by Antoine Pitrou (apitrou):*\nAt some point I think we may have to bite the bullet and collect IO stats."
+        },
+        {
+            "created_at": "2022-10-03T16:38:10.838Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17913?focusedCommentId=17612361) by H\u00e5kon Magne Holmen (hakonmh):*\nMaybe use something akin to the old implementation when memory_map=True, since the I/O is expected to be low latency and zero-copy?"
+        },
+        {
+            "created_at": "2022-10-05T21:12:23.447Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17913?focusedCommentId=17613226) by Weston Pace (westonpace):*\nI'm not sure `ReadRangeCache` is the answer here (it is already being used).  I don't think the problem is that we are issuing few vs. many `Read` calls (these are pretty cheap in a memory mapped file).  I think the problem is that reading a subset of fields is causing a copy (which is a problem whether you are using memory mapped I/O or not).\r\n\r\nThe code was roughly (very liberal pseudo-code here)...\r\n\r\n```\n\r\nBuffer body = read_everything();\r\nstd::vector<Array> arrays = allocate_arrays();\r\nfor (arr in arrays) {\r\n  for (buffer_index in expected_buffers_for_array(arr)) {\r\n    arr.buffers[buffer_index] = get_range_for_arr_buffer(arr, buffer_index);\r\n  }\r\n}\r\n```\r\n\r\nIn order to keep that latter part unchanged I changed the partial-fields case to...\r\n\r\n```\n\r\nBuffer body = AllocateBigBuffer();\r\nfor (auto buffer_range in needed_ranges) {\r\n  Buffer little_body = read_partial(buffer_range);\r\n  body.set(appropriate_offset).to(little_body);\r\n}\r\nstd::vector<Array> arrays = allocate_arrays();\r\nfor (arr in arrays) {\r\n  for (buffer_index in expected_buffers_for_array(arr)) {\r\n    arr.buffers[buffer_index] = get_range_for_arr_buffer(arr, buffer_index);\r\n  }\r\n}\r\n```\r\n\r\nThat triggers a memcpy (I don't recall realizing this at the time).  A better algorithm would be to bite the bullet and change the lower half to get...\r\n\r\n```\n\r\nstd::vector<Buffer> buffers;\r\nfor (auto buffer_range in needed_ranges) {\r\n  Buffer little_body = read_partial(buffer_range);\r\n  buffers.push_back(little_body);\r\n}\r\nstd::vector<Array> arrays = allocate_arrays();\r\nfor (arr in arrays) {\r\n  for (buffer_index in expected_buffers_for_array(arr)) {\r\n    arr.buffers[buffer_index] = buffers[buffer_index + some_offset];\r\n  }\r\n}\r\n```"
+        },
+        {
+            "created_at": "2022-10-05T21:13:39.380Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17913?focusedCommentId=17613228) by Weston Pace (westonpace):*\nAs a workaround in the meantime there is always:\r\n\r\n```\n\r\n    tab = feather.read_table('test.feather', memory_map=True)\r\n    return tab.select(list(df.columns))\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-10-07T07:37:44.488Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17913?focusedCommentId=17613923) by H\u00e5kon Magne Holmen (hakonmh):*\nI'll use it for the time being. Thanks for the help"
+        },
+        {
+            "created_at": "2022-10-07T16:41:31.353Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17913?focusedCommentId=17614155) by David Li (lidavidm):*\nI agree ReadRangeCache is not relevant here, I was trying to make the general point (here and in ARROW-17917 , ARROW-17961) that it seems the file format readers need a better I/O abstraction, instead of ad-hoc trying to integrate readahead and coalescing into each and every format (but maybe it's too tightly integrated for that to be possible)"
+        },
+        {
+            "created_at": "2022-10-07T17:58:30.721Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17913?focusedCommentId=17614191) by Weston Pace (westonpace):*\nI think we could add a ReadRanges method to the filesystem and then move the read range cache into the filesystem.  It would probably simplify the readers a little bit.  However, the burden is still on the readers to figure out all the ranges they need first and then issue the reads second.  This is probably the hardest part of using a read range cache.\r\n\r\nAlternatively, we could do something at the filesystem layer like \"if a read is in progress\" (or enough reads that the filesystem is saturated) then add the request to a queue and coalesce within the queue.  This is very similar to Linux's [\"plugging\"](https://lwn.net/Articles/438256/)."
+        },
+        {
+            "created_at": "2022-10-07T18:03:54.589Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17913?focusedCommentId=17614194) by David Li (lidavidm):*\n(The 'caching' and 'coalescing' parts of ReadRangeCache also probably need to be separated in that scheme or we're going to run into memory issues like in other JIRAs. Or really, we only care about 'coalescing' and not 'caching'.)"
+        },
+        {
+            "created_at": "2022-10-07T18:53:02.634Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17913?focusedCommentId=17614216) by Weston Pace (westonpace):*\nYes, I think caching will always need to be a higher level concern (or we could make a caching filesystem if a user really knows they want it)."
+        }
+    ]
+}

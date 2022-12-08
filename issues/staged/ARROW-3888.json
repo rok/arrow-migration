@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[C++] Compilation warnings with gcc 7.3.0",
+        "body": "***Note**: This issue was originally created as [ARROW-3888](https://issues.apache.org/jira/browse/ARROW-3888). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI sometimes get these warnings in release mode:\r\n```Java\n\r\n[27/161] Building CXX object src/arrow/CMakeFiles/arrow_objlib.dir/csv/converter.cc.o\r\nIn file included from ../src/arrow/csv/converter.cc:24:0:\r\n../src/arrow/builder.h: In member function 'virtual arrow::Status arrow::csv::{anonymous}::TimestampConverter::Convert(const arrow::csv::BlockParser&, int32_t, std::shared_ptr<arrow::Array>*)':\r\n../src/arrow/builder.h:395:5: warning: 'value' may be used uninitialized in this function [-Wmaybe-uninitialized]\r\n     raw_data_[length_++] = val;\r\n     ^~~~~~~~~\r\n../src/arrow/csv/converter.cc:347:18: note: 'value' was declared here\r\n       value_type value;\r\n                  ^~~~~\r\n[93/161] Building CXX object src/parquet/CMakeFiles/parquet_objlib.dir/arrow/writer.cc.o\r\nIn file included from ../src/parquet/arrow/writer.cc:18:0:\r\n../src/parquet/arrow/writer.h: In function 'std::shared_ptr<parquet::arrow::ArrowWriterProperties> parquet::arrow::default_arrow_writer_properties()':\r\n../src/parquet/arrow/writer.h:82:40: warning: '<anonymous>.parquet::arrow::ArrowWriterProperties::Builder::coerce_timestamps_unit_' may be used uninitialized in this function [-Wmaybe-uninitialized]\r\n           truncated_timestamps_allowed_));\r\n                                        ^\r\n../src/parquet/arrow/writer.cc: In member function 'arrow::Status parquet::arrow::{anonymous}::ArrowColumnWriter::Write(const arrow::Array&)':\r\n../src/parquet/arrow/writer.cc:278:56: warning: 'num_levels' may be used uninitialized in this function [-Wmaybe-uninitialized]\r\n     RETURN_NOT_OK(this->data_buffer->Resize(num_values * sizeof(T), false));\r\n                                                        ^\r\n../src/parquet/arrow/writer.cc:869:11: note: 'num_levels' was declared here\r\n   int64_t num_levels;\r\n           ^~~~~~~~~~\r\n[94/161] Building CXX object src/parquet/CMakeFiles/parquet_objlib.dir/arrow/reader.cc.o\r\n../src/parquet/arrow/reader.cc: In function 'int64_t parquet::arrow::impala_timestamp_to_nanoseconds(const parquet::Int96&)':\r\n../src/parquet/arrow/reader.cc:79:86: warning: dereferencing type-punned pointer will break strict-aliasing rules [-Wstrict-aliasing]\r\n   int64_t nanoseconds = *(reinterpret_cast<const int64_t*>(&(impala_timestamp.value)));\r\n                                                                                      ^\r\n```\r\n",
+        "created_at": "2018-11-26T16:57:20.000Z",
+        "updated_at": "2018-11-29T19:19:18.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-11-29T19:19:02.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-11-29T15:11:36.730Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3888?focusedCommentId=16703323) by Francois Saint-Jacques (fsaintjacques):*\nAny reason why\u00a0`BUILD_WARNING_LEVEL` default is not `CHECKIN` (implying -Werror)?"
+        },
+        {
+            "created_at": "2018-11-29T15:29:38.643Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3888?focusedCommentId=16703359) by Antoine Pitrou (apitrou):*\nI don't know. I don't really understand why BUILD_WARNING_LEVEL exists. Note those warnings aren't emitted in debug mode."
+        },
+        {
+            "created_at": "2018-11-29T15:36:53.718Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3888?focusedCommentId=16703368) by Francois Saint-Jacques (fsaintjacques):*\nI'm also using gcc-7.3 and don't get the full list of errors you see."
+        },
+        {
+            "created_at": "2018-11-29T15:42:32.299Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3888?focusedCommentId=16703375) by Antoine Pitrou (apitrou):*\nRight, I think I added `-Wextra` in my build scripts. Perhaps that's the reason.\r\nHere are the full flags displayed by CMake here:\r\n```Java\n\r\n-- CMAKE_C_FLAGS:  -fuse-ld=gold -O3 -DNDEBUG   -Wall -msse4.2\r\n-- CMAKE_CXX_FLAGS:  -Wno-noexcept-type  -fuse-ld=gold -O3 -DNDEBUG  -Wall -msse4.2 -fdiagnostics-color=always -Wextra -Wunused-result -Wno-unused-parameter -Wno-implicit-fallthrough -Wconversion -D_GLIBCXX_USE_CXX11_ABI=1 -g\r\n```\r\n"
+        },
+        {
+            "created_at": "2018-11-29T15:43:24.518Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3888?focusedCommentId=16703376) by Wes McKinney (wesm):*\nHaving `-Werror` hard-coded in a build system could create hardship if compiler warnings are generated by compiler / environment combinations that we don't regularly test. The intent was to have a almost-guaranteed-to-succeed default production build (though possibly generating compiler warnings) but more aggressive warning checking for development / CI. \r\n\r\nhttps://github.com/apache/arrow/blob/master/cpp/cmake_modules/SetupCxxFlags.cmake#L93"
+        },
+        {
+            "created_at": "2018-11-29T19:19:02.100Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3888?focusedCommentId=16703678) by Wes McKinney (wesm):*\nIssue resolved by pull request 3054\n<https://github.com/apache/arrow/pull/3054>"
+        }
+    ]
+}

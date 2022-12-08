@@ -1,0 +1,30 @@
+{
+    "issue": {
+        "title": "[C++] Sporadic failures in CopyFiles test",
+        "body": "***Note**: This issue was originally created as [ARROW-10012](https://issues.apache.org/jira/browse/ARROW-10012). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHere is an example failure on AppVeyor (Windows):\r\nhttps://ci.appveyor.com/project/ApacheSoftwareFoundation/arrow/builds/35210915/job/yhdxkfu7hta3kugp#L1913\r\n```Java\n\r\n[ RUN      ] TestSubTreeFileSystem.CopyFiles\r\nC:/projects/arrow/cpp/src/arrow/filesystem/filesystem_test.cc(608): error: Failed\r\n'CopyFiles({{subfs_, \"ab\"}, {subfs_, \"cd\"}, {subfs_, \"ef\"}}, {{dest_fs, \"AB/ab\"}, {dest_fs, \"CD/CD/cd\"}, {dest_fs, \"EF/EF/EF/ef\"}})' failed with IOError: Path does not exist 'sub/copy/AB/ab'\r\n[  FAILED  ] TestSubTreeFileSystem.CopyFiles (9 ms)\r\n```\r\n\r\nSimilar failure on Linux, showing the line number:\r\nhttps://ci.ursalabs.org/#/builders/101/builds/4412/steps/8/logs/stdio\r\n```Java\n\r\n[ RUN      ] TestSubTreeFileSystem.CopyFiles\r\n../src/arrow/filesystem/filesystem_test.cc:608: Failure\r\nFailed\r\n'CopyFiles({{subfs_, \"ab\"}, {subfs_, \"cd\"}, {subfs_, \"ef\"}}, {{dest_fs, \"AB/ab\"}, {dest_fs, \"CD/CD/cd\"}, {dest_fs, \"EF/EF/EF/ef\"}})' failed with IOError: Path does not exist 'sub/copy/CD/CD/cd'\r\nIn ../src/arrow/filesystem/filesystem.cc, line 467, code: (_error_or_value13).status()\r\n[  FAILED  ] TestSubTreeFileSystem.CopyFiles (17 ms)\r\n```\r\n\r\nThe erroring line number (467) corresponds to the `OpenOutputStream` call below:\r\n```c++\n\r\n\r\n        auto dest_dir = internal::GetAbstractPathParent(destinations[i].path).first;\r\n        if (!dest_dir.empty()) {\r\n          RETURN_NOT_OK(destinations[i].filesystem->CreateDir(dest_dir));\r\n        }\r\n\r\n-->     ARROW_ASSIGN_OR_RAISE(\r\n            auto destination,\r\n            destinations[i].filesystem->OpenOutputStream(destinations[i].path));\r\n```\r\n\r\nIt's not obvious why the error occurs, since the directory is created just above (race condition in the CreateDir implementation?).",
+        "created_at": "2020-09-15T10:15:04.000Z",
+        "updated_at": "2020-09-15T18:56:58.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Continuous Integration",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-09-15T18:56:47.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-15T12:03:13.996Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10012?focusedCommentId=17196091) by Antoine Pitrou (apitrou):*\nI checked and LocalFileSystem::CreateDir is sane (it uses what should be a race condition-immune idiom). The only hope now is to manage to reproduce locally.\r\n\r\nA question though: why does `CopyFiles` create the target directories at all? Shell commands such as `cp` (Unix) or `copy` (Windows) don't do that when copying files (rather than entire directory trees). cc `[~bkietz]`"
+        },
+        {
+            "created_at": "2020-09-15T12:10:49.726Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10012?focusedCommentId=17196094) by Antoine Pitrou (apitrou):*\nAh, but the `CopyFiles` test uses the mock filesystem. So there must be a race condition there!"
+        },
+        {
+            "created_at": "2020-09-15T18:56:47.720Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10012?focusedCommentId=17196478) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 8193\n<https://github.com/apache/arrow/pull/8193>"
+        }
+    ]
+}

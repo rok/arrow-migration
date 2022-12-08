@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[C++] Implement Hash Aggregation query execution node",
+        "body": "***Note**: This issue was originally created as [ARROW-5002](https://issues.apache.org/jira/browse/ARROW-5002). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nDear all,\r\n\r\nI wonder what the best way forward is for implementing GroupBy kernels. Initially this was part of\r\n\r\nhttps://issues.apache.org/jira/browse/ARROW-4124\r\n\r\nbut is not contained in the current implementation as far as I can tell.\r\n\r\nIt seems that the part of group by that just returns indices could be conveniently implemented with the HashKernel. That seems useful in any case. Is that indeed the best way forward/should this be done?\r\n\r\nGroupBy + Aggregate could then either be implemented with that + the Take kernel + aggregation involving more memory copies than necessary though or as part of the aggregate kernel. Probably the latter is preferred, any thoughts on that?\r\n\r\nAm I missing any other JIRAs related to this?\r\n\r\nBest, Philipp.",
+        "created_at": "2019-03-25T02:05:29.000Z",
+        "updated_at": "2021-08-03T18:13:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-08-03T18:13:25.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-03-25T12:50:36.755Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5002?focusedCommentId=16800648) by Francois Saint-Jacques (fsaintjacques):*\nThe Take kernel should be out of the solution, like you mentioned, we want to minimize memory copy. My intent is to extend the `AggregateFunction` class with the `ConsumeWithFilters` and `ConsumeWithGroups` as follows:\r\n\r\n```C++\n\r\nclass AggregateFunction {                                                                                     \r\n public:                                                                                                      \r\n  /// \\brief Consume an array into a state.                                                                   \r\n  /// `SELECT AGG(x) FROM T;`                                                                                 \r\n  virtual Status Consume(const Array& input, void* state) const = 0;             \r\n                            \r\n  /// \\brief Consume an array with a mask into a state.                                                       \r\n  /// `SELECT AGG(x) FROM T WHERE pred;`                                                                      \r\n  virtual Status ConsumeWithFilter(const Array& input, const Array& mask, void* state) const = 0;             \r\n\r\n  /// \\brief Consume an array with a scatter group into states.                                               \r\n  /// `SELECT k, AGG(x) FROM T GROUP BY k;`                                                                      \r\n  /// `SELECT k, AGG(x) FROM T WHERE pred GROUP BY k;`                                                           \r\n  virtual Status ConsumeWithGroups(const Array& input, const Array& groups, IndexableState* states) const = 0;\r\n```\r\n\r\nThe GroupBy kernel would emit an array of index (it also needs to provide the hash table of original keys). One desirable property of the GroupBy kernel is that it is not a full barrier to run the aggregates, in other words, you can run GroupBy & aggregates in parallel assuming you have a final consolidating phase (which is the barrier). Read section 4.4. of [Morsel-driven parallelism: a NUMA-aware query evaluation framework for the many-core age](https://www.semanticscholar.org/paper/Morsel-driven-parallelism%3A-a-NUMA-aware-query-for-Leis-Boncz/463bec3d0298e96e3702e071e241e3898f76eff2).\r\n\r\nAs a side note, we should specialize the GroupBy on the group types, e.g. for any primitive types of width <=16 (assuming a single column expression), we can use a fixed size array and no hash required.\r\n"
+        },
+        {
+            "created_at": "2019-03-28T22:25:29.588Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5002?focusedCommentId=16804371) by Wes McKinney (wesm):*\nI think what we are discussing here is called \"hash aggregation\" in the database literature and is a type of execution node. This is related to ARROW-3978, where we need to be able to compute group ordinal indexes via hashing for multiple keys\r\n\r\nI'm not sure about the \"ConsumeWithGroups\" API. What do other analytic database engines (Impala, Clickhouse, etc.) do?"
+        },
+        {
+            "created_at": "2020-05-25T15:09:39.779Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5002?focusedCommentId=17116106) by Wes McKinney (wesm):*\nI renamed the issue. I need to be able to execute hash aggregations in the next few months so I be working to implement the appropriate machinery for this under arrow/compute (since hash aggregations need to compose with array/kernel expressions)"
+        }
+    ]
+}

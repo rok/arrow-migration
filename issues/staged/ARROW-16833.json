@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "[R] how to enforce type conversion in open_dataset()",
+        "body": "***Note**: This issue was originally created as [ARROW-16833](https://issues.apache.org/jira/browse/ARROW-16833). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHere is a small example:\r\n\r\n``\r\n```java\n\r\nlibrary(arrow)\r\ndf_numbers <- tibble::tibble(number = c(1,2,3,\"error\", 4, 5, NA, 6))\r\nstr(df_numbers)\r\n#> tibble [8 x 1] (S3: tbl_df/tbl/data.frame)\r\n#> \u00a0$ number: chr [1:8] \"1\" \"2\" \"3\" \"error\" ...\r\nwrite_parquet(df_numbers, \"numbers.parquet\")\r\nopen_dataset(\"numbers.parquet\")\u00a0\r\n#> FileSystemDataset with 1 Parquet file\r\n#> number: string\r\nopen_dataset(\"numbers.parquet\", schema(number = int8())) |> dplyr::collect()\r\n#> Error in `dplyr::collect()`:\r\n#> ! Invalid: Failed to parse string: 'error' as a scalar of type int8\r\n\r\n```\r\nThe expected result is having an input column of integers; where the non-integer values are converted to NAs.\r\n\r\nHow this type conversion can be enforced using schema definition in in the\u00a0 `{}open_dataset(){`}?\u00a0\r\n\r\nRationale: I would like to include this in a code chunk \u00a0which imports a csv dataset and saves to parquet dataset (open_dataset -> write_dataset); where the type conversion based on a preset schema would be done at the same time. \u00a0And all these steps without loading all the data in memory.",
+        "created_at": "2022-06-15T06:09:52.000Z",
+        "updated_at": "2022-07-08T21:42:28.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-15T12:14:36.003Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16833?focusedCommentId=17554541) by Nicola Crane (thisisnic):*\nHi `[~kbzsl]`.\u00a0 In Arrow, strings and ints are not compatible types to cast between, which is why the example you give there won't work.\u00a0 However, given the aim is to read from a CSV file and output as Parquet, you can provide the schema and the \"null\" specifier when you read in the CSV like so:\r\n\r\n\u00a0\r\n```java\n\r\nlibrary(arrow)\r\n\r\ndf_numbers <- tibble::tibble(number = c(1,2,3,\"error\", 4, 5, NA, 6))\r\n\r\nwrite_csv_arrow(df_numbers, \"numbers.csv\")\r\n\r\nopen_dataset(\"numbers.csv\", format = \"csv\") |>\u00a0\r\n\u00a0 dplyr::collect()\r\n#> # A tibble: 7 \u00d7 1\r\n#> \u00a0 number\r\n#> \u00a0 <chr>\u00a0\r\n#> 1 1 \u00a0 \u00a0\u00a0\r\n#> 2 2 \u00a0 \u00a0\u00a0\r\n#> 3 3 \u00a0 \u00a0\u00a0\r\n#> 4 error\u00a0\r\n#> 5 4 \u00a0 \u00a0\u00a0\r\n#> 6 5 \u00a0 \u00a0\u00a0\r\n#> 7 6\r\n\r\nopen_dataset(\r\n\u00a0 \"numbers.csv\",\r\n\u00a0 format = \"csv\",\r\n\u00a0 null_values = c(NA, \"error\"),\r\n\u00a0 schema = schema(number = int8()),\r\n\u00a0 skip = 1\r\n\u00a0 ) |>\u00a0\r\n\u00a0 dplyr::collect()\r\n#> # A tibble: 7 \u00d7 1\r\n#> \u00a0 number\r\n#> \u00a0 \u00a0<int>\r\n#> 1 \u00a0 \u00a0 \u00a01\r\n#> 2 \u00a0 \u00a0 \u00a02\r\n#> 3 \u00a0 \u00a0 \u00a03\r\n#> 4 \u00a0 \u00a0 NA\r\n#> 5 \u00a0 \u00a0 \u00a04\r\n#> 6 \u00a0 \u00a0 \u00a05\r\n#> 7 \u00a0 \u00a0 \u00a06\r\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-06-15T14:48:08.641Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16833?focusedCommentId=17554638) by Zsolt Kegyes-Brassai (kbzsl):*\nHi `[~thisisnic]`, thank you for the quick answer.\r\n\r\nI spot a strange behavior in the results of your code: the NA value was dropped silently. In my view this is a totally wrong. Do you agree? Shall I register a new ticket?\r\n\r\nI am afraid that the `convert_options` won\u2019t be the right solution, because it is not feasible to list all the erroneous items from a large and real dataset.\u00a0\r\n\r\nI tried to solve with a `mutate()` function, but it\u2019s not working either.\r\n\r\n\u00a0\r\n```java\n\r\nlibrary(arrow)\r\ndf_numbers <- tibble::tibble(number = c(1,2,3,\"error\", 4, 5, NA, 6))\r\nreadr::write_csv(df_numbers, \"/temp/test/numbers.csv\")\r\nopen_dataset(\"/temp/test\", format = \"csv\") |>\u00a0\r\n\u00a0 dplyr::mutate(number = \u00a0as.integer(number)) |>\u00a0\r\n\u00a0 write_dataset(here::here(\"/temp/test_ds\"), format = \"parquet\")\r\n#> Error: Invalid: Failed to parse string: 'NA' as a scalar of type int32\r\n```\r\n\u00a0\r\n\r\n``\r\n\r\nLet\u2019s share my view, ideas for improvement. The arrow package has the very powerful promise that much larger data sizes can processed on an ordinary computer/laptop by using the datasets. Because the real data is usually messy, some flexible tools/options would \u00a0be desired which can deal with data cleaning (= type conversion) and column selection/renaming inside an `open_dataset() -> write_dataset()` code chunk.\u00a0"
+        },
+        {
+            "created_at": "2022-06-20T09:05:33.219Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16833?focusedCommentId=17556280) by Nicola Crane (thisisnic):*\n`[~kbzsl]` Yeah, please do open a ticket for that one.\r\n\r\nI don't disagree, have opened a ticket to enable this at the C++ layer: ARROW-16862"
+        }
+    ]
+}

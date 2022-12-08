@@ -1,0 +1,24 @@
+{
+    "issue": {
+        "title": "[R] Improve handling of -2^31 in 32-bit integer fields",
+        "body": "***Note**: This issue was originally created as [ARROW-11455](https://issues.apache.org/jira/browse/ARROW-11455). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nR\u2019s `integer` range is 1 smaller than the normal 32-bit integer range of C++, Java, etc. In R, it\u2019s `-2^31 + 1` to `2^31 - 1`. Elsewhere, it\u2019s `-2^31` to `2^31 - 1`. So R's native `integer` type cannot represent `-2^31` (`-2147483648`). I believe this is because R uses `-2^31` as the sentinel value to represent `NA_integer_`.\r\n\r\nIf you run `-2147483648L` in R, it converts the vector it to `numeric`\u00a0type and issues a warning:\r\n```java\n\r\nWarning message:\r\nnon-integer value 2147483648L qualified with L; using numeric value \r\n```\r\nIn the `arrow` R package, when a 32-bit integer Arrow field containing the value `-2147483648` is converted to an R `integer` vector, that value becomes `NA_integer_`. No warning is given.\r\n\r\nSimple command to repro this:\u00a0\r\n```r\n\r\nas.vector(Scalar$create(-2^31, int32()))\n```\r\nConsider whether we should handle this case differently and whether it is feasible to do so without performance regressions. Other possible behaviors might be:\r\n \\* Converting the value to `NA_integer_` with a warning\r\n \\* Converting the field to `bit64::integer64`\u00a0with a warning\r\n \\* Converting the field to `base::numeric` with a warning\r\n \\* Allowing the user to specify an argument or option to control the behavior",
+        "created_at": "2021-02-01T15:14:38.000Z",
+        "updated_at": "2021-09-17T18:58:00.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-02-01T19:41:39.217Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11455?focusedCommentId=17276603) by Neal Richardson (npr):*\nWe have a function we use to determine whether an int64 can fix in an int32: https://github.com/apache/arrow/blob/master/r/src/array_to_vector.cpp#L1043\r\n\r\nBut I'm don't think we can easily use that though, given how it is implemented in the C++ library. We may need to write something custom. cc `[~bkietz]` `[~romainfrancois]`"
+        },
+        {
+            "created_at": "2021-06-04T01:37:22.091Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11455?focusedCommentId=17357003) by Ben Kietzman (bkietz):*\nInstead of using IntegersCanFit, just use CheckIntegersInRange:\r\n\r\n```Java\n\r\n--- a/r/src/array_to_vector.cpp\r\n+++ b/r/src/array_to_vector.cpp\r\n@@ -34,7 +34,7 @@\r\n namespace arrow {\r\n\r\n using internal::checked_cast;\r\n-using internal::IntegersCanFit;\r\n+using internal::CheckIntegersInRange;\r\n\r\n namespace r {\r\n\r\n@@ -1045,14 +1045,17 @@ class Converter_Null : public Converter {\r\n };\r\n\r\n bool ArraysCanFitInteger(ArrayVector arrays) {\r\n-  bool all_can_fit = true;\r\n-  auto i32 = arrow::int32();\r\n-  for (const auto& array : arrays) {\r\n-    if (all_can_fit) {\r\n-      all_can_fit = arrow::IntegersCanFit(arrow::Datum(array), *i32).ok();\r\n-    }\r\n+  // don't include NA_integer_ as a usable int32\r\n+  static arrow::Int32Scalar min_i32(std::numeric_limits<int32_t>::min() + 1);\r\n+  static arrow::Int32Scalar max_i32(std::numeric_limits<int32_t>::max());\r\n+\r\n+  for (arrow::Datum array : arrays) {\r\n+    auto min = ValueOrStop(min_i32.CastTo(array.type()));\r\n+    auto max = ValueOrStop(min_i32.CastTo(array.type()));\r\n+    bool fits = arrow::CheckIntegersInRange(array, *min, *max).ok();\r\n+    if (!fits) return false;\r\n   }\r\n-  return all_can_fit;\r\n+  return true;\r\n }\r\n\r\n bool GetBoolOption(const std::string& name, bool default_) {\r\n```\r\n\r\nNote that we'll need to check ArraysCanFitInteger for int32 as well as uint32, int64, uint64"
+        }
+    ]
+}

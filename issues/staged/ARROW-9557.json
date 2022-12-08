@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[R] Iterating over parquet columns is slow in R",
+        "body": "***Note**: This issue was originally created as [ARROW-9557](https://issues.apache.org/jira/browse/ARROW-9557). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI've found that reading in a parquet file one column at a time is slow in R \u2013 much slower than reading the whole all at once in R, or reading one column at a time in Python.\r\n\r\nAn example is below, though it's certainly possible I've done my benchmarking incorrectly.\r\n\r\n\u00a0\r\n\r\nPython setup and benchmarking:\r\n```python\n\r\nimport numpy as np\r\nimport pyarrow\r\nimport pyarrow.parquet as pq\r\nfrom numpy.random import default_rng\r\nfrom time import time\r\n\r\n# Create a large, random array to save. ~1.5 GB.\r\nrng = default_rng(seed = 1)\r\nn_col = 4000\r\nn_row = 50000\r\n\r\nmat = rng.standard_normal((n_col, n_row))\r\ncol_names = [str(nm) for nm in range(n_col)]\r\ntab = pyarrow.Table.from_arrays(mat, names=col_names)\r\n\r\npq.write_table(tab, \"test_tab.parquet\", use_dictionary=False)\r\n\r\n# How long does it take to read the whole thing in python?\r\ntime_start = time()\r\n_ = pq.read_table(\"test_tab.parquet\") # edit: corrected filename\r\nelapsed = time() - time_start\r\nprint(elapsed) # under 1 second on my computer\r\n\r\n\r\ntime_start = time()\r\nf = pq.ParquetFile(\"test_tab.parquet\")\r\nfor one_col in col_names:\r\n    _ = f.read(one_col).column(0)\r\n\r\nelapsed = time() - time_start\r\nprint(elapsed) # about 2 seconds\r\n\r\n\r\n```\r\nR benchmarking, using the same `test_tab.parquet` file\r\n```r\n\r\nlibrary(arrow)\r\n\r\nread_by_column <- function(f) {\r\n    table = ParquetFileReader$create(f)\r\n    cols <- as.character(0:3999)\r\n    purrr::walk(cols, ~table$ReadTable(.)$column(0))\r\n}\r\n\r\nbench::mark(\r\n    read_parquet(\"test_tab.parquet\", as_data_frame=FALSE), #   0.6 s\r\n    read_parquet(\"test_tab.parquet\", as_data_frame=TRUE),  #   1 s\r\n    read_by_column(\"test_tab.parquet\"),                    # 100 s\r\n    check=FALSE\r\n)\r\n\r\n```",
+        "created_at": "2020-07-25T20:42:09.000Z",
+        "updated_at": "2020-09-25T13:44:20.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-09-24T15:40:02.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-07-27T15:28:42.850Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9557?focusedCommentId=17165797) by Neal Richardson (npr):*\nHmm, I wouldn't expect that big of a difference. Reading through the source, the Python and R bindings look like they're doing about the same thing, but there must be something they're doing differently (assuming that `\"test_tab.pq\"` in your faster Python example is a typo and not secretly a much smaller file ;)\r\n\r\nWould you mind profiling the read_by_column function to see what it's doing in that 100 seconds? My guess is that there's something it's doing inside the loop that seems cheap enough but adds up when you call it 4000 times."
+        },
+        {
+            "created_at": "2020-07-28T15:16:43.745Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9557?focusedCommentId=17166497) by Karl Dunkle Werner (karldw):*\nIt looks like `shared_ptr_is_null` is taking half the time, and `vars_select_eval` is taking another third.\r\n\r\nI attached a screenshot of benchmark results from running the code below. (No difference from the original code I posted, except `read_one` is broken out into its own function.)\r\n```r\n\r\nlibrary(arrow)\r\n\r\nread_one <- function(col, table) {\r\n  x = table$ReadTable(col)\r\n  x$column(0)\r\n}\r\n\r\nread_by_column <- function(f) {\r\n  table = ParquetFileReader$create(f)\r\n  cols <- as.character(0:3999)\r\n  purrr::walk(cols, read_one, table=table)\r\n}\r\n\r\nread_by_column(\"test_tab.parquet\")\r\n\r\n```"
+        },
+        {
+            "created_at": "2020-07-28T18:12:33.137Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9557?focusedCommentId=17166611) by Neal Richardson (npr):*\nInteresting, thanks for sharing. Will definitely take a look.\r\n\r\nFYI `[~romainfrancois]`"
+        },
+        {
+            "created_at": "2020-09-24T15:40:02.344Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9557?focusedCommentId=17201599) by Neal Richardson (npr):*\nIssue resolved by pull request 8122\n<https://github.com/apache/arrow/pull/8122>"
+        }
+    ]
+}

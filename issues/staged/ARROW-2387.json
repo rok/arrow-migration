@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] negative decimal values get spurious rescaling error",
+        "body": "***Note**: This issue was originally created as [ARROW-2387](https://issues.apache.org/jira/browse/ARROW-2387). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n```java\n\r\n$ python\r\nPython 2.7.12 (default, Nov 20 2017, 18:23:56)\r\n[GCC 5.4.0 20160609] on linux2\r\nType \"help\", \"copyright\", \"credits\" or \"license\" for more information.\r\n>>> import pyarrow as pa, decimal\r\n>>> one = decimal.Decimal('1.000000')\r\n>>> neg_one = decimal.Decimal('-1.000000')\r\n>>> pa.array([one], pa.decimal128(24, 12))\r\n<pyarrow.lib.Decimal128Array object at 0x7f7f5ae85cb0>\r\n[\r\nDecimal('1.000000000000')\r\n]\r\n>>> pa.array([neg_one], pa.decimal128(24, 12))\r\nTraceback (most recent call last):\r\nFile \"<stdin>\", line 1, in <module>\r\nFile \"array.pxi\", line 181, in pyarrow.lib.array\r\nFile \"array.pxi\", line 36, in pyarrow.lib._sequence_to_array\r\nFile \"error.pxi\", line 77, in pyarrow.lib.check_status\r\npyarrow.lib.ArrowInvalid: Rescaling decimal value -1000000.000000 from original scale of 6 to new scale of 12 would cause data loss\r\n>>> pa.__version__\r\n'0.9.0'\r\n\r\n```\r\nnot only is the error spurious, the decimal value has been multiplied by one million (i.e. 10 \\*\\* 6 and 6 is the difference in scales, but this is still pretty strange to me).",
+        "created_at": "2018-04-03T21:00:54.000Z",
+        "updated_at": "2018-07-27T15:27:56.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-04-13T20:02:51.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-04-03T21:31:50.140Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2387?focusedCommentId=16424637) by ben w (ben w):*\nthe issue would appear to come up here <https://github.com/apache/arrow/blob/master/cpp/src/arrow/util/decimal.cc#L833-L834>:\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n```java\n\r\nstatic bool RescaleWouldCauseDataLoss(const Decimal128& value, int32_t delta_scale,\r\n                                      int32_t abs_delta_scale, Decimal128* result) {\r\n    Decimal128 multiplier(ScaleMultipliers[abs_delta_scale]);\r\n    if (delta_scale < 0) {\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0DCHECK_NE(multiplier, 0);\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0Decimal128 remainder;\r\n        Status status = value.Divide(multiplier, result, &remainder);\r\n        DCHECK(status.ok()) << status.message();\r\n        return remainder != 0;\r\n     }\r\n     *result = value * multiplier;\r\n     return *result < value;  // indeed, -1 * 1000000 is less than -1\r\n}\r\n```\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-04-03T21:32:32.301Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2387?focusedCommentId=16424638) by Phillip Cloud (cpcloud):*\nThanks for the report."
+        },
+        {
+            "created_at": "2018-04-03T21:35:40.862Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2387?focusedCommentId=16424641) by Phillip Cloud (cpcloud):*\nFeel to add a test and fix if you'd like. I will happily review it. If you don't beat me to it I can put up a fix as early as next week. "
+        },
+        {
+            "created_at": "2018-04-03T21:41:02.731Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2387?focusedCommentId=16424651) by ben w (ben w):*\nHow the actual implementation should work is definitely beyond me, sadly."
+        },
+        {
+            "created_at": "2018-04-13T20:02:51.390Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2387?focusedCommentId=16437834) by Phillip Cloud (cpcloud):*\nIssue resolved by pull request 1832\n<https://github.com/apache/arrow/pull/1832>"
+        }
+    ]
+}

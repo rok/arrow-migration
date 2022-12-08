@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Python] pandas.read_parquet fails for wide parquet files and pyarrow 1.0.X",
+        "body": "***Note**: This issue was originally created as [ARROW-9827](https://issues.apache.org/jira/browse/ARROW-9827). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI recently tried to update my pyarrow from 0.17.1 to 1.0.0 and I'm encountering a serious bug where wide DataFrames fail during pandas.read_parquet.\u00a0 Small parquet files (m=10000) read correctly, medium files (m=40000) fail with a \"Bus Error: 10\", and large files (m=100000) completely hang.\u00a0 I've tried python 3.8.5, pandas 1.0.5, pyarrow 1.0.0, and OSX 10.14.\u00a0\u00a0\u00a0\r\n\r\nThe driver code and output is below:\r\n```python\n\r\nimport pandas as pd\r\nimport numpy as np\r\nimport sys\r\n\r\nfilename = \"test.parquet\"\r\nn = 10\r\nm = int(sys.argv[1])\r\nprint(m)\r\nx = np.zeros((n, m))\r\nx = pd.DataFrame(x, columns=[f\"A_{i}\" for i in range(m)])\r\nx.to_parquet(filename)\r\ny = pd.read_parquet(filename, engine='pyarrow')\r\n```\r\n```java\n\r\ntime python test_pyarrow.py\u00a0 10000\r\nreal 0m4.018s user 0m5.286s sys 0m0.514s\r\ntime python test_pyarrow.py\u00a0 40000\r\n40000\r\nBus error: 10\r\n```\r\n\u00a0\r\n\r\nOn a pyarrow 0.17.1 environment, the 40,000 case completes in 8 seconds.\u00a0\u00a0\r\n\r\nThis was cross-posted on the pandas tracker as well:\u00a0<https://github.com/pandas-dev/pandas/issues/35846>",
+        "created_at": "2020-08-22T15:02:42.000Z",
+        "updated_at": "2020-09-08T16:30:49.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-09-08T16:10:29.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-08-24T12:02:06.840Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9827?focusedCommentId=17183184) by Joris Van den Bossche (jorisvandenbossche):*\n`[~kyleabeauchamp]` thanks for moving the issue here.\r\n\r\nIn pyarrow 1.0, we switched the default for `pyarrow.parquet.read_table` (what pandas uses under the hood) to use the new Dataset API (which eg enables filtering row groups). When reading the file with 40,000 columns, I get a similar result for 1.0 as you got for 0.17 if I disable that:\r\n\r\n```Java\n\r\nIn [3]: import pyarrow.parquet as pq   \r\n\r\nIn [4]: %time table = pq.read_table(\"test.parquet\", use_legacy_dataset=True)                                                                                                                                       \r\nCPU times: user 11.4 s, sys: 296 ms, total: 11.7 s\r\nWall time: 7.98 s\r\n```\r\n\r\nBut without specifying `use_legacy_dataset=True` (so with using the default of `use_legacy_dataset=False`), it \"completed\" after more than 4 minutes, but then directly segfaulted upon return, for me for this case.\r\n\r\nSo that's certainly a temporary workaround for you to be able to upgrade to 1.0 to use this keyword. You can specify it from the pandas interface as well (and it will get passed through): `pd.read_parquet(\"test.parquet\", use_legacy_dataset=True)`"
+        },
+        {
+            "created_at": "2020-08-24T13:13:57.349Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9827?focusedCommentId=17183268) by Joris Van den Bossche (jorisvandenbossche):*\nAs I suspected, this is due to the reading of metadata, and especially the column statistics. In the Dataset API, we by default parse all metadata including statistics, even when there is no filter specified. \r\n\r\nWhen disabling the parsing of statistics, the file with 40,000 columns reads in 2.5 seconds (will open a PR with that).\r\n\r\nFurther, with the released version of pyarrow, using ParquetFile is actually the fastest option right now:\r\n\r\n```Java\n\r\nIn [7]: %time table = pq.ParquetFile(\"test.parquet\").read()                                                                                                                                                        \r\nCPU times: user 7.89 s, sys: 253 ms, total: 8.14 s\r\nWall time: 4.5 s\r\n```\r\n\r\n\r\nAdditional sidenote: the Parquet file format is generally not well suited for such wide tables, because of the column-heavy metadata. \r\nFor example, reading a Parquet file with the same number of values, but in long format (40,000 rows x 10 columns) reads in less than 10ms instead of in multiple seconds)\r\n "
+        },
+        {
+            "created_at": "2020-09-08T16:10:30.015Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9827?focusedCommentId=17192298) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 8037\n<https://github.com/apache/arrow/pull/8037>"
+        }
+    ]
+}

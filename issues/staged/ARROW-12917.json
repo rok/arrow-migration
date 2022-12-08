@@ -1,0 +1,43 @@
+{
+    "issue": {
+        "title": "[C++][R][pyarrow] Failure importing some decimal types using the C data interface",
+        "body": "***Note**: This issue was originally created as [ARROW-12917](https://issues.apache.org/jira/browse/ARROW-12917). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn my R notebook, I try to read data from a Db2 database (\"SELECT CAST (15 as decimal(5,0)) FROM sysibm.sysdummy1\") into an R dataframe, leveraging arrow/flight.\r\nintegers, varchars, etc can be loaded without issues, but when I use a decimal type, an error is thrown.\r\n\r\n\u00a0\r\n\r\nHere is the code I'm running:\r\n\r\n\u00a0\r\n```java\n\r\nlibrary(\"reticulate\")\r\nlibrary(\"arrow\")\r\nitcfs <- import(\"...\")\r\nreadClient <- itcfs$get_flight_client()\r\nManual_data_request = ....\r\nflightInfo <- itcfs$get_flight_info(readClient,data_request=Manual_data_request)\r\n\r\ntables <- itcfs$read_tables(readClient, flightInfo)\r\n...\r\n\u00a0\r\n```\r\n\u00a0\r\n\r\n`The itcfs package is implemented in Python, and here is the read_tables method:`\r\n\r\n\u00a0\r\n<font color=\"#0000ff\">def</font><font color=\"#000000\"> read_tables(read_client, flight_info):</font>\r\n<font color=\"#a31515\">\"\"\"Read a list of pyarrow.Table\"\"\"</font>\r\n<font color=\"#000000\"> tables = []</font>\r\n<font color=\"#0000ff\">for</font><font color=\"#000000\"> endpoint </font><font color=\"#0000ff\">in</font><font color=\"#000000\"> flight_info.endpoints:</font>\r\n<font color=\"#000000\"> reader = read_client.do_get(endpoint.ticket)</font>\r\n<font color=\"#000000\"> batches = [b.data </font><font color=\"#0000ff\">for</font><font color=\"#000000\"> b </font><font color=\"#0000ff\">in</font><font color=\"#000000\"> reader]</font>\r\n<font color=\"#000000\"> tables.append(pa.Table.from_batches(batches))</font>\r\n<font color=\"#0000ff\">return</font><font color=\"#000000\"> tables</font>\r\n\u00a0\r\nThis is the erro message:\r\n\r\n\u00a0\r\n```java\n\r\nError: Invalid: Invalid or unsupported format string: 'd:5,0'\r\nTraceback:\r\n1. itcfs$read_tables(readClient, flightInfo)\r\n2. py_to_r(result)\r\n3. py_to_r.python.builtin.list(result)\r\n4. lapply(converted, function(object) {\r\n . if (inherits(object, \"python.builtin.object\")) \r\n . py_to_r(object)\r\n . else object\r\n . })\r\n5. FUN(X[[i]], ...)\r\n6. py_to_r(object)\r\n7. py_to_r.pyarrow.lib.Table(object)\r\n8. maybe_py_to_r(x$columns)\r\n9. x$columns\r\n10. `$.python.builtin.object`(x, \"columns\")\r\n11. py_get_attr_or_item(x, name, TRUE)\r\n12. py_maybe_convert(object, py_has_convert(x))\r\n13. py_to_r(x)\r\n14. py_to_r.python.builtin.list(x)\r\n15. lapply(converted, function(object) {\r\n . if (inherits(object, \"python.builtin.object\")) \r\n . py_to_r(object)\r\n . else object\r\n . })\r\n16. FUN(X[[i]], ...)\r\n17. py_to_r(object)\r\n18. py_to_r.pyarrow.lib.ChunkedArray(object)\r\n19. ChunkedArray$create(!!!maybe_py_to_r(x$chunks))\r\n20. ChunkedArray__from_list(list2(...), type)\r\n21. list2(...)\r\n22. maybe_py_to_r(x$chunks)\r\n23. x$chunks\r\n24. `$.python.builtin.object`(x, chunks)\r\n25. py_get_attr_or_item(x, name, TRUE)\r\n26. py_maybe_convert(object, py_has_convert(x))\r\n27. py_to_r(x)\r\n28. py_to_r.python.builtin.list(x)\r\n29. lapply(converted, function(object) {\r\n . if (inherits(object, \"python.builtin.object\")) \r\n . py_to_r(object)\r\n . else object\r\n . })\r\n30. FUN(X[[i]], ...)\r\n31. py_to_r(object)\r\n32. py_to_r.pyarrow.lib.Array(object)\r\n33. ImportArray(array_ptr, schema_ptr)\r\n```\r\n\u00a0\r\n\r\n\u00a0\r\n\r\nIn a pure python envrionment, decimal data can be read without issues.",
+        "created_at": "2021-06-01T14:39:21.000Z",
+        "updated_at": "2021-06-07T06:57:00.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-06-03T14:01:31.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-01T16:41:30.828Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12917?focusedCommentId=17355216) by Nicola Crane (thisisnic):*\n`[~apitrou]`- would you mind taking a look at this one please?\u00a0 I'm a little unsure how to proceed with it.\u00a0 FYI, I ran the following code and got the same error.\r\n```java\n\r\nlibrary(arrow)\r\nlibrary(reticulate)\r\nuse_virtualenv(\"arrow-env\")\r\npa <- import(\"pyarrow\")\r\na <- pa$decimal128(5)\r\n```\r\n\u00a0\r\n\r\nPerhaps a more illustrative example is this:\r\n```java\n\r\npa$array(c(1, 2), type=pa$uint16()) # works\r\npa$array(c(1, 2), type=pa$decimal128(5)) # causes error\r\n```"
+        },
+        {
+            "created_at": "2021-06-01T16:50:54.353Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12917?focusedCommentId=17355223) by Antoine Pitrou (apitrou):*\nThanks for the ping `[~thisisnic]`. I'm tracking this down."
+        },
+        {
+            "created_at": "2021-06-02T16:21:39.803Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12917?focusedCommentId=17355844) by Andreas Frieed (afrd@gmx.de):*\nSince we are using pyarrow 3.0.0 in our product, is there any chance to get a fix for 3.0.0?"
+        },
+        {
+            "created_at": "2021-06-02T18:21:14.693Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12917?focusedCommentId=17355907) by Ian Cook (icook):*\n[~afrd@gmx.de]\u00a0you're welcome to ask about the possibility of a patch release for 3.0.0 on the dev@ mailing list (see details at <https://arrow.apache.org/community/)>\u00a0but because of the significant time and effort required to cut a release, I anticipate that the core Arrow dev community would be unlikely to support this unless there were a broader consensus about its necessity. Ursa Computing might be able to offer patched releases as a commercial service; if that's something you're interested in, please contact me at ian at ursacomputing dot com."
+        },
+        {
+            "created_at": "2021-06-03T14:01:31.156Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12917?focusedCommentId=17356459) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 10429\n<https://github.com/apache/arrow/pull/10429>"
+        },
+        {
+            "created_at": "2021-06-07T06:57:00.688Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12917?focusedCommentId=17358380) by Roland Weber (rolweber):*\n[~afrd@gmx.de]\u00a0The fix is in the C++ part of the code. We don't necessarily need a release for this. If the fix is backported to the [maint-3.0.x](https://github.com/apache/arrow/tree/maint-3.0.x) branch, we could ask our in-house team to build their arrow-cpp conda package from the commit."
+        }
+    ]
+}

@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python][Parquet] Reading dictionary type with serialized Arrow schema does not restore \"ordered\" type property",
+        "body": "***Note**: This issue was originally created as [ARROW-6302](https://issues.apache.org/jira/browse/ARROW-6302). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn pandas, I tried roundtripping to parquet with `to_parquet` and `read_parquet`. It preserves categorical dtypes but does not preserve their order.\r\n\r\n\r\n```python\n\r\nimport pandas as pd\r\nfrom pandas.io.parquet import read_parquet, to_parquet\r\n\r\ndf = pd.DataFrame()\r\ndf[\"a\"] = pd.Categorical([\"a\", \"b\", \"c\", \"a\"], categories=[\"b\", \"c\", \"d\"], ordered=True)\r\n\r\ndf.to_parquet(<path>)\r\nactual = read_parquet(<path>)\r\n\r\ndf[\"a\"]    \r\n0    NaN\r\n1      b\r\n2      c\r\n3    NaN\r\nName: a, dtype: category\r\nCategories (3, object): [b < c < d]\r\n\r\nactual[\"a\"]\r\n0    NaN\r\n1      b\r\n2      c\r\n3    NaN\r\nName: a, dtype: category\r\nCategories (3, object): [b, c, d]\r\n```\r\n\r\n\r\n\u00a0",
+        "created_at": "2019-08-20T18:56:55.000Z",
+        "updated_at": "2019-08-25T01:15:27.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-24T20:06:39.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-08-20T19:04:35.606Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6302?focusedCommentId=16911662) by Joris Van den Bossche (jorisvandenbossche):*\ncc `[~wesmckinn]` This was catched from adding tests in pandas (https://github.com/pandas-dev/pandas/pull/28018)\r\n\r\nSo it seems that the `ordered` attribute (which is correctly set when converting pandas to arrow), is not set back when reading from parquet. Given that this is stored in the dataframe, it should also be possible to preserve this.\r\n\r\n```Java\n\r\nIn [45]: df = pd.DataFrame({\"a\": pd.Categorical([\"a\", \"b\", \"c\", \"a\"], categories=[\"b\", \"c\", \"d\"], ordered=True)})                                                                                                  \r\n\r\nIn [46]: table = pa.table(df)                                                                                                                                                                                      \r\n\r\nIn [47]: table                                                                                                                                                                                                     \r\nOut[47]: \r\npyarrow.Table\r\na: dictionary<values=string, indices=int8, ordered=1>\r\nmetadata\r\n--------\r\n{b'pandas': b'{\"index_columns\": [{\"kind\": \"range\", \"name\": null, \"start\": 0, \"'\r\n            b'stop\": 4, \"step\": 1}], \"column_indexes\": [{\"name\": null, \"field_'\r\n            b'name\": null, \"pandas_type\": \"unicode\", \"numpy_type\": \"object\", \"'\r\n            b'metadata\": {\"encoding\": \"UTF-8\"}}], \"columns\": [{\"name\": \"a\", \"f'\r\n            b'ield_name\": \"a\", \"pandas_type\": \"categorical\", \"numpy_type\": \"in'\r\n            b't8\", \"metadata\": {\"num_categories\": 3, \"ordered\": true}}], \"crea'\r\n            b'tor\": {\"library\": \"pyarrow\", \"version\": \"0.14.1.dev304+g7478fac1'\r\n            b'b.d20190816\"}, \"pandas_version\": \"0.25.0+193.gd7c4f0d15\"}'}\r\n\r\nIn [48]: import pyarrow.parquet as pq                                                                                                                                                                              \r\n\r\nIn [49]: pq.write_table(table, 'test_categorical_ordered.parquet')                                                                                                                                                 \r\n\r\nIn [50]: result = pq.read_table('test_categorical_ordered.parquet')                                                                                                                                                \r\n\r\nIn [51]: result                                                                                                                                                                                                    \r\nOut[51]: \r\npyarrow.Table\r\na: dictionary<values=string, indices=int32, ordered=0>\r\nmetadata\r\n--------\r\n{b'pandas': b'{\"index_columns\": [{\"kind\": \"range\", \"name\": null, \"start\": 0, \"'\r\n            b'stop\": 4, \"step\": 1}], \"column_indexes\": [{\"name\": null, \"field_'\r\n            b'name\": null, \"pandas_type\": \"unicode\", \"numpy_type\": \"object\", \"'\r\n            b'metadata\": {\"encoding\": \"UTF-8\"}}], \"columns\": [{\"name\": \"a\", \"f'\r\n            b'ield_name\": \"a\", \"pandas_type\": \"categorical\", \"numpy_type\": \"in'\r\n            b't8\", \"metadata\": {\"num_categories\": 3, \"ordered\": true}}], \"crea'\r\n            b'tor\": {\"library\": \"pyarrow\", \"version\": \"0.14.1.dev304+g7478fac1'\r\n            b'b.d20190816\"}, \"pandas_version\": \"0.25.0+193.gd7c4f0d15\"}'}\r\n```"
+        },
+        {
+            "created_at": "2019-08-20T21:52:06.928Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6302?focusedCommentId=16911760) by Wes McKinney (wesm):*\nYeah this should be easy to fix. The changes need to be based on top of https://github.com/apache/arrow/pull/5138 (or wait for it to be merged) to avoid rebase conflicts"
+        },
+        {
+            "created_at": "2019-08-22T03:25:46.468Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6302?focusedCommentId=16912900) by Galuh Sahid (galuhsahid):*\nI'd like to attempt this if it's OK. \r\n\r\n`[~jorisvandenbossche]` I want to make sure, is https://github.com/apache/arrow/blob/master/cpp/src/parquet/arrow/reader_internal.cc the only file that needs to be changed or are other files that need to be changed as well? "
+        },
+        {
+            "created_at": "2019-08-22T06:25:25.017Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6302?focusedCommentId=16913008) by Joris Van den Bossche (jorisvandenbossche):*\n`[~galuhsahid]` Great!\r\n\r\nYes, it is the `ApplyOriginalMetadata` function in that file that needs to be updated. Apart from a test, I _think_ that's the only place that needs a change."
+        },
+        {
+            "created_at": "2019-08-24T20:06:39.491Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6302?focusedCommentId=16915085) by Wes McKinney (wesm):*\nIssue resolved by pull request 5185\n<https://github.com/apache/arrow/pull/5185>"
+        }
+    ]
+}

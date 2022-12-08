@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[R] Refactor do_exec_plan to return a RecordBatchReader",
+        "body": "***Note**: This issue was originally created as [ARROW-15271](https://issues.apache.org/jira/browse/ARROW-15271). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nRight now [`do_exec_plan`](https://github.com/apache/arrow/blob/master/r/R/query-engine.R#L18) returns an Arrow table because `head`, `tail`, and `arrange` do. If ARROW-14289 is completed and similar work is done for `arrange`, we may be able to alter `do_exec_plan` to return a RBR instead.\r\n\r\nThe `map_batches()` implementation (ARROW-14029) could benefit from this refactor. And it might make ARROW-15040 more useful.",
+        "created_at": "2022-01-06T17:55:22.000Z",
+        "updated_at": "2022-05-19T10:41:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-05-18T23:27:32.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-01-20T19:41:38.235Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15271?focusedCommentId=17479636) by Dewey Dunnington (paleolimbot):*\nJust collecting a few related code comments here:\r\n\r\n- https://github.com/apache/arrow/blob/03219e21b42f17294fba3b3d2b22a9117fe0f080/r/R/dataset-scan.R#L89\n- https://github.com/apache/arrow/blob/03219e21b42f17294fba3b3d2b22a9117fe0f080/r/R/query-engine.R#L23-L26\n- https://github.com/apache/arrow/blob/03219e21b42f17294fba3b3d2b22a9117fe0f080/r/R/dataset-scan.R#L184\n  \n  Related is the ability to write files directly in a query plan using the `WriteNode` that was added in ARROW-13542. For example, there is a ticket open for using the `WriteNode` to write data sets (ARROW-14266). Writing files is useful but perhaps orthogonal to the ability to iterate over a `RecordBatchReader`, which is exemplified by the revamped `map_batches()` + vignette addition."
+        },
+        {
+            "created_at": "2022-01-31T15:03:57.287Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15271?focusedCommentId=17484733) by Dewey Dunnington (paleolimbot):*\nJust connecting ARROW-15489, since an improved RecordBatchReader class will make this more useful!"
+        },
+        {
+            "created_at": "2022-04-19T17:36:21.093Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15271?focusedCommentId=17524462) by Neal Richardson (npr):*\nThe underlying issue is that there are some operations that can't be fully supported with the current ExecPlan:\r\n\r\n- sorting on a temporary expression (e.g. `arrange(ds, x * y)`): you have to project with the expression in it, collect the sorted data, and then drop the derived column, but if you drop the column using `select()` and run it through the ExecPlan again, you lose your sorting because sorting currently only happens in the last step (SinkNode)\n- `arrange %>% tail`: it's implemented as a topK operation, so for `head` you get data in the right order, but for tail, it's done as reversing the sort and taking topK (i.e. there's no bottomK that returns in that order). So you have to re-sort the result. This could I guess be done with another ExecPlan that re-sorts, so that could yield a RBR, though awkwardly.\n- ARROW-14289: head.RecordBatchReader returns Table not RBR, seems easily fixable. Also would be nice if ExecPlan had a limit node, or the SinkNode took a limit, or something.\n  \n  I'm not sure what the performance impact would be in these cases if we were to compute into a Table, do whatever finishing steps, and push back into a RBR, which in most cases is just going to be pulled back into a Table in R. But maybe these are sufficiently uncommon scenarios that we shouldn't let them shape our API to the extent that they are.\n  \n  We also would need to pass the R metadata into ExecPlan_run to attach to the output_schema in `compute::MakeGeneratorReader` because it does not appear that you can modify the schema of an RBR.\n  \n  P.S. I haven't checked whether there are open JIRAs for all of those ExecPlan issues but there probably should be."
+        },
+        {
+            "created_at": "2022-05-18T23:27:32.397Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15271?focusedCommentId=17539131) by Neal Richardson (npr):*\nIssue resolved by pull request 13170\n<https://github.com/apache/arrow/pull/13170>"
+        }
+    ]
+}

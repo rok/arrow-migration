@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[R] Retain schema in new Expressions",
+        "body": "***Note**: This issue was originally created as [ARROW-13117](https://issues.apache.org/jira/browse/ARROW-13117). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen a new Expression is created, `schema` should be retained from the expression(s) it was created from. That way, the `type()` and `type_id()` methods of the new Expression will work. For example, currently this happens:\r\n```r\n\r\n> x <- Expression$field_ref(\"x\")\r\n> x$schema <- Schema$create(x = int32())\r\n> \r\n> y <- Expression$field_ref(\"y\")\r\n> y$schema <- Schema$create(y = int32())\r\n> \r\n> Expression$create(\"add_checked\", x, y)$type()\r\nError: !is.null(schema) is not TRUE \n```\r\n\r\nThis is what we want to happen:\r\n```r\n\r\n> Expression$create(\"add_checked\", x, y)$type()\r\nInt32\r\nint32\r\n```",
+        "created_at": "2021-06-18T14:58:25.000Z",
+        "updated_at": "2021-06-25T20:57:33.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-06-25T20:57:21.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-21T21:00:26.009Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13117?focusedCommentId=17366834) by Neal Richardson (npr):*\nI don't think I agree with your expectation. `Expression` objects should have no type (though $`type()`\u00a0shouldn't error) until it is bound to a Schema. So `Expression$create(\"add_checked\", x, y)$type()` should return NULL IMO."
+        },
+        {
+            "created_at": "2021-06-21T22:17:12.007Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13117?focusedCommentId=17366849) by Ian Cook (icook):*\nIn the abstract, I think that makes sense. But in practice, if we don't automatically bind schemas to expressions, then we cannot evaluate dplyr expressions like this:\r\n```java\n\r\nis.double(x + y) \n```\r\nIf that seems like a silly or contrived example: There are some R functions in which we need to know what the type of the input is in order to know which Arrow kernels to call. For example, to make `is.na()` to work consistently with base R (ARROW-12055) we will need to call different Arrow compute functions depending on the type of the input passed to it. If we want `is.na()` to be able to take expressions (not just bare column references) as input, then we need to automatically bind\u00a0schemas to expressions."
+        },
+        {
+            "created_at": "2021-06-22T00:04:55.904Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13117?focusedCommentId=17366908) by Neal Richardson (npr):*\nI think we should distinguish two things: (1) is.\\* functions that operate on the data, as in mutate(); and (2) is.\\* functions used in dplyr's column predicate across() et al. methods. `is.double(x + y)` doesn't make much sense to me as case (1) because it evaluates to a constant. It might make sense in the context of a Union type, where each row could be a different type. Either way, if this is something we want to support, it sounds like it should be a C++ compute kernel (a unary scalar one), and it sounds low priority (though maybe I'm missing something).\u00a0\r\n\r\nIn case (2), I would think we could handle this in a more targeted way inside of where() or across() etc.\u00a0\r\n\r\nRe:\u00a0ARROW-12055, I see where you're going with it but it feels like we're hacking on ourselves to support that, and we shouldn't have to do that. I'd personally prefer to add is_nan methods for all other types in C++ (always returning false).\u00a0\r\n\r\nMy pushback comes from various past experiences of trying to hack together interfaces that seemingly need to track their state, and trying to get certain APIs to conform to expectations from R. Sometimes that's the right choice, but it's a slippery slope and we should spend some extra time looking for a cleaner solution before going down it."
+        },
+        {
+            "created_at": "2021-06-22T02:49:43.152Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13117?focusedCommentId=17366952) by Ian Cook (icook):*\nThe distinction between (1) and (2) is not significant. (1) is just (2) with scalar recycling. The same mechanisms underlie both.\r\n\r\nThe principle I had in mind with this PR is straightforward: An expression can optionally have a schema bound to it, and once a schema is bound to an expression, it will stay bound to _derivative_ expressions.\r\n\r\nBefore this PR, as soon as you create an expression inside a dplyr verb, you immediately lose the ability to know what its type is, despite the fact that it is fully knowable. You need to wait until `arrow_mask()`\u00a0is run again to know it. In `arrow_mask()`, this command re-binds the schema to all the new expressions, so their types can be known again:\r\n```r\n\r\nmap(.data$selected_columns, ~(.$schema <- .data$.data$schema))\n```\r\nAfter this PR, the types of expressions are known at all times. I think it is a clean solution; it's +7, -2 lines of actual package code; everything else is tests, docs, etc.\r\n\r\nIf the central objection here is that this causes the `Expression` object in the R package to deviate further from the `Expression` object in the C++ library\u2014yes I agree; I wish there was a way to avoid that. Unfortunately\u00a0`compute::Expression` in the C++ library lets you bind a schema to an expression, but the schema does not remain bound to derivative expressions. We already deviated somewhat by storing the schema in the `Expression` object in ARROW-12781. This PR takes better advantage of the fact that we're doing that.\r\n\r\nI experimented with trying to achieve the changes in this PR through changes in `expression.cpp`, instead of to the R code, but that did not work because the problem is due to limitations in what is possible with\u00a0`compute::Expression`, not limitations in how it is exposed to R."
+        },
+        {
+            "created_at": "2021-06-24T17:01:56.860Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13117?focusedCommentId=17368971) by Ian Cook (icook):*\nARROW-13167 would eliminate the need for all these gymnastics (but it has been rejected)."
+        },
+        {
+            "created_at": "2021-06-25T15:42:33.877Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13117?focusedCommentId=17369552) by Ian Cook (icook):*\nIn recognition of the following...\r\n \\* Enabling the data type of an `Expression` to be knowable at all times is\u00a0important for enabling broader support for expressions in dplyr verbs.\r\n \\* The PR here and the the earlier changes in ARROW-12781 enable that, but in a somewhat kludgy.\r\n \\* As kludges go, this one is not so bad, and it and would be straightforward to implement this more cleanly in the future.\r\n \\* At present, there is no clear way to implement this more cleanly, at least not without doing a major refactor or compromising its functionality.\r\n\r\n... I created\u00a0ARROW-13186\u00a0for future consideration of ways to implement this more cleanly, and for now I will merge this PR."
+        },
+        {
+            "created_at": "2021-06-25T20:57:21.335Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13117?focusedCommentId=17369710) by Ian Cook (icook):*\nIssue resolved by pull request 10563\n<https://github.com/apache/arrow/pull/10563>"
+        }
+    ]
+}

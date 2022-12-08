@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[C++] Regression in Parquet file compatibility introduced by ARROW-3246",
+        "body": "***Note**: This issue was originally created as [ARROW-6678](https://issues.apache.org/jira/browse/ARROW-6678). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI randomly discovered that this script fails after applying the patch for ARROW-3246\r\n\r\nhttps://github.com/apache/arrow/commit/2ba0566b29312e84fafc987fd8dc9664748be96a\r\n\r\n```Java\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nimport fastparquet as fp\r\n\r\ndf = pd.util.testing.makeDataFrame()\r\n\r\npq.write_table(pa.table(df), 'test.parquet')\r\n\r\nfp.ParquetFile('test.parquet')\r\n```\r\n\r\nwith \r\n\r\n```Java\n\r\nTraceback (most recent call last):\r\n  File \"/home/wesm/miniconda/envs/arrow-3.7/lib/python3.7/site-packages/fastparquet/api.py\", line 110, in __init__\r\n    with open_with(fn2, 'rb') as f:\r\n  File \"/home/wesm/miniconda/envs/arrow-3.7/lib/python3.7/site-packages/fastparquet/util.py\", line 38, in default_open\r\n    return open(f, mode)\r\nNotADirectoryError: [Errno 20] Not a directory: 'test.parquet/_metadata'\r\n\r\nDuring handling of the above exception, another exception occurred:\r\n\r\nTraceback (most recent call last):\r\n  File \"test.py\", line 10, in <module>\r\n    fp.ParquetFile('test.parquet')\r\n  File \"/home/wesm/miniconda/envs/arrow-3.7/lib/python3.7/site-packages/fastparquet/api.py\", line 116, in __init__\r\n    self._parse_header(f, verify)\r\n  File \"/home/wesm/miniconda/envs/arrow-3.7/lib/python3.7/site-packages/fastparquet/api.py\", line 135, in _parse_header\r\n    fmd = read_thrift(f, parquet_thrift.FileMetaData)\r\n  File \"/home/wesm/miniconda/envs/arrow-3.7/lib/python3.7/site-packages/fastparquet/thrift_structures.py\", line 25, in read_thrift\r\n    obj.read(pin)\r\n  File \"/home/wesm/miniconda/envs/arrow-3.7/lib/python3.7/site-packages/fastparquet/parquet_thrift/parquet/ttypes.py\", line 1929, in read\r\n    iprot._fast_decode(self, iprot, [self.__class__, self.thrift_spec])\r\nUnicodeDecodeError: 'utf-8' codec can't decode byte 0xb4 in position 0: invalid start byte\r\n```\r\n\r\nI don't recall making any metadata-related changes but I'm going to review the patch to see if I can narrow down where the problem is to see whether it's a bug with Arrow/parquet-cpp or with the third party library",
+        "created_at": "2019-09-24T23:02:03.000Z",
+        "updated_at": "2019-09-25T04:37:45.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-09-25T04:37:45.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-09-24T23:07:55.183Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6678?focusedCommentId=16937247) by Wes McKinney (wesm):*\nLuckily I did not have to search long. This is caused by the code that adds the \"ARROW:schema\" metadata field that was added here\r\n\r\nhttps://github.com/apache/arrow/commit/2ba0566b29312e84fafc987fd8dc9664748be96a#diff-806bd9c3d77823ae1bff914269e7db02R592\r\n\r\nInvestigating further"
+        },
+        {
+            "created_at": "2019-09-24T23:10:03.045Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6678?focusedCommentId=16937250) by Wes McKinney (wesm):*\nThe problem is that the serialized schema needs to be base64 encoded because Thrift string types must be UTF-8. \r\n\r\nhttps://github.com/apache/arrow/blob/master/cpp/src/parquet/parquet.thrift#L593\r\n\r\nWorking on a patch"
+        },
+        {
+            "created_at": "2019-09-25T04:37:45.488Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6678?focusedCommentId=16937395) by Micah Kornfield (emkornfield@gmail.com):*\nIssue resolved by pull request 5493\n<https://github.com/apache/arrow/pull/5493>"
+        }
+    ]
+}

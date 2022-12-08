@@ -1,0 +1,62 @@
+{
+    "issue": {
+        "title": "[Rust] [DataFusion] DataFusion should enforce unique field names in a schema",
+        "body": "***Note**: This issue was originally created as [ARROW-8205](https://issues.apache.org/jira/browse/ARROW-8205). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThere does not seem to be any validation to avoid schemas being created with duplicate field names. We should add this along with unit tests.\r\n\r\nThis will require changing the signature of the constructors to try_new with a Result return type.",
+        "created_at": "2020-03-25T00:31:07.000Z",
+        "updated_at": "2020-10-06T03:06:14.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Component: Rust - DataFusion",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-10-06T03:06:14.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-04-20T10:05:31.648Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8205?focusedCommentId=17087569) by Krisztian Szucs (kszucs):*\nActually this is not enforced neither in the format nor in other implementation like C++. cc `[~wesm]`"
+        },
+        {
+            "created_at": "2020-04-20T13:05:52.530Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8205?focusedCommentId=17087699) by Wes McKinney (wesm):*\nCorrect, it should probably be the responsibility of application logic (e.g. in DataFusion or other analytics applications) to assert the uniqueness of field names"
+        },
+        {
+            "created_at": "2020-07-09T23:04:58.623Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8205?focusedCommentId=17154979) by Wes McKinney (wesm):*\nHaven't seen activity on this, can it be moved to the next release?"
+        },
+        {
+            "created_at": "2020-07-11T17:11:49.852Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8205?focusedCommentId=17156063) by Jorge Leit\u00e3o (jorgecarleitao):*\nI agree with enforcing this at the DataFusion level. \r\n\r\nI use spark for the past 3 years and it is really annoying how it handles column duplication. It accepts it, but any projection crashes when building the logical plan. IMO it is poor design. \r\n\r\nI understand that the parquet format does not care, but since SQL statements are based on a column name, that name is the identifier of the column and should thus be unique.\r\n\r\nWhenever a user alias an expression to an existing column name, that is IMO a user mistake."
+        },
+        {
+            "created_at": "2020-07-12T16:06:38.343Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8205?focusedCommentId=17156332) by Jorge Leit\u00e3o (jorgecarleitao):*\nI would like to take a shoot at this. I think that I have the implementation that leverages this and greatly simplifies our code. \r\n\r\nEssentially, my take on this is to make the Column of the physical plan to **not** have an index `usize`, and leave the map `index -> column` to be handled by the projection on the scan itself. This greatly simplifies all the code related to Columns; fully deprecates the UnresolvedColumn and ResolveColumnsRule, and greatly simplifies the projection push down and potentially future optimizers.\r\n\r\nWorking branch: https://github.com/jorgecarleitao/arrow/tree/column_names\r\n\r\n\r\n```bash\n\r\n16 files changed, 294 insertions(+), 625 deletions(-)\r\n```\r\n\r\n\r\nAll but 1 test is failing, and 4 of them are currently wrong (\\*_contract). The failing tests are related with how we build a column name out of an aggregation. Because we no longer use indexes, the aggregation's name can no longer be \"SUM\" or something, and instead must be unique. One way to achieve this is to build its name based on its expression, e.g. `SUM(a + b)` or `SUM(a)`, like spark does. However:\r\n\r\n1. when we perform an aggregation, our physical plan is composed by 2 steps: an aggregate by key followed by a merge. Because the merge induces an extra aggregation, the column names of such aggregation are being named as \"SUM(SUM(a))\" instead of \"SUM(a)\".\r\n2. the aggregation of an expression on the logical plan can't build its name besides \"SUM\". However, the physical plan uses `SUM(expr.name())`. Thus, in the logical plan, we can't tell that a projection shall be named `SUM(expr.name())` without allowing Expr in the logical expressions to be able to name themselves.\r\n\r\nI believe that I can fix both of them, but I would like to know what you guys think of this `[~andygrove]`, `[~wesm]`, `[~kszucs]`.\r\n"
+        },
+        {
+            "created_at": "2020-07-14T13:43:59.956Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8205?focusedCommentId=17157378) by Andy Grove (andygrove):*\nI think I am fine with removing Expr::Column(usize) from the logical plan and removing the complexity there. I hope I'm not forgetting any important reason for still having it there.\r\n\r\nI also think that projections in the physical plan should generally be based on name so that we can better handle cases where parquet partitions don't all have the same schema, and also to handle schemaless use cases better e.g. querying JSON.\r\n\r\nHowever, the output from the parquet scan should generally have a known schema (based on the projection) so it would be nice for all the upstream operators to be able to operate on indices rather than names for good performance. I would be interested to see any impact on performance from your changes, perhaps by running the benchmark crate in the project.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-07-17T18:59:33.209Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8205?focusedCommentId=17160145) by Jorge Leit\u00e3o (jorgecarleitao):*\nThanks for your comments, `[~andygrove]` ,\r\n\r\nI am sorry, I did not understand your last paragraph. What do you mean with \"upstream operators\"?\r\n\r\nAFAIK, the largest (still very minor) performance penalty that I see with this approach is that instead of O(1) on getting a column name to build a schema, we are taking O(number of columns) to get a column's index, necessary to execute a scan. The scan itself (projection) still uses the index-based approach; it is only how we represent columns in the logical and physical plan that are different.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-07-17T19:38:00.077Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8205?focusedCommentId=17160163) by Andy Grove (andygrove):*\nThanks. My concerns are unwarranted in that case. I hadn't realized that\nyou were still doing index based lookups during scan time.\n\n\n"
+        },
+        {
+            "created_at": "2020-09-30T20:22:59.754Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8205?focusedCommentId=17205005) by Jorge Leit\u00e3o (jorgecarleitao):*\nAre we still on time to push this through, or should we move it to 3? How much time do we usually give between feature freeze and release?"
+        },
+        {
+            "created_at": "2020-10-03T18:24:28.775Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8205?focusedCommentId=17206836) by Andy Grove (andygrove):*\nYes, there is still time if we want to do this. I think the goal is to cut RC at the end of this coming week. This might be a nice one to get in."
+        },
+        {
+            "created_at": "2020-10-06T03:06:14.969Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8205?focusedCommentId=17208466) by Jorge Leit\u00e3o (jorgecarleitao):*\nIssue resolved by pull request 8334\n<https://github.com/apache/arrow/pull/8334>"
+        }
+    ]
+}

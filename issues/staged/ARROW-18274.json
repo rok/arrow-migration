@@ -1,0 +1,73 @@
+{
+    "issue": {
+        "title": "[Go] Sparse union of structs is buggy",
+        "body": "***Note**: This issue was originally created as [ARROW-18274](https://issues.apache.org/jira/browse/ARROW-18274). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThere is a bug with union of structs in V10.\r\n\r\nThe first unit test crash with a panic (i.e. invalid memory address or nil pointer dereference). The second test works as expected.\r\n\r\n\u00a0\r\n```go\n\r\nfunc TestDoesNotWork(t *testing.T) {\r\n   dt1 := arrow.SparseUnionOf([]arrow.Field{\r\n      {Name: \"c\", Type: arrow2.DictU16String},\r\n   }, []arrow.UnionTypeCode{0})\r\n   dt2 := arrow.StructOf(\r\n      arrow.Field{Name: \"b\", Type: dt1},\r\n   )\r\n   dt3 := arrow.SparseUnionOf([]arrow.Field{\r\n      {Name: \"a\", Type: dt2},\r\n   }, []arrow.UnionTypeCode{0})\r\n   pool := memory.NewGoAllocator()\r\n\r\n   builder := array.NewSparseUnionBuilder(pool, dt3)\r\n   defer builder.Release()\r\n   arr := builder.NewArray()\r\n   defer arr.Release()\r\n   assert.Equal(t, 0, arr.Len())\r\n}\r\n\r\nfunc TestWorksAsExpected(t *testing.T) {\r\n   dt1 := arrow.SparseUnionOf([]arrow.Field{\r\n      {Name: \"c\", Type: &arrow.DictionaryType{\r\n         IndexType: arrow.PrimitiveTypes.Uint16,\r\n         ValueType: arrow.BinaryTypes.String,\r\n         Ordered:   false,\r\n      }},\r\n   }, []arrow.UnionTypeCode{0})\r\n   dt2 := arrow.SparseUnionOf([]arrow.Field{\r\n      {Name: \"a\", Type: dt1},\r\n   }, []arrow.UnionTypeCode{0})\r\n   pool := memory.NewGoAllocator()\r\n\r\n   builder := array.NewSparseUnionBuilder(pool, dt2)\r\n   defer builder.Release()\r\n   arr := builder.NewArray()\r\n   defer arr.Release()\r\n   assert.Equal(t, 0, arr.Len())\r\n} \n```\r\n\u00a0\r\n\r\n**Analysis:**\r\n - The `NewSparseUnionBuilder` calls the builders for each variant and also calls defer builder.Release.\u00a0\r\n - The Struct Release method calls the Release methods of every field even if the refCount is not 0, so the Release method of the second union is called followed by the Release method of the dictionary.\u00a0\r\n - Although, the union builder is returned without error, the builder is not usable.\r\n - This bug doesn't happen with 2 nested unions. As the internal counter is properly tested.\r\n\r\n\u00a0\r\n\r\nFirst, I don't understand why the Release method of each variant is called right after the Union constructor is created. I also don't understand why the Release method of the structure calls the Release method of each field regardless of the value of the internal refCount. This looks like a bug to me, but I'm not quite sure yet what the right way to fix it will be.\r\n\r\n\u00a0\r\n\r\nAny idea?",
+        "created_at": "2022-11-07T20:39:14.000Z",
+        "updated_at": "2022-11-10T15:38:39.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Go",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-11-08T14:40:18.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-11-07T21:48:12.163Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18274?focusedCommentId=17630044) by Matthew Topol (zeroshade):*\nFrom what i was able to deduce from your statements, (correct me if I'm wrong) but If you use a Struct whose single field is a union containing a Dictionary type, you run into a problem? Could you provide a full snippet that hits the failure to initialize the Dictionary memo table? I wasn't able to replicate the failure to initialize the dictionary memo table you were referring to, but I did encounter a different problem when attempting to Print the resulting struct array. \r\n\r\nHere's my code:\r\n\r\n```go\n\r\ndt1 := arrow.SparseUnionOf([]arrow.Field{\r\n        {Name: \"c\", Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint16, ValueType: arrow.BinaryTypes.String}},\r\n}, []arrow.UnionTypeCode{0})\r\ndt2 := arrow.StructOf(arrow.Field{Name: \"a\", Type: dt1})\r\n\r\npool := memory.NewGoAllocator()\r\nbldr := array.NewStructBuilder(pool, dt2)\r\ndefer bldr.Release()\r\n\r\nbldrDt1 := bldr.FieldBuilder(0).(*array.SparseUnionBuilder)\r\nbinDictBldr := bldrDt1.Child(0).(*array.BinaryDictionaryBuilder)\r\n\r\nbldr.Append(true)\r\nbldrDt1.Append(0)\r\nbinDictBldr.AppendString(\"foo\")\r\n\r\nbldr.Append(true)\r\nbldrDt1.Append(0)\r\nbinDictBldr.AppendString(\"bar\")\r\n\r\nout := bldr.NewStructArray()\r\ndefer out.Release()\r\n\r\nfmt.Println(out) // runs into an issue here\r\n```\r\n\r\nThe issue it runs into with that print is in the Struct array. Because a union array has no null bitmap bytes it attempts to update the field to use the Struct Array's validity bitmap as a mask, except it calls release on a nil buffer of the masked field. So there's a need to add a nil check in the Struct Array `newStructFieldWithParentValidityMask` method.\r\n\r\nThat said, if you can give me a code snippet that replicates the badly initialized dictionary builder then I'll take a look at that and see where the issue is.\r\n\r\nTo address your confusion from the analysis:\r\n\r\n> The `NewSparseUnionBuilder` calls the builders for each variant and also calls defer builder.Release.\r\n\r\nThis is because it calls `NewSparseUnionBuilderWithBuilders` which delegates to `newUnionBuilder` which will internally call `Retain` on each builder. The reason for this is that you can call `NewSparseUnionBuilderWithBuilders` and provide your own builders to construct a `SparseUnionBuilder` with instead of having it create them for you. In that scenario we have to call `Retain` on each provided builder to ensure the `SparseUnionBuilder` doesn't have them removed from under it. So, when we create the builders ourselves we have to clean up the extra refcount by calling release **after** we construct everything and call `Retain`.\r\n\r\n> The Struct Release method calls the Release methods of every field even if the refCount is not 0, so the Release method of the second union is called followed by the Release method of the dictionary.\r\n\r\nIf you look at the `setData` method on the Struct array, you see that it constructs an `arrow.Array` instance for each child, referencing the `ArrayData` object. Each call to `NewSliceData` or `MakeFromData` will call `Retain` on the `ArrayData` object and produce an `Array` that gets put into the Struct's slice of fields which is not being referenced externally to the struct (to start with). These can then get referenced externally to the struct by calling `Field` which doesn't automatically call `Retain` before returning (so you don't need to call `Release` every time you call `Field`. So, to ensure the fields stay alive as necessary for the struct array, calling `Retain` on the Struct Array will always call `Retain` on each child, and calling `Release` on the struct array will always call `Release` on each child. For child fields that are never `Retain`'d outside of the Struct array, the retain and release's will always match, cleaning up as necessary. In theory a potential improvement might be to have it **not** call `Retain` on each child when you call `Retain` on the struct array, and then only call `Release` on the children when the Struct's refCount is 0 after a release. But as it currently stands, I don't see any situation other than improper usage that would cause an issue.\r\n\r\nPlease tag me when you update with a code snippet that exemplifies the failure you're hitting so i can take a look. In the meantime, I'm going to fix the issue this found in the Struct's `String()` method and file it as a separate JIRA card.\r\n \r\n"
+        },
+        {
+            "created_at": "2022-11-07T21:56:55.988Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18274?focusedCommentId=17630048) by Laurent Querel (lquerel):*\nI updated the initial description with two unit tests.\u00a0\r\n\r\nThese tests are really minimalist but I think it allows to reproduce the bug. I have exactly the same problem in a much larger development."
+        },
+        {
+            "created_at": "2022-11-07T21:59:48.454Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18274?focusedCommentId=17630050) by Laurent Querel (lquerel):*\n`[~zeroshade]` see my previous comment."
+        },
+        {
+            "created_at": "2022-11-07T22:05:27.315Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18274?focusedCommentId=17630053) by Matthew Topol (zeroshade):*\nOh interesting, you're constructing an empty array out of the builder with nothing appended to it. Thanks for the code snippets. I'll see what I can figure out."
+        },
+        {
+            "created_at": "2022-11-07T22:12:02.629Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18274?focusedCommentId=17630055) by Laurent Querel (lquerel):*\n`[~zeroshade]` The same kind of problem occurs if I try to add data to the created constructor. I simplified the initial code by removing the different variants and fields to focus the report on what highlights the problem."
+        },
+        {
+            "created_at": "2022-11-07T22:17:36.232Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18274?focusedCommentId=17630059) by Matthew Topol (zeroshade):*\nYea, I found the issue. You were kind of on the right track. The issue is that inside of the `StructBuilder`'s Release, the loop and release of the field builders should be **inside** the if that checks the refcount, don't know why it was outside that if. Probably an old bug that got exposed with the new changes. I'll put up a PR in just a moment. It'll get auto-added to this ticket when I do."
+        },
+        {
+            "created_at": "2022-11-07T22:19:29.503Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18274?focusedCommentId=17630060) by Laurent Querel (lquerel):*\n`[~zeroshade]` Thanks for this quick resolution."
+        },
+        {
+            "created_at": "2022-11-07T22:23:02.758Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18274?focusedCommentId=17630064) by Matthew Topol (zeroshade):*\nNp. Hope the explanations helped in my original comment. \r\n\r\nIs this something that is heavily blocking your work (It does seem like a niche case) and you need us to officially release a patch for it? Or is this something that is fine to just get integrated into v11?"
+        },
+        {
+            "created_at": "2022-11-07T22:36:32.313Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18274?focusedCommentId=17630072) by Laurent Querel (lquerel):*\n`[~zeroshade]` I'm working on the integration of Apache Arrow in a future extension of the Open Telemetry protocol. A beta version is planned in a few weeks so I would not be against the release of a patch. I also think that this problem with the Struct builder release method can cause a bug in other use cases.\r\n\r\nThe repo I'm working on -> <https://github.com/f5/otel-arrow-adapter>\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-11-07T22:43:29.313Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18274?focusedCommentId=17630074) by Matthew Topol (zeroshade):*\n`[~lquerel]` Okay, if you aren't already subscribed to the mailing list please do so as that is where I'll need to propose a vote to release this as a patch v10.0.1 \r\n\r\nAlternately, since it is a beta version you could simply rely on master and bump your version of Arrow up to v11 (which will just get you the most recent commit any time you upgrade until that version is released) and we can revisit releasing this as a patch after your Beta period. Let me know your thoughts.\r\n\r\nIn the meantime, could you take a look at and comment on the PR linked here just to confirm that it fixes your issue?"
+        },
+        {
+            "created_at": "2022-11-07T22:53:09.445Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18274?focusedCommentId=17630076) by Laurent Querel (lquerel):*\n`[~zeroshade]` The PR LGTM.\r\n\r\nIMO a patch v10.0.1 will be the best option but in the meantime I can definitively bump my version to V11.\r\n\r\nNote: I'm already subscribed to the mailing list.\r\n\r\nThanks again."
+        },
+        {
+            "created_at": "2022-11-07T22:59:47.449Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18274?focusedCommentId=17630077) by Matthew Topol (zeroshade):*\nOkay. \r\n\r\nI'll leave the PR up until tomorrow to give others a chance to comment on it and if there's no objections by morning I'll merge it in (and then you can bump to v11). \r\n\r\nAfter that, tomorrow i'll send an email to the ML proposing a cherry-pick + patch release of v10.0.1 for that."
+        },
+        {
+            "created_at": "2022-11-08T14:40:18.085Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18274?focusedCommentId=17630458) by Matthew Topol (zeroshade):*\nIssue resolved by pull request 14604\n<https://github.com/apache/arrow/pull/14604>"
+        },
+        {
+            "created_at": "2022-11-08T16:01:06.862Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18274?focusedCommentId=17630499) by Matthew Topol (zeroshade):*\n`[~lquerel]` There's already a need for a v10.0.1 due to issues with pyarrow and R, so there will be a v10.0.1 release and I've tagged this issue so it will get cherry-picked and included in that release. Keep an eye on the Mailing list for when that happens. Thanks!"
+        }
+    ]
+}

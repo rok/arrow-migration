@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] Add a mask argument to pyarrow.StructArray.from_arrays",
+        "body": "***Note**: This issue was originally created as [ARROW-12677](https://issues.apache.org/jira/browse/ARROW-12677). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe python API for creating StructArray from a list of array doesn't allow to pass a missing value mask. \r\n\r\nAt the moment the only way to create a StructArray with missing value is to use `pyarrow.array` and passing a vector of tuple.\r\n\r\n```python\n\r\n>>> pyarrow.array(\r\n    [\r\n        None,\r\n        (1, \"foo\"),\r\n    ],\r\n    type=pyarrow.struct(\r\n        [pyarrow.field('col1', pyarrow.int64()), pyarrow.field(\"col2\", pyarrow.string())]\r\n    )\r\n)\r\n-- is_valid:\r\n  [\r\n    false,\r\n    true\r\n  ]\r\n-- child 0 type: int64\r\n  [\r\n    0,\r\n    1\r\n  ]\r\n-- child 1 type: string\r\n  [\r\n    \"\",\r\n    \"foo\"\r\n  ]\r\n>>> pyarrow.StructArray.from_arrays(\r\n    [\r\n        [None, 1],\r\n        [None, \"foo\"]\r\n    ],\r\n    fields=[pyarrow.field('col1', pyarrow.int64()), pyarrow.field(\"col2\", pyarrow.string())]\r\n)\r\n-- is_valid: all not null\r\n-- child 0 type: int64\r\n  [\r\n    null,\r\n    1\r\n  ]\r\n-- child 1 type: string\r\n  [\r\n    null,\r\n    \"foo\"\r\n  ]\r\n```\r\n\r\nThe C++ API allows it, so it should be easy to add.\r\n\r\n\r\nsee [this so question](https://stackoverflow.com/questions/67417110/)",
+        "created_at": "2021-05-07T07:45:39.000Z",
+        "updated_at": "2021-05-17T18:19:45.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-05-14T20:48:34.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-05-08T17:58:00.442Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12677?focusedCommentId=17341380) by &res (0x26dres):*\n`[~westonpace]` thanks for looking into this.\r\n\r\nI'm not sure if it's the right place to mention that, but I now have the same issue with ListArray, and I'm wondering if it'd be worth doing the same changes there.\r\n\r\n\u00a0\r\n\r\nHere's an example where I'm have a list of struct, but some of the list are null:\r\n\r\n\u00a0\r\n \\* Using pyarrow.array (works, but requires turning columns into rows)\r\n\r\n```python\n\r\nlist_of_struct = pyarrow.list_(\r\n    pyarrow.struct([pyarrow.field(\"foo\", pyarrow.string())])\r\n)\r\narray = pyarrow.array(\r\n    [[(\"hello\",), (\"World\",)], [], None, [None, (\"foo\",), (\"bar\",)]],\r\n    type=list_of_struct,\r\n)\r\nprint(array) \n```\r\n```java\n\r\n[\r\n  -- is_valid: all not null\r\n  -- child 0 type: string\r\n    [\r\n      \"hello\",\r\n      \"World\"\r\n    ],\r\n  -- is_valid: all not null\r\n  -- child 0 type: string\r\n    [],\r\n  null,\r\n  -- is_valid:\r\n      [\r\n      false,\r\n      true,\r\n      true\r\n    ]\r\n  -- child 0 type: string\r\n    [\r\n      \"\",\r\n      \"foo\",\r\n      \"bar\"\r\n    ]\r\n] \n```\r\n\u00a0\r\n\r\n \\* Using ListArray.from_array (it's not possible to mark a list a null (It falls back to empty)\r\n```python\n\r\nstruct_type = pyarrow.struct([pyarrow.field(\"foo\", pyarrow.string())])\r\nfoo = pyarrow.array([\"hello\", \"World\", None, \"foo\", \"bar\"])\r\nvalidity_mask = pyarrow.array([True, True, False, True, True])\r\nvalidity_bitmask = validity_mask.buffers()[1]\r\nstruct_array = pyarrow.StructArray.from_buffers(\r\n    struct_type, len(foo), [validity_bitmask], children=[foo]\r\n)\r\nlist_array = pyarrow.ListArray.from_arrays(\r\n    offsets=[0, 2, 2, 2, 5], values=struct_array\r\n)\r\n```\r\n```java\n\r\n[\r\n  -- is_valid: all not null\r\n  -- child 0 type: string\r\n    [\r\n      \"hello\",\r\n      \"World\"\r\n    ],\r\n  -- is_valid: all not null\r\n  -- child 0 type: string\r\n    [],\r\n  -- is_valid: all not null\r\n  -- child 0 type: string\r\n    [],\r\n  -- is_valid:\r\n      [\r\n      false,\r\n      true,\r\n      true\r\n    ]\r\n  -- child 0 type: string\r\n    [\r\n      null,\r\n      \"foo\",\r\n      \"bar\"\r\n    ]\r\n]\r\n```\r\n\u00a0\r\n\r\n \\* Using the \"from_buffers\" work around (it works, but not a great API):\r\n\r\n```python\n\r\nstruct_type = pyarrow.struct([pyarrow.field(\"foo\", pyarrow.string())])\r\nfoo_values = pyarrow.array([\"hello\", \"World\", None, \"foo\", \"bar\"])\r\nstruct_validity_mask = pyarrow.array([True, True, False, True, True])\r\nstruct_validity_bitmask = struct_validity_mask.buffers()[1]\r\nstruct_array = pyarrow.StructArray.from_buffers(\r\n    struct_type,\r\n    len(foo_values),\r\n    [struct_validity_bitmask],\r\n    children=[foo_values],\r\n)\r\n\r\nlist_validity_mask = pyarrow.array([True, True, False, True])\r\nlist_validity_buffer = list_validity_mask.buffers()[1]\r\nlist_offsets_buffer = pyarrow.array([0, 2, 2, 2, 5], pyarrow.int32()).buffers()[1]\r\n\r\nlist_array = pyarrow.ListArray.from_buffers(\r\n    type=pyarrow.list_(struct_type),\r\n    length=4,\r\n    buffers=[list_validity_buffer, list_offsets_buffer, ],\r\n    children=[struct_array],\r\n)\r\nprint(list_array)\r\n```\r\n```java\n\r\n  -- is_valid: all not null\r\n  -- child 0 type: string\r\n    [\r\n      \"hello\",\r\n      \"World\"\r\n    ],\r\n  -- is_valid: all not null\r\n  -- child 0 type: string\r\n    [],\r\n  null,\r\n  -- is_valid:\r\n      [\r\n      false,\r\n      true,\r\n      true\r\n    ]\r\n  -- child 0 type: string\r\n    [\r\n      null,\r\n      \"foo\",\r\n      \"bar\"\r\n    ]\r\n]\r\n```"
+        },
+        {
+            "created_at": "2021-05-10T08:20:17.691Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12677?focusedCommentId=17341770) by &res (0x26dres):*\n> StructArray 100% cheaply from existing arrays with `from_arrays`\r\n\r\nAre you saying this because a copy of the inverted mask array is required? Or is there another overhead.\r\n\r\nI guess if we have to do a copy of the array, than memory_pool shoud be added to 'from_arrays' to be consistent, but it would make things confusing.\r\n\r\nPersonally I'm happy with using from_buffer. The API isn't great, but once you've figured it out it's fine.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-05-10T15:14:09.368Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12677?focusedCommentId=17341955) by Joris Van den Bossche (jorisvandenbossche):*\n> Are you saying this because a copy of the inverted mask array is required? \r\n\r\nIndeed, inverting the mask is indeed the \"overhead\" I was pointing at.\r\n\r\n"
+        },
+        {
+            "created_at": "2021-05-13T23:55:04.722Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12677?focusedCommentId=17344192) by Weston Pace (westonpace):*\n> Using ListArray.from_array (it's not possible to mark a list a null (It falls back to empty)\u00a0\r\n\r\nIt's odd, but you can do it by putting a null in the offsets array.\u00a0 I added some examples to ListArray.from_arrays as part of the PR."
+        },
+        {
+            "created_at": "2021-05-13T23:56:41.505Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12677?focusedCommentId=17344193) by Weston Pace (westonpace):*\nAlthough I'm not opposed to accepting a mask as well.\u00a0 I could probably raise invalid if offsets.null_count > 0 and a mask is specified.\u00a0 `[~jorisvandenbossche]` any opinion?"
+        },
+        {
+            "created_at": "2021-05-14T20:48:34.940Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12677?focusedCommentId=17344876) by David Li (lidavidm):*\nIssue resolved by pull request 10272\n<https://github.com/apache/arrow/pull/10272>"
+        }
+    ]
+}

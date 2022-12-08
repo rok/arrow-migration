@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[R] CSV dataset file header read in as data",
+        "body": "***Note**: This issue was originally created as [ARROW-15123](https://issues.apache.org/jira/browse/ARROW-15123). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn `arrow` 6.0.0+ for R, when I read in a CSV file using a schema where the order of the columns in the schema doesn't match the order of columns in the CSV, the data is read in incorrectly.\r\n\r\nThe header is included as an observation in the read-in dataset. The columns are renamed **but not reordered** to match the schema. So I end up with the \"quantile\" column called \"location\", etc, as below.\r\n```java\n\r\n[1] \"last few obs in sorted order with arrow\"\r\n# A tibble: 6 \u00d7 7\r\n\u00a0 forecast_date target \u00a0 \u00a0 \u00a0 target_end_date location type \u00a0 \u00a0 \u00a0 quantile value\u00a0\r\n\u00a0 <chr> \u00a0 \u00a0 \u00a0 \u00a0 <chr> \u00a0 \u00a0 \u00a0 \u00a0<chr> \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 <chr> \u00a0 \u00a0<chr> \u00a0 \u00a0 \u00a0<chr> \u00a0 \u00a0<chr>\u00a0\r\n1 2021-12-12 \u00a0 \u00a09 day ahead\u2026 2021-12-21 \u00a0 \u00a0 \u00a00.99 \u00a0 \u00a0 946.43313\u2026 06 \u00a0 \u00a0 \u00a0 quant\u2026\r\n2 2021-12-12 \u00a0 \u00a09 day ahead\u2026 2021-12-21 \u00a0 \u00a0 \u00a00.99 \u00a0 \u00a0 956.43294\u2026 39 \u00a0 \u00a0 \u00a0 quant\u2026\r\n3 2021-12-12 \u00a0 \u00a09 day ahead\u2026 2021-12-21 \u00a0 \u00a0 \u00a00.99 \u00a0 \u00a0 97.948144\u2026 41 \u00a0 \u00a0 \u00a0 quant\u2026\r\n4 2021-12-12 \u00a0 \u00a09 day ahead\u2026 2021-12-21 \u00a0 \u00a0 \u00a00.99 \u00a0 \u00a0 98.573545\u2026 49 \u00a0 \u00a0 \u00a0 quant\u2026\r\n5 2021-12-12 \u00a0 \u00a09 day ahead\u2026 2021-12-21 \u00a0 \u00a0 \u00a00.99 \u00a0 \u00a0 98.978636\u2026 33 \u00a0 \u00a0 \u00a0 quant\u2026\r\n6 forecast_date target \u00a0 \u00a0 \u00a0 target_end_date quantile value \u00a0 \u00a0 \u00a0location type \n```\r\nThe last line (\"forecast_date target...\") is the original header.\r\n\r\nThe file in question (<https://raw.githubusercontent.com/reichlab/covid19-forecast-hub/master/data-processed/JHUAPL-Gecko/2021-12-12-JHUAPL-Gecko.csv)>\u00a0has 45360 observations + 1 line for the header. But the read-in dataset has\r\n```java\n\r\n[1] \"dimensions with arrow\"\r\n[1] 45361 \u00a0 \u00a0 7  \n```\r\nReprex attached with working (`packageVersion(\"arrow\") == 4.0.1`; 5.0.0 also works) and non-working (`packageVersion(\"arrow\") == 6.0.1`) examples. Run examples using `make run-broken` and `make run-works`.",
+        "created_at": "2021-12-15T22:59:59.000Z",
+        "updated_at": "2022-01-28T23:09:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-01-26T14:10:57.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-01-13T14:41:37.118Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15123?focusedCommentId=17475405) by Nicola Crane (thisisnic):*\nThanks for reporting this `[~ndefriesJIRA]` ! \u00a0There are a couple of different things going on here, so I'll look at them 1 by 1.\r\n\r\nIn terms of the columns not being reordered, this is expected behaviour. \u00a0In Arrow, a schema is an ordered map of column names to type. \u00a0Therefore, the order of the data in the schema should be specified in a way that matches the original data. \u00a0I think a reasonable workflow could be reading in the data in the order in which it is provided and then using `dplyr::select()` to reorder the columns, perhaps?\r\n\r\nThe extra row in the dataset is due to the header being read in as a row of data. \u00a0We have some other tickets relating to this open at the moment; let me check those and get back to you on that one!"
+        },
+        {
+            "created_at": "2022-01-14T07:38:46.274Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15123?focusedCommentId=17476001) by Nicola Crane (thisisnic):*\nSo in terms of the header row being read in; this is because when we have a schema specified but no column names etc, the code infers the column name from the schema - this was implemented in\u00a0 ARROW-14063.\u00a0"
+        },
+        {
+            "created_at": "2022-01-14T08:34:27.572Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15123?focusedCommentId=17476025) by Nicola Crane (thisisnic):*\n`[~ndefriesJIRA]` I had a think about this.\u00a0 If you are reading in CSV files via `open_dataset()` and you supply a schema, current intended behaviour (to match that in `{}read_csv_arrow(){`}) is that you need to also pass in `skip_rows=1` to skip the header rows in your CSV."
+        },
+        {
+            "created_at": "2022-01-26T14:10:57.638Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15123?focusedCommentId=17482503) by Jonathan Keane (jonkeane):*\nIssue resolved by pull request 12152\n<https://github.com/apache/arrow/pull/12152>"
+        }
+    ]
+}

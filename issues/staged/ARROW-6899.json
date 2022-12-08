@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] to_pandas() not implemented on list<dictionary<values=string, indices=int32>",
+        "body": "***Note**: This issue was originally created as [ARROW-6899](https://issues.apache.org/jira/browse/ARROW-6899). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi,\r\n\r\n`pyarrow.Table.to_pandas()` fails on an Arrow List Vector where the data vector is of type \"dictionary encoded string\". Here is the table schema as printed by pyarrow:\r\n```java\n\r\npyarrow.Table\r\nencodedList: list<$data$: dictionary<values=string, indices=int32, ordered=0> not null> not null\r\n  child 0, $data$: dictionary<values=string, indices=int32, ordered=0> not null\r\nmetadata\r\n--------\r\nOrderedDict() \n```\r\nand the data (also attached in a file to this ticket)\r\n```java\n\r\n<pyarrow.lib.ChunkedArray object at 0x7f7ea6a748b8>\r\n[\r\n  [\r\n\r\n    -- dictionary:\r\n      [\r\n        \"a\",\r\n        \"b\",\r\n        \"c\",\r\n        \"d\"\r\n      ]\r\n    -- indices:\r\n      [\r\n        0,\r\n        1,\r\n        2\r\n      ],\r\n\r\n    -- dictionary:\r\n      [\r\n        \"a\",\r\n        \"b\",\r\n        \"c\",\r\n        \"d\"\r\n      ]\r\n    -- indices:\r\n      [\r\n        0,\r\n        3\r\n      ]\r\n  ]\r\n] \n```\r\nand the exception I got\r\n```java\n\r\n---------------------------------------------------------------------------\r\nArrowNotImplementedError                  Traceback (most recent call last)\r\n<ipython-input-10-5f865bc01df1> in <module>\r\n----> 1 df.to_pandas()\r\n\r\n~/.local/share/virtualenvs/jupyter-BKbz0SEp/lib/python3.6/site-packages/pyarrow/array.pxi in pyarrow.lib._PandasConvertible.to_pandas()\r\n\r\n~/.local/share/virtualenvs/jupyter-BKbz0SEp/lib/python3.6/site-packages/pyarrow/table.pxi in pyarrow.lib.Table._to_pandas()\r\n\r\n~/.local/share/virtualenvs/jupyter-BKbz0SEp/lib/python3.6/site-packages/pyarrow/pandas_compat.py in table_to_blockmanager(options, table, categories, ignore_metadata)\r\n    700 \r\n    701     _check_data_column_metadata_consistency(all_columns)\r\n--> 702     blocks = _table_to_blocks(options, table, categories)\r\n    703     columns = _deserialize_column_index(table, all_columns, column_indexes)\r\n    704 \r\n\r\n~/.local/share/virtualenvs/jupyter-BKbz0SEp/lib/python3.6/site-packages/pyarrow/pandas_compat.py in _table_to_blocks(options, block_table, categories)\r\n    972 \r\n    973     # Convert an arrow table to Block from the internal pandas API\r\n--> 974     result = pa.lib.table_to_blocks(options, block_table, categories)\r\n    975 \r\n    976     # Defined above\r\n\r\n~/.local/share/virtualenvs/jupyter-BKbz0SEp/lib/python3.6/site-packages/pyarrow/table.pxi in pyarrow.lib.table_to_blocks()\r\n\r\n~/.local/share/virtualenvs/jupyter-BKbz0SEp/lib/python3.6/site-packages/pyarrow/error.pxi in pyarrow.lib.check_status()\r\n\r\nArrowNotImplementedError: Not implemented type for list in DataFrameBlock: dictionary<values=string, indices=int32, ordered=0> \n```\r\nNote that the data vector itself can be loaded successfully by to_pandas.\r\n\r\nIt'd be great if this would be addressed in the next version of pyarrow. For now, is there anything I can do on my end to bypass this unimplemented conversion?\r\n\r\nThanks,\r\n\r\nRazvan",
+        "created_at": "2019-10-16T08:36:45.000Z",
+        "updated_at": "2020-01-20T04:53:05.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-01-20T04:53:02.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-17T17:12:27.714Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6899?focusedCommentId=16953933) by Joris Van den Bossche (jorisvandenbossche):*\n`[~razvanch]` thanks for the report. Could you provide a small script to reproduce the issue (some code to create a Table with such a type) ?"
+        },
+        {
+            "created_at": "2019-10-17T17:15:11.036Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6899?focusedCommentId=16953934) by Joris Van den Bossche (jorisvandenbossche):*\nAnother thing: I suppose it should be possible to add this conversion, but, the question is to what it would convert. For other List types, we convert it to a numpy arrays of numpy arrays. But for a dictionary type, this would mean that it would loose that information."
+        },
+        {
+            "created_at": "2019-10-17T21:05:30.021Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6899?focusedCommentId=16954110) by Wes McKinney (wesm):*\nDictionary should be converted to dense / non-dictionary in this case. Marking for 1.0"
+        },
+        {
+            "created_at": "2019-10-17T22:36:43.687Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6899?focusedCommentId=16954149) by Razvan Chitu (razvanch):*\n`[~jorisvandenbossche]` \u00a0sure, here's an example that throws:\r\n```java\n\r\nimport pyarrow as pa\r\n\r\noffsets = pa.array([0, 3, 5])\r\nvalues = pa.array(['a', 'b', 'c', 'a', 'd']).dictionary_encode()\r\npa.ListArray.from_arrays(offsets, values).to_pandas() \n```\r\n`[~wesm]` \u00a0is 1.0 going to be the next release? Also I wouldn't mind trying to solve this myself, but I would need a bit of guidance!"
+        },
+        {
+            "created_at": "2020-01-20T04:53:02.182Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6899?focusedCommentId=17019227) by Wes McKinney (wesm):*\nIssue resolved by pull request 6199\n<https://github.com/apache/arrow/pull/6199>"
+        }
+    ]
+}

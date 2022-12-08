@@ -1,0 +1,22 @@
+{
+    "issue": {
+        "title": "[C++][FlightRPC] Decouple Arrow Flight RPC from GRPC",
+        "body": "***Note**: This issue was originally created as [ARROW-13889](https://issues.apache.org/jira/browse/ARROW-13889). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI'm trying to implement Flight RPC on RPC framework with protobuf message support in distributed system.\r\n\r\nHowever, the flight rpc is tied to grpc. \r\nClasses from grpc used in flight server are:\r\n1. `grpc::ServerContext` used in grpc generated code in parameter, and used to generate `ServerCallContext`.\r\n2. `grpc::Status` used in grpc generated code as return type.\r\n3. `grpc::ServerReaderWriter` and `grpc::ServerReader` used in massive wrapped MessageReader/Writer classes.\r\n\r\n1 & 2 are not coupled much with flight, while the third part is the tough work.\r\nShall we introduce an interface class with same semantics to allow anyone implement the writing process to stream, such as `arrow::flight::ServerReaderWriter` and `arrow::flight::ServerReader`.\r\n\r\nSo that, making a shim layer between `FlightServiceImpl` and `FlightServerBase` is possible to decouple flight from grpc, meanwhile taking advantage of its zero-copy messages.\r\nAll message converting processes can be handled in the shim layer. \r\nFor example,  the function definition of `DoGet` can be `arrow::Status DoGet(ServerCallContext\\* context, const pb::Ticket\\* request, ServerWriter<pb::FlightData>\\* writer)`,  which converts pb messages to flight's and call functions from actual business logic implementation from `FlightServerBase` as `Status DoGet(const ServerCallContext& context, const Ticket& request, std::unique_ptr<FlightDataStream>\\* stream)`.\r\n\r\n\r\nWhile, the client seems more complex, since the cookie stuff and others.\r\nIf the idea above is possible, I'll have a exploration on client in depth",
+        "created_at": "2021-09-03T13:40:11.000Z",
+        "updated_at": "2022-07-01T15:56:52.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: FlightRPC",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-07-01T15:56:52.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-09-03T13:48:56.092Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13889?focusedCommentId=17409517) by David Li (lidavidm):*\nHey Wenbo, you may want to kick this up to the dev mailing list [dev@arrow.apache.org](https://arrow.apache.org/community/) for more visibility. We have wanted to support alternative transports in Flight but so far haven't looked at how best to do that. What transport are you looking at? One thought was to keep gRPC for all control plane methods (GetFlightInfo, DoAction, etc.) and support alternative transports for data plane methods (DoGet, DoPut, DoExchange).\r\n\r\nHaving a shim over the gRPC specific classes sounds like a reasonable approach. Frankly, what's probably needed is a lot of refactoring of the build scripts and code organization so that different transports can be toggled on and off. And possibly, reorganization such that different transports can be implemented as contrib modules, depending on what transports exactly you'd like to support. But this is something for discussion and I would encourage you to talk to the mailing list!"
+        }
+    ]
+}

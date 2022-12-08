@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[RUST] Improve sort kernels",
+        "body": "***Note**: This issue was originally created as [ARROW-9895](https://issues.apache.org/jira/browse/ARROW-9895). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFollowup from my mailing list post:\r\n> 1. When sorting by multiple columns (lexsort_to_indices) the Float32\n> and Float64 data types are not supported because the implementation\n> relies on the OrdArray trait. This trait is not implemented because\n> f64/f32 only implements PartialOrd. The sort function for a single\n> column (sort_to_indices) has some special logic which looks like it\n> wants to treats NaN the same as null, but I'm also not convinced this\n> is the correct way. For example postgres does the following\n> (https://www.postgresql.org/docs/12/datatype-numeric.html#DATATYPE-FLOAT)\n> \n> \"In order to allow floating-point values to be sorted and used in\n> tree-based indexes, PostgreSQL treats NaN values as equal, and greater\n> than all non-NaN values.\"\n> \n> I propose to do the same in an OrdArray impl for\n> Float64Array/Float32Array and then simplifying the sort_to_indices\n> function accordingly.\n> \n> 2. Sorting for dictionary encoded strings. The problem here is that\n> DictionaryArray does not have a generic parameter for the value type\n> so it is not currently possible to only implement OrdArray for string\n> dictionaries. Again for the single column case, the value data type\n> could be checked and a sort could be implemented by looking up each\n> key in the dictionary. An optimization could be to check the is_sorted\n> flag of DictionaryArray (which does not seem to be used really) and\n> then directly sort by the keys. For the general case I see roughly to\n> options\n> \n> - Somehow implement an OrdArray view of the dictionary array. This\n>   could be easier if OrdArray did not extend Array but was a completely\n>   separate trait.\n> - Change the lexicographic sort impl to not use dynamic calls but\n>   instead sort multiple times. So for a query `ORDER BY a, b`, first\n>   sort by b and afterwards sort again by a. With a stable sort\n>   implementation this should result in the same ordering. I'm curious\n>   about the performance, it could avoid dynamic method calls for each\n>   comparison, but it would process the indices vector multiple times.\r\n\r\nMy plan is to open a draft PR with the following changes:\r\n\r\n - `sort_to_indices` further splits up float64/float32 inputs into nulls/non-nan/nan, sorts the non-nan values and then concats those 3 slices according to the sort options. Nans are distinct from null and sort greater than any other valid value\r\n- implement a sort method for dictionary arrays with string values. this kernel checks the `is_ordered` flag and sorts just by the keys if it is set, it will look up the string values otherwise\n- for the lexical sort use case the above kernel are not used, instead the `OrdArray` trait is used. To make that more flexible and allow wrapping arrays with differend ordering behavior I will make it no longer extend `Array` and instead only contain the `cmp_value` method\n- string dictionary sorting can then be implemented with a wrapper struct `StringDictionaryArrayAsOrdArray` which implements `OrdArray`\n- NaN aware sorting of floats can also be implemented with a wrapper struct and trait implementation",
+        "created_at": "2020-09-01T17:13:53.000Z",
+        "updated_at": "2020-09-09T00:58:46.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-09-09T00:58:40.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-05T05:20:53.261Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9895?focusedCommentId=17190982) by Jorge Leit\u00e3o (jorgecarleitao):*\n`[~jhorstmann]`, I assigned this to you and made the issue to in progress. I hope that is fine for you."
+        },
+        {
+            "created_at": "2020-09-09T00:58:40.749Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9895?focusedCommentId=17192551) by Andy Grove (andygrove):*\nIssue resolved by pull request 8092\n<https://github.com/apache/arrow/pull/8092>"
+        }
+    ]
+}

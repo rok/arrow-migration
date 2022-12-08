@@ -1,0 +1,64 @@
+{
+    "issue": {
+        "title": "[FlightRPC][Python] Server seems to leak memory during DoPut",
+        "body": "***Note**: This issue was originally created as [ARROW-16697](https://issues.apache.org/jira/browse/ARROW-16697). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHello,\r\n\r\nWe are stress testing our Flight RPC server (PyArrow 8.0.0) with write-heavy workloads and are running into what appear to be memory leaks.\r\n\r\nThe server is under pressure by a number of separate clients doing DoPut. What we are seeing is that server's memory usage only ever goes up until the server finally gets whacked by k8s due to hitting memory limit.\r\n\r\nI have spent many hours fishing through our code for memory leaks with no success. Even short-circuiting all our custom DoPut handling logic does not alleviate the situation. This led me to create a reproducer that uses nothing but PyArrow and I see the server process memory only increasing similar to what we see on our servers.\r\n\r\nThe reproducer is in attachments + I included the test CSV file (20MB) that I use for my tests. Few notes:\r\n \\* The client code has multiple threads, each emulating a separate Flight Client\r\n \\* There are two variants where I see slightly different memory usage characteristic:\r\n \\*\\* _do_put_with_client_reuse << one client opened at start of thread, then hammering many puts, finally closing the client; leaks appear to happen faster in this variant\r\n \\*\\* _do_put_with_client_per_request << client opens & connects, does put, then disconnects; loop like this many times; leaks appear to happen slower in this variant if there are less concurrent clients; increasing number of threads 'helps'\r\n \\* The server code handling do_put reads batch-by-batch & does nothing with the chunks\r\n\r\nAlso one interesting (but highly likely unrelated thing) that I keep noticing is that _sometimes_ FlightClient takes long time to close (like 5seconds). It happens intermittently.",
+        "created_at": "2022-05-31T18:09:28.000Z",
+        "updated_at": "2022-08-27T14:42:04.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-06-06T12:23:55.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-05-31T18:17:17.466Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16697?focusedCommentId=17544540) by Lubo Slivka (lupko):*\nForgot to mention, we are using PyArrow v8.0.0. Updated ticket."
+        },
+        {
+            "created_at": "2022-06-01T11:15:31.279Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16697?focusedCommentId=17544820) by Lubo Slivka (lupko):*\nHello,\r\n\r\nI'm doing some more research. Out of curiosity, I have also tried the DoGet. Server holds single table and multiple clients (separate threads in the same process) run repeated DoGet, each with its own FlightClient that stays connected. They throw batches that they read away.\r\n\r\nIn this scenario, the server memory footprint stays constant.\r\n\r\nOn the receiver side of things, the memory usage keeps on growing (although not as rapidly as on the server during DoPut). What is interesting, the memory footprint stays nearly the same even after all the clients get closed.\r\n\r\n--L"
+        },
+        {
+            "created_at": "2022-06-01T15:59:34.950Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16697?focusedCommentId=17544990) by David Li (lidavidm):*\nThanks for the notes, I'll try to investigate this soon but likely it won't be this week"
+        },
+        {
+            "created_at": "2022-06-01T16:12:08.621Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16697?focusedCommentId=17544999) by Lubo Slivka (lupko):*\nThanks `[~lidavidm]` \u00a0 and no problemo. I'm digging around the Arrow codebase, trying my own hand at this but since my experience in the area is limited it goes slow and I do not give myself high chances of success :)\u00a0\r\n\r\nWas poking around naively, seeing some potential for leaks in PeekableFlightDataReader / GrpcBuffer in combination with grpc not cleaning up after requests. So added some constructor/destructor tracing but all looks good on that front.\u00a0\r\n\r\nI have few more ideas that I'm going to investigate but its likely that i will hit the wall soon.\u00a0"
+        },
+        {
+            "created_at": "2022-06-03T20:43:26.353Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16697?focusedCommentId=17547025) by David Li (lidavidm):*\nWith the reproducer, what I observe is that memory usage goes up slowly, but stabilizes. (For me, it starts around 80 MB and ends around 700 MB.) A second run of the client bumps up the memory a bit, but it stays around that baseline. \r\n\r\nFurthermore, if I attach to the process and call `malloc_trim`, RSS drops to about 200 MB (though not all the way to what it was at startup). If I run the client again, memory goes back up (to about 500 MB). Another malloc_trim brings the memory back down (though to a slightly higher point than before).\r\n\r\nSo this seems to be _primarily_ a matter of the allocator. (Maybe there is still a leak, but it seems to be much more minor.)"
+        },
+        {
+            "created_at": "2022-06-05T18:44:19.279Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16697?focusedCommentId=17550237) by Lubo Slivka (lupko):*\nhello `[~lidavidm]` \u00a0 thanks for looking into this. I was oblivious to the allocator behavior and unaware of the malloc trim so went down the leak rabbit hole. With this new info, I think I can move forward and follow existing sources on this topic.\r\n\r\nSeems to me that this is about tuning the malloc behavior ([https://www.gnu.org/software/libc/manual/html_node/Memory-Allocation-Tunables.html) ](https://www.gnu.org/software/libc/manual/html_node/Memory-Allocation-Tunables.html))and perhaps if needed also triggering malloc trim.\r\n\r\n\u2014\r\n\r\nI would like to expand on the behavior that you mentioned that the RSS usage stabilizes at some point: what I see is the point where RSS stabilizes is a function of number of concurrent clients.\u00a0 So let's say with 64 concurrent clients, the high watermark goes up (4GB no problem, running with 64 clients for longer, i was able to surpass 10GB).\r\n\r\nPerhaps some gRPC behavior + overhead combines with malloc all contribute into how high the memory usage can climb?"
+        },
+        {
+            "created_at": "2022-06-05T18:52:55.333Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16697?focusedCommentId=17550238) by David Li (lidavidm):*\n> So let's say with 64 concurrent clients, the high watermark goes up (4GB no problem, running with 64 clients for longer, i was able to surpass 10GB).\n> \n> Perhaps some gRPC behavior + overhead combines with malloc all contribute into how high the memory usage can climb?\r\nInteresting. I didn't dig deep enough myself but it could certainly be gRPC behavior there. That would also explain the asymmetry between DoPut (server) and DoGet (client). If you see unexpected behavior I can dig further into that. I'm not sure off the top of my head how gRPC manages allocations and I wouldn't be surprised if it did its own allocation and/or buffering. I wonder if, on the server, shutting down and restarting the server (and maybe calling `malloc_trim` in between) might reduce the high water mark (in which case it would probably explain the rest of the allocated memory). For instance I believe there is an unbounded thread pool used by default and I'm not sure if this thread pool ever shrinks.\r\n\r\nOn the client side: AIUI, gRPC maintains some global state, and I'm not sure all of it gets freed without an explicit `{}grpc_shutdown{`}. (That applies to the server too, really.)"
+        },
+        {
+            "created_at": "2022-06-05T19:12:17.521Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16697?focusedCommentId=17550241) by Lubo Slivka (lupko):*\nFor completeness of this ticket, I have attached valgrind+massif output; this shows where in gRPC most of the allocations are done. massif.txt is from server handling DoPut's, massif_client.txt is client handling DoGets. They give further insight about the call paths that do the allocations, don't think they paint bullseye on any culprit or anything like that.\r\n\r\nI will proceed tomorrow with malloc tuning and workarounds and update this ticket with my findings.\r\n\r\nOne thing that makes me somewhat concerned is these 'small leaks' that you were alluding to in one of your messages. Will keep an eye on this during our longevity tests for sure."
+        },
+        {
+            "created_at": "2022-06-06T08:58:33.763Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16697?focusedCommentId=17550353) by Lubo Slivka (lupko):*\nHi,\r\n\r\nI have spent some time today fiddling about with the glibc tunables and malloc and things become much brighter.\r\n\r\nAs I understand it, malloc by default tends to create per-thread arenas; the limit on number of arenas is: \"For 32-bit systems the limit is twice the number of cores online and on 64-bit systems, it is 8 times the number of cores online.\"\r\n\r\nThis imho directly answers the 'high watermark' we contemplated above. More concurrent clients -> more threads on the server -> more arenas.\r\n\r\nThe **glibc.malloc.arena_max** tunable (or MALLOC_ARENA_MAX env var) can help to keep the high watermark low at the cost of contention during allocations.\r\n\r\n\u2014\r\n\r\nHowever, what I find is that the limiting the number of arenas is not really needed. What seems important is the **glibc.malloc.trim_threshold:** \"If this tunable is not set, the default value is set as 128 KB and the threshold is adjusted dynamically to suit the allocation patterns of the program.\".\r\n\r\nWhile sounding reasonable, this default behavior does not seem to produce expected results (even if the record batches that go over wire are 1MB large). I'm sure there is perfectly valid explanation behind it all but alas, I cannot spend more time digging into it now.\r\n\r\nSetting this threshold explicitly helps keeping the RSS down during DoPuts and after they complete brings the RSS down very close to the starting point.\u00a0\r\n\r\nSo for instance something like this goes a long way:\r\n```java\n\r\nexport GLIBC_TUNABLES=glibc.malloc.trim_threshold=524288 \n```\r\n\u2014\r\n\r\nI think this trim tuning, perhaps in combination with explicit trim triggered every once in a while is what I'll go with.\r\n\r\nThanks `[~lidavidm]` for helping out and setting me on the right track. Shall I close this ticket then?\r\n\r\n--L"
+        },
+        {
+            "created_at": "2022-06-06T11:53:09.730Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16697?focusedCommentId=17550429) by David Li (lidavidm):*\nInteresting. Thanks for sharing your findings! If you're all set we can close this now. I should find a place to start collecting pitfalls like this\u2026"
+        },
+        {
+            "created_at": "2022-06-06T12:23:55.802Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16697?focusedCommentId=17550449) by Lubo Slivka (lupko):*\nClosing. The described behavior is not a bug. It is a result of malloc allocator behavior combined with gRPC threading model."
+        },
+        {
+            "created_at": "2022-08-27T14:42:04.814Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16697?focusedCommentId=17586027) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

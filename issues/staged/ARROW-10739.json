@@ -1,0 +1,80 @@
+{
+    "issue": {
+        "title": "[Python] Pickling a sliced array serializes all the buffers",
+        "body": "***Note**: This issue was originally created as [ARROW-10739](https://issues.apache.org/jira/browse/ARROW-10739). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIf a large array is sliced, and pickled, it seems the full buffer is serialized, this leads to excessive memory usage and data transfer when using multiprocessing or dask.\r\n```java\n\r\n>>> import pyarrow as pa\r\n>>> ar = pa.array(['foo'] * 100_000)\r\n>>> ar.nbytes\r\n700004\r\n>>> import pickle\r\n>>> len(pickle.dumps(ar.slice(10, 1)))\r\n700165\r\n\r\nNumPy for instance\r\n>>> import numpy as np\r\n>>> ar_np = np.array(ar)\r\n>>> ar_np\r\narray(['foo', 'foo', 'foo', ..., 'foo', 'foo', 'foo'], dtype=object)\r\n>>> import pickle\r\n>>> len(pickle.dumps(ar_np[10:11]))\r\n165\n```\r\nI think this makes sense if you know arrow, but kind of unexpected as a user.\r\n\r\nIs there a workaround for this? For instance copy an arrow array to get rid of the offset, and trim the buffers?",
+        "created_at": "2020-11-25T20:15:54.000Z",
+        "updated_at": "2022-10-06T09:07:43.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-11-25T20:38:09.618Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10739?focusedCommentId=17238934) by Wes McKinney (wesm):*\nWe truncate the buffers on sliced arrays when writing record batches to the IPC protocol, so the buffers should be similarly truncated in the case of pickling.\u00a0"
+        },
+        {
+            "created_at": "2020-11-26T15:08:58.727Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10739?focusedCommentId=17239312) by Maarten Breddels (maartenbreddels):*\nOk, good to know.\r\n\r\nTwo workarounds I came up with\r\n\r\n\u00a0\r\n```java\n\r\n%%timeit\r\ns = pa.serialize(ar.slice(10, 1))\r\nar2 = pa.deserialize(s.to_buffer())\r\n790 \u00b5s \u00b1 578 ns per loop (mean \u00b1 std. dev. of 7 runs, 1000 loops each)\r\n```\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n```java\n\r\nimport vaex.arrow.convert\r\n\r\n----\r\n\r\ndef trim_buffers(ar):\r\n\u00a0 \u00a0 '''\r\n\u00a0 \u00a0 >>> ar = pa.array([1, 2, 3, 4], pa.int8())\r\n\u00a0 \u00a0 >>> ar.nbytes\r\n\u00a0 \u00a0 4\r\n\u00a0 \u00a0 >>> ar.slice(2, 2) #doctest: +ELLIPSIS\r\n\u00a0 \u00a0 <pyarrow.lib.Int8Array object at 0x...>\r\n\u00a0 \u00a0 [\r\n\u00a0 \u00a0 \u00a0 3,\r\n\u00a0 \u00a0 \u00a0 4\r\n\u00a0 \u00a0 ]\r\n\u00a0 \u00a0 >>> ar.slice(2, 2).nbytes\r\n\u00a0 \u00a0 4\r\n\u00a0 \u00a0 >>> trim_buffers(ar.slice(2, 2)).nbytes\r\n\u00a0 \u00a0 2\r\n\u00a0 \u00a0 >>> trim_buffers(ar.slice(2, 2))#doctest: +ELLIPSIS\r\n\u00a0 \u00a0 <pyarrow.lib.Int8Array object at 0x...>\r\n\u00a0 \u00a0 [\r\n\u00a0 \u00a0 \u00a0 3,\r\n\u00a0 \u00a0 \u00a0 4\r\n\u00a0 \u00a0 ]\r\n\u00a0 \u00a0 '''\r\n\u00a0 \u00a0 schema = pa.schema({'x': ar.type})\r\n\u00a0 \u00a0 with pa.BufferOutputStream() as sink:\r\n\u00a0 \u00a0 \u00a0 \u00a0 with pa.ipc.new_stream(sink, schema) as writer:\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 writer.write_table(pa.table({'x': ar}))\r\n\u00a0 \u00a0 with pa.BufferReader(sink.getvalue()) as source:\r\n\u00a0 \u00a0 \u00a0 \u00a0 with pa.ipc.open_stream(source) as reader:\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 table = reader.read_all()\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 assert table.num_columns == 1\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 assert table.num_rows == len(ar)\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 trimmed_ar = table.column(0)\r\n\u00a0 \u00a0 if isinstance(trimmed_ar, pa.ChunkedArray):\r\n\u00a0 \u00a0 \u00a0 \u00a0 assert len(trimmed_ar.chunks) == 1\r\n\u00a0 \u00a0 \u00a0 \u00a0 trimmed_ar = trimmed_ar.chunks[0]\r\n\r\n\r\n\u00a0 \u00a0 return trimmed_ar\r\n----\r\n\r\n%%timeit\r\nvaex.arrow.convert.trim_buffers(ar.slice(10, 1))\r\n202 \u00b5s \u00b1 2.31 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 10000 loops each)\r\n```\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-12-01T11:20:15.590Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10739?focusedCommentId=17241452) by Joris Van den Bossche (jorisvandenbossche):*\nNote that `pyarrow.serialize` is deprecated, so best not use that as a workaround"
+        },
+        {
+            "created_at": "2020-12-07T14:32:58.548Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10739?focusedCommentId=17245238) by Maarten Breddels (maartenbreddels):*\nThanks Joris!\r\n\r\nI cannot reproduce the previous timings (I guess I had an debug install without optimization), but this one seems fastest:\r\n```java\n\r\n%%timeit\r\npa.concat_arrays([ar.slice(10, 1)])\r\n2.16 \u00b5s \u00b1 9.22 ns per loop (mean \u00b1 std. dev. of 7 runs, 100000 loops each)\r\n```\r\n(vs 8 and 125 us using ipc and (de)serialize respectively)"
+        },
+        {
+            "created_at": "2021-06-22T00:29:52.833Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10739?focusedCommentId=17366917) by Wes McKinney (wesm):*\nSeems like this would be good to fix?"
+        },
+        {
+            "created_at": "2021-06-22T08:37:06.610Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10739?focusedCommentId=17367138) by Joris Van den Bossche (jorisvandenbossche):*\nThat would indeed be good.\r\n\r\nFor a moment, I naively thought this would just be adding a `SliceBuffer` call when wrapping the buffer in `_reduce_array_data` (https://github.com/apache/arrow/blob/c43fab3d621bedef15470a1be43570be2026af20/python/pyarrow/array.pxi#L597). But of course, the offset and length to slice the buffer with depends on the array type and bit width, or whether it's a bitmap, etc. \r\nIn the IPC code, the truncation is handled in the Visit methods of `RecordBatchSerializer` (eg for primitive arrays: https://github.com/apache/arrow/blob/c43fab3d621bedef15470a1be43570be2026af20/cpp/src/arrow/ipc/writer.cc#L331), and this is quite a lot of code for doing this correctly for all the different data types. Something we shouldn't start replicating in cython, I think.\r\n\r\nAre there other utilities in C++ that can be reused to do this truncation? Or could we \"just\" use the IPC serialization under the hood for pickling in Python?"
+        },
+        {
+            "created_at": "2022-05-03T20:24:28.032Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10739?focusedCommentId=17531399) by Jim Crist-Harif (jcrist):*\nWe're running into this in Dask right now when attempting to integrate Pandas `string[pyarrow]`, since pickling pyarrow string arrays ends up pickling all the data even if the result only includes a small slice. I'm willing to hack on this if no one else has the bandwidth, but upon initial inspection this looks a bit more complicated than I'd like to bite off for a new-ish arrow contribute. With some guidance on the best path forward though I could possibly get something working though? `[~jorisvandenbossche]` any further thoughts on a solution here?"
+        },
+        {
+            "created_at": "2022-07-25T08:10:12.439Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10739?focusedCommentId=17570763) by Krisztian Szucs (kszucs):*\nPostponing to 10.0 since there is no PR available at the moment."
+        },
+        {
+            "created_at": "2022-07-26T19:51:37.635Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10739?focusedCommentId=17571590) by Philipp Moritz (pcmoritz):*\nIn Ray we are also planning to work around this <https://github.com/ray-project/ray/pull/22891> \u2013 it would be wonderful to see this fixed in Arrow :)"
+        },
+        {
+            "created_at": "2022-07-26T20:23:23.673Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10739?focusedCommentId=17571603) by Clark Zinzow (clarkzinzow):*\nHey folks, I'm the author of the Ray PR that `[~pcmoritz]` linked to, which essentially ports Arrow's buffer truncation in the IPC serialization path to Python as a custom pickle serializer. I'd be happy to help push on getting this fixed upstream for Arrow 10.0.0.\r\n\r\nFirst, is there any in-progress work by `[~jcrist]` or others?\r\n\r\nIf not, I could take this on in the next month or so; the two implementation routes that I've thought of when looking at the IPC serialization code (these are basically the same routes that `[~jorisvandenbossche]` pointed out a year ago) are:\r\n1. Refactor the IPC writer's per-type buffer truncation logic into utilities that can be shared by the IPC serialization path and the pickle serialization path.\n1. Directly use the Arrow IPC format in its pickle serialization, where the pickle reducer is a light wrapper around the IPC serialization and deserialization hooks.\n   \n   Do either of these routes sound appealing? (2) has the added benefits of consolidating the serialization schemes on the IPC format and pushing all expensive serialization code into C++ land, but is a larger change and would involve otherwise-unnecessary wrapping of plain Arrow (chunked) arrays in record batches in order to match the IPC format, so maybe (1) is the better option."
+        },
+        {
+            "created_at": "2022-08-06T01:49:00.967Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10739?focusedCommentId=17576108) by Clark Zinzow (clarkzinzow):*\nPing on this, `[~amol-]` `[~jcrist]` are either of y'all actively working on this for Arrow 10.0.0? And if not, does option (1) that I gave in my previous comment sound like a good path forward?"
+        },
+        {
+            "created_at": "2022-08-09T16:40:09.075Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10739?focusedCommentId=17577524) by Joris Van den Bossche (jorisvandenbossche):*\n`[~clarkzinzow]` sorry for the slow reply, several of us were on holidays. As far as I know, nobody is actively working on this, so a PR is certainly welcome! I think option (1) is a good path forward.\r\n\r\n"
+        },
+        {
+            "created_at": "2022-08-10T19:27:31.463Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10739?focusedCommentId=17578134) by Clark Zinzow (clarkzinzow):*\n`[~jorisvandenbossche]` No worries! And sounds good, I should be able to start working on this in a few weeks, I will update this thread once I've started working on it and again once I have a PR out."
+        },
+        {
+            "created_at": "2022-08-11T18:30:48.553Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10739?focusedCommentId=17578601) by Joris Van den Bossche (jorisvandenbossche):*\nThat sounds good!"
+        },
+        {
+            "created_at": "2022-09-23T12:45:54.199Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10739?focusedCommentId=17608730) by Joris Van den Bossche (jorisvandenbossche):*\n`[~clarkzinzow]` were you able to make some progress on this?\r\n\r\n(I am removing the \"In progress\" label, just to make it a bit easier to keep track of this as open issue in JIRA, but can change that again once there is an open PR)"
+        },
+        {
+            "created_at": "2022-09-28T17:01:27.558Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10739?focusedCommentId=17610662) by Clark Zinzow (clarkzinzow):*\n`[~jorisvandenbossche]` I did a quick implementation of (2), where the Arrow IPC format is used under-the-hood for pickle serialization, and confirmed that the buffer truncation works as expected. Although this is a far simpler solution than (1), the overhead of the `RecordBatch` wrapper adds ~230 extra bytes to the pickled payload (per `Array` chunk) compared to current Arrow master, which can be pretty bad for the many-chunk and/or many-column case (order of magnitude larger serialized payloads). We could sidestep this issue by having `{}Table{`}, `{}RecordBatch{`}, and `ChunkedArray` port their `\\_\\_reduce\\_\\_`\u00a0to the Arrow IPC serialization as well, which should avoid this many-column and many-chunk blow-up, but there will still be the baseline ~230 byte bloat for `ChunkedArray` and `Array` that we might find untenable.\r\n\r\nI can try to get a PR up for (2) either today or tomorrow while I start working on (1) in the background. (1) is going to have a much larger Arrow code impact + we'll continue having two serialization paths to maintain, but it shouldn't result in any serialized payload bloat."
+        }
+    ]
+}

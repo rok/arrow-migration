@@ -1,0 +1,52 @@
+{
+    "issue": {
+        "title": "[C++] Create plugging/coalescing filesystem wrapper",
+        "body": "***Note**: This issue was originally created as [ARROW-14524](https://issues.apache.org/jira/browse/ARROW-14524). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe have I/O optimizations scattered across some of our readers.  The most prominent example is prebuffering in the parquet reader.  However, these techniques are rather general purpose and will apply in IPC (see ARROW-14229) as well as other readers (e.g. Orc, maybe even CSV)\r\n\r\nThis filesystem wrapper will not generally be necessary for local filesystems as the OS' filesystem schedulers are sufficient.  Most of these we can accomplish by simply aiming for some configurable degree of parallelism (e.g. if there are already X requests in progress then start batching).\r\n\r\nGoals:\r\n\r\n \\* Batch consecutive small requests into fewer large requests\r\n   \\* We could plug (configurably) small holes in read ranges as well\r\n \\* Potentially split large requests into concurrent small requests\r\n \\* Support for the RandomAccessFile::WillNeed command by prefetching ranges",
+        "created_at": "2021-10-29T23:00:46.000Z",
+        "updated_at": "2022-07-12T14:04:30.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-10-29T23:02:02.599Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14524?focusedCommentId=17436200) by Weston Pace (westonpace):*\n`[~lidavidm]` `[~apitrou]` thoughts? "
+        },
+        {
+            "created_at": "2021-10-29T23:10:00.222Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14524?focusedCommentId=17436202) by David Li (lidavidm):*\nThis would be less effort, but wouldn't be technically quite as optimal compared to taking advantage of what we know about the file format. For instance IPC is like Parquet and we should be able to know all the ranges to be read up front. What's proposed here would possibly help for CSV though, and I have no idea for ORC.\r\n\r\nThat said, we could extend the interface of RandomAccessFile or extend the contract of WillNeed to allow for both such use cases in the same interface.\r\n\r\nI also think we would need to do some refactoring in general to take advantage of this anyways - else if we just start batching requests, we might unintentionally block something (or conversely, we won't ever have anything to batch since the reader is just reading one block at a time).\r\n\r\nOne thing that we should do regardless though is update the ReadRangeCache to be able to discard ranges to save on memory, particularly for the use case we have in Datasets where we're just sequentially scanning (a subset of) a file."
+        },
+        {
+            "created_at": "2021-10-29T23:54:48.280Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14524?focusedCommentId=17436206) by Weston Pace (westonpace):*\nI agree work will still be needed on the readers side.  We will need to add something like ReadRangeCache::Cache to RandomAccessFile (which should be a natural extension of WillNeed).\r\n\r\n> else if we just start batching requests, we might unintentionally block something (or conversely, we won't ever have anything to batch since the reader is just reading one block at a time).\r\n\r\nCorrect, if a reader is using synchronous I/O then they probably wouldn't get any benefit.  Because they won't call Read(10, 10) until the call to Read(0, 10) has finished and so nothing will ever have a chance to batch up.  Readers would either need to do two passes (first, a cache pass that will call WillNeed/Cache on all required ranges.  Then, a read pass that actual does the reads) or they would need to do asynchronous readahead (similar to the way the CSV reader operates) so that they call ReadAsync(0, 10) and then continue on, calling ReadAsync(10, 10) before the first call finishes."
+        },
+        {
+            "created_at": "2021-10-29T23:58:34.170Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14524?focusedCommentId=17436209) by Weston Pace (westonpace):*\nOr, for column reads in the IPC reader, it might be some hybrid approach.  For example:\r\n\r\nFor each batch:\r\n1. Call read and synchronously wait to get the metadata\r\n2. For each column requested make a call to Cache\r\n3. For each column requested make a call to Read"
+        },
+        {
+            "created_at": "2021-10-30T09:57:31.663Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14524?focusedCommentId=17436275) by Antoine Pitrou (apitrou):*\nI think I lack context on what is proposed specifically here. ReadRangeCache and WillNeed already exist, so what more is desired and why?"
+        },
+        {
+            "created_at": "2021-11-01T18:40:24.040Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14524?focusedCommentId=17436976) by Weston Pace (westonpace):*\nReadRangeCache works well in the case where you plan out all your reads ahead of time but this was intended for something more automatic.  As long as the filesystem user is making concurrent reads to the same file then the reads are coalesced in the same fashion as ReadRangeCache (whether the calling user realizes they can do this or not).\r\n\r\nGiven David's feedback above I've been thinking through what this means for IPC and I agree, this probably isn't the way to go.  In order to generate concurrent reads to the same file you're probably doing 90% of the work to use ReadRangeCache anyways so we can just use it directly.  I'm going to prototype something and then I'll close this if my prototype doesn't need it."
+        },
+        {
+            "created_at": "2021-11-02T11:25:54.172Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14524?focusedCommentId=17437306) by Weston Pace (westonpace):*\nSo I did a little bit of thinking through this today and I think there are merits to both approaches.\r\n\r\n1. Pushing the scheduling into the filesystem\r\n\r\nThis would basically mean a filesystem wrapper with a read method like...\r\n\r\n```python\n\r\ndef read_async(self, pos, off):\r\n  if self.num_active_readers < self.max_concurrent_readers:\r\n    return self.do_read(pos, off)\r\n  else\r\n# adds the range to a queue of ranges to read (possibly merging at this point)\r\n# returns a future that will finish when the item pops off the queue and is processed\r\n    return self.schedule_read(pos, off)\r\n```\r\n\r\n \\* + One spot fixes the problem for all formats\r\n \\* + Ability to coalesce across workflows (I doubt this will ever be needed)\r\n \\* - Higher latency because first few requests need to \"prime the pump\" (e.g. the reads will be immediately issued since there is an idle spot and no batching will happen)\r\n\r\n2. Keeping scheduling in the readers\r\n\r\nThis means the file readers need a 2-step read where the first step simply determines the ranges to read:\r\n\r\n```python\n\r\ndef read_row_group(self, i):\r\n  ranges = self.compute_ranges(i)\r\n  self.file.will_need(ranges)\r\n  return self.do_read_row_group(i)\r\n```\r\n\r\n \\* + Lower latency because readers know which reads are related\r\n \\* - Requires a 2-pass algorithm, first compute ranges (e.g. parquet::ParquetFileReader::PreBuffer) then issue reads\r\n\r\nAt the moment I'm proceeding with the status quo and prototyping adding a 2-step read to the IPC reader (via a ipc::RecordBatchFileReader::WillNeedBatches method)"
+        },
+        {
+            "created_at": "2021-11-02T11:27:59.195Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14524?focusedCommentId=17437309) by Weston Pace (westonpace):*\nNote, there is already a 2-step read in the GetRecordBatchGenerator version of the IPC reader.  It's only the synchronous reader that is missing the ability to pre-buffer."
+        },
+        {
+            "created_at": "2022-07-12T14:04:30.182Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14524?focusedCommentId=17565662) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

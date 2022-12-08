@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[JS] Reorganize imports and exports to be more friendly to ESM tree-shaking",
+        "body": "***Note**: This issue was originally created as [ARROW-10255](https://issues.apache.org/jira/browse/ARROW-10255). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nPresently most of our public classes can't be easily [tree-shaken](https://webpack.js.org/guides/tree-shaking/) by library consumers. This is a problem for libraries that only need to use parts of Arrow.\r\n\r\nFor example, the vis.gl projects have an integration test that imports three of our simpler classes and tests the resulting bundle size:\r\n\r\n```javascript\n\r\nimport {Schema, Field, Float32} from 'apache-arrow';\r\n\r\n// | Bundle Size        | Compressed     \r\n// | 202KB (207112) KB  | 45KB (46618) KB\r\n```\r\n\r\nWe can help solve this with the following changes:\r\n- Add \"sideEffects\": false to our ESM package.json\n- Reorganize our imports to only include what's needed\n- Eliminate or move some static/member methods to standalone exported functions\n- Wrap the utf8 util's node Buffer detection in eval so Webpack doesn't compile in its own Buffer shim\n- Removing flatbuffers namespaces from generated TS because these defeat Webpack's tree-shaking ability\n  \n  Candidate functions for removal/moving to standalone functions:\n- Schema.new, Schema.from, Schema.prototype.compareTo\n- Field.prototype.compareTo\n- Type.prototype.compareTo\n- Table.new, Table.from\n- Column.new\n- Vector.new, Vector.from\n- RecordBatchReader.from\n  \n  After applying a few of the above changes to the Schema and flatbuffers files, I was able to reduce the vis.gl's import size 90%:\n  ```javascript\n  \n  // Bundle Size      | Compressed\n  // 24KB (24942) KB  | 6KB (6154) KB\n  ```",
+        "created_at": "2020-10-09T21:43:38.000Z",
+        "updated_at": "2021-04-28T00:38:52.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: JavaScript",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-04-08T16:02:44.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-01-30T19:38:29.109Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10255?focusedCommentId=17275702) by Brian Hulette (bhulette):*\n[~paul.e.taylor] should we have a deprecation cycle for the removed/moved functions to avoid suddenly breaking any users?"
+        },
+        {
+            "created_at": "2021-02-03T03:41:14.350Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10255?focusedCommentId=17277659) by Paul Taylor (paul.e.taylor):*\n`[~bhulette]` \u00a0I vote no on the current PR for 4 reasons: \r\n1. Arrow releases have moved to releases major-version-revs only, so npm won't upgrade libs/people by default\n1. The [very minor changes](https://github.com/apache/arrow/pull/8418/files#diff-281075682d7444bc1be962b47cff16401e18f1b9bafee2b58557a3f73fb54507) we had to make to our own tests makes me think this shouldn't be a huge pain to upgrade for users (not to mention Field and Schema aren't the most common APIs to interact with directly)\n1. These changes are needed by [vis.gl](https://github.com/visgl) to import ArrowJS in [loaders.gl](https://github.com/visgl/loaders.gl). Currently they're reimplementing the bits of Schema/Field/DataType they need because importing ours adds ~250k (~24k minified) to their bundle, which is over their size budget.\n1. Adding deprecation warnings will add to the size of the lib, and likely in ways that can't be tree-shaken. In Python size on-disk isn't an issue, so people add deprecation warnings all the time, but without extensive tooling support it's difficult to do/guide users how to do in JS.\n"
+        },
+        {
+            "created_at": "2021-04-08T16:02:44.729Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10255?focusedCommentId=17317297) by Krisztian Szucs (kszucs):*\nIssue resolved by pull request 8418\n<https://github.com/apache/arrow/pull/8418>"
+        }
+    ]
+}

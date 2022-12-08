@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "[Python] combine_chunks fails on column of table, but does not error on table itself",
+        "body": "***Note**: This issue was originally created as [ARROW-13150](https://issues.apache.org/jira/browse/ARROW-13150). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\ncombine_chunks fails on column of table, but does not error on table itself (but creates 3 chunks instead).\r\n\r\nIs there a reason why they are not handled the same?\r\n```python\n\r\nIn [90]: pa.__version__\r\nOut[90]: '4.0.0'\r\n\r\n# Get shape\r\nIn [85]: pa_table.shape\r\nOut[85]: (102753589, 1)In [86]: pa_col1_array = pa_table.column(0)\r\n\r\n# Get number of chunks\r\nIn [87]: pa_col1_array.num_chunks\r\nOut[87]: 4404\r\n\r\n# Combining chunks on the pyarrow table with one column works.\r\nIn [88]: pa_table.combine_chunks()\r\nOut[88]: \r\npyarrow.Table\r\n# id=TEW__014e25__c14e1d__Multiome_RNA_brain_10x_no_perm: string\r\n\r\n# Combining chunks on the column itself does not work.\r\nIn [89]: pa_col1_array.combine_chunks()\r\n---------------------------------------------------------------------------\r\nArrowInvalid                              Traceback (most recent call last)\r\n<ipython-input-89-fdd0d0056a8e> in <module>\r\n----> 1 pa_col1_array.combine_chunks()\r\n/software/miniconda3/envs/cisTopic/lib/python3.7/site-packages/pyarrow/table.pxi in pyarrow.lib.ChunkedArray.combine_chunks()\r\n/software/miniconda3/envs/cisTopic/lib/python3.7/site-packages/pyarrow/array.pxi in pyarrow.lib.concat_arrays()\r\n/software/miniconda3/envs/cisTopic/lib/python3.7/site-packages/pyarrow/error.pxi in pyarrow.lib.pyarrow_internal_check_status()\r\n/software/miniconda3/envs/cisTopic/lib/python3.7/site-packages/pyarrow/error.pxi in pyarrow.lib.check_status()\r\nArrowInvalid: offset overflow while concatenating arrays\r\n\r\n# Assign combine chunks table to new tabled.\r\nIn [91]: pa_table_combined = pa_table.combine_chunks()\r\n\r\n# Get first column\r\nIn [92]: pa_col1_array_from_pa_table_combined = pa_table_combined.column(0)\r\n\r\n# Get number of chunks\r\nIn [93]: pa_col1_array_from_pa_table_combined.num_chunks\r\nOut[93]: 3\r\n\r\n# Try to combine column 1 again.\r\nIn [94]: pa_col1_array_from_pa_table_combined.combine_chunks()\r\n---------------------------------------------------------------------------\r\nArrowInvalid                              Traceback (most recent call last)\r\n<ipython-input-94-e2e323e6519f> in <module>\r\n----> 1 pa_col1_array_from_pa_table_combined.combine_chunks()\r\n/software/miniconda3/envs/cisTopic/lib/python3.7/site-packages/pyarrow/table.pxi in pyarrow.lib.ChunkedArray.combine_chunks()\r\n/software/miniconda3/envs/cisTopic/lib/python3.7/site-packages/pyarrow/array.pxi in pyarrow.lib.concat_arrays()\r\n/software/miniconda3/envs/cisTopic/lib/python3.7/site-packages/pyarrow/error.pxi in pyarrow.lib.pyarrow_internal_check_status()\r\n/software/miniconda3/envs/cisTopic/lib/python3.7/site-packages/pyarrow/error.pxi in pyarrow.lib.check_status()\r\nArrowInvalid: offset overflow while concatenating arrays\r\n\r\n# Get sizes of each chunk.\r\nIn [106]: [chunk.nbytes for chunk in pa_col1_array_from_pa_table_combined.chunks]\r\nOut[106]: [2341650593, 2342925682, 241257842]\r\n```",
+        "created_at": "2021-06-23T16:21:20.000Z",
+        "updated_at": "2022-09-23T13:57:39.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-24T14:16:18.398Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13150?focusedCommentId=17368877) by Joris Van den Bossche (jorisvandenbossche):*\nBoth are implemented differently. The Table version is backed by the C++ `arrow::Table::CombineChunks` (https://github.com/apache/arrow/blob/998a2a1668ea57a49d85fbb38f7f0e7eb94c29db/cpp/src/arrow/table.cc#L532-L568), which has specific handling to allow multiple chunks in the output to avoid overflow errors.\r\n\r\nThe ChunkedArray version is backed by `pa.concat_arrays`, which uses the C++ `arrow::Concatenate` function to concatenate arrays (https://github.com/apache/arrow/blob/998a2a1668ea57a49d85fbb38f7f0e7eb94c29db/cpp/src/arrow/array/concatenate.h#L28-L36), which doesn't have this handling (`CombineChunks` is actually calling `Concatenate` on each column and handling the possible overflow).\r\n\r\nNow, that's the explanation of the difference, but the question is of course if we want to unify that behaviour. Or for example have a keyword to indicate that multiple chunks is also fine for the Array case."
+        },
+        {
+            "created_at": "2021-06-24T14:56:18.937Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13150?focusedCommentId=17368907) by David Li (lidavidm):*\nI think ARROW-7245 and possibly ARROW-9003 would be relevant."
+        },
+        {
+            "created_at": "2021-06-24T15:27:25.559Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13150?focusedCommentId=17368929) by Gert Hulselmans (ghuls):*\nhttps://issues.apache.org/jira/browse/ARROW-7245 indeed would solve this issue.\r\n\r\nIt is actually the solution that will be used in polars for handling this problem:\r\nhttps://github.com/pola-rs/polars/issues/862"
+        }
+    ]
+}

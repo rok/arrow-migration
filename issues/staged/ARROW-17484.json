@@ -1,0 +1,36 @@
+{
+    "issue": {
+        "title": "[C++] Substrait to Arrow Aggregate doesn't take the provided Output Type for aggregates",
+        "body": "***Note**: This issue was originally created as [ARROW-17484](https://issues.apache.org/jira/browse/ARROW-17484). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe current Substrait to Aggregate deserializer doesn't take the plan provided output type as the output type of the execution plan.",
+        "created_at": "2022-08-20T02:59:53.000Z",
+        "updated_at": "2022-09-19T17:19:44.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-08-20T03:00:09.978Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17484?focusedCommentId=17582109) by Vibhatha Lakmal Abeykoon (vibhatha):*\ncc `[~westonpace]`"
+        },
+        {
+            "created_at": "2022-08-20T03:02:25.852Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17484?focusedCommentId=17582110) by Vibhatha Lakmal Abeykoon (vibhatha):*\n\r\n```json\n\r\n\"relations\": [{\r\n      \"rel\": {\r\n        \"aggregate\": {\r\n          \"common\": {\r\n          \"emit\": {\r\n            \"outputMapping\": [0]\r\n          }\r\n        },\r\n          \"input\": {\r\n            \"read\": {\r\n              \"base_schema\": {\r\n                \"names\": [\"A\", \"B\", \"C\"],\r\n                \"struct\": {\r\n                  \"types\": [{\r\n                    \"i32\": {}\r\n                  }, {\r\n                    \"i32\": {}\r\n                  }, {\r\n                    \"i32\": {}\r\n                  }]\r\n                }\r\n              },\r\n              \"local_files\": {\r\n                \"items\": [\r\n                  {\r\n                    \"uri_file\": \")\" +\r\n                               substrait_file_uri +\r\n                               R\"(\",\r\n                    \"parquet\": {}\r\n                  }\r\n                ]\r\n              }\r\n            }\r\n          },\r\n          \"groupings\": [{\r\n            \"groupingExpressions\": [{\r\n              \"selection\": {\r\n                \"directReference\": {\r\n                  \"structField\": {\r\n                    \"field\": 0\r\n                  }\r\n                }\r\n              }\r\n            }]\r\n          }],\r\n          \"measures\": [{\r\n            \"measure\": {\r\n              \"functionReference\": 0,\r\n              \"arguments\": [{\r\n                \"value\": {\r\n                  \"selection\": {\r\n                    \"directReference\": {\r\n                      \"structField\": {\r\n                        \"field\": 2\r\n                      }\r\n                    }\r\n                  }\r\n                }\r\n            }],\r\n              \"sorts\": [],\r\n              \"phase\": \"AGGREGATION_PHASE_INITIAL_TO_RESULT\",\r\n              \"invocation\": \"AGGREGATION_INVOCATION_ALL\",\r\n              \"outputType\": {\r\n                \"i32\": {}\r\n              }\r\n            }\r\n          }]\r\n        }\r\n      }\r\n    }],\r\n    \"extensionUris\": [{\r\n      \"extension_uri_anchor\": 0,\r\n      \"uri\": \"https://github.com/substrait-io/substrait/blob/main/extensions/functions_arithmetic.yaml\"\r\n    }],\r\n    \"extensions\": [{\r\n      \"extension_function\": {\r\n        \"extension_uri_reference\": 0,\r\n        \"function_anchor\": 0,\r\n        \"name\": \"sum\"\r\n      }\r\n    }],\r\n```\r\n\r\nFor instance, here, if we debug and check the aggregate function's return type, it mentions that _i32_ is the _output_type_ , but at the end of the execution the return type is _i64_. This is not the expected behavior."
+        },
+        {
+            "created_at": "2022-08-22T14:49:55.875Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17484?focusedCommentId=17583015) by Weston Pace (westonpace):*\nThis is an invalid plan.  The \"sum\" function is defined in Substrait as follows:\r\n\r\n```\n\r\n  - name: \"sum\"\r\n    description: Sum a set of values. The sum of zero elements yields null.\r\n    impls:\r\n      - args:\r\n          - options: [ SILENT, SATURATE, ERROR ]\r\n            required: false\r\n          - value: i8\r\n        nullability: DECLARED_OUTPUT\r\n        decomposable: MANY\r\n        intermediate: i64?\r\n        return: i64?\r\n```\r\n\r\nThe output type is always `i64?`.  It is not legal in Substrait to have two implementations that differ only by return type.  This is very similar to function overloading which has a similar constraint.  So it would be illegal to have an implementation that accepted `i32` and returns `i32`.  So this plan that you've created can never be legal.\r\n\r\nAs a consequence, the output type can always be calculated from the input types and the function name.  So the `outputType` in the plan is purely informational and the consumer is free to ignore it."
+        },
+        {
+            "created_at": "2022-09-17T00:36:44.155Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17484?focusedCommentId=17606022) by Vibhatha Lakmal Abeykoon (vibhatha):*\n`[~westonpace]` \u00a0Rest of the aggregate functions respect the fact that we don't do any type promotions. But this definition is a bit old one and definitely this didn't caught up with that discussion. Please correct me if I am wrong `[~jvanstraten]`.\u00a0"
+        },
+        {
+            "created_at": "2022-09-19T17:19:22.203Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17484?focusedCommentId=17606681) by Weston Pace (westonpace):*\nAggregate functions typically have very small outputs compared to the input (e.g. the sum of 1 million rows is a single value) and so it very often makes sense for the output type to be larger than the input type.\r\n\r\nOne could argue that you can simply cast beforehand.  However, you would have to cast the entire array of inputs (e.g. the 1 million rows) and this could be rather costly.\r\n\r\nFinally, we are mirroring SQL here (which is not, by itself, necessarily a good thing, but it is worth noting).  From the [postgres docs](https://www.postgresql.org/docs/8.2/functions-aggregate.html) for sum the return type is:\r\n\r\n> bigint for smallint or int arguments, numeric for bigint arguments, double precision for floating-point arguments, otherwise the same as the argument data type\r\n\r\n\r\n"
+        }
+    ]
+}

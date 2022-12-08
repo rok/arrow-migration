@@ -1,0 +1,65 @@
+{
+    "issue": {
+        "title": "[Python] The new Dataset API will not work with files on Azure Blob",
+        "body": "***Note**: This issue was originally created as [ARROW-9514](https://issues.apache.org/jira/browse/ARROW-9514). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI tried using\u00a0 pyarrow.dataset and\u00a0pq.ParquetDataset(use_legacy_system=False) and my connection to Azure Blob fails.\u00a0\r\n\r\nI know the documentation says only hdfs and s3 are implemented, but I have been using Azure Blob by using fsspec as the filesystem when reading and writing parquet files/datasets with Pyarrow (with use_legacy_system=True). Also, Dask works with storage_options.\r\n\r\nI am hoping that Azure Blob will be supported because I'd really like to try out the new row filtering and non-hive partitioning schemes.\r\n\r\nThis is what I use for the filesystem when using read_table() or write_to_dataset():\r\n\r\n```Java\n\r\nfs = fsspec.filesystem(protocol='abfs', \r\n account_name=base.login, \r\n account_key=base.password)\r\n```\r\n\u00a0\r\nIt seems like the class _ParquetDatasetV2 has a section that the original ParquetDataset does not have. Perhaps this is why the fsspec filesystem fails when I turn off the legacy system?\r\n\r\nLine 1423 in\u00a0arrow/python/pyarrow/parquet.py:\r\n\r\nif filesystem is not None:\r\n\u00a0 \u00a0 filesystem = pyarrow.fs._ensure_filesystem(filesystem, use_mmap=memory_map)\u00a0\r\n\r\n\r\nEDIT -\r\n\r\nI got this to work using fsspec on **single** files on Azure Blob:\r\n\r\n```Java\n\r\nimport pyarrow.dataset as ds\r\nimport fsspec\r\n\r\nfs = fsspec.filesystem(protocol='abfs', \r\n                       account_name=login, \r\n                       account_key=password)\r\n\r\ndataset = ds.dataset(\"abfs://analytics/test/test..parquet\", format=\"parquet\", filesystem=fs)\r\ndataset.to_table(columns=['ticket_id', 'event_value'], filter=ds.field('event_value') == 'closed').to_pandas().drop_duplicates('ticket_id')\r\n```\r\n\r\n\r\nWhen I try to use this on a partitioned file I made using write_to_dataset, I run into an error though. I tried this with the same code as above and also with the partitioning='hive' option.\r\n\r\n\r\n```Java\n\r\nTypeError                                 Traceback (most recent call last)\r\n<ipython-input-174-f44e707aa83e> in <module>\r\n----> 1 dataset = ds.dataset(\"abfs://analytics/test/tickets-audits/\", format=\"parquet\", filesystem=fs, partitioning=\"hive\", )\r\n\r\n~/.local/lib/python3.7/site-packages/pyarrow/dataset.py in dataset(source, schema, format, filesystem, partitioning, partition_base_dir, exclude_invalid_files, ignore_prefixes)\r\n    665     # TODO(kszucs): support InMemoryDataset for a table input\r\n    666     if _is_path_like(source):\r\n--> 667         return _filesystem_dataset(source, **kwargs)\r\n    668     elif isinstance(source, (tuple, list)):\r\n    669         if all(_is_path_like(elem) for elem in source):\r\n\r\n~/.local/lib/python3.7/site-packages/pyarrow/dataset.py in _filesystem_dataset(source, schema, filesystem, partitioning, format, partition_base_dir, exclude_invalid_files, selector_ignore_prefixes)\r\n    430         selector_ignore_prefixes=selector_ignore_prefixes\r\n    431     )\r\n--> 432     factory = FileSystemDatasetFactory(fs, paths_or_selector, format, options)\r\n    433 \r\n    434     return factory.finish(schema)\r\n\r\n~/.local/lib/python3.7/site-packages/pyarrow/_dataset.pyx in pyarrow._dataset.FileSystemDatasetFactory.__init__()\r\n\r\n~/.local/lib/python3.7/site-packages/pyarrow/error.pxi in pyarrow.lib.pyarrow_internal_check_status()\r\n\r\n~/.local/lib/python3.7/site-packages/pyarrow/_fs.pyx in pyarrow._fs._cb_get_file_info_selector()\r\n\r\n~/.local/lib/python3.7/site-packages/pyarrow/fs.py in get_file_info_selector(self, selector)\r\n    159         infos = []\r\n    160         selected_files = self.fs.find(\r\n--> 161             selector.base_dir, maxdepth=maxdepth, withdirs=True, detail=True\r\n    162         )\r\n    163         for path, info in selected_files.items():\r\n\r\n/opt/conda/lib/python3.7/site-packages/fsspec/spec.py in find(self, path, maxdepth, withdirs, **kwargs)\r\n    369         # TODO: allow equivalent of -name parameter\r\n    370         out = set()\r\n--> 371         for path, dirs, files in self.walk(path, maxdepth, **kwargs):\r\n    372             if withdirs:\r\n    373                 files += dirs\r\n\r\n/opt/conda/lib/python3.7/site-packages/fsspec/spec.py in walk(self, path, maxdepth, **kwargs)\r\n    324 \r\n    325         try:\r\n--> 326             listing = self.ls(path, detail=True, **kwargs)\r\n    327         except (FileNotFoundError, IOError):\r\n    328             return [], [], []\r\n\r\nTypeError: ls() got multiple values for keyword argument 'detail'\r\n\u00a0\n```",
+        "created_at": "2020-07-17T15:49:11.000Z",
+        "updated_at": "2020-08-06T07:20:32.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-08-05T20:41:55.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-08-04T12:38:07.545Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9514?focusedCommentId=17170771) by Joris Van den Bossche (jorisvandenbossche):*\n`[~ldacey]` thanks for trying this out and for the issue report!\r\n\r\nSo when using the Dataset API, Azure is not yet supported _natively_ (see ARROW-2034, ARROW-9611). But in theory it should indeed be supported through the fsspec wrapper. However, it seems you ran into a bug (we don't test the fsspec integration with Azure, only some basic tests with local and S3).\r\n\r\nIt might also be a bug in the fsspec implementation, though. Because the fsspec docs indicate that the `find` method supports the kwargs of `ls`, which has a `detail` method. But in practice it doesn't seem to be correctly passed through, resulting in a duplicate `detail` keyword (based on the error traceback). But maybe the docs are wrong instead.\r\n\r\ncc `[~mdurant]`\r\n"
+        },
+        {
+            "created_at": "2020-08-04T12:52:26.157Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9514?focusedCommentId=17170779) by Martin Durant (mdurant):*\nFix appreciated :)"
+        },
+        {
+            "created_at": "2020-08-05T15:16:07.050Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9514?focusedCommentId=17171566) by Lance Dacey (ldacey):*\nDoes this seem like an issue with pyarrow or fsspec at this point?"
+        },
+        {
+            "created_at": "2020-08-05T15:30:36.537Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9514?focusedCommentId=17171570) by Martin Durant (mdurant):*\nNot sure, probably fsspec. The \"details\" kwarg is explicitly removed here (\u00a0<https://github.com/intake/filesystem_spec/blob/master/fsspec/spec.py#L401>\u00a0), so not sure why it's still in the kwargs."
+        },
+        {
+            "created_at": "2020-08-05T17:59:38.712Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9514?focusedCommentId=17171650) by Lance Dacey (ldacey):*\nI see that fsspec 0.7.4 (which is the version I use) has the same line of code to remove the 'details' kwarg.\r\n\r\n\u00a0\r\n\r\nread_table() on Azure Blob also worked on 0.17.1 pyarrow, so if I check the differences between 0.17.1 and 1.0.0 I can see that this file was changed and has some references to fsspec:\r\n\r\n<https://github.com/apache/arrow/blob/apache-arrow-1.0.0/python/pyarrow/fs.py>\r\n\r\n\u00a0\r\n\r\nI see reference to detail=True within the\u00a0get_file_info_selector method inside\u00a0class FSSpecHandler(FileSystemHandler):\r\n\r\nselected_files = self.fs.find(selector.base_dir, maxdepth=maxdepth, withdirs=True, detail=True)\r\n\r\n\u00a0\r\n\r\nThese classes do not exist within 0.17.1 at all:\r\n\r\n<https://github.com/apache/arrow/blob/apache-arrow-0.17.1/python/pyarrow/fs.py>\r\n\r\n\u00a0\r\n\r\nSo it looks like the detail kwarg is popped in the fsspec.find function that pyarrow references, but there is a detail=True specified in the self.walk function. Is this the issue, perhaps?\r\n\r\ndef find(self, path, maxdepth=None, withdirs=False, \\*\\*kwargs):\r\n detail = kwargs.pop(\"detail\", False)\r\n for path, dirs, files in self.walk(path, maxdepth, detail=True, \\*\\*kwargs):"
+        },
+        {
+            "created_at": "2020-08-05T19:21:34.541Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9514?focusedCommentId=17171707) by Martin Durant (mdurant):*\nboth find and walk allow for the detail= kwargs via a `pop()` (added a number of months ago, before 0.7.4), so I can't see how it can survive to the call to `ls`. Perhaps a pdb would help. Certainly `.find(..., detail=True)` does the right thing (I don't have access to azure)."
+        },
+        {
+            "created_at": "2020-08-05T20:23:43.736Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9514?focusedCommentId=17171738) by Joris Van den Bossche (jorisvandenbossche):*\n`[~ldacey]` BTW, if you want the old behaviour in pyarrow 1.0.0, you can specify `use_legacy_dataset=True` in read_table, which should give the same as in 0.17 normally (instead of reverting to 0.17). \r\nThe FSSpecHandler is indeed new in 1.0.0, which allows to use the newer pyarrow.dataset functionality in `read_table` (which eg gives the row group filtering); in 0.17.0 the fsspec filesystem is used directly in a different way. \r\n"
+        },
+        {
+            "created_at": "2020-08-05T20:29:03.063Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9514?focusedCommentId=17171740) by Joris Van den Bossche (jorisvandenbossche):*\nThe error is indeed bizarre from looking at the traceback: there are clearly `detail = kwargs.pop(\"detail\", False)` calls, but apparently the `kwargs` afterwards still include a \"detail\" key ..."
+        },
+        {
+            "created_at": "2020-08-05T20:30:45.396Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9514?focusedCommentId=17171741) by Joris Van den Bossche (jorisvandenbossche):*\nActually, the traceback doesn't show this `detail = kwargs.pop(\"detail\", False)` line where it should be present in the surrounding code. So `[~ldacey]` it might be you are using an older version of fsspec that doesn't yet handle this correctly. What is the fsspec version you have installed? And does it work with the latest version?"
+        },
+        {
+            "created_at": "2020-08-05T20:36:47.327Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9514?focusedCommentId=17171743) by Lance Dacey (ldacey):*\nI am closing this issue. I assume that there was a conflicting package so I basically tore everything down and set things up again.\r\n\r\n\u00a0\r\n \\* I downgraded pyarrow to 0.17.1 and re-upgraded to 1.0.0 (this should have zero impact but who knows?)\r\n \\* I uninstalled adlfs completely and reinstalled fsspec 0.7.4 which downloaded adlfs 0.2.5\r\n \\* I uninstalled a package called dask-azureblobfs\r\n \\* I uninstalled a package called dask-adlfs\r\n\r\n\u00a0\r\n\r\nHere is a pip freeze with some of the packages which might impact the success of read_table and dataset.\r\n\r\nadlfs==0.2.5\r\nazure-common==1.1.23\r\nazure-core==1.7.0\r\nazure-storage-blob==2.1.0\r\nazure-storage-common==2.1.0\r\ndask==2.22.0\r\nfsspec==0.7.4\r\npandas==1.1.0\r\npyarrow==1.0.0\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\nI tested the following methods and they all work - I am quite pleased!\r\n\r\nfs = fsspec.filesystem(protocol='abfs',\u00a0 account_name=login,\u00a0 account_key=password)\r\n\r\nds.dataset(\"abfs://analytics/test\", format=\"parquet\", filesystem=fs)\r\n\r\npq.ParquetDataset(path_or_paths='analytics/test', filesystem=fs, use_legacy_dataset=False)\r\n\r\npq.read_table(source='analytics/test/zendesk/tickets-audits/', filesystem=fs)\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-08-05T20:41:55.884Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9514?focusedCommentId=17171747) by Lance Dacey (ldacey):*\nThis issue was most likely caused by additional unnecessary packages which might have downgraded fsspec potentially. Version 0.7.4 fsspec and 1.0.0 pyarrow are working as intended though now."
+        },
+        {
+            "created_at": "2020-08-06T07:20:32.791Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9514?focusedCommentId=17172085) by Joris Van den Bossche (jorisvandenbossche):*\n`[~ldacey]` thanks for checking, and happy it works now!"
+        }
+    ]
+}

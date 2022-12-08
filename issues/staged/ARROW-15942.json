@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[C++] RecordBatch::ValidateFull fails on nested StructArray",
+        "body": "***Note**: This issue was originally created as [ARROW-15942](https://issues.apache.org/jira/browse/ARROW-15942). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nValidateFull appears to discard the outermost field of nested schema. The following example passes:\r\n\r\n```bash\n\r\ndiff --git a/cpp/src/arrow/array/array_struct_test.cc b/cpp/src/arrow/array/array_struct_test.cc\r\nindex 318c83860..6a8896ca9 100644\r\n--- a/cpp/src/arrow/array/array_struct_test.cc\r\n+++ b/cpp/src/arrow/array/array_struct_test.cc\r\n@@ -15,6 +15,8 @@\r\n // specific language governing permissions and limitations\r\n // under the License.\r\n \r\n+#include <arrow/table.h>\r\n+\r\n #include <gtest/gtest.h>\r\n \r\n #include <cstdint>\r\n@@ -696,4 +698,20 @@ TEST(TestFieldRef, GetChildren) {\r\n   AssertArraysEqual(*a, *expected_a);\r\n }\r\n \r\n+TEST(TestFieldRef, TestValidateFullRecordBatch) {\r\n+  auto struct_array =\r\n+      ArrayFromJSON(struct_({field(\"a\", struct_({field(\"b\", float64())}))}), R\"([\r\n+    {\"a\": {\"b\": 6.125}},\r\n+    {\"a\": {\"b\": 0.0}},\r\n+    {\"a\": {\"b\": -1}}\r\n+  ])\");\r\n+\r\n+  auto schema1 = arrow::schema({field(\"x\", struct_({field(\"a\", struct_({field(\"b\", float64())}))}))});\r\n+  auto schema2 = arrow::schema({field(\"a\", struct_({field(\"b\", float64())}))});\r\n+  auto record_batch1 = arrow::RecordBatch::Make(schema1, 3, {struct_array});\r\n+  auto record_batch2 = arrow::RecordBatch::Make(schema2, 3, {struct_array});\r\n+  ASSERT_OK(record_batch1->ValidateFull());\r\n+  ASSERT_NOT_OK(record_batch2->ValidateFull());\r\n+}\r\n+\r\n```\r\n\r\nIs this expected behaviour?",
+        "created_at": "2022-03-15T17:08:31.000Z",
+        "updated_at": "2022-03-15T19:11:12.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-15T18:42:41.615Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15942?focusedCommentId=17507160) by David Li (lidavidm):*\nHmm, it seems you shouldn't be able to make the second record batch in the first place, because it has the wrong type. But since RecordBatch::Make doesn't appear to do more than the bare minimum validation, no error happens and then ValidateFull presumably validates the array against the wrong type - maybe we need to check that the schema and array types match up?"
+        },
+        {
+            "created_at": "2022-03-15T18:51:35.233Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15942?focusedCommentId=17507167) by Rok Mihevc (rokm):*\nSo you're saying the first schema is correct? I was assuming the other way around.\r\n\r\nCreation time check sounds good to me, but maybe there's considerations I'm not aware of."
+        },
+        {
+            "created_at": "2022-03-15T18:54:02.720Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15942?focusedCommentId=17507171) by David Li (lidavidm):*\nThe array has type `Struct(a: Struct(b: Float64))` so the _field_ should be `{}Field(\"x\", Struct(a: Struct(b: Float64))){`}, i.e. we have to wrap the entire original type in the Field.\r\n\r\nA creation time check isn't possible since that API doesn't return Result (unless we DCHECK or ARROW_CHECK it). But we can check as part of ValidateFull (and we should probably add the caveat to make sure that your type is correct in RecordBatch::Make)"
+        },
+        {
+            "created_at": "2022-03-15T19:11:12.845Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15942?focusedCommentId=17507176) by Rok Mihevc (rokm):*\nGot it.\r\n\r\nOk, I can make a PR once I complete some other things."
+        }
+    ]
+}

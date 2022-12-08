@@ -1,0 +1,21 @@
+{
+    "issue": {
+        "title": "Errors with DictionaryArray inside of ListArray or other DictionaryArray",
+        "body": "***Note**: This issue was originally created as [ARROW-2515](https://issues.apache.org/jira/browse/ARROW-2515). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAn exception (\"KeyError: 26\") is raised when .as_py() is called on elements of a ListArray over a DictionaryArray, or of a DictionaryArray with values in a DictionaryArray. Here are a couple tests that currently fail:\r\n\r\n\u00a0\r\n```java\n\r\nimport pyarrow as pa\r\n\r\ndef test_dictionary_array_1():\r\n    dict_arr = pa.DictionaryArray.from_arrays([0, 1, 0], ['a', 'b'])\r\n    list_arr = pa.ListArray.from_arrays([0, 2, 3], dict_arr)\r\n    assert list_arr.to_pylist() == [['a', 'b'], ['a']]\r\n\r\ndef test_dictionary_array_2():\r\n    dict_arr = pa.DictionaryArray.from_arrays([0, 1, 0], ['a', 'b'])\r\n    dict_arr2 = pa.DictionaryArray.from_arrays([0, 1, 2, 1, 0], dict_arr)\r\n    assert dict_arr2.to_pylist() == ['a', 'b', 'a', 'b', 'a']\r\n```\r\nIt appears that the problem is caused by the fact that the function box_scalar in scalar.pxi does not handle the case of dictionary array, as we currently have no DictionaryValue type.\u00a0\r\n\r\nDictionaryArray.__getitem__ currently works around the\u00a0lack of DictionaryValue type by dereferencing the index and constructing a scalar based on the value in the underlying dictionary. In other words, if we have a dictionary with int8 indices and string values, then the result of __getitem__ will be a StringValue (rather than a DictionaryValue). This works in simple cases but not in the more complex scenarios illustrated above.\r\n\r\nI have a patch ready, which would add a DictionaryValue type similar to other scalar types, resolving these bugs and removing the need for a special-cased implementation of DictionaryArray.__getitem__. This DictionaryValue would contain a couple accessor properties, \"indices_value\" and \"dictionary_value\"\u00a0to\u00a0allow access to both the index in the dictionary as well as the looked-up value. Then\u00a0DictionaryValue.as_py() would simply call .as_py() on the underlying dictionary_value.\u00a0",
+        "created_at": "2018-04-26T15:53:07.000Z",
+        "updated_at": "2018-07-27T18:47:20.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-04-30T07:43:38.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-04-30T07:43:38.268Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2515?focusedCommentId=16458380) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 1954\n<https://github.com/apache/arrow/pull/1954>"
+        }
+    ]
+}

@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Python] Remove LIBDIR assumptions in Python build",
+        "body": "***Note**: This issue was originally created as [ARROW-4930](https://issues.apache.org/jira/browse/ARROW-4930). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis is in reference to (4) in [this](http://mail-archives.apache.org/mod_mbox/arrow-dev/201903.mbox/%3C0AF328A1-ED2A-457F-B72D-3B49C8614850%40xhochy.com%3E) mailing list discussion.\r\n\r\nCertain sections of setup.py assume a specific location of the C++ libraries. Removing this hard assumption will simplify PyArrow builds significantly. As far as I could tell these assumptions are made in the `build_ext._run_cmake()` method (wherever bundling of C++ libraries are handled).\r\n1. The first occurrence is before invoking cmake (see line 237).\n1. The second occurrence is when the C++ libraries are moved from their build directory to the Python tree (see line 347). The actual implementation is in the function `_move_shared_libs_unix(..)` (see line 468).\n   \n   Hope this helps.",
+        "created_at": "2019-03-17T10:32:45.000Z",
+        "updated_at": "2019-11-05T13:32:02.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-11-05T13:32:02.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-09-18T17:11:48.327Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4930?focusedCommentId=16932684) by Antoine Pitrou (apitrou):*\n`[~suvayu]` If this important for you, can you try submitting a PR?"
+        },
+        {
+            "created_at": "2019-09-19T03:58:42.116Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4930?focusedCommentId=16933039) by Suvayu Ali (suvayu):*\nI have some time this weekend, I'll have a go at it."
+        },
+        {
+            "created_at": "2019-09-24T04:35:13.932Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4930?focusedCommentId=16936383) by Suvayu Ali (suvayu):*\nHi `[~apitrou]`, I have had limited success so far.\r\n\r\n[I was working off of master, `git describe` says: `apache-arrow-0.14.0-584-g176adf5a0`]\r\n\r\nThis is what I found:\r\n\r\n1. `setup.py` makes the library directory is `$ARROW_HOME/lib` when setting `PKG_CONFIG_PATH` in the environment (line 253). I believe this is bit of a hack, which is also mentioned by the author in the issue that tracked that change ARROW-1090. The resolution should be somewhere in the cmake scripts.\r\n 2. I successfully detected `libarrow` with the attached patch [FindArrow.cmake.patch](FindArrow.cmake.patch).\r\n 3. However I then failed to detect `libparquet`. On further investigation I found (AFAIU) that even though `FindParquet.cmake` sets `ARROW_HOME`, it is not used. However, it does use `PARQUET_HOME`. Since my CMake foo is a bit weak, I worked up a similar patch [FindParquet.cmake.patch](FindParquet.cmake.patch) as before and set `export PARQUET_HOME=$ARROW_HOME` in the terminal. This allowed the compilation to succeed.\r\n\r\nThe compilation commands I used for C++ and Python are:\r\n```java\n\r\n$ cmake -G Ninja -DCMAKE_INSTALL_PREFIX=$ARROW_HOME \\\r\n      -DARROW_FLIGHT=ON -DARROW_GANDIVA=ON -DARROW_ORC=ON \\\r\n      -DARROW_PARQUET=ON -DPYTHON_EXECUTABLE=/usr/bin/python3.7m \\\r\n      -DARROW_PYTHON=ON -DARROW_PLASMA=ON \\\r\n      -DARROW_BUILD_TESTS=ON -DLLVM_DIR=/usr/lib64/llvm7.0 ..\r\n$ python3 setup.py build_ext --cmake-generator Ninja --inplace\r\n```\r\nI then tried to run the python tests with `pytest-3 pyarrow`. The summary was:\r\n> 5 failed, 1411 passed, 59 skipped, 4 xfailed, 29 warnings in 28.30 seconds\r\nThe failures are all some kind of setup related issues, not being able to import, not being able to start plasma, etc.\r\n\r\nI'll investigate this further, but my take is the cmake scripts don't actually have _one way_ of detecting the libraries, making it very difficult to configure it properly from setup.py."
+        },
+        {
+            "created_at": "2019-09-24T09:13:06.810Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4930?focusedCommentId=16936581) by Antoine Pitrou (apitrou):*\nI'm afraid I can't really help constructively :-/ My CMake-fu is quite weak. I'll cc `[~kou]` who's quite more knowledgeable in the area."
+        },
+        {
+            "created_at": "2019-09-25T21:04:18.747Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4930?focusedCommentId=16938066) by Kouhei Sutou (kou):*\n`CMAKE_INSTALL_LIBDIR` works on Fedora, CentOS and so on but may not work on Debian, Ubuntu and so on. (This is depends on `CMAKE_INSTALL_PREFIX`.)\r\n\r\nUsing `PATH_SUFFIXES` option of `find_library` with our `LIB_PATH_SUFFIXES` is better. https://cmake.org/cmake/help/latest/command/find_library.html\r\nWe already do this in `FindArrow.cmake` but don't do this in `FindParquet.cmake` yet.\r\n\r\n`FindArrow.cmake` uses wrong `ARROW_SEARCH_LIB_PATH`:\r\n\r\n```\n\r\ndiff --git a/cpp/cmake_modules/FindArrow.cmake b/cpp/cmake_modules/FindArrow.cmake\r\nindex b160506c4..58cf438e3 100644\r\n--- a/cpp/cmake_modules/FindArrow.cmake\r\n+++ b/cpp/cmake_modules/FindArrow.cmake\r\n@@ -52,7 +52,7 @@ if(\"$ENV{ARROW_HOME}\" STREQUAL \"\")\r\n else()\r\n   set(ARROW_HOME \"$ENV{ARROW_HOME}\")\r\n   set(ARROW_SEARCH_HEADER_PATHS ${ARROW_HOME}/include)\r\n-  set(ARROW_SEARCH_LIB_PATH ${ARROW_HOME}/lib)\r\n+  set(ARROW_SEARCH_LIB_PATH ${ARROW_HOME})\r\n \r\n   find_path(ARROW_INCLUDE_DIR arrow/array.h\r\n             PATHS ${ARROW_SEARCH_HEADER_PATHS}\r\n```\r\n\r\nBut we need to fix more code in `FindArrow.cmake`.\r\n\r\nAnyway, could you create a pull request to discuss right fix with code?\r\nOr should I take over this?"
+        },
+        {
+            "created_at": "2019-09-26T04:26:39.076Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4930?focusedCommentId=16938260) by Suvayu Ali (suvayu):*\nHi `[~kou]` I'm a bit out of my depth here, but here's my attempt: https://github.com/apache/arrow/pull/5504"
+        },
+        {
+            "created_at": "2019-11-05T13:32:02.184Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4930?focusedCommentId=16967532) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 5767\n<https://github.com/apache/arrow/pull/5767>"
+        }
+    ]
+}

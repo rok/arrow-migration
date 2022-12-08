@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[C++] Add a Tensor logical value type with varying dimensions, implemented using ExtensionType",
+        "body": "***Note**: This issue was originally created as [ARROW-8714](https://issues.apache.org/jira/browse/ARROW-8714). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSupport for tensor in Table, RecordBatch, etc. where each row is a tensor of a different shape (e.g images of different sizes), but of the same underlying type (e.g. int32). Implemented as an ExtensionType, so no need to change the format.\u00a0\r\n\r\nI don't see needing each row being a tensor with a different number of dimensions, so if the implementation for that falls out easily of the use case with each row in the table having a tensor with the same number of dimensions, great. If it adds a lot of complexity, that case would be postponed.",
+        "created_at": "2020-05-06T13:24:55.000Z",
+        "updated_at": "2020-10-30T18:22:14.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Format",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-05-06T13:37:52.427Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8714?focusedCommentId=17100811) by Christian Hudon (chrish42):*\nProposed approach: a first column containing the elements from all the tensors (in row-major order), and a second containing a tuple with that tensor's shape. The start offset of the data for the next tensor can be computed from the shape of the previous one. Does that sound like the right approach? Would we also need a separate column containing the pre-computed start index of for each tensor?\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-05-07T09:53:41.444Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8714?focusedCommentId=17101489) by Joris Van den Bossche (jorisvandenbossche):*\nI think a struct with one field with the actual values and one field keeping track of the shape of each tensor sounds good.\r\n\r\n> The start offset of the data for the next tensor can be computed from the shape of the previous one.\r\n\r\nThe field storing the values of the actual tensors will be a variable size binary or list layout, I suppose. That way, since this is a normal arrow array, you already have access to the start offset of each tensor (without needing to calculate it from all previous ones), see https://arrow.apache.org/docs/format/Columnar.html#variable-size-binary-layout\r\n\r\nFor variable size binary vs variable size list layout, in the end both will be same physical storage. But using a list array instead of binary array might make it a bit easier to work with (the data type of the individual values is then already coded in the list type as well, and eg in the python APIs of pyarrow, you can easily access the flat array of values of the ListArray as a single numpy array (from which a part can be sliced and reshaped to get the tensor). \r\n"
+        },
+        {
+            "created_at": "2020-10-28T21:25:07.534Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8714?focusedCommentId=17222490) by Bryan Cutler (bryanc):*\n+1 on the proposal of having a list array for the data (of same type as the tensor) and second array for the shape. For the shape, a list array of ints would work but it could also be possible to modify Tensor.fbs slightly to have a TensorShape message. That might have some benefit to keep the size down for lots of small tensors, but not sure if it's worth the added complexity.\r\n\r\nI also had another thought, if the shape for each tensor added an additional outer dimension to represent how many records are in each tensor, that would allow us to use a single tensor extension type for both variable and constant shapes. For example, say you have 10 tensors of shape (2, 3) stacked in a single ndarray of (10, 2, 3), then the shape array would have a single entry `[(10, 2, 3)]`, if you have 10 tensors of varying shapes, then each one will have a 1 added to the outer dimension, so 10 entries with `[(1, 2, 3), (1, 5, 3), (1, 4, 3), ...]`. It would be a little redundant having the 1's in this case, but this would also allow to combine smaller batches, say 10 tensors where 5 are same shape, as an example would give you `[(5, 2, 3), (5, 4, 6)`. What do you think of this `[~chrish42]` and `[~jorisvandenbossche]` ?"
+        },
+        {
+            "created_at": "2020-10-29T21:01:18.201Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8714?focusedCommentId=17223206) by Rok Mihevc (rokm):*\nI like idea of batching into equally shaped Tensors. It would require a bit extra complexity for keeping original order of elements and taking into account cases where Tensors with equal shapes would have different strides. I suppose this will become clearer with\u00a0ARROW-1614 resolved."
+        },
+        {
+            "created_at": "2020-10-30T12:34:59.768Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8714?focusedCommentId=17223622) by Joris Van den Bossche (jorisvandenbossche):*\n> I also had another thought, if the shape for each tensor added an additional outer dimension to represent how many records are in each tensor, that would allow us to use a single tensor extension type for both variable and constant dimensions.\r\n\r\nTo clarify, this is only about constant vs variable _dimensions_, and not about constant _shape_ ?\r\n\r\nMy understanding was that ARROW-1614 is also about constant shape (although the title only says dimension), and then I don't see how that would be possible to combine in the way described?"
+        },
+        {
+            "created_at": "2020-10-30T18:22:14.592Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8714?focusedCommentId=17223832) by Bryan Cutler (bryanc):*\nSorry, I mistyped dimension when I meant shape above (fixed now). I was trying to think of a way to use a single extension type for constant _and_ variable shapes, with a fixed dimension. Although there is a problem with my suggestion in that the arrays won't be able to be sliced without recomputing the shapes, and I don't see a way around that. So I guess it seems better to stay with 2 different extension types, this one for variable shapes and ARROW-1614 for constant shapes."
+        }
+    ]
+}

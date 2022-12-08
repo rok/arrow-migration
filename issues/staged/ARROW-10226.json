@@ -1,0 +1,66 @@
+{
+    "issue": {
+        "title": "[Rust] [Parquet] Parquet reader reading wrong columns in some batches within a parquet file",
+        "body": "***Note**: This issue was originally created as [ARROW-10226](https://issues.apache.org/jira/browse/ARROW-10226). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI re-installed my desktop a few days ago (now using Ubuntu 20.04 LTS)\u00a0 and when I try and run the TPC-H benchmark, it never completes and eventually uses up all 64 GB RAM.\r\n\r\nI can run Spark against the data\u00a0 set and the query completes in 24 seconds, which IIRC is how long it took before.\r\n\r\nIt is possible that something is odd on my environment, but it is also possible/likely that this is a real bug.\r\n\r\nI am investigating this and will update the Jira once I know more.\r\n\r\nI also went back to old commits that were working for me before and they show the same issue so I don't think this is related to a recent code change.",
+        "created_at": "2020-10-07T23:05:59.000Z",
+        "updated_at": "2020-10-12T21:29:04.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Component: Rust - DataFusion",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-10-08T18:11:40.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-10-08T00:05:29.790Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10226?focusedCommentId=17209937) by Andy Grove (andygrove):*\nThe query also returns the wrong results ... grouping by l_comment (high cardinality) instead of l_returnflag (low cardinality)"
+        },
+        {
+            "created_at": "2020-10-08T00:36:08.176Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10226?focusedCommentId=17209945) by Andy Grove (andygrove):*\nQuery works fine against tbl files but not against parquet files (it's reading the wrong columns somehow). Spark works fine so the issue is not with the Parquet files. Really odd to find this now."
+        },
+        {
+            "created_at": "2020-10-08T15:00:51.109Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10226?focusedCommentId=17210273) by Jorge Leit\u00e3o (jorgecarleitao):*\nI am really sorry to hear that. Let me know if there is anything I can support on this ahead of the release. I can take time over the weekend to bootstrap an environment on the cloud to run this and debug it.\r\n\r\nI can also easy write some Terraform to bootstrap an environment, so that we have a procedure to run these tests on an independent and \"immutable\" environment."
+        },
+        {
+            "created_at": "2020-10-08T15:10:08.374Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10226?focusedCommentId=17210280) by Neal Richardson (npr):*\n`[~andygrove]` can you explain why this is a release blocker, given that our release target date is tomorrow? It certainly sounds bad, but if this is not due to a recent change, and perhaps something that never worked, I'm curious why this should hold up 2.0."
+        },
+        {
+            "created_at": "2020-10-08T16:31:40.903Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10226?focusedCommentId=17210314) by Andy Grove (andygrove):*\n`[~npr]` Sure, I changed to major, but my plan was to resolve the issue before we release tomorrow."
+        },
+        {
+            "created_at": "2020-10-08T16:34:18.728Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10226?focusedCommentId=17210317) by Neal Richardson (npr):*\nSounds good, thanks. Good luck!"
+        },
+        {
+            "created_at": "2020-10-08T16:49:04.018Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10226?focusedCommentId=17210328) by Andy Grove (andygrove):*\nJust tracking progress with debugging this. The issue is that the projection is behaving differently PER BATCH within these Parquet files. We expect l_returnflag to be a single char but sometimes the parquet reader is returning the contents of the l_comment field instead.\r\n```java\n\r\n [/mnt/tpch/s1/parquet/lineitem/part-00002-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet] first non-null value for l_returnflag in this batch: N\r\n[/mnt/tpch/s1/parquet/lineitem/part-00000-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet] first non-null value for l_returnflag in this batch: N\r\n[/mnt/tpch/s1/parquet/lineitem/part-00001-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet] first non-null value for l_returnflag in this batch: A\r\n[/mnt/tpch/s1/parquet/lineitem/part-00003-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet] first non-null value for l_returnflag in this batch: R\r\n[/mnt/tpch/s1/parquet/lineitem/part-00002-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet] first non-null value for l_returnflag in this batch: N\r\n[/mnt/tpch/s1/parquet/lineitem/part-00000-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet] first non-null value for l_returnflag in this batch: R\r\n[/mnt/tpch/s1/parquet/lineitem/part-00003-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet] first non-null value for l_returnflag in this batch: R\r\n[/mnt/tpch/s1/parquet/lineitem/part-00002-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet] first non-null value for l_returnflag in this batch: s among the fluffily r\r\n[/mnt/tpch/s1/parquet/lineitem/part-00000-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet] first non-null value for l_returnflag in this batch: eposits a\r\n[/mnt/tpch/s1/parquet/lineitem/part-00001-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet] first non-null value for l_returnflag in this batch: N\r\n[/mnt/tpch/s1/parquet/lineitem/part-00001-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet] first non-null value for l_returnflag in this batch: y ironic foxes above t\r\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-10-08T17:21:59.220Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10226?focusedCommentId=17210341) by Andy Grove (andygrove):*\n```java\n\r\npart-00000-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 0 bad values in batch\r\npart-00000-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 0 bad values in batch\r\npart-00000-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 0 bad values in batch\r\npart-00000-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 0 bad values in batch\r\npart-00000-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 375000 bad values in batch\r\npart-00000-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 49880 bad values in batch\r\n\r\npart-00001-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 0 bad values in batch\r\npart-00001-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 0 bad values in batch\r\npart-00001-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 0 bad values in batch\r\npart-00001-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 0 bad values in batch\r\npart-00001-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 375000 bad values in batch\r\npart-00001-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 49979 bad values in batch\r\n\r\npart-00002-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 0 bad values in batch\r\npart-00002-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 0 bad values in batch\r\npart-00002-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 0 bad values in batch\r\npart-00002-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 0 bad values in batch\r\npart-00002-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 374998 bad values in batch\r\npart-00002-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 50031 bad values in batch\r\n\r\npart-00003-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 0 bad values in batch\r\npart-00003-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 0 bad values in batch\r\npart-00003-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 0 bad values in batch\r\npart-00003-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 0 bad values in batch\r\npart-00003-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 375002 bad values in batch\r\npart-00003-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet has 50110 bad values in batch \n```"
+        },
+        {
+            "created_at": "2020-10-08T17:49:11.211Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10226?focusedCommentId=17210358) by Andy Grove (andygrove):*\nHere is a test case to reproduce the issue. I uploaded the parquet file to dropbox. It is ~100MB.\r\n\r\n<https://www.dropbox.com/s/6cpz1h9juxl4c7t/part-00000-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet?dl=0>\r\n\r\n`[~jorgecarleitao]` Thanks for the offer of help. I don't know much time we should spend on this but if you have the time to take a look at least to confirm the test also fails for you, that would be an extra data point. \r\n```java\n\r\n#[test]\r\nfn foo() {\r\n    use arrow::array::Array;\r\n    use crate::arrow::arrow_reader::ArrowReader;\r\n\r\n    let file = std::fs::File::open(\r\n        \"/mnt/tpch/debug/lineitem/part-00000-36eb4379-93a2-47a8-873a-d0f1ed13a85a-c000.snappy.parquet\").unwrap();\r\n    let file_reader = Rc::new(SerializedFileReader::new(file).unwrap());\r\n    let metadata = file_reader\r\n        .metadata\r\n        .file_metadata()\r\n        .key_value_metadata()\r\n        .as_ref()\r\n        .unwrap();\r\n\r\n\r\n    let mut arrow_reader = ParquetFileArrowReader::new(file_reader);\r\n    let schema = arrow_reader.get_schema().unwrap();\r\n    let projection = vec![4, 5, 6, 7, 8, 9, 10];\r\n    let mut batch_reader =\r\n        arrow_reader.get_record_reader_by_columns(projection, 40960).unwrap();\r\n\r\n    while let Some(batch) = batch_reader.next() {\r\n        let batch = batch.unwrap();\r\n\r\n        let mut n = 0;\r\n        match batch.column(4).as_any().downcast_ref::<StringArray>() {\r\n            Some(l_returnflag) => {\r\n                for i in 0..batch.num_rows() {\r\n                    if l_returnflag.is_valid(i) {\r\n                        if l_returnflag.value(i).len() > 1 {\r\n                            n = n + 1;\r\n                        }\r\n                    }\r\n                }\r\n            }\r\n            None => println!(\"l_returnflag is not a string\")\r\n        }\r\n        println!(\"{} bad values in batch\", n);\r\n        assert_eq!(n, 0);\r\n    }\r\n}\r\n \n```"
+        },
+        {
+            "created_at": "2020-10-08T18:11:40.340Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10226?focusedCommentId=17210370) by Andy Grove (andygrove):*\nAlthough Spark produces the correct result when I run an aggregate query against this parquet file, it too shows bad values when I just query the l_returnflag column so it appears that the files are corrupt and Spark skips the bad rows when building the aggregate? I will keep looking into this but I no longer think this is a bug that we need to spend time on.\r\n\r\n\u00a0\r\n\r\nfyi `[~jorgecarleitao]`"
+        },
+        {
+            "created_at": "2020-10-11T05:28:21.935Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10226?focusedCommentId=17211833) by Josh Taylor (joshx):*\nI'm seeing the same issue of the initial title, which was that it never completes.\r\n\r\nTest file: <https://drive.google.com/file/d/1aCW7SW2rUVioSePduhgo_91F5-xDMyjp/view?usp=sharing>\r\n\r\n(This is from snowflakes example data, exported as a single file parquet file, same thing happens for many files).\r\n\r\nCode that fails (both group by with sum of columns and the builder pattern doesn't work):\r\n\r\nhttps://github.com/joshuataylor/parquet-group-by/blob/main/src/main.rs"
+        },
+        {
+            "created_at": "2020-10-12T21:29:04.248Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10226?focusedCommentId=17212683) by Andy Grove (andygrove):*\nI did get to the bottom of why this happened for me. When I converted TPC-H CSV data to Parquet I accidentally combined all of the tables when I intended to just do this for lineitem. As a result, my lineitem Parquet files were a combination of all the tables with varying schema."
+        }
+    ]
+}

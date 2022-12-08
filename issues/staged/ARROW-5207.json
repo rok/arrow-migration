@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Java] add APIs to support vector reuse",
+        "body": "***Note**: This issue was originally created as [ARROW-5207](https://issues.apache.org/jira/browse/ARROW-5207). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn some scenarios we hope that ValueVector could be reused to reduce creation overhead. This is very common in shuffle stage, it's no need to create ValueVector or realloc buffers every time, suppose that the recordCount of ValueVector and capacity of its buffers is written in stream, when we deserialize it, we can simply judge whether realloc is needed through dataLength.\r\n\r\nMy proposal is that add APIs in ValueVector to process this logic, otherwise users have to implement by themselves if they want to reuse which is not user-friendly.\u00a0\r\n\r\nIf you agree with this, I would like to take this ticket. Thanks",
+        "created_at": "2019-04-24T02:36:49.000Z",
+        "updated_at": "2019-05-09T09:23:18.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-05-09T08:56:40.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-04-30T04:47:36.454Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5207?focusedCommentId=16829945) by Ji Liu (tianchen92):*\nI have submitted a [PR\\|[https://github.com/apache/arrow/pull/4202]]."
+        },
+        {
+            "created_at": "2019-05-07T07:29:49.237Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5207?focusedCommentId=16834451) by Jacques Nadeau (jnadeau):*\nTo clarify, are you wanting to reuse the same ArrowBuf within a Vector? Vectors are already reusable (with different underlying memory) If so,\u00a0maybe we should introduce this in a different way where it is purpose built. E.g. reuseMemory. For example, during reuse, there is some types of memory you need to clear. Also, I don't understand why you have setting valuecount and datalength. If you're reusing, you need to fit within whatever you have and then use setValueCount at the end. The reason we should make this more formal is because Vectors are mostly thought about as created, sealed, read. This isn't formally enforced by the API but I think we should try to keep the spirit\u00a0of this in new APIs we introduce.\u00a0If your pattern is different, we\u00a0should formallize it specifically as reuse rather than something more low-level as your current PR proposes."
+        },
+        {
+            "created_at": "2019-05-07T08:12:07.599Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5207?focusedCommentId=16834478) by Ji Liu (tianchen92):*\n`[~jnadeau]` \u00a0Thanks a lot for your comments,\u00a0I'm sorry to have misled you by the title. You are right, what I mean is that reuse the same ArrowBuf within a Vector in some cases, maybe the title should be 'enable resize buffers within Vector for given valueCount and dataLength'.\r\n\r\nThe idea is inspired by the following case:\r\n\r\nIn general, in shuffle stage, the schema of data is fixed. So we could keep several reuse vectors in a serializer to do deserialize work rather than create these vectors for every deserialization. Since the serialization process have written vectors(mainly its buffers) in stream(such as WritableChannel, not using ArrowRecordBatch), when deserialize, we read buffer metas(valueCount and dataLength) and buffers from channel and write them directly to the reuse vector. In this case, if the read dataBuffer length is greater than the dataBuffer.capacity within reuse vector or the read valueCount/8 is greater than the validityBuffer.capacity within reuse vector we need to resize these buffers to hold the read data. Otherwise if the read data is less than the reuse vector capacity, just write data into its buffers without resizing buffer size.\r\n\r\nMy proposal is add some APIs to make the process of resizing buffers simpler(Now if we want to do this with BaseVariableWidthVector, it seems we need to _setInitialCapacity_\u00a0and\u00a0_allocateNew_ and the calculated size may be not accurate enough because of density). Do you have any better idea or suggestion for this? Thanks very much"
+        },
+        {
+            "created_at": "2019-05-08T04:43:59.209Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5207?focusedCommentId=16835296) by Jacques Nadeau (jnadeau):*\nIs this an important optimization?\u00a0Given that we already pool the memory itself at the lower layers it seems like the reuse here wouldn't be an\u00a0impactful optimization."
+        },
+        {
+            "created_at": "2019-05-08T05:40:09.258Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5207?focusedCommentId=16835321) by Ji Liu (tianchen92):*\n`[~jnadeau]` \u00a0Thanks for your feedback. Sure, it's not an important optimization. However, I think users have different usage scenarios for Arrow, for example, they may use it in ArrowBuf or ValueVector level rather than ArrowRecordBatch. Maybe it's better to give more options, if you think break the design of ValueVector, at least I think we should provide a utility class to support operations like serialize ValueVector, resize buffers mentioned above. What do you think?\r\n\r\n\u00a0"
+        }
+    ]
+}

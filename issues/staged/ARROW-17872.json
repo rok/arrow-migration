@@ -1,0 +1,84 @@
+{
+    "issue": {
+        "title": "[CI] Reduce required dependencies on macOS builds",
+        "body": "***Note**: This issue was originally created as [ARROW-17872](https://issues.apache.org/jira/browse/ARROW-17872). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nOur macOS CI builds on Github Actions usually take at least 10 minutes installing dependencies from Homebrew (because of compiling from source?). It would be nice to cache those, especially as they probably don't change often.",
+        "created_at": "2022-09-28T09:05:54.000Z",
+        "updated_at": "2022-10-09T00:21:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Continuous Integration",
+            "Component: GLib",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-08T21:59:27.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-28T09:06:08.509Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17872?focusedCommentId=17610450) by Antoine Pitrou (apitrou):*\n`[~assignUser]` Do you think that's reasonably doable?"
+        },
+        {
+            "created_at": "2022-09-28T10:21:05.865Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17872?focusedCommentId=17610482) by Antoine Pitrou (apitrou):*\nHere is an example job which timed out due to an overlong dependency step:\r\nhttps://github.com/pitrou/arrow/actions/runs/3141950727/jobs/5104979517"
+        },
+        {
+            "created_at": "2022-09-28T12:01:52.549Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17872?focusedCommentId=17610524) by Jacob Wujciak-Jens (assignUser):*\nI have set up a test job with debug output to see what exactly is taking so long: https://github.com/assignUser/test-repo-a/actions/runs/3142905685/jobs/5107502078#step:4:392\r\n\r\nIf you turn on timestamps you can see that what takes the time is extracting the archives (e.g. llvm ~1.5G) not downloading them, so caching the `hombrew --cache` directory would not save significant time. As the cache is also tar'd extracting the cache might be the new bottle neck...."
+        },
+        {
+            "created_at": "2022-09-28T12:14:03.728Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17872?focusedCommentId=17610528) by Jacob Wujciak-Jens (assignUser):*\nit looks like homebrew is using system tar to extract the gzipped bottles, maybe we can speed it up by symlinking in pigz to make use of the 3 cores the mac runners have..."
+        },
+        {
+            "created_at": "2022-09-28T12:21:21.694Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17872?focusedCommentId=17610538) by Antoine Pitrou (apitrou):*\nOuch, LLVM can be heavy but 1.5GB sounds really outlandish.\r\n(for comparison, the combined unpacked size for the conda-forge packages `libllvm`, `llvm-tools` and `llvmdev` is 500MB)"
+        },
+        {
+            "created_at": "2022-09-28T12:23:17.848Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17872?focusedCommentId=17610539) by Antoine Pitrou (apitrou):*\n(and even 10 minutes for extracting 1.5GB  seems quite unexpected: that's only 2.5 MB/s... so it's not a gzip problem but probably an IO/memory issue)"
+        },
+        {
+            "created_at": "2022-09-28T12:23:38.521Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17872?focusedCommentId=17610540) by Jacob Wujciak-Jens (assignUser):*\nAnd we have 12 & 15 both similar size (do we need both?), aws sdk is 800M..."
+        },
+        {
+            "created_at": "2022-09-28T12:25:11.277Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17872?focusedCommentId=17610541) by Jacob Wujciak-Jens (assignUser):*\nrelevant homebrew issue: https://github.com/Homebrew/brew/issues/13621"
+        },
+        {
+            "created_at": "2022-09-28T12:28:51.739Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17872?focusedCommentId=17610545) by Antoine Pitrou (apitrou):*\nWe may perhaps want to disable some Arrow components on those macOS builds, unless there's another package manager that we can use?\r\n\r\n`[~kou]` Do you know why we decided to use Homebrew for dependencies on macOS?"
+        },
+        {
+            "created_at": "2022-09-28T13:15:48.407Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17872?focusedCommentId=17610573) by Jacob Wujciak-Jens (assignUser):*\n> 10 minutes for extracting 1.5GB seems quite unexpected\r\n\r\nI have checked in detail and each of the bigger dependecies (aws, llvm, boost) take 2-3 minutes to \"pour\", so ok speeds I would say. Just over all a lot but still nothing  Isee the cache really speeding up. \r\n\r\nThe timeout is set to 60 minutes so we could just raise that limit if it is not  applicable for the current build complexity (or as you said remove features). The build should already be using all 3 available cores."
+        },
+        {
+            "created_at": "2022-09-28T13:45:29.861Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17872?focusedCommentId=17610581) by Antoine Pitrou (apitrou):*\nA build that takes 60 minutes or more is horrible for developer experience. So I would suggest disabling Gandiva and S3 support on all our PR-based macOS builds (and update the brew files to remove/disable the corresponding third-party deps).\r\n\r\nDo you want to take this `[~assignUser]`?"
+        },
+        {
+            "created_at": "2022-09-28T18:42:00.371Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17872?focusedCommentId=17610690) by Kouhei Sutou (kou):*\n> Do you know why we decided to use Homebrew for dependencies on macOS?\r\n\r\nBecause Homebrew is one of major package managers that are used by macOS users. We should use an environment similar to the one that is used by users for CI to find bugs before we release.\r\n\r\nAnyway, I'm OK with disabling some features for PR."
+        },
+        {
+            "created_at": "2022-09-30T05:34:04.036Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17872?focusedCommentId=17611357) by Jin Shang (jinshang):*\nFYI The Mac runner we use for github CI (mac-os-latest) has LLVM@14 and LLVM@13 preinstalled (<https://github.com/actions/runner-images/blob/main/images/macos/macos-11-Readme.md>). If we can use these two version for both Gandiva and Clang-format then the build costs for LLVM can be saved entirely. cc `[~apitrou]` `[~kou]` \u00a0\r\n\r\nEDIT: :llvm@13 seems to only include the clang compiler. So to save build time we have to use llvm@14 for Gandiva and clang-format."
+        },
+        {
+            "created_at": "2022-09-30T09:01:34.207Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17872?focusedCommentId=17611442) by Antoine Pitrou (apitrou):*\nclang-format is only used for linting, so that shouldn't be an issue. "
+        },
+        {
+            "created_at": "2022-10-01T21:54:20.562Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17872?focusedCommentId=17611991) by Kouhei Sutou (kou):*\nThanks for the info!\r\n\r\nLet's try one of the preinstalled LLVMs.\r\n\r\nIf we upgrade our clang-format version to 14 from 12, we can use `cpp/Brewfile` without changes on CI:\r\n\r\n```\n\r\ndiff --git a/.env b/.env\r\nindex 761642506f..e124264335 100644\r\n--- a/.env\r\n+++ b/.env\r\n@@ -53,7 +53,7 @@ FEDORA=35\r\n UBUNTU=20.04\r\n \r\n# Default versions for various dependencies\r\n-CLANG_TOOLS=12\r\n+CLANG_TOOLS=14\r\n CUDA=11.0.3\r\n DASK=latest\r\n DOTNET=6.0\r\ndiff --git a/cpp/Brewfile b/cpp/Brewfile\r\nindex 61fb619dc6..c6afd5dc76 100644\r\n--- a/cpp/Brewfile\r\n+++ b/cpp/Brewfile\r\n@@ -28,8 +28,9 @@ brew \"git\"\r\n brew \"glog\"\r\n brew \"googletest\"\r\n brew \"grpc\"\r\n-brew \"llvm\"\r\n-brew \"llvm@12\"\r\n+# GitHub Actions' macos-11 runner includes llvm@14.\r\n+# We can use it to save CI time.\r\n+brew \"llvm@14\"\r\n brew \"lz4\"\r\n brew \"ninja\"\r\n brew \"numpy\"\r\n```\r\n\r\nIf we don't want to change our required clang-format version, we need to change `cpp/Brewfile` in each CI job."
+        },
+        {
+            "created_at": "2022-10-08T21:59:27.234Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17872?focusedCommentId=17614542) by Kouhei Sutou (kou):*\nIssue resolved by pull request 14310\n<https://github.com/apache/arrow/pull/14310>"
+        }
+    ]
+}

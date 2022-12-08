@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[C#] Consider exposing ValueTask instead of Task",
+        "body": "***Note**: This issue was originally created as [ARROW-4717](https://issues.apache.org/jira/browse/ARROW-4717). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSee <https://github.com/apache/arrow/pull/3736#pullrequestreview-207169204>\u00a0for the discussion and <https://devblogs.microsoft.com/dotnet/understanding-the-whys-whats-and-whens-of-valuetask/>\u00a0for the reasoning.\r\n\r\nUsing `Task<T>` in public API requires that a new Task instance be allocated on every call. When returning synchronously, using ValueTask will allow the method to not allocate.\r\n\r\nIn order to do this, we will need to take a new dependency on\u00a0\u00a0`System.Threading.Tasks.Extensions` NuGet package.",
+        "created_at": "2019-02-28T18:29:33.000Z",
+        "updated_at": "2019-04-30T14:37:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C#",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-04-30T14:37:47.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-03-25T03:55:42.988Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4717?focusedCommentId=16800385) by Jorgen Thelin (jthelin):*\nI took a quick look at this, and mostly it is just a straight-forward s/Task/ValueTask/\r\n\r\nHowever, the biggest impediment to making this change be most impactful is that a \"Span-friendly\" overload for the C# **System.IO.Stream.WriteAsync** method \u2013 which directly handles ReadOnlyMemory<T> (without requiring any copying to intermediate byte[] buffer) and returns ValueTask (no heap alloc) \u2013 is only available in **.NET Core 2.1** and later.\r\n\r\n[Stream.WriteAsync(ReadOnlyMemory<Byte>, CancellationToken)](https://docs.microsoft.com/en-us/dotnet/api/system.io.stream.writeasync?view=netcore-2.1#System_IO_Stream_WriteAsync_System_ReadOnlyMemory_System_Byte__System_Threading_CancellationToken_)\r\n\r\nCurrently the C# Apache.Arrow library here is built for both .NET Core 2.1 and .NET Standard 1.3.\r\n\r\nHow important is it to maintain compatibility with .NET Standard 1.3?\r\n\r\nThe **ArrowStreamWriter.WriteBufferAsync** function is directly on the hot-path for all writes, so switching to using zero-copy memory buffers and zero return object heap allocation (which needs .NET Core 2.1+) should make a big performance improvement.\r\n\r\nThoughts?"
+        },
+        {
+            "created_at": "2019-04-24T21:59:28.796Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4717?focusedCommentId=16825532) by Mani Gandham (ManiGandham):*\n`[~jthelin]`\r\n\r\n\u00a0Since this is a performance-focused project, using ValueTask seems like the right call.\r\n\r\n.NET Core 2.0 is already [end of life as of October 2018](https://dotnet.microsoft.com/platform/support/policy/dotnet-core) and .NET Core 2.1 is the current LTS release."
+        },
+        {
+            "created_at": "2019-04-30T14:21:56.852Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4717?focusedCommentId=16830341) by Eric Erhardt (eerhardt):*\n`[~jthelin]` - Take a look at\u00a0the StreamExtensions class/files under\u00a0<https://github.com/apache/arrow/tree/master/csharp/src/Apache.Arrow/Extensions>. These polyfills/shims allow for the Arrow code to work on netstandard1.3, and if the memory is backed by a .NET array, there are no extra allocations/copies. (However, in the case where the memory is backed by something else, and it is not\u00a0running on .NET Core 2.1 or higher, then it does need to copy the data into an array in order to continue working.)\r\n\r\n>\u00a0How important is it to maintain compatibility with .NET Standard 1.3?\r\n\r\n\u00a0I would say it is fairly important to at least work on netstandard2.0.\u00a0The main project I am using the C# Arrow library is in the .NET for Apache Spark project\u00a0<https://github.com/dotnet/spark>, which currently\u00a0targets\u00a0netstandard2.0 and\u00a0is supported on .NET Framework v4.6.1."
+        },
+        {
+            "created_at": "2019-04-30T14:37:47.865Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4717?focusedCommentId=16830355) by Wes McKinney (wesm):*\nIssue resolved by pull request 4194\n<https://github.com/apache/arrow/pull/4194>"
+        }
+    ]
+}

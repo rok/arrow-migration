@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] Memory leak with RecordBatchFileReader",
+        "body": "***Note**: This issue was originally created as [ARROW-1053](https://issues.apache.org/jira/browse/ARROW-1053). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhile working on SPARK-13534 and running repeated calls to `toPandas`, memory usage continues to climb and I isolated to the Python side.  The following code reproduces the issue, which looks like a memory leak.  Commenting out the block with the `RecordBatchFileReader` while leaving the writer, memory usage is stable, so I believe the issue is with the reader.\n\n```\nimport pyarrow as pa\nimport numpy as np\nimport memory_profiler\nimport gc\nimport io\n\n\ndef leak():\n    data = [pa.array(np.concatenate([np.random.randn(100000)] * 10))]\n    table = pa.Table.from_arrays(data, ['foo'])\n    while True:\n        print('calling to_pandas')\n        print('memory_usage: {0}'.format(memory_profiler.memory_usage()))\n        df = table.to_pandas()\n\n        batch = pa.RecordBatch.from_pandas(df)\n\n        sink = io.BytesIO()\n        writer = pa.RecordBatchFileWriter(sink, batch.schema)\n        writer.write_batch(batch)\n        writer.close()\n\n        reader = pa.open_file(pa.BufferReader(sink.getvalue()))\n        reader.read_all()\n\n        gc.collect()\n\nleak()\n```\n\nSome of the output from the code above:\n```\ncalling to_pandas\nmemory_usage: [67.0546875]\ncalling to_pandas\nmemory_usage: [143.95703125]\ncalling to_pandas\nmemory_usage: [151.58984375]\ncalling to_pandas\nmemory_usage: [174.453125]\ncalling to_pandas\nmemory_usage: [189.84765625]\ncalling to_pandas\nmemory_usage: [212.7109375]\ncalling to_pandas\nmemory_usage: [228.046875]\ncalling to_pandas\nmemory_usage: [243.109375]\ncalling to_pandas\nmemory_usage: [258.4375]\ncalling to_pandas\nmemory_usage: [273.83203125]\ncalling to_pandas\nmemory_usage: [288.90234375]\ncalling to_pandas\nmemory_usage: [304.23046875]\ncalling to_pandas\nmemory_usage: [319.625]\n```",
+        "created_at": "2017-05-18T21:45:34.000Z",
+        "updated_at": "2017-05-19T13:06:22.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-05-19T13:06:22.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-05-18T21:49:34.784Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1053?focusedCommentId=16016511) by Wes McKinney (wesm):*\nPretty sure this is https://github.com/apache/arrow/commit/c7839e9fab91e62cced9367f23e561afb6728652. Does your pyarrow build include this fix? "
+        },
+        {
+            "created_at": "2017-05-18T21:57:29.871Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1053?focusedCommentId=16016529) by Wes McKinney (wesm):*\nI can repro against master; I will investigate"
+        },
+        {
+            "created_at": "2017-05-18T22:00:56.451Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1053?focusedCommentId=16016537) by Bryan Cutler (bryanc):*\nYeah, I built the Arrow 0.4.0 rc0 which included it, and the original test_leak.py script was stable.  Not until I added the FileReader did I see memory usage increase."
+        },
+        {
+            "created_at": "2017-05-18T22:02:24.112Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1053?focusedCommentId=16016540) by Bryan Cutler (bryanc):*\nThanks Wes, let me know if I can help at all."
+        },
+        {
+            "created_at": "2017-05-18T22:25:06.570Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1053?focusedCommentId=16016560) by Wes McKinney (wesm):*\nPR: https://github.com/apache/arrow/pull/704"
+        },
+        {
+            "created_at": "2017-05-19T13:06:22.504Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1053?focusedCommentId=16017366) by Wes McKinney (wesm):*\nIssue resolved by pull request 704\n<https://github.com/apache/arrow/pull/704>"
+        }
+    ]
+}

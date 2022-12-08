@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[C++][R] GroupByNode accesses FunctionOptions after Init/ExecNode_Aggregate keep_alives aren't kept alive",
+        "body": "***Note**: This issue was originally created as [ARROW-13638](https://issues.apache.org/jira/browse/ARROW-13638). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis causes a use-after-free on function options\r\n\r\n<https://github.com/apache/arrow/blob/6f62649392a7e704ad7b730e792b9ba2d62783f6/r/src/compute-exec.cpp#L138-L165>\u00a0",
+        "created_at": "2021-08-16T18:21:07.000Z",
+        "updated_at": "2021-08-18T16:53:58.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-08-17T19:41:03.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-16T18:32:54.086Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13638?focusedCommentId=17399929) by David Li (lidavidm):*\n```\n\r\n(gdb) bt\r\n#0  __cxxabiv1::__dynamic_cast (src_ptr=0x55555a7aea20, \r\n    src_type=0x7fffe9f0efd0 <typeinfo for arrow::compute::FunctionOptions>, \r\n    dst_type=0x7fffe9f0f200 <typeinfo for arrow::compute::ScalarAggregateOptions>, src2dst=0)\r\n    at /home/conda/feedstock_root/build_artifacts/ctng-compilers_1610729750655/work/.build/x86_64-conda-linux-gnu/src/gcc/libstdc++-v3/libsupc++/dyncast.cc:55\r\n#1  0x00007fff6c74080f in arrow::internal::checked_cast<arrow::compute::ScalarAggregateOptions const&, arrow::compute::FunctionOptions const&> (value=...) at /home/lidavidm/Code/upstream/arrow-13627/cpp/src/arrow/util/checked_cast.h:38\r\n#2  0x00007fff6c91633e in arrow::compute::internal::(anonymous namespace)::GroupedAnyImpl::Init (this=0x7fff60004b80, \r\n    ctx=0x7fffe9f19e80 <ExecPlan_create(bool)::threaded_context>, options=0x55555a7aea20)\r\n    at /home/lidavidm/Code/upstream/arrow-13627/cpp/src/arrow/compute/kernels/hash_aggregate.cc:1769\r\n#3  0x00007fff6c925d49 in arrow::compute::internal::(anonymous namespace)::HashAggregateInit<arrow::compute::internal::(anonymous namespace)::GroupedAnyImpl> (ctx=0x7fff8c6ff170, args=...)\r\n    at /home/lidavidm/Code/upstream/arrow-13627/cpp/src/arrow/compute/kernels/hash_aggregate.cc:777\r\n#4  0x00007fff6c7b049d in std::_Function_handler<arrow::Result<std::unique_ptr<arrow::compute::KernelState, std::default_delete<arrow::compute::KernelState> > > (arrow::compute::KernelContext*, arrow::compute::KernelInitArgs const&), arrow::Result<std::unique_ptr<arrow::compute::KernelState, std::default_delete<arrow::compute::KernelState> > > (*)(arrow::compute::KernelContext*, arrow::compute::KernelInitArgs const&)>::_M_invoke(std::_Any_data const&, arrow::compute::KernelContext*&&, arrow::compute::KernelInitArgs const&) (__functor=..., __args#0=@0x7fff8c6ff0c8: 0x7fff8c6ff170, __args#1=...)\r\n    at /home/lidavidm/miniconda3/envs/arrow4/x86_64-conda-linux-gnu/include/c++/9.3.0/bits/std_function.h:286\r\n#5  0x00007fff6c7c201a in std::function<arrow::Result<std::unique_ptr<arrow::compute::KernelState, std::default_delete<arrow::compute::KernelState> > > (arrow::compute::KernelContext*, arrow::compute::KernelInitArgs const&)>::operator()(arrow::compute::KernelContext*, arrow::compute::KernelInitArgs const&) const (this=0x5555562a9d80, __args#0=0x7fff8c6ff170, \r\n    __args#1=...)\r\n    at /home/lidavidm/miniconda3/envs/arrow4/x86_64-conda-linux-gnu/include/c++/9.3.0/bits/std_function.h:688\r\n#6  0x00007fff6c918bc2 in arrow::compute::internal::InitKernels (kernels=..., \r\n    ctx=0x7fffe9f19e80 <ExecPlan_create(bool)::threaded_context>, aggregates=..., in_descrs=...)\r\n    at /home/lidavidm/Code/upstream/arrow-13627/cpp/src/arrow/compute/kernels/hash_aggregate.cc:2035\r\n#7  0x00007fff6c7cc52e in arrow::compute::(anonymous namespace)::GroupByNode::InitLocalStateIfNeeded (\r\n    this=0x55555a7aef60, state=0x55555a7ced60)\r\n    at /home/lidavidm/Code/upstream/arrow-13627/cpp/src/arrow/compute/exec/aggregate_node.cc:555\r\n#8  0x00007fff6c7ca0d0 in arrow::compute::(anonymous namespace)::GroupByNode::Consume (this=0x55555a7aef60, batch=...)\r\n    at /home/lidavidm/Code/upstream/arrow-13627/cpp/src/arrow/compute/exec/aggregate_node.cc:348\r\n#9  0x00007fff6c7cbab8 in arrow::compute::(anonymous namespace)::GroupByNode::InputReceived (this=0x55555a7aef60, \r\n    input=0x55555a796950, seq=0, batch=...)\r\n    at /home/lidavidm/Code/upstream/arrow-13627/cpp/src/arrow/compute/exec/aggregate_node.cc:470\r\n#10 0x00007fff6c81032d in arrow::compute::(anonymous namespace)::ProjectNode::InputReceived (this=0x55555a796950, \r\n    input=0x55555a64d630, seq=0, batch=...)\r\n    at /home/lidavidm/Code/upstream/arrow-13627/cpp/src/arrow/compute/exec/project_node.cc:97 \n```\r\nso this happens because the GroupByNode initializes thread-local states lazily, after the options have been potentially destructed."
+        },
+        {
+            "created_at": "2021-08-16T18:38:17.915Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13638?focusedCommentId=17399935) by David Li (lidavidm):*\nWe can make internal::Aggregate take owning instead of non-owning pointers to avoid this."
+        },
+        {
+            "created_at": "2021-08-16T20:43:01.406Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13638?focusedCommentId=17399998) by David Li (lidavidm):*\nThis won't work since most APIs are based around non-owning pointers. We can instead add a FunctionOptions::Copy as suggested by `[~bkietz]`. Also, there are several scalar aggregate kernels that keep a reference to their options instead of a copy - those need fixing."
+        },
+        {
+            "created_at": "2021-08-16T20:45:33.281Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13638?focusedCommentId=17399999) by David Li (lidavidm):*\n(Actually, that seems to be only TDigest, fortunately.)"
+        },
+        {
+            "created_at": "2021-08-17T19:41:03.237Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13638?focusedCommentId=17400582) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 10947\n<https://github.com/apache/arrow/pull/10947>"
+        }
+    ]
+}

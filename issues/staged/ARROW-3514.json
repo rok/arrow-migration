@@ -1,0 +1,66 @@
+{
+    "issue": {
+        "title": "[Python] zlib deflate exception when writing Parquet file",
+        "body": "***Note**: This issue was originally created as [ARROW-3514](https://issues.apache.org/jira/browse/ARROW-3514). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe below Python code throws an exception in 0.11.0, but not in 0.10.0.\r\n\r\nI was able to reproduce the issue in Amazon Linux, CentOS 7, and Ubuntu 16.04, but not in Windows 7.\r\n\r\nThe Amazon and CentOS machines are both running zlib 1.2.7, and the Ubuntu machine is using 1.2.8.\r\n\r\nTested with CPython 3.6 in all cases.\r\n```python\n\r\nimport io\r\nimport pyarrow\r\nfrom pyarrow import parquet\r\n\r\ntbl = pyarrow.Table.from_arrays([pyarrow.array(['abc', 'def'])], ['some_col'])\r\n\r\nf = io.BytesIO()\r\nparquet.write_table(tbl, f, compression='gzip')\r\n```\r\n\r\nFollowing is the exception:\r\n\r\n```Java\n\r\nTraceback (most recent call last):\r\n  File \"test_pyarrow.py\", line 8, in <module>\r\n    parquet.write_table(tbl, f, compression='gzip')\r\n  File \"/home/adam/anaconda3/lib/python3.6/site-packages/pyarrow/parquet.py\", line 1125, in write_table\r\n    writer.write_table(table, row_group_size=row_group_size)\r\n  File \"/home/adam/anaconda3/lib/python3.6/site-packages/pyarrow/parquet.py\", line 376, in write_table\r\n    self.writer.write_table(table, row_group_size=row_group_size)\r\n  File \"pyarrow/_parquet.pyx\", line 934, in pyarrow._parquet.ParquetWriter.write_table\r\n  File \"pyarrow/error.pxi\", line 83, in pyarrow.lib.check_status\r\npyarrow.lib.ArrowIOError: Arrow error: IOError: zlib deflate failed, output buffer too small\r\n```",
+        "created_at": "2018-10-15T02:23:14.000Z",
+        "updated_at": "2018-10-18T09:29:07.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-10-16T11:33:00.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-10-15T06:57:58.381Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3514?focusedCommentId=16649814) by Antoine Pitrou (apitrou):*\n> The below Python code throws an exception in 0.11.0, but not in 0.10.0.\r\n\r\nPlease, when you report an exception, can you paste the exception and traceback?"
+        },
+        {
+            "created_at": "2018-10-15T18:59:11.194Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3514?focusedCommentId=16650626) by Adam Machanic (amachanic):*\nSorry about that! All set."
+        },
+        {
+            "created_at": "2018-10-15T19:24:50.302Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3514?focusedCommentId=16650662) by Antoine Pitrou (apitrou):*\nThanks. For the record, I can't reproduce here. Also, there don't seem to be any significant changes in zlib compression during 0.10.0 and 0.11.0, so I'm a bit surprised.\r\n\r\nHow did you install Arrow and Parquet exactly?"
+        },
+        {
+            "created_at": "2018-10-15T19:38:06.325Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3514?focusedCommentId=16650678) by Antoine Pitrou (apitrou):*\nAh, I can reproduce using the pip wheel for Arrow 0.11.0 (but not when building from source). It seems that the pip wheel may be linked with an old zlib (\"`pyarrow/libz-a147dcb0.so.1.2.3`\"). `[~xhochy]`"
+        },
+        {
+            "created_at": "2018-10-15T19:58:26.125Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3514?focusedCommentId=16650700) by Antoine Pitrou (apitrou):*\nAccording to https://www.zlib.net/ChangeLog.txt, the following issue was fixed in zlib 1.2.3.1. I'm not sure it's the culprit.\r\n\r\n> Fix compressBound(), was low for some pathological cases"
+        },
+        {
+            "created_at": "2018-10-15T20:06:55.292Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3514?focusedCommentId=16650708) by Wes McKinney (wesm):*\nWe probably will need to vendor a newer zlib in the wheels.\r\n\r\nThis is a pretty problematic issue \u2013 I am not sure we can wait until the next Arrow release to fix this"
+        },
+        {
+            "created_at": "2018-10-15T20:09:13.623Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3514?focusedCommentId=16650715) by Antoine Pitrou (apitrou):*\nI downloaded a 0.10.0 wheel and it does not seem to bundle a shared zlib. So perhaps zlib was built statically back then (automatically getting whichever version we were building against). Switching to dynamic linking was at my suggestion IIRC, though I didn't know that manylinux1 would automatically bundle an old version within the wheel..."
+        },
+        {
+            "created_at": "2018-10-15T20:30:45.681Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3514?focusedCommentId=16650748) by Wes McKinney (wesm):*\nYeah. Should manylinux1 not be bundling zlib at all? In any case we should not allow this issue to linger long, either we should post fixed p1 wheels or do an 0.11.1 Arrow release"
+        },
+        {
+            "created_at": "2018-10-16T08:35:16.016Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3514?focusedCommentId=16651314) by Antoine Pitrou (apitrou):*\nI've posted a workaround PR that fixes the issue on the posted test case.\r\n\r\nI think not shipping zlib at all should be reasonable, but I don't think we want to try it on a bugfix release. Also, it seems the zlib bundling may be done by the \"auditwheel\" utility."
+        },
+        {
+            "created_at": "2018-10-16T08:59:00.965Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3514?focusedCommentId=16651348) by Uwe Korn (uwe):*\n`auditwheel`\u00a0vendors automatically all libs that should be shipped in the wheel and are not part of a system as defined by the manylinux1 specification. We should definitely build a newer version of zlib but still should bundle it in the wheel."
+        },
+        {
+            "created_at": "2018-10-16T11:33:00.023Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3514?focusedCommentId=16651537) by Krisztian Szucs (kszucs):*\nIssue resolved by pull request 2771\n<https://github.com/apache/arrow/pull/2771>"
+        },
+        {
+            "created_at": "2018-10-16T11:36:36.415Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3514?focusedCommentId=16651539) by Krisztian Szucs (kszucs):*\n`[~xhochy]` I've merged the fix. What's the verdict about the packaging?"
+        }
+    ]
+}

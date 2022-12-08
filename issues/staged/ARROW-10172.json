@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Python] pyarrow.concat_arrays segfaults if a resulting StringArray's capacity overflows",
+        "body": "***Note**: This issue was originally created as [ARROW-10172](https://issues.apache.org/jira/browse/ARROW-10172). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI'm sorry if this was already reported, but there's an overflow issue in concatenation of large arrays\r\n\r\n```python\n\r\nIn [1]: import pyarrow as pa\r\n\r\nIn [2]: str_array = pa.array(['a' * 128] * 10**8)\r\n\r\nIn [3]: large_array = pa.concat_arrays([str_array] * 50)\r\nSegmentation fault (core dumped)\r\n```\r\n\r\nI suppose that  this should be handled by upcast to large_string.",
+        "created_at": "2020-10-05T09:20:37.000Z",
+        "updated_at": "2022-09-23T15:10:38.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-09-23T15:10:38.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-10-05T14:24:28.125Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10172?focusedCommentId=17208105) by Artem KOZHEVNIKOV (ArtemK):*\nbtw, casting to large_string is not supported neither (it's maybe linked):\r\n```python\n\r\nstr_array.cast(pa.large_string())\r\nArrowNotImplementedError                  Traceback (most recent call last)\r\n<ipython-input-2-7399d0bc10ae> in <module>\r\n----> 1 str_array.cast(pa.large_string())\r\n\r\n/opt/conda/envs/model/lib/python3.7/site-packages/pyarrow/table.pxi in pyarrow.lib.ChunkedArray.cast()\r\n\r\n/opt/conda/envs/model/lib/python3.7/site-packages/pyarrow/compute.py in cast(arr, target_type, safe)\r\n     85     else:\r\n     86         options = _pc.CastOptions.unsafe(target_type)\r\n---> 87     return call_function(\"cast\", [arr], options)\r\n     88 \r\n     89 \r\n\r\n/opt/conda/envs/model/lib/python3.7/site-packages/pyarrow/_compute.pyx in pyarrow._compute.call_function()\r\n\r\n/opt/conda/envs/model/lib/python3.7/site-packages/pyarrow/_compute.pyx in pyarrow._compute.Function.call()\r\n\r\n/opt/conda/envs/model/lib/python3.7/site-packages/pyarrow/error.pxi in pyarrow.lib.pyarrow_internal_check_status()\r\n\r\n/opt/conda/envs/model/lib/python3.7/site-packages/pyarrow/error.pxi in pyarrow.lib.check_status()\r\n\r\nArrowNotImplementedError: Unsupported cast from string to large_utf8 using function cast_large_string\r\n\u200b\r\n```"
+        },
+        {
+            "created_at": "2020-10-26T11:02:37.026Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10172?focusedCommentId=17220623) by Artem KOZHEVNIKOV (ArtemK):*\nbtw, in pyarrow=2,  the behaviour has changed \r\n```python\n\r\ntype(pa.array(['a' * 128] * 10**8))\r\npyarrow.lib.ChunkedArray  # before it was pyarrow.lib.StringArray\r\ntype(pa.array(['a' * 128] * 10**8, pa.large_string()))\r\npyarrow.lib.LargeStringArray \r\n```\r\n\r\npa.concat_arrays will overflow\r\n```python\n\r\nstr_array = pa.array(['a' * 128] * 10**8)\r\npa.concat_arrays(str_array.chunks)\r\n---------------------------------------------------------------------------\r\nArrowInvalid                              Traceback (most recent call last)\r\n<ipython-input-49-ec7499df74ad> in <module>\r\n----> 1 pa.concat_arrays(str_array.chunks)\r\n\r\n/opt/conda/envs/model/lib/python3.7/site-packages/pyarrow/array.pxi in pyarrow.lib.concat_arrays()\r\n\r\n/opt/conda/envs/model/lib/python3.7/site-packages/pyarrow/error.pxi in pyarrow.lib.pyarrow_internal_check_status()\r\n\r\n/opt/conda/envs/model/lib/python3.7/site-packages/pyarrow/error.pxi in pyarrow.lib.check_status()\r\n\r\nArrowInvalid: offset overflow while concatenating arrays\r\n```\r\nand upcast to large string does not work neither, so it looks like we cannot handle such large arrays correctly as now.\r\n"
+        },
+        {
+            "created_at": "2022-09-23T15:10:10.568Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10172?focusedCommentId=17608797) by David Li (lidavidm):*\nI happened to see this. The segfault is gone, casting is fixed, but the error is still there.\r\n\r\n```python\n\r\n>>> import pyarrow as pa\r\n>>> str_array = pa.array(['a' * 128] * 10**8)\r\n>>> str_array\r\n<pyarrow.lib.ChunkedArray object at 0x7f7198a89c70>\r\n...\r\n>>> type(str_array)\r\n<class 'pyarrow.lib.ChunkedArray'>\r\n>>> str_array.cast(pa.large_string())\r\n<pyarrow.lib.ChunkedArray object at 0x7f71ca5bd400>\r\n...\r\n>>> large_array = pa.concat_arrays([str_array] * 50)\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"pyarrow/array.pxi\", line 2884, in pyarrow.lib.concat_arrays\r\nTypeError: Iterable should contain Array objects, got <class 'pyarrow.lib.ChunkedArray'> instead\r\n>>> pa.concat_arrays(str_array.chunks)\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"pyarrow/array.pxi\", line 2889, in pyarrow.lib.concat_arrays\r\n  File \"pyarrow/error.pxi\", line 144, in pyarrow.lib.pyarrow_internal_check_status\r\n  File \"pyarrow/error.pxi\", line 100, in pyarrow.lib.check_status\r\npyarrow.lib.ArrowInvalid: offset overflow while concatenating arrays\r\n```\r\n\r\nThere's more discussion now in ARROW-17828 so I'm going to close this in favor of that one to keep things in one place"
+        }
+    ]
+}

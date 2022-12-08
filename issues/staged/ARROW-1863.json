@@ -1,0 +1,54 @@
+{
+    "issue": {
+        "title": "[Python] PyObjectStringify could render bytes-like output for more types of objects",
+        "body": "***Note**: This issue was originally created as [ARROW-1863](https://issues.apache.org/jira/browse/ARROW-1863). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nPyObjectStringify doesn't handle non-string(bytes or utf-8) type correctly. Should use PyObject_Repr(or PyObject_Str) to get string representation of PyObject.\r\n\r\n\r\n```java\n\r\nstruct ARROW_EXPORT PyObjectStringify {\r\n  OwnedRef tmp_obj;\r\n  const char* bytes;\r\n  Py_ssize_t size;\r\n\r\n  explicit PyObjectStringify(PyObject* obj) {\r\n    PyObject* bytes_obj;\r\n    if (PyUnicode_Check(obj)) {\r\n      bytes_obj = PyUnicode_AsUTF8String(obj);\r\n      tmp_obj.reset(bytes_obj);\r\n      bytes = PyBytes_AsString(bytes_obj);\r\n      size = PyBytes_GET_SIZE(bytes_obj);\r\n    } else if (PyBytes_Check(obj)) {\r\n      bytes = PyBytes_AsString(obj);\r\n      size = PyBytes_GET_SIZE(obj);\r\n    } else {\r\n      bytes = NULLPTR;\r\n      size = -1;\r\n    }\r\n  }\r\n};\r\n```\r\nshould change to \r\n\r\n```java\n\r\nstruct ARROW_EXPORT PyObjectStringify {\r\n  OwnedRef tmp_obj;\r\n  const char* bytes;\r\n  Py_ssize_t size;\r\n\r\n  explicit PyObjectStringify(PyObject* obj) {\r\n    PyObject* bytes_obj;\r\n    if (PyUnicode_Check(obj)) {\r\n      bytes_obj = PyUnicode_AsUTF8String(obj);\r\n      tmp_obj.reset(bytes_obj);\r\n      bytes = PyBytes_AsString(bytes_obj);\r\n      size = PyBytes_GET_SIZE(bytes_obj);\r\n    } else if (PyBytes_Check(obj)) {\r\n      bytes = PyBytes_AsString(obj);\r\n      size = PyBytes_GET_SIZE(obj);\r\n    } else {\r\n      bytes_obj = PyObject_Repr(obj);\r\n      tmp_obj.reset(bytes_obj);\r\n      bytes = PyBytes_AsString(bytes_obj);\r\n      size = PyBytes_GET_SIZE(bytes_obj);\r\n    }\r\n  }\r\n};\r\n```\r\n\r\nHow do this infect pyarrow? Minimal reproduction case:\r\n\r\n```java\n\r\nimport pyarrow\r\n\r\ndata = ['-10', '-5', {'a': 1}, '0', '5', '10']\r\n\r\narr = pyarrow.array(data, type=pyarrow.string())\r\n\r\n[1]    64491 segmentation fault  ipython\r\n```\r\n\r\nThis case is found by my colleague. I would ask him to send a pr here.  \r\n\r\ncc `[~wesmckinn]`",
+        "created_at": "2017-11-27T16:05:48.000Z",
+        "updated_at": "2017-12-04T09:49:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-12-04T09:49:40.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-11-27T17:04:37.737Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1863?focusedCommentId=16267065) by Wes McKinney (wesm):*\nMarked for 0.8.0, thanks for reporting"
+        },
+        {
+            "created_at": "2017-11-27T18:49:21.997Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1863?focusedCommentId=16267238) by Phillip Cloud (cpcloud):*\n`[~advancedxy]` Thanks for the report!\r\n\r\nThis definitely shouldn't segfault, but `PyObjectStringify` is meant to convert a Python `str`, `bytes`, or `unicode` type to `const char*`, it's not meant to take an arbitrary Python object and convert it to a string.\r\n\r\nI think this should raise an error, since you're telling arrow to construct an array of type string and you're passing a non-string object to it.\r\n\r\nIt seems arbitrary to enable this behavior for type `X` to `string`, but not for say, `string` to `int64`. Why should implicit conversion from type `X` to `string` be special?\r\n\r\nFor example, should this try to convert the string to an integer?\r\n\r\n```Java\n\r\ndata = [1, 2, '3']\r\npyarrow.array(data, type=pyarrow.int64())\r\n```\r\n\r\nI don't think so.\r\n\r\nImplicit casting from one type to another is a slippery slope and one that makes it hard to predict the output of a function, especially in the presence of the ability to override the string representation of an object."
+        },
+        {
+            "created_at": "2017-11-28T01:09:05.255Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1863?focusedCommentId=16267912) by Xianjin YE (advancedxy):*\nHI `[~cpcloud]`, thanks for your comment.\r\n\r\nThis definitely shouldn't segfault, and an error should be raised. It's never my intention to convert arbitrary type `x` to `string`.\r\n\r\nThe reason it segfault lies down to `UTF8Converter` in builtin_converter.cc\r\n\r\n\r\n```java\n\r\nclass UTF8Converter : public TypedConverterVisitor<StringBuilder, UTF8Converter> {\r\n public:\r\n  inline Status AppendItem(const OwnedRef& item) {\r\n    PyObject* bytes_obj;\r\n    OwnedRef tmp;\r\n    const char* bytes;\r\n    Py_ssize_t length;\r\n\r\n    PyObject* obj = item.obj();\r\n    if (PyBytes_Check(obj)) {\r\n      tmp.reset(\r\n          PyUnicode_FromStringAndSize(PyBytes_AS_STRING(obj), PyBytes_GET_SIZE(obj)));\r\n      RETURN_IF_PYERROR();\r\n      bytes_obj = obj;\r\n    } else if (!PyUnicode_Check(obj)) {\r\n      PyObjectStringify stringified(obj);\r\n      std::stringstream ss;\r\n      ss << \"Non bytes/unicode value encountered: \" << stringified.bytes;\r\n      return Status::Invalid(ss.str());\r\n    } else {\r\n      tmp.reset(PyUnicode_AsUTF8String(obj));\r\n      RETURN_IF_PYERROR();\r\n      bytes_obj = tmp.obj();\r\n    }\r\n\r\n    // No error checking\r\n    length = PyBytes_GET_SIZE(bytes_obj);\r\n    bytes = PyBytes_AS_STRING(bytes_obj);\r\n    return typed_builder_->Append(bytes, static_cast<int32_t>(length));\r\n  }\r\n};\r\n```\r\n`PyObjectStringify` is used to construct the error message,  but a NULLPTR is used instead of string representation of the Python object.\r\n\r\n> but `PyObjectStringify` is meant to convert a Python str, bytes, or unicode type to const char\\*, it's not meant to take an arbitrary Python object and convert it to a string.\r\nSo, I don't think this is true. From the function name and its usage, `PyObjectStringify` should get the string representation of an arbitrary Python object."
+        },
+        {
+            "created_at": "2017-11-28T01:15:50.360Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1863?focusedCommentId=16267918) by Xianjin YE (advancedxy):*\nI believe most use cases of `PyObjectStringigy` is used in log/error message, not to actually convert Python object for arrow types..."
+        },
+        {
+            "created_at": "2017-11-28T21:09:09.113Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1863?focusedCommentId=16269463) by Phillip Cloud (cpcloud):*\n`[~advancedxy]` That sounds good to me. If we're just using it for error messages that's great. Do you (or your colleague) want to put up a PR to fix this?"
+        },
+        {
+            "created_at": "2017-11-29T02:42:08.602Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1863?focusedCommentId=16269981) by Xianjin YE (advancedxy):*\nHi, `[~cpcloud]` I will ask my colleague to send a pr."
+        },
+        {
+            "created_at": "2017-12-03T19:19:29.806Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1863?focusedCommentId=16276037) by Phillip Cloud (cpcloud):*\nLooks like this is already fixed in master. I'll add this example to our test suite, to prevent regressions."
+        },
+        {
+            "created_at": "2017-12-03T20:08:45.871Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1863?focusedCommentId=16276065) by Phillip Cloud (cpcloud):*\nInteresting, this is only showing up on OS X."
+        },
+        {
+            "created_at": "2017-12-04T09:49:40.915Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1863?focusedCommentId=16276545) by Uwe Korn (uwe):*\nIssue resolved by pull request 1385\n<https://github.com/apache/arrow/pull/1385>"
+        }
+    ]
+}

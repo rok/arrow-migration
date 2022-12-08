@@ -1,0 +1,202 @@
+{
+    "issue": {
+        "title": "[C++] Writing float32 values with \"Dictionary Encoding\" makes parquet files not readable for some tools",
+        "body": "***Note**: This issue was originally created as [ARROW-11629](https://issues.apache.org/jira/browse/ARROW-11629). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIf I try to read the attached csv file with pyarrow, changing the float64 columns to float32 and export it to parquet, the parquet file gets corrupted. It is not readable for apache drill or Parquet.Net any longer.\r\n\r\n\u00a0\r\n\r\nUpdate: Bug in \"**Dictionary Encoding**\" feature. If I switch it off for float32 columns, everything works as expected.",
+        "created_at": "2021-02-15T11:49:42.000Z",
+        "updated_at": "2022-08-27T14:42:05.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-04-02T06:57:43.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-02-15T14:41:21.484Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17284756) by Joris Van den Bossche (jorisvandenbossche):*\nThe Parquet format supports both FLOAT and DOUBLE as physical type (float32/float64), so this should normally work. Do you get a specific error message with drill / Parquet.Net ?"
+        },
+        {
+            "created_at": "2021-02-15T14:51:17.369Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17284762) by Matthias Rosenthaler (matthros):*\n`[~jorisvandenbossche]`, In apache drill the values are all displaced. The columns doesn't suit together.\r\n\r\n<https://github.com/mukunku/ParquetViewer> v. 2.3.0 returns 0 values although the values are not 0 or empty in csv. And older version of this parquet viewer returns the attached exception.  ![image-2021-02-15-15-49-41-908.png](https://issues.apache.org/jira/secure/attachment/13020488/image-2021-02-15-15-49-41-908.png)"
+        },
+        {
+            "created_at": "2021-02-15T15:03:54.753Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17284765) by Joris Van den Bossche (jorisvandenbossche):*\nThanks for the details! Would you also be able to check if you have the same issue if you write the parquet file with an older version of pyarrow?"
+        },
+        {
+            "created_at": "2021-02-15T17:32:22.652Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17284875) by Micah Kornfield (emkornfield):*\nAlso, from the comment it sounds like pyarrow can read the data back accurately?"
+        },
+        {
+            "created_at": "2021-02-15T17:34:13.379Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17284877) by Micah Kornfield (emkornfield):*\nto answer my own question, at least the parquet file attached, Arrow seems to be able to read it.\u00a0 I'll confirm the data is actually the same in a minute."
+        },
+        {
+            "created_at": "2021-02-15T17:48:14.779Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17284885) by Micah Kornfield (emkornfield):*\nWould you mind sharing how the parquet file is written.\r\n\r\n\u00a0\r\n\r\nLoading the provided parquet file loads successfully, but isn't equal to the CSV data (when I load it as below).\u00a0 When I try round tripping the data myself it appears to work though:\r\n\r\n\u00a0\r\n\r\n`from_csv=pyarrow.csv.read_csv(\"output.csv\", convert_options=pyarrow.csv.ConvertOptions(column_types=\\{\"I_Injection_IA\": pyarrow.float32(), \"InjectionRate\": pyarrow.float32() }))`\r\n\r\n`parquet.write_table(from_csv ,'foo.parquet')`\r\n\r\n`from_parquet = parquet.read_table('foo.parquet')`\r\n\r\n`from_parquet == from_csv\u00a0# Yields True`\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-02-15T17:50:10.617Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17284886) by Micah Kornfield (emkornfield):*\nSo I think there might be two issues:\r\n\r\n1.\u00a0 The file might be getting corrupted and the pyarrow reader is not detected it somehow.\r\n\r\n2.\u00a0 There could be something wrong in one of the write code paths (but it seems simple local round trip works)."
+        },
+        {
+            "created_at": "2021-02-15T17:59:57.159Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17284890) by Micah Kornfield (emkornfield):*\nI've uploaded the output of the code I used above, could you confirm if this works for the tools you are using?"
+        },
+        {
+            "created_at": "2021-02-16T10:12:48.271Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285123) by Matthias Rosenthaler (matthros):*\n1. I tried it with pyarrow 0.17.0 too, same problem\n1. The parquet file is generated with <https://github.com/G-Research/ParquetSharp> (latest version)\n1. Same problem for your foo.parquet file\n   \n   As I said, if I write out the file with pandas.to_parquet with engine fastparquet it is working. Maybe you find some differences if you diff both output files (pyarrow vs fastparquet)."
+        },
+        {
+            "created_at": "2021-02-16T17:09:47.212Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285350) by Micah Kornfield (emkornfield):*\nThere are two differences with fast parquet:\r\n\r\n1.\u00a0 It appears the placement of column metadata is different (fileoffset with arrow seems to place all column metadata together and fastparquet seems to place it at the beginning of the column).\r\n\r\n2. It looks like Arrow Parquet, first tries dictionary encoding the float columns (it also looks like it does this for doubles as well though.)."
+        },
+        {
+            "created_at": "2021-02-17T03:58:23.218Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285626) by Micah Kornfield (emkornfield):*\n`[~matthros]` \u00a0sorry I don't have easy access to the other utilities you are using but a couple of more items that might help narrow it down.\r\n\r\n\u00a0\r\n\r\n1. From the title above it sounds like if you don't cast the columns to float32 then the tools can read them properly?\r\n\r\n2. Have you tried turning off compression with the tools?"
+        },
+        {
+            "created_at": "2021-02-17T07:09:57.798Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285660) by Matthias Rosenthaler (matthros):*\n`[~emkornfield]`\r\n1. correct, float64/double works perfect\n1. yes, turning off compression doesn't work"
+        },
+        {
+            "created_at": "2021-02-17T14:50:18.872Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285857) by Antoine Pitrou (apitrou):*\n`[~matthros]` I don't think we'll be able to guess what fails on the other side. Can you contact the Drill and Parquet.Net developers and ask them to diagnose the issue? Once we know the cause of the failure, we can decide if there's anything wrong on the Parquet C++ side (and, if necessary, fix it)."
+        },
+        {
+            "created_at": "2021-02-17T15:14:31.988Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285874) by Matthias Rosenthaler (matthros):*\n`[~apitrou]`, created a ticket there too (https://issues.apache.org/jira/browse/DRILL-7864), but I guess they will redirect me back^^\r\n\r\nCreated a ticket on ParquetSharp, they redirected me to arrow, you redirect me to drill, now I am excited what will happen :)"
+        },
+        {
+            "created_at": "2021-02-17T15:23:56.447Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285877) by Antoine Pitrou (apitrou):*\nCan you give the link to the ParquetSharp issue?"
+        },
+        {
+            "created_at": "2021-02-17T15:24:56.120Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285879) by Matthias Rosenthaler (matthros):*\nhttps://github.com/G-Research/ParquetSharp/issues/166"
+        },
+        {
+            "created_at": "2021-02-17T15:28:49.600Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285882) by Antoine Pitrou (apitrou):*\nWait... Parquet.NET and ParquetSharp are two different projects?\r\n\r\nIf it's Parquet.NET that has trouble reading the file, you should open your issue there. ParquetSharp developers cannot guess what happens in Parquet.NET."
+        },
+        {
+            "created_at": "2021-02-17T15:31:49.813Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285885) by Matthias Rosenthaler (matthros):*\nYes they are different. And no, I won't open a further ticket there. I have 3 open tickets on different tools/projects now. Parquet.Net ist not my issue because I don't use them (exception for quick view of parquet data). My problem is that apache drill is not able to read the ParquetSharp parquet file correctly. Parquet.Net was only a further example which has problems with the generated file."
+        },
+        {
+            "created_at": "2021-02-17T15:32:34.031Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285886) by Antoine Pitrou (apitrou):*\nOk, then let's hope Drill developers take a look :-)"
+        },
+        {
+            "created_at": "2021-02-17T15:34:53.876Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285888) by Matthias Rosenthaler (matthros):*\nthere is a promising comment on parquetSharp project now"
+        },
+        {
+            "created_at": "2021-02-17T15:43:48.110Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285894) by Joris Van den Bossche (jorisvandenbossche):*\nThey mention that it might be related to dictionary encoding, which is also what `[~emkornfield]` noted above as a difference with fastparquet (that arrow tries dictionary encoding first for float columns)\r\n\r\nCould you try if disabling dictionary encoding results in a readable file? (I _think_ you can disable it in pyarrow with `use_dictionary=False`)"
+        },
+        {
+            "created_at": "2021-02-17T15:57:38.554Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285910) by Matthias Rosenthaler (matthros):*\n`[~jorisvandenbossche]`: fascinating, it works. Do you know how to turn off dictionary encoding in parquetSharp? I have to check if it works for apache drill too. It would be strange if both tools have the same bug?"
+        },
+        {
+            "created_at": "2021-02-17T16:03:31.666Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285926) by Joris Van den Bossche (jorisvandenbossche):*\nNo idea if/how the feature is exposed in ParquetSharp, that's something to ask at https://github.com/G-Research/ParquetSharp/issues/166 I think"
+        },
+        {
+            "created_at": "2021-02-17T16:05:54.476Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285936) by Tanguy Fautre (GPSnoopy):*\nParquetSharp is just a wrapper around Arrow/Parquet C++. API will be similar (in this particular case, you need to use the `WriterPropertiesBuilder(string columName)` to disable dictionary encoding on the float column). Here is an example from ParquetSharp unit tests:\r\n\r\n```c#\n\r\nvar columns = new Column[]\r\n{\r\n    new Column<int>(\"int\"),\r\n    new Column<double>(\"double\"),\r\n    new Column<string>(\"string\"),\r\n    new Column<bool>(\"bool\")\r\n};\r\n\r\nusing var builder = new WriterPropertiesBuilder();\r\nusing var writerProperties = builder.Compression(Compression.Snappy).DisableDictionary(\"double\").Build();\r\nusing var fileWriter = new ParquetFileWriter(output, columns, writerProperties);\r\n```\r\n\r\nI suspect that either Arrow creates somehow an incorrect Parquet file when a large dictionary is created, or (more likely) that Drill and Parquet .NET have a bug when reading large dictionaries."
+        },
+        {
+            "created_at": "2021-02-17T16:11:03.168Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285940) by Antoine Pitrou (apitrou):*\nI may be mistaken, but it seems Drill is based on parquet-mr (the reference Java Parquet implementation)."
+        },
+        {
+            "created_at": "2021-02-17T16:13:13.108Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285942) by Matthias Rosenthaler (matthros):*\nIt also solves the problem for drill. So it seems it is the same bug for both tools."
+        },
+        {
+            "created_at": "2021-02-17T16:15:47.178Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17285943) by Antoine Pitrou (apitrou):*\nIt may mean that there's a bug in Parquet C++. Let's wait for feedback from the Drill developers."
+        },
+        {
+            "created_at": "2021-02-17T18:02:43.723Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17286038) by Tanguy Fautre (GPSnoopy):*\nWild speculations / hypothesis on my part:\r\n\r\n- Parquet C++ does not revert back to PLAIN encoding when the dictionary gets too large, resulting in inefficiencies and an abnormally large dictionary that other libraries cannot handle.\n  \n- Parquet .NET used Parquet MR as a reference implementation and potentially used part of its source code. In which case, bugs like https://github.com/aloneguid/parquet-dotnet/issues/81 are originally in Parquet MR and impact both implementations."
+        },
+        {
+            "created_at": "2021-02-18T07:07:35.967Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17286312) by Matthias Rosenthaler (matthros):*\n`[~GPSnoopy]`, it seems there is no possibility to disableDictionary for multiple float columns because the method only takes 1 argument?"
+        },
+        {
+            "created_at": "2021-02-18T07:17:01.883Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17286314) by Matthias Rosenthaler (matthros):*\nI disabled it for all columns now, because it makes not really a difference in file size, at least with gzip compression. It works now.\r\nBut we should solve the bug for future, because I think that is a huge major bug."
+        },
+        {
+            "created_at": "2021-02-18T13:52:46.240Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17286483) by Tanguy Fautre (GPSnoopy):*\n`[~matthros]` You can chain those calls, since they take the column name. For example:\r\n\r\n```c#\n\r\nusing var writerProperties = builder\r\n    .Compression(Compression.Snappy)\r\n    .DisableDictionary(\"MyFirstColumn\")\r\n    .DisableDictionary(\"MyOtherColumn\")\r\n    .Build();\r\n```"
+        },
+        {
+            "created_at": "2021-03-01T14:09:15.381Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17292899) by Matthias Rosenthaler (matthros):*\nSome news about this bug? Can I do something for you to support to find a solution?"
+        },
+        {
+            "created_at": "2021-03-06T04:32:57.271Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17296428) by Micah Kornfield (emkornfield):*\nSorry haven't had time to look.\u00a0 The issue posted above (<https://github.com/aloneguid/parquet-dotnet/issues/81>) looks very similar to this one.\u00a0 Did you say that you already opened up an issue there?"
+        },
+        {
+            "created_at": "2021-03-08T09:47:53.533Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17297223) by Matthias Rosenthaler (matthros):*\n`[~emkornfield]`, No, because I think it is not caused by that library alone, because I also have problems to read the data with apache drill."
+        },
+        {
+            "created_at": "2021-03-29T04:12:32.050Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17310390) by Micah Kornfield (emkornfield):*\n`[~matthros]` \u00a0 Sorry, one more question.\u00a0 If you you reduce the number of rows written does it still fail with the other tools?\u00a0 I'll try to get parquet MR setup on my machine but it might take me a while.\u00a0\u00a0"
+        },
+        {
+            "created_at": "2021-03-29T04:59:21.403Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17310419) by Micah Kornfield (emkornfield):*\n`[~matthros]` \u00a0and apologies\u00a0 Was \"<https://github.com/mukunku/ParquetViewer>\u00a0v. 2.0.2\" as typo.\u00a0 Did you mean 2.2?\u00a0 if I'm tracing the code correctly, it looks like\u00a0<https://github.com/aloneguid/parquet-dotnet/issues/81>\u00a0didn't make it into ParquetViewer until 2.2 (and this could explain why it is broken)."
+        },
+        {
+            "created_at": "2021-03-29T06:54:55.566Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17310454) by Matthias Rosenthaler (matthros):*\n`[~emkornfield]`, yes, it was a typo in the current version 2.3.0 the error disappears, but I am getting 0 values instead of correct/original values."
+        },
+        {
+            "created_at": "2021-04-01T06:12:29.942Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17312891) by Micah Kornfield (emkornfield):*\n`[~matthros]` \u00a0could you give some more details on the mismatch you were seeing in Java?\u00a0 Also is the way you are generating the parquet file similar to the python code I posted above that round trips?\u00a0\u00a0\r\n\r\n\u00a0\r\nI hacked [together a gist\u00a0](https://gist.github.com/emkornfield/efd3a4c3c1012dc19cf9769198e3bffe) to read the  parquet file generated with the code above and wrote two columns back out to an Arrow  file (the first column and \"I_Injection_IA\").  Reading the file back in Python and comparing to the columns read from the CSV shows that the data round trips correctly.\r\n\r\n\r\nNote \"a\" in this gist corresponds to the first column.\u00a0 To use the avro bindings all columns need a name.\u00a0\u00a0\r\n\r\nP.S. I was originally hoping to use the AvroToArrow Java functionality but that appears broken, which is why I only sampled two columns. I'll have to file some issues against it."
+        },
+        {
+            "created_at": "2021-04-01T06:26:04.014Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17312902) by Micah Kornfield (emkornfield):*\nI'm checking equality with:\r\n\r\n\u00a0\r\n\r\n```python\n\r\nreader = pyarrow.ipc.open_file('/Users/micahk/fp.arrow')\r\nreader.get_batch(0)['injection'] == from_csv.flatten()['I_Injection_IA'].combine_chunks()\r\nreader.get_batch(0)['a'] == from_csv.flatten()['a'].combine_chunks()\r\n```"
+        },
+        {
+            "created_at": "2021-04-01T06:36:02.439Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17312910) by Micah Kornfield (emkornfield):*\nAnd I should say this is all under pyarrow 3.0.0"
+        },
+        {
+            "created_at": "2021-04-01T06:45:18.259Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17312914) by Matthias Rosenthaler (matthros):*\n`[~emkornfield]` I know that reading with pyarrow is possible. But it doesn't work with parquet-dotnet and apache drill"
+        },
+        {
+            "created_at": "2021-04-01T07:03:11.417Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17312926) by Micah Kornfield (emkornfield):*\n`[~matthros]` Sorry I posted a lot of thoughts in a row so my communication might have been unclear.\u00a0 I created java code using parque-mr ([gist](https://gist.github.com/emkornfield/efd3a4c3c1012dc19cf9769198e3bffe)) that parses the parquet file written by pyarrow.\r\n\r\nthe java code then reads through all the data and selects two columns to write out in the Arrow format.  When I read the arrow file produced from java back in python the columns are identical.    So it seems the latest version of parquet-mr (java which I believe drill relies on) is able to read the files produced by pyarrow.  If there are other columns I should compare I can add them (I compared the first column which appears to be row-number and one of the float columns ('I_Injection_IA').  \r\n\r\nSo my question is what do you mean by values are \"displaced\" in Drill?  Was it for 'I_Injection_IA' or other columns?"
+        },
+        {
+            "created_at": "2021-04-01T09:19:54.544Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17313037) by Matthias Rosenthaler (matthros):*\n`[~emkornfield]`,was wrong, parquet-dotnet seems to be working with the current version now, Apache drill doesn't. I uploaded a csv output of both tools so you are able to identify the differences. I did the following query on sample data to get a smaller subset of it:\u00a0WHERE `operating_point` = 214 AND `statistic` = 'mean'\\``\r\n\r\napache drill 1.18 is using parquet-mr 1.11.0 maybe thats the cause. The new version will include 1.12.0"
+        },
+        {
+            "created_at": "2021-04-01T15:49:35.785Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17313258) by Micah Kornfield (emkornfield):*\n`[~matthros]` I updated the gist to include all columns.  I tested (hopefully correctly) with parquet avro (which should use the  corresponding parquet-mr version) of 1.11.0, 1.11.1, 1.12 (I changed these value in pom.xml).  All arrow files exactly match the Arrow data original parsed from the the CSV.\r\n\r\nGiven that parquet-dotnet is working on the latest version and Parquet MR seems to be able to faithfully read the data for prior versions (please confirm my results in cased I messed up).  I think the last remaining issue might exist someplace in Drill, but if it is OK with you, I think we should close this bug as it doesn't seem to be a problem with arrow (at least as of version 3.0)."
+        },
+        {
+            "created_at": "2021-04-02T06:50:46.741Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17313632) by Matthias Rosenthaler (matthros):*\n`[~emkornfield]`: ok, thx for the support. Hope the drill ticket will bring some clarification."
+        },
+        {
+            "created_at": "2022-08-27T14:42:05.554Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11629?focusedCommentId=17586035) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

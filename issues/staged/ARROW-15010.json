@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[R] Create a function registry for our NSE funcs",
+        "body": "***Note**: This issue was originally created as [ARROW-15010](https://issues.apache.org/jira/browse/ARROW-15010). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis came up in the comments of ARROW-14575, but would be helpful even without doing anything with the namespace: instead of `nse_funcs <- ...`, create a registry + function to register each function and then use that registry in place of `nse_funcs`. \r\n\r\nThis will: \r\n\r\n- Give us a bit more freedom for defining bindings in separate files (though which nse_funcs+collate we could do the same). E.g. have one file per package\n- Possibly give a place to add some documentation (though see ARROW-15011)",
+        "created_at": "2021-12-07T16:29:39.000Z",
+        "updated_at": "2022-01-04T14:47:00.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-01-04T14:46:51.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-12-07T17:19:58.246Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15010?focusedCommentId=17454764) by Dewey Dunnington (paleolimbot):*\nI think the main thing is to break up the definition of translations into a few files because the current file is getting quite long and contains some translation logic and some actual translations. This also helps with managing multiple function translation PRs (and the testing is separated anyway).\r\n\r\nShort reprex of what I was thinking:\r\n\r\n```R\n\r\nnse_funcs <- new.env(parent = emptyenv())\r\nagg_funcs <- new.env(parent = emptyenv())\r\n\r\ntranslation_registry <- function() {\r\n  nse_funcs\r\n}\r\n\r\ntranslation_registry_agg <- function() {\r\n  agg_funcs\r\n}\r\n\r\nregister_translation <- function(fun_name, fun, registry = translation_registry()) {\r\n  name <- gsub(\"^.*?::\", \"\", fun_name)\r\n  namespace <- gsub(\"::.*$\", \"\", fun_name)\r\n  \r\n  attr(fun, \"arrow_namespace\") <- namespace\r\n  nse_funcs[[name]] <- fun\r\n  invisible(fun)\r\n}\r\n\r\nregister_translation_agg <- function(fun_name, fun, registry = translation_registry_agg()) {\r\n  register_translation(fun_name, fun, registry = registry)\r\n}\r\n\r\n# ...then one of these per package\r\nregister_lubridate_translations <- function() {\r\n  register_translation(\"lubridate::year\", function(x) {\r\n# ...\r\n  })\r\n}\r\n\r\n# ...then define them at package load\r\n.onLoad <- function(...) {\r\n  register_lubridate_translations()\r\n}\r\n```\r\n\r\nThis has some nice features:\r\n\r\n- You can define related functions, aggregate functions, and (soon!) window functions next to each other\n- No need to worry about collate order (you're the onLoad thing already, caching all the functions into `.cache$funcs`)\n- You can export `register_translation()` and make translating to Arrow expressions another package's problem (e.g., geoarrow translations for `st_literally_everything()`)\n- There's a place for namespacing if or when that gets supported \n"
+        },
+        {
+            "created_at": "2022-01-04T14:46:51.291Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15010?focusedCommentId=17468662) by Jonathan Keane (jonkeane):*\nIssue resolved by pull request 11904\n<https://github.com/apache/arrow/pull/11904>"
+        }
+    ]
+}

@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[C++] Add a const overload to MemoryMappedFile::GetSize",
+        "body": "***Note**: This issue was originally created as [ARROW-3662](https://issues.apache.org/jira/browse/ARROW-3662). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n\u00a0\r\n\r\nWhile GetSize in general is not a const function, it can be on a MemoryMappedFile. I propose to add a const override directly to the MemoryMappedFile.\r\n\r\nAlternatively we could add a const version on the RandomAccessFile level which would fail, if a const size getting (e.g. without a seek) isn't possible, but it seems to me to be a potential source of hard-to-debug bugs and spurious failures. At would at least require a careful\u00a0analysis of the platform support of different size getting options.",
+        "created_at": "2018-10-31T08:39:08.000Z",
+        "updated_at": "2019-06-03T12:30:18.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2018-11-01T16:49:31.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-10-31T11:00:20.547Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3662?focusedCommentId=16669938) by Antoine Pitrou (apitrou):*\nI'm not sure what the point would be. The idea of \"const\" files is a bit murky in itself :)"
+        },
+        {
+            "created_at": "2018-10-31T11:01:07.925Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3662?focusedCommentId=16669939) by Antoine Pitrou (apitrou):*\ncc'ing `[~fsaintjacques]`, who might have an opinion"
+        },
+        {
+            "created_at": "2018-10-31T11:14:06.378Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3662?focusedCommentId=16669966) by Dimitri Vorona (alendit):*\n>\u00a0The idea of \"const\" files is a bit murky in itself\u00a0:)\r\n\r\nTrue in general.\u00a0I'm not completely sure if mmap'ed files are different enough to make an exception, but at least from the technical PoW you could get their size as a const operation. Thinking about it, the Read(int, shared_ptr<Buffer>\\*) method could also have a const version.\u00a0\r\n\r\nIt came up when I tried to pass a const MemoryMappedFile& to a function. Surely I can just pass a pointer, but it feels strange to do it for a read-only file, especially\u00a0when there isn't any seeking involved."
+        },
+        {
+            "created_at": "2018-10-31T14:13:10.082Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3662?focusedCommentId=16670156) by Francois Saint-Jacques (fsaintjacques):*\nWhy can't the GetSize can't be made const for the other File implementation, afaik stat() only needs an fd."
+        },
+        {
+            "created_at": "2018-10-31T14:38:48.658Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3662?focusedCommentId=16670185) by Dimitri Vorona (alendit):*\nI was under the impression that on some platforms we used SEEK_END/Tell trick to get the size, but it's apparently not true. We do however call seek on the fd in some cases, (io-util.cc:372\u00a0 => io-util.cc:218) and I'm not sure about the reason here. I hesitate considering a seek operation to be const, even if it effectively doesn't move the head. If it isn't a convern, I can of course change all GetSize methods."
+        },
+        {
+            "created_at": "2018-10-31T15:11:21.350Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3662?focusedCommentId=16670225) by Antoine Pitrou (apitrou):*\n> We do however call seek on the fd in some cases, (io-util.cc:372\u00a0 => io-util.cc:218) and I'm not sure about the reason here\r\n\r\nThe problem here is: if you get st_size = 0, does it mean the file is empty, or does it mean the file doesn't have a well-defined size? By trying to call tell(), we disambiguate between those two cases. Example in Python:\r\n```python\n\r\n>>> import os, socket                                                                                                                                                  \r\n>>> r, w = os.pipe()                                                                                                                                                   \r\n>>> os.fstat(r)                                                                                                                                                        \r\nos.stat_result(st_mode=4480, st_ino=261470, st_dev=12, st_nlink=1, st_uid=1000, st_gid=1000, st_size=0, st_atime=1540998512, st_mtime=1540998512, st_ctime=1540998512)\r\n>>> os.lseek(r, 0, os.SEEK_CUR)                                                                                                                                        \r\nTraceback (most recent call last):\r\n  File \"<ipython-input-9-462a3a2bd3e7>\", line 1, in <module>\r\n    os.lseek(r, 0, os.SEEK_CUR)\r\nOSError: [Errno 29] Illegal seek\r\n```\r\n"
+        },
+        {
+            "created_at": "2018-11-01T16:49:31.279Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3662?focusedCommentId=16671858) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 2882\n<https://github.com/apache/arrow/pull/2882>"
+        }
+    ]
+}

@@ -1,0 +1,16 @@
+{
+    "issue": {
+        "title": "[Python] Table.to_pandas() fails for dictionary encoded columns with an is_null partition_expression",
+        "body": "***Note**: This issue was originally created as [ARROW-16905](https://issues.apache.org/jira/browse/ARROW-16905). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nMinimal steps to reproduce:\r\n\r\nI attached a `.zip` file containing a python script and a test parquet file. Running this python script reproduces the issue.\r\n\r\nThe steps taken to reproduce:\r\n1. Create a test parquet file with one column containing only null.\n1. Create a parquet fragment from this file adding a `partition_expression` with an\u00a0`is_null` guarantee on this fragment.\n1. Create a `FileSystemDataset` from this fragment setting the schema to be a dictionary column.\n1. Call `.to_table().to_pandas()` on the resulting pyarrow dataset. You will get the following error.\n   \n   ```java\n   \n   \u00a0 File \"/.../pip-core_pandas/pandas/core/dtypes/dtypes.py\", line 492, in validate_categories\n   \u00a0 \u00a0 raise ValueError(\"Categorical categories cannot be null\")\n   ValueError: Categorical categories cannot be null \n   ```\n   \u00a0\n   \n   My understanding of why this doesn't work:\n1. There are 2 ways of dictionary encoding nulls: `mask` and `encode` described in the [pyarrow docs](https://arrow.apache.org/docs/python/generated/pyarrow.compute.DictionaryEncodeOptions.html#pyarrow.compute.DictionaryEncodeOptions). Pyarrow supports both but pandas categoricals only supports mask. Arguably the real issue here is pandas should support `encode` style categoricals.\n1. When you provide an `.is_null` guarantee on a fragment arrow will not actually read the data. It knows the type from the schema, we've guaranteed the values are all null and it can get the length from the parquet metadata so it has everything it needs.\n1. Instead of reading the data it uses the [Null ArrayFactory](https://github.com/apache/arrow/blob/master/cpp/src/arrow/array/util.cc). For dictionary type columns I believe that calls [this DictionaryArray constructor ](https://github.com/apache/arrow/blob/53752adc6b81166cd4ee7db5a819494042f29197/cpp/src/arrow/array/array_dict.cc#L80-L93)which appears to be creating the dictionary in the `encode` style.\n   \n   Would it be possible to make this configurable? It seems like the `mask` style of dictionary encoding is the default for the rest of PyArrow and it would solve the Pandas compatibility issue. I appreciate this is probably an extremely niche issue but my options for a workaround are looking pretty horrible.\u00a0",
+        "created_at": "2022-06-25T20:24:36.000Z",
+        "updated_at": "2022-06-27T08:01:22.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": []
+}

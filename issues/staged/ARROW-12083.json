@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[R] schema use in open_dataset",
+        "body": "***Note**: This issue was originally created as [ARROW-12083](https://issues.apache.org/jira/browse/ARROW-12083). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI have a directory of split .csvs that I'm importing with open_dataset(). Between files, a column is imported as either int64 (e.g. -2) and the other string (1986CD), and this throws an error when `unify_schemas = T`\r\n\r\n` arrow::open_dataset('./split-csvs/nswcr/', format = 'csv', unify_schemas = T)`\r\n\r\n`Error: Invalid: Unable to merge: Field SEIFACalcMethod has incompatible types: int64 vs string`\r\n\r\nIf I use the schema parameter, and only want to specify this column, I only am able to import this column\r\n\r\n`arrow::open_dataset('./split-csvs/nswcr/',\u00a0``format = 'csv',\u00a0``schema = schema(SEIFACalcMethod = string()))`\r\n\r\n` `\r\n`FileSystemDataset with 45 csv files`\r\n`SEIFACalcMethod: string`\r\n\r\nI was expecting that could set the class of a select few columns, while the rest would be imported as-is. Similar to readr::read_csv(col_types = cols()) approach.\r\n\r\nNot sure if this is expected behaviour, a bug, or a possible avenue for improvement. I've tagged this as the latter.\u00a0(y)\r\n\r\n\u00a0",
+        "created_at": "2021-03-25T01:20:02.000Z",
+        "updated_at": "2021-05-10T16:48:22.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-05-10T16:48:13.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-03-25T22:24:59.354Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12083?focusedCommentId=17309006) by Neal Richardson (npr):*\ncc `[~bkietz]` `[~lidavidm]` \r\n\r\nIt's true that this works differently from how single file reading works. \r\n\r\nThis is also the motivating use case behind ARROW-11589 ( `[~jonkeane]`): open_dataset once to detect schema, then modify the Schema object and use it to open_dataset with declared schema."
+        },
+        {
+            "created_at": "2021-03-25T22:33:15.984Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12083?focusedCommentId=17309011) by David Li (lidavidm):*\nSince 4.0 lets you specify CSVConvertOptions when reading a dataset, you can specify a type for that column only and let Arrow infer the rest. I think it would be something like this (basically all the arguments get forwarded to CsvConvertOptions/CsvReadOptions/CsvParseOptions as appropriate\u00a0 so it should be exactly as you expect from read_csv)\r\n```r\n\r\nopen_dataset(..., format=\"csv\", col_types = schema(SEIFACalcMethod=string()))\r\n```"
+        },
+        {
+            "created_at": "2021-03-25T22:41:46.118Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12083?focusedCommentId=17309014) by Neal Richardson (npr):*\nOh nice! `[~Shaunson26]` if you want to try this out, you can install a nightly build of the arrow package: `arrow::install_arrow(nightly = TRUE)`\r\n\r\nArrow 4.0 is scheduled to release sometime in April."
+        },
+        {
+            "created_at": "2021-03-25T23:06:20.975Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12083?focusedCommentId=17309029) by Weston Pace (westonpace):*\nRelated: ARROW-12080\r\n\r\nSchema evolution (ARROW-11003) is also a closely related topic.\r\n\r\nAllowing the schema to evolve as a dataset is read is challenging.\u00a0 The single-file CSV reader does this and it comes with a fair amount of complexity as well as CPU cost (have to go back and cast previous chunks).\u00a0 It's not even \"single-file\" with datasets though.\u00a0 The streaming CSV reader uses the first block (typically ~1MB) of the CSV file to determine the schema.\u00a0 A lot of the dataset scanning, project, etc. code relies on knowing the schema up front.\u00a0 It's probably an interesting question for the ML (or the query engine doc).\r\n\r\nA pretty decent workaround is to store the evolved schema alongside your data files as a really short IPC or parquet file.\u00a0 I believe Spark refers to these as \"summary files\"."
+        },
+        {
+            "created_at": "2021-03-25T23:09:10.266Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12083?focusedCommentId=17309032) by Weston Pace (westonpace):*\nAh, reading closer I see what makes this unique (it's more about how the schema is interpreted (partially specified columns) vs the concept of having a schema)."
+        },
+        {
+            "created_at": "2021-03-25T23:47:10.478Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12083?focusedCommentId=17309047) by Neal Richardson (npr):*\nI think the schema evolution behavior is related--it's another way that the single-file CSV reader works differently from the dataset. If the schema evolved automatically, then you wouldn't have to bother with specifying the schema and any of the options that entails."
+        },
+        {
+            "created_at": "2021-05-10T01:05:53.387Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12083?focusedCommentId=17341631) by Shaun Nielsen (Shaunson26):*\nHi all,\r\n\r\nI still have this issue. Let me know if i've missesd something\r\n\r\n\u00a0\r\n```\n\r\n> ds <- arrow::open_dataset(source_dir, format = 'csv', unify_schemas = T, col_types = arrow::schema(SEIFACalcMethod = arrow::string()))\r\n\r\n#> Error: Invalid: Unable to merge: Field SEIFACalcMethod has incompatible types: int64 vs string\n```\r\n\u00a0\r\n\r\n`It does not seem to pass on the parameter?`\r\n\r\n\u00a0\r\n```\n\r\n> packageVersion('arrow')\r\n[1] \u20184.0.0\u2019\n```\r\nI attempted to write a repex (manually)\r\n\r\n\u00a0\r\n```\n\r\n# Test dataframe, write in hive style for open_dataset\r\ndir.create('open_dataset_test')\r\na_dataframe <- \r\n data.frame(A = rep(c(1L,2L), each = 5),\r\n B = rep(c(1L,'2L'), each = 5))\r\ndir.create('open_dataset_test/B=1')\r\ndir.create('open_dataset_test/B=2L')\r\nfilter(a_dataframe, B == '1') %>% readr::write_csv('open_dataset_test/B=1/B=1.csv')\r\nfilter(a_dataframe, B == '2L') %>% readr::write_csv('open_dataset_test/B=2L/B=2L.csv')\r\n# open_dataset\r\n# * Error on unify_schemas\r\narrow::open_dataset(sources = 'open_dataset_test/', \r\n format = 'csv', \r\n unify_schemas = T)\r\n# * schema only returns specified columns\r\narrow::open_dataset(sources = 'open_dataset_test/',\r\n format = 'csv', \r\n unify_schemas = T,\r\n schema = arrow::schema(B = arrow::string()))\r\n# col_types not passed on == error on unify_schemes\r\narrow::open_dataset(sources = 'open_dataset_test/', \r\n format = 'csv', \r\n unify_schemas = T,\r\n col_types = arrow::schema(SEIFACalcMethod = arrow::string()))\r\n```\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-05-10T12:18:00.729Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12083?focusedCommentId=17341870) by David Li (lidavidm):*\nThanks for the repex `[~Shaunson26]`! There's two bugs here:\r\n \\* The col_types passed are ignored during dataset construction\r\n \\* The col_types passed would be unconditionally overridden during dataset reading with the types inferred from dataset construction\r\n\r\nBoth of these are on the C++ side, so I'll look at a fix."
+        },
+        {
+            "created_at": "2021-05-10T16:48:13.563Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12083?focusedCommentId=17342009) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 10284\n<https://github.com/apache/arrow/pull/10284>"
+        }
+    ]
+}

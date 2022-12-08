@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[C++] Implement concurrent IO read queue for file-like sources",
+        "body": "***Note**: This issue was originally created as [ARROW-500](https://issues.apache.org/jira/browse/ARROW-500). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn a multithreaded setting, we may spawn many threads which will have access to a shared IO resources. It may be useful to create a thread-safe IO queue implementing the `arrow::io::ReadableFileInterface`, limiting the number of concurrent requests to the desired number (which may be 1, for services not permitting concurrent access).",
+        "created_at": "2017-01-19T22:29:48.000Z",
+        "updated_at": "2021-08-04T08:16:33.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-08-04T08:16:33.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-12-18T11:38:23.216Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-500?focusedCommentId=16999065) by Antoine Pitrou (apitrou):*\nWe now have `MakeInputStreamIterator` and `MakeReadaheadIterator`. Does this solve the issue?"
+        },
+        {
+            "created_at": "2020-03-14T22:54:26.607Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-500?focusedCommentId=17059512) by Wes McKinney (wesm):*\nThat partly addresses the issue. It seems like it might be better to turn this issue more generally into building some asynchronous work queue concepts. \r\n\r\nConsider the following pseudocode:\r\n\r\n```Java\n\r\nfor $arg in $collection {\r\n  $result1 = f($arg)\r\n  g($result1)\r\n}\r\n```\r\n\r\nNow:\r\n\r\n- Suppose that \"f\" and \"g\" do not compete for the same resources. \n- The next invocation of \"f\" can occur while the prior invocation of \"g\" is still running\n- We are OK with some fixed number of results of \"f\" accumulating while invocations of \"g\" are being carried out\n  \n  So if we defined an asynchronous \"work queue\" for \"g\" function calls then the code looks something like:\n  \n  ```Java\n  \n  g_queue->SetMaxDepth($queue_depth)\n  g_queue->Start();\n  for $arg in $collection {\n    $result1 = f($arg)\n    g_queue->Push($result1)\n  }\n  g_queue->WaitForCompletion();\n  ```\n  \n  Some of the machinery for this is available in the `ReadaheadQueue` used for CSV/JSON IO readahead but it could be made more general perhaps. "
+        },
+        {
+            "created_at": "2020-03-15T12:34:50.685Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-500?focusedCommentId=17059639) by Antoine Pitrou (apitrou):*\nIt would be good to know what level of generality is required. For the record, we now also have `AsCompletedIterator` which yields futures in order of completion."
+        },
+        {
+            "created_at": "2020-03-15T12:37:20.500Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-500?focusedCommentId=17059640) by Antoine Pitrou (apitrou):*\nIn other words, the building blocks should now be here to implement opportunistic column chunk reading in Parquet (i.e.: when reading columns in a row group, issue reads using `ReadRangeCache` and process the column chunks in their arrival order).\r\n"
+        },
+        {
+            "created_at": "2021-01-20T19:09:11.700Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-500?focusedCommentId=17268799) by Weston Pace (westonpace):*\nThe asynchronous iterator utilities now have `AddReadahead(N)` which I think adds queuing in the manner described here.\u00a0 That plus adding parallelism to Visit plus adding some kind of FlatMap operator will I think cover most of the cases described here."
+        },
+        {
+            "created_at": "2021-01-21T14:33:58.652Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-500?focusedCommentId=17269342) by Antoine Pitrou (apitrou):*\n`[~westonpace]` Where is `AddReadahead` defined?"
+        },
+        {
+            "created_at": "2021-01-21T14:45:51.806Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-500?focusedCommentId=17269352) by Weston Pace (westonpace):*\nOnly in the PR for 10183 at the moment.\r\n\r\n\u00a0\r\n\r\nhttps://github.com/apache/arrow/pull/9095/files#diff-a1626f73432fa64ed275a1200a64f650b752ee59e939c14594e04f6a64840c00R158"
+        },
+        {
+            "created_at": "2021-08-04T08:16:25.869Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-500?focusedCommentId=17392840) by Antoine Pitrou (apitrou):*\nWe have various async facilities in the IO and filesystem layers now, closing."
+        }
+    ]
+}

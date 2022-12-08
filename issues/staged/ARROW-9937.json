@@ -1,0 +1,30 @@
+{
+    "issue": {
+        "title": "[Rust] [DataFusion] Average is not correct",
+        "body": "***Note**: This issue was originally created as [ARROW-9937](https://issues.apache.org/jira/browse/ARROW-9937). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe current design of aggregates makes the calculation of the average incorrect.\r\n\r\nNamely, if there are multiple input partitions, the result is average of the averages. For example if the input it in two batches `[1,2]`, and `[3,4,5]`, datafusion will say \"average=3.25\" rather than \"average=3\".\r\n\r\n It also makes it impossible to compute the [geometric mean](https://en.wikipedia.org/wiki/Geometric_mean), distinct sum, and other operations.\r\n\r\nThe central issue is that Accumulator returns a `ScalarValue` during partial aggregations via `get_value`, but very often a `ScalarValue` is not sufficient information to perform the full aggregation.\r\n\r\nA simple example is the average of 5 numbers, x1, x2, x3, x4, x5, that are distributed in batches of 2,\r\n\r\n{[x1, x2], [x3, x4],\u00a0[x5]}\r\n\r\n. Our current calculation performs partial means,\r\n\r\n{(x1+x2)/2, (x3+x4)/2, x5}\r\n\r\n, and then reduces them using another average, i.e.\r\n\r\n`((x1+x2)/2 + (x3+x4)/2 + x5)/3`\r\n\r\nwhich is not equal to `(x1 + x2 + x3 + x4 + x5)/5`.\r\n\r\nI believe that our Accumulators need to pass more information from the partial aggregations to the final aggregation.\r\n\r\nWe could consider taking an API equivalent to [spark](<https://docs.databricks.com/spark/latest/spark-sql/udaf-scala.html>), i.e. have an `update`, a `merge` and an `evaluate`.\r\n\r\nCode with a failing test (`src/execution/context.rs`)\r\n```java\n\r\n    #[test]\r\n    fn simple_avg() -> Result<()> {\r\n        let schema = Schema::new(vec![\r\n            Field::new(\"a\", DataType::Int32, false),\r\n        ]);\r\n\r\n        let batch1 = RecordBatch::try_new(\r\n            Arc::new(schema.clone()),\r\n            vec![\r\n                Arc::new(Int32Array::from(vec![1, 2, 3])),\r\n            ],\r\n        )?;\r\n        let batch2 = RecordBatch::try_new(\r\n            Arc::new(schema.clone()),\r\n            vec![\r\n                Arc::new(Int32Array::from(vec![4, 5])),\r\n            ],\r\n        )?;\r\n\r\n        let mut ctx = ExecutionContext::new();\r\n\r\n        let provider = MemTable::new(Arc::new(schema), vec![vec![batch1], vec![batch2]])?;\r\n        ctx.register_table(\"t\", Box::new(provider));\r\n\r\n        let result = collect(&mut ctx, \"SELECT AVG(a) FROM t\")?;\r\n\r\n        let batch = &result[0];\r\n        assert_eq!(1, batch.num_columns());\r\n        assert_eq!(1, batch.num_rows());\r\n\r\n        let values = batch\r\n            .column(0)\r\n            .as_any()\r\n            .downcast_ref::<Float64Array>()\r\n            .expect(\"failed to cast version\");\r\n        assert_eq!(values.len(), 1);\r\n        // avg(1,2,3,4,5) = 3.0\r\n        assert_eq!(values.value(0), 3.0_f64);\r\n        Ok(())\r\n    }\r\n```",
+        "created_at": "2020-09-08T07:08:26.000Z",
+        "updated_at": "2020-09-22T03:21:16.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Component: Rust - DataFusion",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-09-20T16:59:56.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-08T07:10:03.126Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9937?focusedCommentId=17191993) by Jorge Leit\u00e3o (jorgecarleitao):*\n`[~andygrove]`, I remember that you wanted to touch this. If not, let me know and I take a shoot at it.\r\n\r\nLooking at [Ballista's source code for this](https://github.com/ballista-compute/ballista/blob/main/rust/ballista/src/execution/operators/hash_aggregate.rs) , I think that we have the same issue there. :/\r\n"
+        },
+        {
+            "created_at": "2020-09-12T10:40:37.745Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9937?focusedCommentId=17194706) by Andrew Lamb (alamb):*\nThis is bad correctness bug \u2013 we should definitely fix this"
+        },
+        {
+            "created_at": "2020-09-20T16:59:56.730Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9937?focusedCommentId=17199045) by Andy Grove (andygrove):*\nIssue resolved by pull request 8172\n<https://github.com/apache/arrow/pull/8172>"
+        }
+    ]
+}

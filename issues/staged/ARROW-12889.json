@@ -1,0 +1,21 @@
+{
+    "issue": {
+        "title": "[Python] compute.replace_substring_regex sometimes returns incorrect offsets, causing crashes/ub",
+        "body": "***Note**: This issue was originally created as [ARROW-12889](https://issues.apache.org/jira/browse/ARROW-12889). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI've come across examples where calling `pyarrow.compute.replace_substring_regex` caused a segfault once using the result. After some experimentation, I found that the problem lies in the offsets buffer in the result of the computation.\r\n\r\nHere is a docker file that reproduces the problem in a few lines (though without an immediate crash):\r\n```java\n\r\nFROM python:3.8\r\nRUN pip install pyarrow\r\nRUN echo \"import pyarrow; \\\r\n    import pyarrow.compute; \\\r\n    options = pyarrow.compute.ReplaceSubstringOptions('a', ''); \\\r\n    values = [''] * 16; \\\r\n    arr = pyarrow.array(values, pyarrow.string()); \\\r\n    res = pyarrow.compute.replace_substring_regex(arr, options=options); \\\r\n    offsets = res.buffers()[1]; \\\r\n    assert any(offset != 0 for offset in offsets[-4:]);\" > /test.py\r\nRUN python /test.py\r\n```\r\nThe docker image installs pyarrow (4.0.0 at the time of submitting this issue), and then runs python code which creates an array of 16 empty strings, and calls\u00a0`replace_substring_regex` on the array.\r\n The offsets buffer's last 4 bytes (representing the last offset) are checked to be non-zero, which fails.\r\n\r\nEverything but the last offset looks fine: the valid buffer, the rest of the offsets, and the data buffer.\r\n\r\nI have more elaborate examples of arrays which return a random value for the last offset, causing crashes sooner than simply 0 at the end.\r\n Another hint which might help, the problem occurs at multiples of 16, i.e. changing 16 to 32, 48, etc. still shows the problem, but other values don't have a problem.\r\n \u00a0\r\n When I cloned the latest master, built arrow, and run the example - there was no problem. But since I didn't see the issue here on JIRA, I thought I should probably post it. I have no idea if I'm building correctly, and maybe I'm adding a bug to a bug :)",
+        "created_at": "2021-05-26T19:51:03.000Z",
+        "updated_at": "2021-05-27T08:58:31.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-05-27T08:58:31.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-05-26T19:54:52.722Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12889?focusedCommentId=17352042) by Dror Speiser (drorspei):*\nThis is same as #ARROW-12774 !\r\n\r\nClosing..."
+        }
+    ]
+}

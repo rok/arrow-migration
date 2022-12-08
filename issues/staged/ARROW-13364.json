@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "[C++] Should NaN comparison return false or NaN/NA?",
+        "body": "***Note**: This issue was originally created as [ARROW-13364](https://issues.apache.org/jira/browse/ARROW-13364). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn working on ARROW-12964 we ran into some corner behaviors with `NaN` that don't match our (and R's) expectations. It appears that (any?) comparison with `NaN` results in false:\r\n\r\n```r\n\r\n> Scalar$create(NaN) > 5\r\nScalar\r\nfalse\r\n``` \r\n\r\nthough at least in R this would result in an NA value:\r\n```r\n\r\n> NaN > 5\r\n[1] NA\r\n```\r\n\r\nThe current behavior _does_ match numpy's behavior:\r\n\r\n```python\n\r\n>>> np.nan > 5\r\nFalse\r\n```",
+        "created_at": "2021-07-16T20:48:15.000Z",
+        "updated_at": "2021-07-17T08:24:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-07-17T04:20:32.647Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13364?focusedCommentId=17382437) by Eduardo Ponce (edponce):*\n**EqualOptions** has a **nans_equal** member to control the behavior of comparisons between NaNs. I assume this was included to satisfy the behavior of different tools.\r\n\r\nIEEE 754 states that all logical operations with a NaN should always result in false, except for **NaN != x**. For a discussion on this topic, refer to the first answer of [this stack overflow question](https://stackoverflow.com/questions/1565164/what-is-the-rationale-for-all-comparisons-returning-false-for-ieee754-nan-values) and [wikipedia NaN page](https://en.wikipedia.org/wiki/NaN).\r\n\r\nMy opinion for Arrow is that all logical comparisons with a NaN value should return false except for:\r\n- NaN != x\n- NaN == NaN\n  \n  this would eliminate the use of the **nans_equal** option."
+        },
+        {
+            "created_at": "2021-07-17T04:39:21.782Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13364?focusedCommentId=17382453) by Eduardo Ponce (edponce):*\nR uses **NA** to represent a missing value, equivalent to having a **NULL** bit set in Arrow.\r\n\r\nCoercing NaN to logical or integer type gives an NA of the appropriate type, but coercion to character gives the string \"NaN\". NaN values are incomparable so tests of equality or collation involving NaN will result in NA.\r\n\r\nw.r.t. R's behavior for\r\n```r\n\r\n> NaN > 5\r\n[1] NA\r\n```\r\nit does not seems to conform strictly to IEEE 754. My speculation is that internally the result is **NaN** but when coerced as a logical type becomes **NA**.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-07-17T08:24:25.724Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13364?focusedCommentId=17382510) by Joris Van den Bossche (jorisvandenbossche):*\n> EqualOptions has a nans_equal member to control the behavior of comparisons between NaNs. I assume this was included to satisfy the behavior of different tools.\r\n\r\nNote this is for a different operation: for a \"full array, data-structure equality\" (`arr1.equals(arr2) = True or False`), and the option is added here mainly for convenience (as often you want to regard NaNs in the same location as equal when it comes to full array equality, and writing this out manually is rather verbose, i.e. something like `((a == b) | (a.isnan() & b.isnan()).all()`).\r\n\r\nWe don't have such an option for _element-wise_ comparisons (which is the type of equality/comparison that is discussed in this issue)"
+        }
+    ]
+}

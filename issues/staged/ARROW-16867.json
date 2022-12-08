@@ -1,0 +1,36 @@
+{
+    "issue": {
+        "title": "A CSV parser improvement idea",
+        "body": "***Note**: This issue was originally created as [ARROW-16867](https://issues.apache.org/jira/browse/ARROW-16867). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAs I run a CSV reading test(reading from a big file with more than 200 columns and only needing four of them) and I found the CSV parser cost most of the execution time.\u00a0\r\n\r\n![20220621-174727.png](https://issues.apache.org/jira/secure/attachment/13045364/20220621-174727.png)\r\n\r\nAnd I go through the ParseLine function, and I found Arrow will parse all columns of one row even though I just want only 4 columns, and I think it will be a great improvement if Arrow can add including_column to parser_option.\r\n\r\nI want to ask if this idea works or if you guys don't do this for some reason. Thanks in advance.",
+        "created_at": "2022-06-21T10:00:21.000Z",
+        "updated_at": "2022-06-28T12:13:38.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-21T10:02:43.542Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16867?focusedCommentId=17556783) by Antoine Pitrou (apitrou):*\nCan you explain **how** you can parse some CSV columns without parsing all of them?"
+        },
+        {
+            "created_at": "2022-06-22T03:21:01.523Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16867?focusedCommentId=17557209) by youngfn (youngfn):*\n`[~apitrou]` now My\u00a0 naive changed like below:\r\n1. MakeConversionSchema() : save including_column index\u00a0 and\u00a0 change the index value from absolute value to 0,1,2,3.... ![20220622-11065.png](https://issues.apache.org/jira/secure/attachment/13045413/20220622-11065.png)\n   \n   2.\u00a0 then pass the comlumn_indexs(use a set here) to BlockParserImpl through its contructor, so in ParseLine function I can just skip the column I don't need by find in comlumn_index\n   \n   now the result seems good in my test , it has reduce almost 1s from 3.8s --> 2.8s, but I'm not sure if this change will hurt other features\n   \n   ![20220622-111516.png](https://issues.apache.org/jira/secure/attachment/13045414/20220622-111516.png)\n   \n   \u00a0"
+        },
+        {
+            "created_at": "2022-06-27T15:05:03.994Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16867?focusedCommentId=17559213) by Weston Pace (westonpace):*\n> then pass the comlumn_indexs(use a set here) to BlockParserImpl through its contructor, so in ParseLine function I can just skip the column I don't need by find in comlumn_index\r\n\r\nCan you expand a bit more on this part (or provide a PR)?  The parser's job is to figure out where all the delimiters are.  It doesn't know ahead of time how many characters are in each field.  So, for example, if we are only reading the field at index 3 then we don't know how many characters are used by indices 0-2 and there is no way to simply skip that part."
+        },
+        {
+            "created_at": "2022-06-28T02:06:32.769Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16867?focusedCommentId=17559459) by Yibo Cai (yibocai):*\nAgree with Weston that a PR or demo code will be helpful.\r\nMaybe we can skip copying unwanted fields to the output buffer, but we must still scanning and parsing the whole CSV data buffer field by field."
+        },
+        {
+            "created_at": "2022-06-28T12:13:38.536Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16867?focusedCommentId=17559734) by youngfn (youngfn):*\nSorry for my unclear expression. Yes, both of you ( `[~westonpace]` `[~yibocai]`) are right, we can't get rid of scanning, instead, I just don't push every char to the output writer of the whole CSV, just like Yibo Cai said.\r\n\r\nI love to provide a PR, but now my implementation is very rough and I want to do more tests. So I want to show you some demo code of my change. The key part of my implementation of \u00a0**ParseLine(csv/parser.cc)** is like below:\r\n\r\nthis func scans every row and once it gets the field I want then it'll push it to the writer, then if it got all the fields I want then it will return early. So the worse case still needs to scan the whole table, but in most cases will benefit from the early return.\r\n\r\n![20220628-200449.png](https://issues.apache.org/jira/secure/attachment/13045812/20220628-200449.png)\r\n\r\n\u00a0"
+        }
+    ]
+}

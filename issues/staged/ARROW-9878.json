@@ -1,0 +1,38 @@
+{
+    "issue": {
+        "title": "[Python] table to_pandas self_destruct=True + split_blocks=True cannot prevent doubling memory",
+        "body": "***Note**: This issue was originally created as [ARROW-9878](https://issues.apache.org/jira/browse/ARROW-9878). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nTest on: pyarrow 1.0.1, system: Ubuntu 16.04, python3.7\r\n\r\n\u00a0\r\n\r\nReproduce code:\r\n\r\nGenerate about 800MB data first.\r\n```java\n\r\nimport pyarrow as pa\r\n\r\n# generate about 800MB data\r\ndata = [pa.array([10]* 1000)]\r\nbatch = pa.record_batch(data, names=['f0'])\r\nwith open('/tmp/t1.pa', 'wb') as f1:\r\n\twriter = pa.ipc.new_stream(f1, batch.schema)\r\n\tfor i in range(100000):\r\n\t\twriter.write_batch(batch)\r\n\twriter.close()\r\n```\r\nTest to_pandas with self_destruct=True, split_blocks=True, use_threads=False\r\n```python\n\r\nimport pyarrow as pa\r\nimport time\r\nimport sys\r\n\r\nimport os\r\npid = os.getpid()\r\nprint(f'run `psrecord {pid} --plot /tmp/t001.png` and then press ENTER.')\r\nsys.stdin.readline()\r\n\r\nwith open('/tmp/t1.pa', 'rb') as f1:\r\n\treader = pa.ipc.open_stream(f1)\r\n\tbatches = [b for b in reader]\r\n\r\npa_table = pa.Table.from_batches(batches)\r\ndel batches\r\ntime.sleep(3)\r\npdf = pa_table.to_pandas(self_destruct=True, split_blocks=True, use_threads=False)\r\ndel pa_table\r\ntime.sleep(3)\r\n```\r\nThe attached file is psrecord profiling result.",
+        "created_at": "2020-08-28T03:41:00.000Z",
+        "updated_at": "2021-03-30T17:51:42.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Documentation",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-03-30T17:51:26.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-08-28T15:05:49.415Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9878?focusedCommentId=17186602) by David Li (lidavidm):*\nIt's actually fairly complex. There are two issues here:\r\n1. The layout of arrays/record batches in memory when they come from IPC \"blocks\" the optimization\n1. jemalloc tends to cache memory, even when set to return free memory to the OS, so unless you are close to an OOM scenario, you will still likely observe doubling memory\n   \n   For (1):\n   \n   When you deserialize batches from IPC, memory ends up being laid out like this:\n   \n   Batch 0: Allocation 0: array 0 chunk 0, array 1 chunk 0, ...\n   Batch 1: Allocation 1: array 0 chunk 1, array 1 chunk 1, ...\n   Batch 2: Allocation 2: array 0 chunk 2, array 1 chunk 2, ...\n   ...\n   \n   And so (chunked) array 0 is a set of references to allocation 0, allocation 1, ...\n   \n   to_pandas operates _columnwise_, so it'll drop references to each array as it goes - but since each array is a slice of a larger allocation, this doesn't free any memory!\n   \n   So first, you need something like the following:\n   \n   \u00a0\n   ```java\n   \n   new_batches = [\n       pa.RecordBatch.from_arrays([\n           pa.concat_arrrays([arr])\n           for arr in batch\n       ], schema=batch.schema)\n       for batch in batches\n   ]\n   ```\n   Even then, if you measure memory usage with something like [memory-profiler](https://pypi.org/project/memory-profiler/), you'll still see a spike in memory usage unless you are close to OOM, because jemalloc caches allocations. You can avoid this by patching Arrow to force jemalloc to dump all caches after free()ing memory, though this is expensive. You can also avoid this by benchmarking in a scenario where the dataset is over half of available RAM.\n   \n   `[~wesm]` maybe it's worth documenting these caveats somewhere?\n   \n   \u00a0"
+        },
+        {
+            "created_at": "2020-08-30T21:18:50.030Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9878?focusedCommentId=17187331) by Wes McKinney (wesm):*\nYes, I agree they should be documented. With the way that this is set up, all of the columns are slices of the message bodies from the stream, so no memory is deallocated until all of the column references for a chunk of the table are released. Unfortunately there are fairly narrow cases where the `split_blocks=True` yields memory improvements, when the memory in the columns is owned and not sliced from some other memory block."
+        },
+        {
+            "created_at": "2020-08-31T02:49:05.845Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9878?focusedCommentId=17187391) by Weichen Xu (weichenxu123):*\n`[~lidavidm]`\r\n\r\nThanks your explanation!\r\n\r\nFor (1), if I use primitive type, will it block the\u00a0optimization ?"
+        },
+        {
+            "created_at": "2021-02-27T13:06:21.517Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9878?focusedCommentId=17292130) by David Li (lidavidm):*\n`[~weichenxu123]` \u00a0sorry I missed this. The type does not matter; it is about the physical layout of data in memory. My tests were always done with arrays of doubles."
+        },
+        {
+            "created_at": "2021-03-30T17:51:26.436Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9878?focusedCommentId=17311692) by David Li (lidavidm):*\nIssue resolved by pull request 9730\n<https://github.com/apache/arrow/pull/9730>"
+        }
+    ]
+}

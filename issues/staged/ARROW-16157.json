@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[R] Inconsistent behavior for arrow datasets vs working in memory",
+        "body": "***Note**: This issue was originally created as [ARROW-16157](https://issues.apache.org/jira/browse/ARROW-16157). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen I generate a sparse matrix using indices from an arrow dataset I get inconsistent behavior, sometimes there are duplicated indexes resulting in a matrix with values more than one at some places. When loading the dataset first in memory everything works as expected and all the values are one\r\n\r\nRepro\r\n```java\n\r\nlibrary(Matrix)\r\nlibrary(dplyr)\r\nlibrary(arrow)\r\n\r\nsparseMatrix <- Matrix::rsparsematrix(1e5,1e3, 0.05, repr=\"T\")\r\n\r\ndF <- data.frame(i=sparseMatrix@i + 1, j=sparseMatrix@j + 1)\r\n\r\narrow::write_dataset(dF, path='./data/feather', format='feather')\r\narrowDataset <- arrow::open_dataset('./data/feather', format='feather')\r\n\r\n# run the below a few times, and at some time the output is more than just # 1 for unique(newSparse@x), indicating there are \r\n# duplicate indices for the sparse matrix (then it adds the values there)\r\nnewSparse <- Matrix::sparseMatrix(i = arrowDataset %>% pull(i) ,\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 j = arrowDataset %>% pull(j),\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 x = 1)\r\nunique(newSparse@x) # here is the bug, @x is the slot for values\r\n\r\n\r\narrowInMemory <- arrowDataset %>% collect()\r\n\r\n# after loading in memory the output is never more than 1 no matter how \r\n# often I run it\r\nnewSparse <- Matrix::sparseMatrix(i = arrowInMemory %>% pull(i) ,\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 j = arrowInMemory %>% pull(j),\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 x = 1)\r\nunique(newSparse@x)\n```",
+        "created_at": "2022-04-08T17:38:47.000Z",
+        "updated_at": "2022-05-24T11:27:32.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-05-23T17:45:23.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-04-13T09:12:03.470Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16157?focusedCommentId=17521560) by Nicola Crane (thisisnic):*\nThanks for reporting this `[~egillax]`!  I was able to replicate your error with the released version of Arrow you mention above, but when I run the dev version, I think this is fixed. \r\n\r\nIf you want to run the dev version, you can install via `install.packages(\"arrow\", repos = \"https://arrow-r-nightly.s3.amazonaws.com\") `.\r\n\r\nI'll close the ticket for now as I believe this is fixed, but let me know if you're still having this issue let me know and I'll reopen it and take another look."
+        },
+        {
+            "created_at": "2022-04-13T09:34:19.082Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16157?focusedCommentId=17521577) by Egill Axfjord Fridgeirsson (egillax):*\nHi `[~thisisnic]` , \r\n\r\nI updated to the dev version and unfortunately I still get the issue. \r\n\r\nHere is my arrow::info() output if that helps\r\n\r\n```java\n\r\n > arrow::arrow_info()\r\nArrow package version: 7.0.0.20220412\r\n\r\nCapabilities:\r\n               \r\ndataset    TRUE\r\nengine    FALSE\r\nparquet    TRUE\r\njson       TRUE\r\ns3        FALSE\r\nutf8proc   TRUE\r\nre2        TRUE\r\nsnappy     TRUE\r\ngzip      FALSE\r\nbrotli    FALSE\r\nzstd      FALSE\r\nlz4        TRUE\r\nlz4_frame  TRUE\r\nlzo       FALSE\r\nbz2       FALSE\r\njemalloc  FALSE\r\nmimalloc  FALSE\r\n\r\nTo reinstall with more optional capabilities enabled, see\r\n   https://arrow.apache.org/docs/r/articles/install.html\r\n\r\nMemory:\r\n                  \r\nAllocator   system\r\nCurrent   76.29 Mb\r\nMax        76.3 Mb\r\n\r\nRuntime:\r\n                        \r\nSIMD Level          avx2\r\nDetected SIMD Level avx2\r\n\r\nBuild:\r\n                                   \r\nC++ Library Version  8.0.0-SNAPSHOT\r\nC++ Compiler                    GNU\r\nC++ Compiler Version         11.2.0\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-05-23T17:45:08.243Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16157?focusedCommentId=17541072) by Nicola Crane (thisisnic):*\nFigured it out `[~egillax]`!\u00a0\r\n\r\nTwo important things to consider here:\r\n1. Row order is not guaranteed when reading in datasets\r\n2. Datasets are not read into memory until you call `{}collect(){`}, `{}pull(){`}, or similar.\r\n\r\nIn your first example, you read in both columns at once and so the values in each row are properly matched.\u00a0 However, in your second example, you read in the data 1 column at a time (so technically reading it in on 2 separate occasions, but with different columns chosen), and so on the occasions where you're getting values > 1 when you run `{}unique(newSparse@x){`}, those will be where the values have been read in in different orders.\r\n\r\nThis isn't a bug, though obviously not idea in this case here. \r\n\r\nIf you are using a single file to store the data instead of datasets, you could use `write_feather()` and `read_feather();` in this case, order **is** guaranteed, and you won't have the same problem."
+        },
+        {
+            "created_at": "2022-05-24T11:27:32.152Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16157?focusedCommentId=17541428) by Egill Axfjord Fridgeirsson (egillax):*\nThanks `[~thisisnic]` ! That's good to know."
+        }
+    ]
+}

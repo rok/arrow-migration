@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[Python] ListArray.from_arrays does not check validity of input arrays",
+        "body": "***Note**: This issue was originally created as [ARROW-6132](https://issues.apache.org/jira/browse/ARROW-6132). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFrom https://github.com/apache/arrow/pull/4979#issuecomment-517593918.\r\n\r\nWhen creating a ListArray from offsets and values in python, there is no validation of the offsets that it starts with 0 and ends with the length of the array (but is that required? the docs seem to indicate that: https://github.com/apache/arrow/blob/master/docs/source/format/Layout.rst#list-type (\"The first value in the offsets array is 0, and the last element is the length of the values array.\").\r\n\r\nThe array you get \"seems\" ok (the repr), but on conversion to python or flattened arrays, things go wrong:\r\n\r\n```Java\n\r\nIn [61]: a = pa.ListArray.from_arrays([1,3,10], np.arange(5)) \r\n\r\nIn [62]: a\r\nOut[62]: \r\n<pyarrow.lib.ListArray object at 0x7fdd9c468678>\r\n[\r\n  [\r\n    1,\r\n    2\r\n  ],\r\n  [\r\n    3,\r\n    4\r\n  ]\r\n]\r\n\r\nIn [63]: a.flatten()\r\nOut[63]: \r\n<pyarrow.lib.Int64Array object at 0x7fdd9cbfe9e8>\r\n[\r\n  0,   # <--- includes the 0\r\n  1,\r\n  2,\r\n  3,\r\n  4\r\n]\r\n\r\nIn [64]: a.to_pylist()\r\nOut[64]: [[1, 2], [3, 4, 1121, 1, 64, 93969433636432, 13]]  # <--includes more elements as garbage\r\n```\r\n\r\n\r\nCalling `validate` manually correctly raises:\r\n\r\n```Java\n\r\nIn [65]: a.validate()\r\n...\r\nArrowInvalid: Final offset invariant not equal to values length: 10!=5\r\n```\r\n\r\nIn C++ the main constructors are not safe, and as the caller you need to ensure that the data is correct or call a safe (slower) constructor. But do we want to use the unsafe / fast constructors without validation in Python as default as well? Or should we do a call to `validate` here?\r\n\r\nA quick search seems to indicate that `pa.Array.from_buffers` does validation, but other `from_arrays` method don't seem to explicitly do this. ",
+        "created_at": "2019-08-05T08:52:02.000Z",
+        "updated_at": "2019-08-08T15:31:06.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-08T15:30:52.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-08-05T11:59:41.726Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6132?focusedCommentId=16900029) by Antoine Pitrou (apitrou):*\n`[~wesmckinn]` `[~xhochy]` What do you think? I think there is value in spending a few CPU cycles validating inputs in the Python APIs."
+        },
+        {
+            "created_at": "2019-08-05T13:24:18.307Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6132?focusedCommentId=16900079) by Wes McKinney (wesm):*\nI agree, I think adding validation here is OK"
+        },
+        {
+            "created_at": "2019-08-05T17:37:11.145Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6132?focusedCommentId=16900260) by Uwe Korn (uwe):*\n+1, not getting segfaults or delayed errors on Python APIs is essential."
+        },
+        {
+            "created_at": "2019-08-07T10:12:26.250Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6132?focusedCommentId=16901945) by Joris Van den Bossche (jorisvandenbossche):*\n`DictionaryArray.from_arrays` has a `safe=True/False` argument (with `safe=True` as default) to disable the validity checking. \r\nAlthough it is not exactly the same under the hood (DictionaryArray does not use the `ValidateArray` method), for users it is similar functionality, so I could also add such a keyword to `ListArray.from_arrays` as well (didn't do that yet in the PR https://github.com/apache/arrow/pull/5029).\r\n\r\n"
+        },
+        {
+            "created_at": "2019-08-07T10:20:56.858Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6132?focusedCommentId=16901954) by Antoine Pitrou (apitrou):*\nWell, `DictionaryArray.from_arrays(safe=True)` is really expensive: it will walk all indices and check they are within bounds. `ValidateArray` doesn't do such a thing."
+        },
+        {
+            "created_at": "2019-08-07T10:43:12.196Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6132?focusedCommentId=16901966) by Joris Van den Bossche (jorisvandenbossche):*\nI was actually just planning to open an issue for that: should `ValidateArray` check the indices of a DictionaryArray? \r\n\r\nNot knowingly in detail how `ValidateArray` is used internally and what its purpose is, I would expect that from the name of that function, but from your response it might not?\r\n\r\n`ValidateArray` for a ListArray also does walk all offsets and check they are consistent."
+        },
+        {
+            "created_at": "2019-08-07T10:45:26.960Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6132?focusedCommentId=16901968) by Antoine Pitrou (apitrou):*\nMy expectation is that `ValidateArray` is O(1), not O(n) in array size.\r\n\r\nPerhaps we need a separate `ValidateArrayData` that digs deeper...\r\n\r\nEdit: oh, you're right about `ValidateArray(ListArray)`..."
+        },
+        {
+            "created_at": "2019-08-08T15:30:52.337Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6132?focusedCommentId=16903076) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 5029\n<https://github.com/apache/arrow/pull/5029>"
+        }
+    ]
+}

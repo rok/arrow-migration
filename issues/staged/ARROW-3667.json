@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[JS] Incorrectly reads record batches with an all null column",
+        "body": "***Note**: This issue was originally created as [ARROW-3667](https://issues.apache.org/jira/browse/ARROW-3667). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe JS library seems to incorrectly read any columns that come after an all-null column in IPC buffers produced by pyarrow.\r\n\r\nHere's a python script that generates two arrow buffers, one with an all-null column followed by a utf-8 column, and a second with those two reversed\r\n\r\n```python\n\r\nimport pyarrow as pa\r\nimport pandas as pd\r\n\r\ndef serialize_to_arrow(df, fd, compress=True):\r\n  batch = pa.RecordBatch.from_pandas(df)\r\n  writer = pa.RecordBatchFileWriter(fd, batch.schema)\r\n\r\n  writer.write_batch(batch)\r\n  writer.close()\r\n\r\nif __name__ == \"__main__\":\r\n    df = pd.DataFrame(data={'nulls': [None, None, None], 'not nulls': ['abc', 'def', 'ghi']}, columns=['nulls', 'not nulls'])\r\n    with open('bad.arrow', 'wb') as fd:\r\n        serialize_to_arrow(df, fd)\r\n    df = pd.DataFrame(df, columns=['not nulls', 'nulls'])\r\n    with open('good.arrow', 'wb') as fd:\r\n        serialize_to_arrow(df, fd)\r\n```\r\n\r\nJS incorrectly interprets the [null, not null] case:\r\n\r\n```javascript\n\r\n> var arrow = require('apache-arrow')\r\nundefined\r\n> var fs = require('fs')\r\nundefined\r\n> arrow.Table.from(fs.readFileSync('good.arrow')).getColumn('not nulls').get(0)\r\n'abc'\r\n> arrow.Table.from(fs.readFileSync('bad.arrow')).getColumn('not nulls').get(0)\r\n'\\u0000\\u0000\\u0000\\u0000\\u0003\\u0000\\u0000\\u0000\\u0006\\u0000\\u0000\\u0000\\t\\u0000\\u0000\\u0000'\r\n```\r\n\r\nPresumably this is because pyarrow is omitting some (or all) of the buffers associated with the all-null column, but the JS IPC reader is still looking for them, causing the buffer count to get out of sync.\r\n",
+        "created_at": "2018-11-01T03:43:39.000Z",
+        "updated_at": "2019-06-03T12:30:05.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: JavaScript",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-03-02T20:38:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-11-01T15:58:50.816Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3667?focusedCommentId=16671795) by Brian Hulette (bhulette):*\nI'm looking at adding a null column case to the integration tests, but it's not clear what the JSON format should look like for a null type column.\r\n\r\nI tried generating a json file using the C++ implementation to use as a guide, but it turns out C++ actually fails to read the JSON it generates based on `bad.arrow`\r\n```Java\n\r\n-> % ./cpp/build/debug/json-integration-test --integration --mode ARROW_TO_JSON --arrow /tmp/bad.arrow --json /tmp/bad.json Found schema:\r\nnulls: null\r\nnot nulls: string\r\n__index_level_0__: int64\r\n-- metadata --\r\npandas: {\"index_columns\": [\"__index_level_0__\"], \"column_indexes\": [{\"name\": null, \"field_name\": null, \"pandas_type\": \"unicode\", \"numpy_type\": \"object\", \"metadata\": {\"encoding\": \"UTF-8\"}}], \"columns\": [{\"name\": \"nulls\", \"field_name\": \"nulls\", \"pandas_type\": \"empty\", \"numpy_type\": \"object\", \"metadata\": null}, {\"name\": \"not nulls\", \"field_name\": \"not nulls\", \"pandas_type\": \"unicode\", \"numpy_type\": \"object\", \"metadata\": null}, {\"name\": null, \"field_name\": \"__index_level_0__\", \"pandas_type\": \"int64\", \"numpy_type\": \"int64\", \"metadata\": null}], \"pandas_version\": \"0.23.4\"}\r\n-> % ./cpp/build/debug/json-integration-test --integration --mode JSON_TO_ARROW --arrow /tmp/bad.arrow --json /tmp/bad.json\r\nFound schema: nulls: null\r\nnot nulls: string\r\n__index_level_0__: int64\r\nError message: Invalid: field VALIDITY not found\n```\r\n\r\nCould someone familiar with the C++ implementation weigh in here? cc `[~wesmckinn]` `[~pitrou]`\r\nHere's what `/tmp/bad.json` looks like:\r\n\r\n```json\n\r\n{\r\n  \"schema\": {\r\n    \"fields\": [\r\n      {\r\n        \"name\": \"nulls\",\r\n        \"nullable\": true,\r\n        \"type\": {\r\n          \"name\": \"null\"\r\n        },\r\n        \"children\": []\r\n      },\r\n      {\r\n        \"name\": \"not nulls\",\r\n        \"nullable\": true,\r\n        \"type\": {\r\n          \"name\": \"utf8\"\r\n        },\r\n        \"children\": []\r\n      },\r\n      {\r\n        \"name\": \"__index_level_0__\",\r\n        \"nullable\": true,\r\n        \"type\": {\r\n          \"name\": \"int\",\r\n          \"bitWidth\": 64,\r\n          \"isSigned\": true\r\n        },\r\n        \"children\": []\r\n      }\r\n    ]\r\n  },\r\n  \"batches\": [\r\n    {\r\n      \"count\": 3,\r\n      \"columns\": [\r\n        {\r\n          \"name\": \"nulls\",\r\n          \"count\": 3,\r\n          \"children\": []\r\n        },\r\n        {\r\n          \"name\": \"not nulls\",\r\n          \"count\": 3,\r\n          \"VALIDITY\": [\r\n            1,\r\n            1,\r\n            1\r\n          ],\r\n          \"OFFSET\": [\r\n            0,\r\n            3,\r\n            6,\r\n            9\r\n          ],\r\n          \"DATA\": [\r\n            \"abc\",\r\n            \"def\",\r\n            \"ghi\"\r\n          ],\r\n          \"children\": []\r\n        },\r\n        {\r\n          \"name\": \"__index_level_0__\",\r\n          \"count\": 3,\r\n          \"VALIDITY\": [\r\n            1,\r\n            1,\r\n            1\r\n          ],\r\n          \"DATA\": [\r\n            0,\r\n            1,\r\n            2\r\n          ],\r\n          \"children\": []\r\n        }\r\n      ]\r\n    }\r\n  ]\r\n}\r\n```\r\n\r\n"
+        },
+        {
+            "created_at": "2018-11-01T16:04:46.346Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3667?focusedCommentId=16671808) by Brian Hulette (bhulette):*\nMy branch that adds a null column case to the integration test is at https://github.com/TheNeuralBit/arrow/tree/all_null_column"
+        },
+        {
+            "created_at": "2018-11-04T19:02:20.813Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3667?focusedCommentId=16674477) by Wes McKinney (wesm):*\nWell, we don't have integration tests for null type yet, so I would not expect it to be working correctly\r\n\r\nsee ARROW-1636, ARROW-1638"
+        },
+        {
+            "created_at": "2018-12-04T03:29:57.516Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3667?focusedCommentId=16708149) by Brian Hulette (bhulette):*\nMakes sense, thanks for the context.\r\nMaybe I'll start a discussion on the mailing list to define how we represent the null datatype in JSON."
+        },
+        {
+            "created_at": "2019-03-02T20:38:08.761Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3667?focusedCommentId=16782517) by Paul Taylor (paul.e.taylor):*\nIssue resolved by pull request 3787\r\n<https://github.com/apache/arrow/pull/3787>"
+        }
+    ]
+}

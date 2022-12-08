@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Python] Parquet write_table creates gzipped Parquet file, not Parquet with gzip compression",
+        "body": "***Note**: This issue was originally created as [ARROW-10480](https://issues.apache.org/jira/browse/ARROW-10480). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWriting \"foo.parquet.gz\" in Arrow 2.0.0 creates a gzipped Parquet file, which Arrow can't read back, while in 1.0.1 it created a Parquet file with gzip compression. Hence I think this is a regression.\r\n\r\nIn Arrow 2.0.0:\r\n```\n\r\n> pip freeze\r\nnumpy==1.19.4\r\npyarrow==2.0.0\r\n> python write.py\r\nArrow: 2.0.0\r\nRead/write with PyArrow:\r\ntest.pyarrow.gz: gzip compressed data, from Unix, original size modulo 2^32 630\r\nTraceback (most recent call last):\r\n  File \"write.py\", line 12, in <module>\r\n    print(pq.read_table(\"test.pyarrow.gz\"))\r\n  File \"/home/lidavidm/Code/twosigma/arrow-regression/venv/lib/python3.8/site-packages/pyarrow/parquet.py\", line 1607, in read_table\r\n    dataset = _ParquetDatasetV2(\r\n  File \"/home/lidavidm/Code/twosigma/arrow-regression/venv/lib/python3.8/site-packages/pyarrow/parquet.py\", line 1452, in __init__\r\n    [fragment], schema=fragment.physical_schema,\r\n  File \"pyarrow/_dataset.pyx\", line 761, in pyarrow._dataset.Fragment.physical_schema.__get__\r\n  File \"pyarrow/error.pxi\", line 122, in pyarrow.lib.pyarrow_internal_check_status\r\n  File \"pyarrow/error.pxi\", line 99, in pyarrow.lib.check_status\r\nOSError: Could not open parquet input source 'test.pyarrow.gz': Invalid: Parquet magic bytes not found in footer. Either the file is corrupted or this is not a parquet file. \n```\r\nBut in Arrow 1.0.1:\r\n```\n\r\n> pip freeze\r\nnumpy==1.19.4\r\npyarrow==1.0.1\r\n> python write.py\r\nArrow: 1.0.1\r\nRead/write with PyArrow:\r\ntest.pyarrow.gz: Apache Parquet\r\npyarrow.Table\r\nints: int64 \n```\r\nReproduction:\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nimport subprocess\r\n\r\nprint(\"Arrow:\", pa.__version__)\r\nprint()\r\n\r\nprint(\"Read/write with PyArrow:\")\r\ntable = pa.table([pa.array(range(4))], names=[\"ints\"])\r\npq.write_table(table, \"test.pyarrow.gz\", compression=\"GZIP\")\r\nsubprocess.check_call([\"file\", \"test.pyarrow.gz\"])\r\nprint(pq.read_table(\"test.pyarrow.gz\"))\r\n```\r\n\u00a0",
+        "created_at": "2020-11-03T13:48:15.000Z",
+        "updated_at": "2021-03-10T16:40:28.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-11-16T20:43:19.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-11-05T22:26:45.388Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10480?focusedCommentId=17227033) by David Li (lidavidm):*\nI believe this is due to [a56e483126](https://github.com/apache/arrow/commit/a56e483126) where ParquetWriter now uses open_output_stream instead of open for non-legacy filesystems; the former detects a compression method by looking at the file extension. Furthermore, passing a legacy filesystem explicitly doesn't fix it, because pyarrow.fs._ensure_filesystem maps the legacy ones to new ones.\r\n\r\n`[~jorisvandenbossche]` what do you think? We often use filenames with .parquet.snappy or .snappy.parquet, the former of which now gets tripped up - but not sure if that's common to do."
+        },
+        {
+            "created_at": "2020-11-05T22:34:52.967Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10480?focusedCommentId=17227061) by Wes McKinney (wesm):*\nI agree this is a regression. That said using `.parquet.$COMPRESSION` is not conforming, so that's not recommended (but it shouldn't fail in this way)"
+        },
+        {
+            "created_at": "2020-11-16T20:43:19.072Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10480?focusedCommentId=17233068) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 8659\n<https://github.com/apache/arrow/pull/8659>"
+        }
+    ]
+}

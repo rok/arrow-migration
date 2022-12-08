@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "Support mutable array.",
+        "body": "***Note**: This issue was originally created as [ARROW-15289](https://issues.apache.org/jira/browse/ARROW-15289). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFor scenarios where the record batch needs to be reused, the repeated construction of record batch is expensive. This task is about supporting a mutable recordBatch/array to avoid repeated construction overhead.",
+        "created_at": "2022-01-10T07:07:39.000Z",
+        "updated_at": "2022-01-20T08:57:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-01-11T09:19:34.948Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15289?focusedCommentId=17472591) by Gang Wu (wgtmac):*\nHi `[~wesm]` `[~apitrou]`, is it a valid use case to support mutable arrow RecordBatch / Array C++ interfaces? We have implemented it and depended on it extensively at Alibaba. If true, we are happy to contribute it back to the community. Thanks!"
+        },
+        {
+            "created_at": "2022-01-11T13:20:38.458Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15289?focusedCommentId=17472713) by Antoine Pitrou (apitrou):*\nHi `[~wgtmac]`, what would the mutable interfaces look like? The standard Array and RecordBatch classes should definitely stay immutable. A separate set of mutable classes would deserve further discussion."
+        },
+        {
+            "created_at": "2022-01-14T06:39:20.915Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15289?focusedCommentId=17475984) by Gang Wu (wgtmac):*\nThanks for the reply `[~apitrou]` . Yes we have implemented a separate set of mutable classes. Will provide a short design doc here shortly."
+        },
+        {
+            "created_at": "2022-01-20T08:46:26.290Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15289?focusedCommentId=17479190) by Hao Zou (luffyZ):*\nHi `[~apitrou]`, this is a short design about MutableRecordBatch.\r\n## BACKGROUND\r\n\r\nAs arrow::Array objects are immutable, they are created by [arrow::ArrayBuilder or arrow::ArrowData](https://arrow.apache.org/docs/cpp/arrays.html#building-an-array). However, some computing engines need to repeatedly read arrow data from the same reader with fixed schema, or write arrow data to the same writer with fixed schema multiple times. Immutable arrow::Array has a lot of unnecessary overhead in the above scenario. So, we propose a mutable array that is reusable and has the following benefits\r\n \\* Avoid extra overhead like repeating array construction, which is significant in multi-column or deeply nested scenarios.\r\n \\* Avoid extra memory fragmentation caused by repeated allocation or release of memory.\r\n\r\n## API\r\n### MutableArray\r\n \\* **template <typenameTYPE>** {**}MutableNumericArray{**}{**}{{**}}\r\n```java\n\r\n// Return mutable raw pointer to the raw value. \r\nvalue_type* mutable_raw_values() \n```\r\n```java\n\r\n// Return mutable raw pointer to the null bitmap.\r\nuint8_t* mutable_null_bitmap_data() \n```\r\n```java\n\r\n// Change Array reported size to indicated size, allocating memory if necessary. \r\narrow::Status Resize(constint64_tnew_nb_elements, boolshrink_to_fit = true) \n```\r\n```java\n\r\n// Ensure that array has enough memory allocated to fit the indicated.\r\narrow::Status Reserve(constint64_tnew_nb_elements) \n```\r\n\r\n**The API of MutableRecordBatch and MutableArrayBuilder is similar to MutableArray.**\r\n## E.g\r\n\r\nModify the value of the int64 array in a mutable record batch.\r\n```java\n\r\n// Create mutable recordBatch with chema <c1: int64> \r\nstd::shared_ptr<arrow::MutableRecordBatch> mutable_record_batch = arrow::MutableRecordBatch::Make(schema, 2); \r\n\r\n// Get the shared pointer of mutable array\r\nauto int_array = dynamic_pointer_cast<arrow::MutableNumericArray<arrow::Int64Type>>(\r\n  mutable_record_batch->column(0)); \r\n\r\n// Resize int_array to 1024 rows\r\nint_array->Resize(1024); \r\n\r\n// Get the pointer to mutable raw value\r\nint64_t* raw_value = int_array->mutable_raw_values();\r\n\r\n// Get the pointer to mutable null_bitmap\r\nuint8_t* null_bitmap = int_array->mutable_null_bitmap_data();\r\n\r\n// Modify the value of int64 array\r\nfor (int i = 0; i < 1024; ++i) {\r\n  if (i % 2 == 0) {\r\n    raw_value[i] = i;\r\n    arrow::BitUtil::SetBit(null_bitmap, i);\r\n  } else {\r\n    arrow::BitUtil::ClearBit(null_bitmap, i);\r\n  }\r\n} \n```"
+        }
+    ]
+}

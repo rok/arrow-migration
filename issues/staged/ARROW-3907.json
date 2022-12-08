@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] from_pandas errors when schemas are used with lower resolution timestamps",
+        "body": "***Note**: This issue was originally created as [ARROW-3907](https://issues.apache.org/jira/browse/ARROW-3907). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen passing in a schema object to from_pandas a resolution error occurs if the schema uses a lower resolution timestamp.\u00a0Do we need to also add \"coerce_timestamps\" and \"allow_truncated_timestamps\" parameters found in write_table() to from_pandas()?\r\n\r\nError:\r\n\r\npyarrow.lib.ArrowInvalid: ('Casting from timestamp[ns] to timestamp[ms] would lose data: 1532015191753713000', 'Conversion failed for column modified with type datetime64[ns]')\r\n\r\n\r\n\r\nCode:\r\n\r\n\u00a0\r\n```java\n\r\nprocessed_schema = pa.schema([\r\npa.field('Id', pa.string()),\r\npa.field('modified', pa.timestamp('ms')),\r\npa.field('records', pa.int32())\r\n])\r\n\r\npa.Table.from_pandas(df, schema=processed_schema, preserve_index=False)\r\n```\r\n\u00a0",
+        "created_at": "2018-11-29T18:51:27.000Z",
+        "updated_at": "2018-12-13T21:54:46.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-12-03T17:30:42.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-11-29T20:45:47.685Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3907?focusedCommentId=16703802) by Wes McKinney (wesm):*\nDoes passing `safe=False` to `Table.from_pandas` do the trick?"
+        },
+        {
+            "created_at": "2018-11-30T19:50:24.611Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3907?focusedCommentId=16705210) by David Lee (davlee1972@yahoo.com):*\npassing in safe=False works, but it is pretty hacky.. Another problem also pops up with ParquetWriter.write_table(). I'll open a separate ticket for that one.\r\n\r\nThe conversion from pandas nanoseconds to whatever timestamp resolution declared using pa.timestamp() in the schema object worked fine in 0.11.0.\r\n\r\nHaving to pass in coerce_timestamps, allow_truncated_timestamps and safe is pretty messy.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-11-30T21:46:41.706Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3907?focusedCommentId=16705311) by Wes McKinney (wesm):*\nHow is it hacky? We can always add `allow_truncated_timestamps` as an option to `Table.from_pandas`, but somehow you have to opt in to the lossy conversion"
+        },
+        {
+            "created_at": "2018-12-03T17:30:42.522Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3907?focusedCommentId=16707569) by David Lee (davlee1972@yahoo.com):*\nClosing for now. Not convinced Safe is the best solution to address timestamp resolution. If a schema is used it should be clear the intent is to convert pandas nanoseconds to a lower resolution. I think the same can be said for other types of conversions like floats to int."
+        },
+        {
+            "created_at": "2018-12-04T01:41:26.270Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3907?focusedCommentId=16708059) by Wes McKinney (wesm):*\nETL can be a messy business. If you have ideas about improving the APIs for schema coercion / casting, I'd be interested to discuss more"
+        },
+        {
+            "created_at": "2018-12-13T21:54:46.480Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3907?focusedCommentId=16720638) by David Lee (davlee1972@yahoo.com):*\nYeah i'm trying to figure out what the best way to preserve INTs when converting json to parquet..\r\n\r\nThe problem is more or less summarized here.\r\n<https://pandas.pydata.org/pandas-docs/stable/gotchas.html>\r\n\r\nThere are a lot of gotchas with each step.\r\n\r\njson.loads() works fine.\r\n\r\npandas.DataFrame() is a problem if every record doesn't contain the same columns.\r\n\r\nUsing pandas.DataFrame.reindex() to add missing columns adds a bunch of NaN values.\r\n\r\nAdding NaN values will force change a column's dtype from INT64 to FLOAT64.\r\n\r\nNaNs are a problem to begin with because if you convert it to Parquet you end up with Zeros instead of Nulls.\r\n\r\nRunning pandas.DataFrame.reindex(fill_value=None) doesn't work because passing in None is equal to pandas.DataFrame.reindex() without any params.\r\n\r\nOnly way to replace NaNs with None is with pandas.DataFrame.where().\r\n\r\nAfter replacing NaNs you can then change the dtype of the column from FLOAT64 back to INT64\r\n\r\nIt's basically a lot of hoops to go through to preserve your original JSON INT as a Parquet INT.\r\n\r\nMaybe the best solution is to create a pyarrow.Table.from_pydict() function to create a arrow table from a python dictionary. We have this gap with pyarrow.Table.to_pydict(), pyarrow.Table.to_pandas() and pyarrow.Table.from_pandas()."
+        }
+    ]
+}

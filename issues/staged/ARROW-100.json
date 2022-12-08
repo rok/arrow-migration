@@ -1,0 +1,65 @@
+{
+    "issue": {
+        "title": "[C++] Computing RowBatch size",
+        "body": "***Note**: This issue was originally created as [ARROW-100](https://issues.apache.org/jira/browse/ARROW-100). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi,\n\nthank you guys for this project, I'm really enjoying what I've seen so far!\n\nThere is an unimplemented method for getting the total size of objects:\n\nint64_t GetRowBatchSize(const RowBatch\\* batch);\n\nHas somebody already started to implement it or thought about how to do it?\n\nIt could be done by recursively adding up all the involved buffer sizes, build the metadata and add its size. Let me know if you want me to create a draft of the implementation.\n\n\u2013 Philipp.",
+        "created_at": "2016-04-12T23:19:45.000Z",
+        "updated_at": "2016-10-04T23:00:58.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2016-04-23T15:11:38.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2016-04-13T00:19:17.856Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-100?focusedCommentId=15238304) by Kai Zheng (drankye):*\nSounds good Philipp. I refined the title to avoid confusion."
+        },
+        {
+            "created_at": "2016-04-13T01:39:33.409Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-100?focusedCommentId=15238386) by Micah Kornfield (emkornfield@gmail.com):*\nWelcome Philip.\n\nYour approach sounds correct to me.  Most of the necessary code is already in ipc/adapter.cc (see RowBatchWriter), I think it is just a matter of factoring it a little better.\n\nI'm working on some unrelated changes  to the same file but I don't think we will conflict (making it possible to send arrays across)."
+        },
+        {
+            "created_at": "2016-04-13T01:52:41.389Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-100?focusedCommentId=15238398) by Philipp Moritz (pcmoritz):*\nThanks for your answers!\n\nLooking into it a bit more, it should be as simple as implementing DataHeaderSize (by calling WriteDataHeader and getting the resulting buffer size) and adding TotalBytes to its result. Assembling the Flatbuffer header should be fast enough, or do you see a better way to estimate the size?"
+        },
+        {
+            "created_at": "2016-04-13T02:04:00.289Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-100?focusedCommentId=15238413) by Micah Kornfield (emkornfield@gmail.com):*\nI don't have much experience with flatbuffers but I think it should be pretty fast (the google benchmark library is part of the toolchain if you want to write a benchmark to prove this).  I can't think of a better way to estimate its size, and I think keeping the implementation simple and concise makes sense until we have numbers to prove that it is a performance bottleneck.   If it is a bottleneck, we could probably mitigate it by keeping around the serialized version for writing (I think the most common use-case for this method will be call GetRowBatchSize(), allocate the necessary shared memory memory, then push the buffers to the shared-memory)."
+        },
+        {
+            "created_at": "2016-04-13T02:35:29.055Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-100?focusedCommentId=15238481) by Philipp Moritz (pcmoritz):*\nThanks!\n\nThe implementation is here: https://github.com/pcmoritz/arrow/tree/rowbatchsize\n\nI'd like to write a test, is there any way to see how many bytes have been written to the MemorySource? And is it enough to create a PR in git to contribute the code back?\n"
+        },
+        {
+            "created_at": "2016-04-13T03:11:11.170Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-100?focusedCommentId=15238507) by Micah Kornfield (emkornfield@gmail.com):*\nAt the moment there isn't you could create a Mock one that allows you to track the calls made to it.  \n\nYes a PR is sufficient to contribute the code.  Make sure the title starts with \"ARROW-100:\"  Also, if you haven't already you can follow the steps outlined at: https://github.com/apache/arrow/tree/master/cpp#continuous-integration to avoid CI failures."
+        },
+        {
+            "created_at": "2016-04-13T03:16:25.241Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-100?focusedCommentId=15238517) by Micah Kornfield (emkornfield@gmail.com):*\nAlso, in the existing unit test there is an approximate size (1<<16) you could replace that as well."
+        },
+        {
+            "created_at": "2016-04-13T06:17:56.183Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-100?focusedCommentId=15238688) by Philipp Moritz (pcmoritz):*\nJust added the test and fixed a bug that the test discovered (I need to compute the actual offset, passing in 0 is not enough); I also addressed your comments (didn't change the 1<<16 because I don't want the test to depend on code that is supposed to be tested). Thanks a lot for your help!\n\nThe issues clang-tidy found are largely unrelated to what I have been doing, but there is one the was introduced by the code I wrote that I don't really understand:\n\nhttps://gist.github.com/pcmoritz/0ec7421c60140eb47fccd770c2cd280d\n\nAny chance you can look at it and help me figure out what is going on?"
+        },
+        {
+            "created_at": "2016-04-13T06:47:41.001Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-100?focusedCommentId=15238717) by Micah Kornfield (emkornfield@gmail.com):*\nhmm what version, of clang-tidy do you have installed?  I thought I fixed this issue (at least for clang-tidy-3.7) when I checked in the initial clang-tidy check.  It looks like it is following the path that the assertion should checking for, but it doesn't realize that FatalLogger never returns after destruction.  "
+        },
+        {
+            "created_at": "2016-04-14T05:20:38.367Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-100?focusedCommentId=15240621) by Philipp Moritz (pcmoritz):*\nYou were right, I was using an old version of clang-tidy. After updating it, everything worked out nicely, the pull request should be complete now."
+        },
+        {
+            "created_at": "2016-04-18T08:19:34.197Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-100?focusedCommentId=15245290) by Philipp Moritz (pcmoritz):*\nJust addressed the comments from the review and I'm now reasonably happy with the pull requests (thank you all for your suggestions!)."
+        },
+        {
+            "created_at": "2016-04-23T15:11:38.580Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-100?focusedCommentId=15255278) by Wes McKinney (wesm):*\nIssue resolved by pull request 61\n<https://github.com/apache/arrow/pull/61>"
+        }
+    ]
+}

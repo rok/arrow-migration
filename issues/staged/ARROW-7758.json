@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[Python] Wrong conversion of timestamps that are out of bounds for pandas (eg 0000-01-01)",
+        "body": "***Note**: This issue was originally created as [ARROW-7758](https://issues.apache.org/jira/browse/ARROW-7758). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nUsing pandas.read_parquet() with pyarrow as the engine produces ValueError when the parquet file contains a date column with the value 0000-01-01.\r\n\r\nPySpark can read the same parquet with no issues and PyArrow up to version 0.11.1 could read it as well.\u00a0\r\n\r\n\u00a0\r\n```java\n\r\n// code placeholder\r\n\r\n---------------------------------------------------------------------------\r\nValueError                                Traceback (most recent call last)\r\n<ipython-input-7-06e3cce13e18> in <module>\r\n----> 1 df_init_df = read_parquet_files('{}/DebtFacility'.format(ext_path))\r\n\r\n<ipython-input-4-f12125c1c8fe> in read_parquet_files(folder_path)\r\n      2     files = [f for f in os.listdir(folder_path) if f.endswith('parquet')]\r\n      3 \r\n----> 4     df_list = [pd.read_parquet(os.path.join(folder_path, f)) for f in files]\r\n      5 \r\n      6     print(files)\r\n\r\n<ipython-input-4-f12125c1c8fe> in <listcomp>(.0)\r\n      2     files = [f for f in os.listdir(folder_path) if f.endswith('parquet')]\r\n      3 \r\n----> 4     df_list = [pd.read_parquet(os.path.join(folder_path, f)) for f in files]\r\n      5 \r\n      6     print(files)\r\n\r\n/opt/conda/lib/python3.6/site-packages/pandas/io/parquet.py in read_parquet(path, engine, columns, **kwargs)\r\n    294 \r\n    295     impl = get_engine(engine)\r\n--> 296     return impl.read(path, columns=columns, **kwargs)\r\n\r\n/opt/conda/lib/python3.6/site-packages/pandas/io/parquet.py in read(self, path, columns, **kwargs)\r\n    123         kwargs[\"use_pandas_metadata\"] = True\r\n    124         result = self.api.parquet.read_table(\r\n--> 125             path, columns=columns, **kwargs\r\n    126         ).to_pandas()\r\n    127         if should_close:\r\n\r\n/opt/conda/lib/python3.6/site-packages/pyarrow/array.pxi in pyarrow.lib._PandasConvertible.to_pandas()\r\n\r\n/opt/conda/lib/python3.6/site-packages/pyarrow/table.pxi in pyarrow.lib.Table._to_pandas()\r\n\r\n/opt/conda/lib/python3.6/site-packages/pyarrow/pandas_compat.py in table_to_blockmanager(options, table, categories, ignore_metadata)\r\n    702 \r\n    703     _check_data_column_metadata_consistency(all_columns)\r\n--> 704     blocks = _table_to_blocks(options, table, categories)\r\n    705     columns = _deserialize_column_index(table, all_columns, column_indexes)\r\n    706 \r\n\r\n/opt/conda/lib/python3.6/site-packages/pyarrow/pandas_compat.py in _table_to_blocks(options, block_table, categories)\r\n    974 \r\n    975     # Convert an arrow table to Block from the internal pandas API\r\n--> 976     result = pa.lib.table_to_blocks(options, block_table, categories)\r\n    977 \r\n    978     # Defined above\r\n\r\n/opt/conda/lib/python3.6/site-packages/pyarrow/table.pxi in pyarrow.lib.table_to_blocks()\r\n\r\nValueError: year -1 is out of range\r\n\r\n```",
+        "created_at": "2020-02-04T02:27:02.000Z",
+        "updated_at": "2020-03-09T17:23:52.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-02-17T15:21:47.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-02-04T09:36:50.121Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7758?focusedCommentId=17029689) by Joris Van den Bossche (jorisvandenbossche):*\n`[~vagos7]` Thanks for the report! \r\nCan you give a bit more details on which versions of pandas and pyarrow you are using?\r\n\r\nThe issue has to do with pandas' limitation on the range of timestamp values it supports (https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#timeseries-timestamp-limits). So the 0000-01-01 is out of bounds for pandas. So it is not failing in reading the parquet file, but in converting the arrow table to pandas.\r\n\r\nI am however seeing a different problem: not an error, but wrong values:\r\n\r\n```Java\n\r\n>>> import datetime    \r\n>>> table = pa.table({'a': [datetime.datetime(1,1,1)]})    \r\n>>> table.to_pandas() \r\n                              a\r\n0 1754-08-30 22:43:41.128654848\r\n```\r\n"
+        },
+        {
+            "created_at": "2020-02-04T10:27:55.464Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7758?focusedCommentId=17029729) by Joris Van den Bossche (jorisvandenbossche):*\nI recently looked at a related issue (ARROW-6704), but apparently only fixed this for the array->Series/np.ndarray conversion, and not for the table->DataFrame conversion"
+        },
+        {
+            "created_at": "2020-02-04T10:38:28.318Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7758?focusedCommentId=17029741) by Joris Van den Bossche (jorisvandenbossche):*\nSo currently, the conversion for from non-ns timestamp data to ns resolution happens here:\r\n\r\nhttps://github.com/apache/arrow/blob/bc261d1e43aea04f5277ff0c3252a21582e7ab61/cpp/src/arrow/python/arrow_to_pandas.cc#L1212-L1224\r\n\r\nThis does a multiplication of the values to convert to nanoseconds, but so without checking any overflow. While in the `cast` code, we do those overflow checks (optional, on by default with a safe cast). \r\n\r\nSo the question is: do we want to be safe here as well? (I would say yes, since returning \"garbage\" values doesn't seem good) But do we want to provide an option to turn off this safe casting (it has some performance overhead) ?\r\n\r\ncc `[~wesm]`"
+        },
+        {
+            "created_at": "2020-02-04T17:41:24.520Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7758?focusedCommentId=17030012) by Wes McKinney (wesm):*\nBeing safe by default makes sense. May need to add an option to permit unsafe casts though"
+        },
+        {
+            "created_at": "2020-02-05T14:55:21.736Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7758?focusedCommentId=17030714) by Evangelos Pertsinis (vagos7):*\nJust to answer the question about versions:\r\n- Pandas 0.25.3\n- PyArrow 0.15.1"
+        },
+        {
+            "created_at": "2020-02-17T15:21:47.410Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7758?focusedCommentId=17038437) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 6358\n<https://github.com/apache/arrow/pull/6358>"
+        },
+        {
+            "created_at": "2020-02-17T22:35:37.071Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7758?focusedCommentId=17038674) by Evangelos Pertsinis (vagos7):*\nThanks for working on this guys! Can you share when the fix will go out?\u00a0"
+        },
+        {
+            "created_at": "2020-02-18T08:26:00.854Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7758?focusedCommentId=17038878) by Wes McKinney (wesm):*\nIn the next release. If we do a 0.16.1 release it will be sooner otherwise I expect the next major release will be sometime in April or May"
+        }
+    ]
+}

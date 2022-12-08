@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Python] Incorrect null column returned when using a dataset filter expression.",
+        "body": "***Note**: This issue was originally created as [ARROW-10027](https://issues.apache.org/jira/browse/ARROW-10027). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen using dataset filter expressions (which I <3) with Parquet files, entire `null` columns are returned, rather than rows that matched other columns in the filter. \r\n\r\nHere's an example.\r\n\r\n```python\n\r\nIn [7]: import pyarrow as pa\r\nIn [8]: import pyarrow.dataset as ds\r\nIn [9]: import pyarrow.parquet as pq\r\n\r\nIn [10]: table = pa.Table.from_arrays(\r\n ...:     arrays=[\r\n ...:         pa.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),\r\n ...:         pa.array([\"zero\", \"one\", \"two\", \"three\", \"four\", \"five\", \"six\", \"seven\", \"eight\", \"nine\"]),\r\n ...:         pa.array([None, None, None, None, None, None, None, None, None, None]),\r\n ...:     ],\r\n ...:     names=[\"id\", \"name\", \"other\"],\r\n ...: )\r\n\r\nIn [11]: table\r\nOut[11]:\r\npyarrow.Table\r\nid: int64\r\nname: string\r\nother: null\r\n\r\nIn [12]: table.to_pandas()\r\nOut[12]:\r\n   id   name other\r\n0   0   zero  None\r\n1   1    one  None\r\n2   2    two  None\r\n3   3  three  None\r\n4   4   four  None\r\n5   5   five  None\r\n6   6    six  None\r\n7   7  seven  None\r\n8   8  eight  None\r\n9   9   nine  None\r\n\r\nIn [13]: pq.write_table(table, \"/tmp/test.parquet\", data_page_version=\"2.0\")\r\nIn [14]: data = ds.dataset(\"/tmp/test.parquet\")\r\nIn [15]: table = data.to_table(filter=ds.field(\"id\").isin([1, 4, 7]))\r\nIn [16]: table\r\nOut[16]:\r\npyarrow.Table\r\nid: int64\r\nname: string\r\nother: null\r\n\r\nIn [17]: table.to_pydict()\r\nOut[17]:\r\n{'id': [1, 4, 7],\r\n 'name': ['one', 'four', 'seven'],\r\n 'other': [None, None, None, None, None, None, None, None, None, None]}\r\n```\r\nThe `to_pydict` method highlights the strange behavior: the `id` and `name` columns have 3 elements, but the `other` column has all 10. When I call `to_pandas` on the filtered table, the program crashes.\r\n\r\nThis could be a C++ issue, but, since my examples are in Python, I categorized it as a Python issue. Let me know if that's wrong and I'll note that for the future.",
+        "created_at": "2020-09-16T21:00:00.000Z",
+        "updated_at": "2020-09-25T13:10:31.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-09-24T09:55:02.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-17T08:52:32.555Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10027?focusedCommentId=17197515) by Joris Van den Bossche (jorisvandenbossche):*\n`[~tazimmerman]` thanks for the report!\r\n\r\nI don't see the crash in `to_pandas` (using master):\r\n\r\n```Java\n\r\nIn [7]: table.to_pandas()\r\nOut[7]: \r\n   id   name other\r\n0   1    one  None\r\n1   4   four  None\r\n2   7  seven  None\r\n```\r\n\r\nbut also see the wrong behaviour of `to_pydict`, so there is certainly something fishy going on."
+        },
+        {
+            "created_at": "2020-09-17T08:53:19.023Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10027?focusedCommentId=17197516) by Joris Van den Bossche (jorisvandenbossche):*\nAlso selecting the null column from the filtered table indicates it still has 10 elements:\r\n\r\n```Java\n\r\nIn [9]: table['other']\r\nOut[9]: \r\n<pyarrow.lib.ChunkedArray object at 0x7fdfb2a0e7d8>\r\n[\r\n10 nulls\r\n]\r\n```\r\n\r\nso it seems the null column doesn't get properly filtered (which means for a NullArray: change the length)"
+        },
+        {
+            "created_at": "2020-09-17T09:07:48.806Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10027?focusedCommentId=17197535) by Joris Van den Bossche (jorisvandenbossche):*\nSo it seems this is a bug not directly in the Dataset code, but in the filter operation. Also when manually filtering a RecordBatch, it incorrectly returns a batch with the null column not being filtered:\r\n\r\n```Java\n\r\ntable = pa.Table.from_arrays(\r\n    arrays=[\r\n        pa.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),\r\n        pa.array([\"zero\", \"one\", \"two\", \"three\", \"four\", \"five\", \"six\", \"seven\", \"eight\", \"nine\"]),\r\n        pa.array([None, None, None, None, None, None, None, None, None, None]),\r\n    ],\r\n    names=[\"id\", \"name\", \"other\"],\r\n)\r\n\r\nbatch = table.to_batches()[0]\r\n```\r\n\r\n```Java\n\r\nIn [32]: batch\r\nOut[32]: \r\npyarrow.RecordBatch\r\nid: int64\r\nname: string\r\nother: null\r\n\r\nIn [33]: batch.num_rows\r\nOut[33]: 10\r\n\r\nIn [34]: filtered_batch = batch.filter(pa.array([True, False]*5))\r\n\r\nIn [35]: filtered_table.num_rows\r\nOut[35]: 5\r\n\r\nIn [36]: filtered_batch.column(2)\r\nOut[36]: \r\n<pyarrow.lib.NullArray object at 0x7fdf9c4002e8>\r\n10 nulls\r\n\r\nIn [37]: len(filtered_batch.column(2))\r\nOut[37]: 10\r\n```\r\n\r\n\r\nDirectly filtering on the array or chunked array or on a Table seems to work, though:\r\n\r\n```Java\n\r\nIn [38]: filtered_table = table.filter(pa.array([True, False]*5))\r\n\r\nIn [39]: filtered_table.num_rows\r\nOut[39]: 5\r\n\r\nIn [40]: filtered_table['other']\r\nOut[40]: \r\n<pyarrow.lib.ChunkedArray object at 0x7fdf9c3b9938>\r\n[\r\n5 nulls\r\n]\r\n\r\nIn [41]: chunked_array = table['other']\r\n\r\nIn [42]: chunked_array\r\nOut[42]: \r\n<pyarrow.lib.ChunkedArray object at 0x7fdf9c391410>\r\n[\r\n10 nulls\r\n]\r\n\r\nIn [43]: chunked_array.filter(pa.array([True, False]*5))\r\nOut[43]: \r\n<pyarrow.lib.ChunkedArray object at 0x7fdf9c352c50>\r\n[\r\n5 nulls\r\n]\r\n\r\nIn [44]: chunked_array.chunks[0].filter(pa.array([True, False]*5))\r\nOut[44]: \r\n<pyarrow.lib.NullArray object at 0x7fdf9c362e88>\r\n5 nulls\r\n\r\n```"
+        },
+        {
+            "created_at": "2020-09-17T13:41:34.298Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10027?focusedCommentId=17197685) by Troy Zimmerman (tazimmerman):*\n`[~jorisvandenbossche]` Thank you for the quick & detailed response.\r\n\r\nI'll take a closer look at the core that is dumped to see if I can narrow down what's causing the crash since it just seems to be on my end."
+        },
+        {
+            "created_at": "2020-09-17T13:47:14.703Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10027?focusedCommentId=17197703) by Joris Van den Bossche (jorisvandenbossche):*\nDon't worry about the crash (I actually saw a crash when closing my python session afterwards). The malformed dataframe should be solved by fixing the filter bug, which is tackled by my PR https://github.com/apache/arrow/pull/8209"
+        },
+        {
+            "created_at": "2020-09-17T14:19:16.005Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10027?focusedCommentId=17197720) by Troy Zimmerman (tazimmerman):*\nYou rock! Thank you for the fast turnaround."
+        },
+        {
+            "created_at": "2020-09-24T09:55:02.489Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10027?focusedCommentId=17201416) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 8209\n<https://github.com/apache/arrow/pull/8209>"
+        }
+    ]
+}

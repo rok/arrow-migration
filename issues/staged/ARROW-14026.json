@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[C++] Batch readahead not working correctly in Parquet scanner",
+        "body": "***Note**: This issue was originally created as [ARROW-14026](https://issues.apache.org/jira/browse/ARROW-14026). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe parquet scanner implements batch readahead by applying a readahead generator to the generator returned by parquet::arrow::FileReader::GetRecordBatchGenerator.  However, that generator is constructed with MakeConcatenatedGenerator which, regrettably, has this comment:\r\n\r\n> This generator is async-reentrant but will never pull from source reentrantly and will never pull from any subscription reentrantly.\r\n\r\nThis effectively prevents any batch readahead from happening and the file is always read one batch at a time.  Part of the problem seems to be that ReadOneRowGroup in reader.cc returns a RecordBatchGenerator when it seems it should be able to return a RecordBatch.  For the testing I am doing I changed this to return a single record batch which allowed me to get rid of the concatenated generator and batch readahead appeared to work properly but I didn't fully confirm the correctness of this.",
+        "created_at": "2021-09-17T11:59:26.000Z",
+        "updated_at": "2021-10-04T14:04:30.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-09-27T17:46:59.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-09-17T12:38:01.364Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14026?focusedCommentId=17416652) by David Li (lidavidm):*\nIIRC, the reason why ReadOneRowGroup gives a generator is because a Table isn't necessarily convertible into a single batch (the ChunkedArrays in a table need not have the same chunk layout)."
+        },
+        {
+            "created_at": "2021-09-17T12:38:31.495Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14026?focusedCommentId=17416653) by David Li (lidavidm):*\nThough maybe with the way the Parquet reader works, the ChunkedArrays will always have a single chunk? We'd have to dig more into the Parquet reader."
+        },
+        {
+            "created_at": "2021-09-17T16:25:51.155Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14026?focusedCommentId=17416788) by David Li (lidavidm):*\nAfter digging around the Parquet implementation it seems unclear; there look to be cases where multiple chunks can be delivered, though in many cases only one chunk is hardcoded. So it might be better to replace MakeConcatenatedGenerator. One thing is that we don't actually have AsyncGenerator<AsyncGenerator<RecordBatch>> but rather AsyncGenerator<vector<RecordBatch>> (because ultimately we're reading a Table) so we could perhaps do the following:\r\n \\* Queue up async-reentrant pulls,\r\n \\* Queue up a number of row groups,\r\n \\* Whenever the next row group is delivered, re-chunk the table into batches of the desired size, then fulfill any outstanding pulls (and queue up the remainder)."
+        },
+        {
+            "created_at": "2021-09-17T16:26:16.598Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14026?focusedCommentId=17416789) by David Li (lidavidm):*\nThis would also solve ARROW-14024 for the Parquet case."
+        },
+        {
+            "created_at": "2021-09-17T18:09:22.099Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14026?focusedCommentId=17416838) by David Li (lidavidm):*\nI started pursuing this though I don't think I'll have it ready today (I always run into deadlocks with async code\u2026)"
+        },
+        {
+            "created_at": "2021-09-17T18:59:22.182Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14026?focusedCommentId=17416877) by Weston Pace (westonpace):*\nWhat you propose sounds good to me.  My other thoughts (that I haven't really investigated at all) were:\r\n\r\nOne option is if we interpret batch_readahead as row group readahead and just read ahead X vectors of record batches and put the flattening / concatenating on the other side.  It's potentially keeping a little more in memory than strictly necessary but it keeps things simple.\r\n\r\nAnother option is to create a different kind of concatenating generator.  Right now the concatenating generator is a merge generator with a max readahead of 1.  We could create a merge generator with higher max readahead (e.g. batch_readahead) and then keep a buffer of items ordering information that gets resequenced.  I think this is a generic version of what you described.  The downside would be that it wouldn't really be clear how big that resequencing buffer could get (it would be max_streams \\* max_size_of_one_stream - 1 I think).  Plus, adding the resequencing logic is always a pain."
+        },
+        {
+            "created_at": "2021-09-21T13:02:48.903Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14026?focusedCommentId=17418107) by David Li (lidavidm):*\n`[~westonpace]` how did we determine that there was no readahead? What I see is that there are actually concurrent pulls to the row group generator (the generator of generators):\r\n\r\n(Ignore this; I was mistakenly testing with multiple files which would cover up issues.)"
+        },
+        {
+            "created_at": "2021-09-27T17:46:59.664Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14026?focusedCommentId=17420936) by David Li (lidavidm):*\nIssue resolved by pull request 11189\n<https://github.com/apache/arrow/pull/11189>"
+        }
+    ]
+}

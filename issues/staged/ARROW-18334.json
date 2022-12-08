@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "add function for timestamp/duration is not commutative",
+        "body": "***Note**: This issue was originally created as [ARROW-18334](https://issues.apache.org/jira/browse/ARROW-18334). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe expression simplification currently has a small set of functions which it knows are commutative (IsBinaryAssociativeCommutative).  \"add\" (and \"add_checked\" are in this list.  This should be ok for add(timestamp,duration) since this boils down to add(int64,int64) which is commutative.  However, the way the kernels are currently implemented, we are getting the incorrect output type.\r\n\r\nConcretely, we have kernels:\r\n\r\n```\n\r\nadd_checked<Timestamp,Duration>() -> types[0]\r\nadd_checked<Duration,Timestamp>() -> types[1]\r\n```\r\n\r\nA call is made with expression `field_ref(\"x\") + duration_literal`.  This call is bound to `add_checked<Timestamp, Duration>`.  However, the expression is then simplified to `duration_literal + field_ref(\"x\")`.  Oddly enough, the math in this case is correct, since it is just addition, but the output type is not.  It assigns an output type of duration instead of timestamp.",
+        "created_at": "2022-11-15T21:24:23.000Z",
+        "updated_at": "2022-11-18T20:26:59.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-11-15T22:32:31.878Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18334?focusedCommentId=17634552) by Weston Pace (westonpace):*\nI had an offline discussion with `[~bkietz]` on this issue:\r\n\r\n \\* Canonicalize will only reorder types if it thinks the functions is commutative\r\n \\* There is a small list of functions which are considered commutative (and add_checked is one of them)\r\n \\* So we shouldn't need to re-bind\r\n\r\nOne way to solve this problem is to create a custom output resolver for the add(duration, timestamp) kernels which grabs the first timestamp type and uses it as the output."
+        },
+        {
+            "created_at": "2022-11-15T22:36:02.556Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18334?focusedCommentId=17634553) by Weston Pace (westonpace):*\nExample output type resolver (from `[~bkietz]`):\r\n\r\n```\n\r\nResult<TypeHolder> FirstTimestampType(KernelContext*, const std::vector<TypeHolder>& types) {\r\n  for (const auto& type : types) {\r\n    if (type.id() == Type::TIMESTAMP) return type;\r\n  }\r\n  return Status::Invalid(\"no timestamp type found\");\r\n}\r\n```"
+        },
+        {
+            "created_at": "2022-11-16T13:31:42.025Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18334?focusedCommentId=17634840) by Dewey Dunnington (paleolimbot):*\nJust adding the link to ARROW-18243...this may result in a sanitizer error for anybody using this operation because the `RecordBatchReader` output schema is different than the schema for each record batch. Because the sanitizers run on CRAN, this will affect an R package release (i.e., needs to be fixed or we need to skip more tests on CRAN)."
+        }
+    ]
+}

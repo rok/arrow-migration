@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[R] Accept partitioning in open_dataset when file paths are hive-style",
+        "body": "***Note**: This issue was originally created as [ARROW-10485](https://issues.apache.org/jira/browse/ARROW-10485). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen writing a dataset with hive_style = TRUE, now the default, that dataset has to be opened without an explicit definition of the partitions to work as expected. Even if the correct partition is specified, any query to the dataset on the partition field returns 0 rows.\r\n\r\n\u00a0\r\n\r\nFrom my eyes as a user, I'd want this to error out specifically (not just warn), probably when first calling open_dataset().\r\n\r\n```r\n\r\ndata(\"mtcars\")\r\narrow::write_dataset(\r\n    dataset = mtcars, path = \"mtcarstest\", partitioning = \"cyl\",\r\n    format = \"parquet\", hive_style = TRUE)\r\n\r\nmtc1 <- arrow::open_dataset(\"mtcarstest\", partitioning = \"cyl\")\r\nmtc2 <- arrow::open_dataset(\"mtcarstest\")\r\n\r\nmtc1 %>%\r\n \u00a0 \u00a0 dplyr::filter(cyl == 4) %>%\r\n \u00a0 \u00a0 collect()\r\n\r\nmtc2 %>%\r\n \u00a0 \u00a0 dplyr::filter(cyl == 4) %>%\r\n \u00a0 \u00a0 collect()\r\n\r\n \n```",
+        "created_at": "2020-11-03T20:46:36.000Z",
+        "updated_at": "2022-01-15T00:21:21.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-01-13T22:36:14.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-01-07T20:53:11.477Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10485?focusedCommentId=17260817) by Ben Kietzman (bkietz):*\nTo be clear: the issue here stems from the dataset-on-disk being hive-partitioned, so directories look like /`cyl=4/part-0.parquet`. When reading with a **directory** partitioning (which what results when a character vector is specified), this results in string values like \"cyl=4\" for field \"cyl\"; obviously suspect to a human but technically valid. If you construct a `HivePartitioning` explicitly this issue should not arise\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-01-07T21:22:53.419Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10485?focusedCommentId=17260835) by Neal Richardson (npr):*\n\"Constructing a `HivePartitioning`\" is what happens when you omit the \"partitioning\" argument. \r\n\r\nI agree with `[~jms]` that this isn't great. It's not unreasonable to expect that `open_dataset(\"mtcarstest\", partitioning = \"cyl\")` should do the right thing if the column name matches the hive key. As it turns out, that's not so trivial, and supporting that introduces some other API ambiguities. We'll need to think about this some more."
+        },
+        {
+            "created_at": "2021-11-08T15:39:45.716Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10485?focusedCommentId=17440558) by Jonathan Keane (jonkeane):*\nI wonder if it wouldn\u2019t be too bad performance-wise to check the first element of the partitioning column and see if the name is in it, if it is, at least flag that the specification is an issue?\r\n\r\nWe also might be encouraging this some since many (all?) of our examples use a non-hive NYC taxi dataset, so we always specify partitioning making that look obligatory. "
+        },
+        {
+            "created_at": "2021-11-08T19:15:25.521Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10485?focusedCommentId=17440691) by Weston Pace (westonpace):*\nPerformance-wise it wouldn't be a difficult check though I think it'd have to be a warning and we don't have a mechanism for communicating those from C++.\u00a0 Technically, while odd, it should be valid for a user to have an \"=\" character in a directory partitioning scheme.\r\n\r\nWould the following be more intuitive to add a hive_style argument to open_dataset and, if set to true (the default), ignore partitioning if it is a character vector or, if it is a schema, construct a HivePartitioning and send that in."
+        },
+        {
+            "created_at": "2022-01-13T22:36:14.512Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10485?focusedCommentId=17475813) by Neal Richardson (npr):*\nIssue resolved by pull request 12133\n<https://github.com/apache/arrow/pull/12133>"
+        }
+    ]
+}

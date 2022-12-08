@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "C++: Algorithms for using nested types in a hash table context",
+        "body": "***Note**: This issue was originally created as [ARROW-38](https://issues.apache.org/jira/browse/ARROW-38). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nComputing hash values (and performing equality comparisons) for top-level slots in nested-type data (for example, computing DISTINCT on a `List<List<Int32>>`, related: ARROW-32) can be fairly complex. Additionally, value slots at any level of the type tree can be null. \n\nWe should explore various algorithms for their performance and memory use in practical settings. For example, one can compute a contiguous \"record\" / byte array resulting from a depth-first traversal of a single value slot for the purposes of computing a hash value or comparing with another slot. If anyone has other ideas from past experiences I would be keen to learn more.",
+        "created_at": "2016-03-04T18:14:27.000Z",
+        "updated_at": "2018-11-10T21:14:34.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2018-11-10T21:14:34.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2016-03-13T20:30:43.274Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-38?focusedCommentId=15192523) by Dan Robinson (danrobinson010@gmail.com):*\nI think a breadth-first traversal of each slot might be simplest. You can recursively compute a unique \"record\" for each top-level slot by concatenating the range of values corresponding to that slot with the record of that slot for each of its child arrays. \n\nFor each level, you could define a \"record array.\"\n\n- For a primitive array, the record array is simply the values array.\n- For a list, the record array is the array of lengths of its slots, i.e. the first order difference of its offset array.  (This could be precomputed to take advantage of SIMD and make the algorithms more parallelizable, or calculated while traversing so it only takes constant space.)\n- For a sparse union, the record array is the array of types.\n- A dense union seems somewhat more complex; I'm sure there's a better way, but at worst we could just convert it to a sparse union before calculating hashes.\n- For a struct, there is no record array (the contents of the record are entirely determined by the contents of its child arrays).\n- For a nullable array, the record array is the null bitmask. (If all arrays are considered nullable, rather than nullable arrays being treated as a nested \"wrapper\" around other types, this logic can be included in all array types.)\n\nThe record arrays for each level of the example array shown at https://github.com/apache/arrow/blob/master/format/diagrams/layout-list-of-list.png would therefore be:\n\n2 | 3\n2 | 3 | 3 | 1 | 2\n0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10\n\nThen, for each of the two top-level slots in the array, do a breadth-first traversal of the record arrays, over the ranges corresponding to that slot. (We could also precalculate the \"top-level offsets\" for each array by successively slicing offset arrays.)\n\nThe record of each slot in the example list would be:\n\n2 | 2 | 3 | 0 | 1 | 2 | 3 | 4 | \n3 | 3 | 1 | 2 | 5 | 6 | 7 | 8 | 9 | 10\n\nThese records would not actually need to be created in memory; hashes could be calculated sequentially, and comparisons could use one memcmp for each level.\n\n(Note, as I alluded to on the e-mail list, that the logic for sparse unions and nullable arrays depends on \"empty\" slots in child arrays being initialized to 0.)"
+        },
+        {
+            "created_at": "2018-11-10T21:14:34.418Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-38?focusedCommentId=16682593) by Wes McKinney (wesm):*\nThis issue is ill-defined. We will have to address hashing of nested types in the course of implementing kernels like Unique, or hash joins"
+        }
+    ]
+}

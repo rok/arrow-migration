@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[Python][Parquet] improve reading of partitioned parquet datasets whose schema changed",
+        "body": "***Note**: This issue was originally created as [ARROW-8964](https://issues.apache.org/jira/browse/ARROW-8964). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi there, i'm encountering the following issue when reading from HDFS:\r\n\r\n\u00a0\r\n\r\n**My situation:**\r\n\r\nI have a paritioned parquet dataset in HDFS, whose recent partitions contain parquet files with more columns than the older ones. When i try to read data using pyarrow.dataset.dataset and filter on recent data, i still get only the columns that are also contained in the old parquet files. I'd like to somehow merge the schema or use the schema from parquet files from which data ends up being loaded.\r\n\r\n**when using:**\r\n\r\n`pyarrow.dataset.dataset(path_to_hdfs_directory, paritioning = 'hive', filters = my_filter_expression).to_table().to_pandas()`\r\n\r\nIs there please a way to handle schema changes in a way, that the read data would contain all columns?\r\n\r\neverything works fine when i copy the needed parquet files into a separate folder, however it is very inconvenient way of working.\u00a0\r\n\r\n\u00a0",
+        "created_at": "2020-05-27T12:19:39.000Z",
+        "updated_at": "2020-06-09T08:52:43.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-06-09T08:52:43.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-05-28T18:39:45.482Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8964?focusedCommentId=17118981) by Joris Van den Bossche (jorisvandenbossche):*\nWhat you are describing should normally already be implemented (so something else should be going wrong for some reason).  \r\nWhen multiple files with different schemas are read in a dataset, the dataset discovery uses a very basic \"schema evoluation / normalization\", which right now only involves adding missing columns as \"null\" values (so exactly the use case you are describing, I think). In the future we also want to allow some type evoluation (like the same columns in different files with int32 and int64 type, which right now would raise an error).\r\n\r\nCan you show an example of just reading one of the old and one of the new files in the directory (you can pass the exact file name instead of the directory to `dataset(..)`) ?"
+        },
+        {
+            "created_at": "2020-05-28T18:46:49.776Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8964?focusedCommentId=17118987) by Joris Van den Bossche (jorisvandenbossche):*\nWhile pressing \"Add comment\" button, I realized we changed the dataset discovery process: it by default only checks the schema of the first file it encounters, and then will assume the full dataset has this schema. So that is probably the reason you only see the old columns even for the new files.\r\n\r\nThere are in principle two solutions for this:\r\n1) Manually specify the schema (where you yourself ensure it includes all columns of both old and new files)\r\n2) Specify that the discovery should inspect all files to infer the dataset schema, and not just the first file. The problem here is that this option is not yet exposed in the python interface ..\r\n\r\nSo for now, only the first is an option. "
+        },
+        {
+            "created_at": "2020-05-28T18:47:49.537Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8964?focusedCommentId=17118988) by Joris Van den Bossche (jorisvandenbossche):*\nExisting issue for exposing this in python: ARROW-8221"
+        },
+        {
+            "created_at": "2020-05-28T19:47:31.947Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8964?focusedCommentId=17119035) by Ira Saktor (1ira):*\nThank you very much for your fast answer. In the meantime, regarding schema specification, could you please tell me if there a way in pyarrow.dataset to read schema from specific parquet file? I could then simply pass it one of the recent parquet files to infer schema from.\r\n\r\nI know how to load schema with pyarrow.parquet, however non-legacy dataset in parquet doesn't yet support schema specification, so i was hoping to manage this with pyarrow.dataset, if that's possible."
+        },
+        {
+            "created_at": "2020-05-28T19:55:24.988Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8964?focusedCommentId=17119037) by Joris Van den Bossche (jorisvandenbossche):*\nYes, if you have the path to a single parquet file, you can easily get the schema from that one.\r\n\r\nI think something like this should work:\r\n\r\n```Java\n\r\nschema = pyarrow.dataset.dataset(path_to_hdfs_single_parquet_file, paritioning = 'hive').schema\r\ndataset = pyarrow.dataset.dataset(path_to_hdfs_directory, paritioning = 'hive', schema=schema)\r\ndataset.to_table(filter = my_filter_expression).to_pandas()\r\n```"
+        },
+        {
+            "created_at": "2020-05-29T07:18:31.015Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8964?focusedCommentId=17119343) by Ira Saktor (1ira):*\nawesome! thank you, that's what i was looking for. Looking forward to\u00a0ARROW-8221\u00a0being resolved :). Should i close this task as it's pretty much a duplicate?"
+        },
+        {
+            "created_at": "2020-05-29T13:24:05.455Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8964?focusedCommentId=17119598) by Ira Saktor (1ira):*\nin an unrelated question, any chance you would also know how to write timestamps to parquet files so that i can then create impala table with columns as timestamp type from the given parquets?\u00a0"
+        },
+        {
+            "created_at": "2020-06-09T08:50:15.751Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8964?focusedCommentId=17129009) by Joris Van den Bossche (jorisvandenbossche):*\nI am not familiar with Impala. Looking at https://impala.apache.org/docs/build/html/topics/impala_parquet.html#parquet_data_types, it seems that the INT64 based timestamp types (the default when writing with pyarrow) is only supported in Impala > 3.2). If you need the older INT96 representation for timestamps, there is an option `use_deprecated_int96_timestamps=True` you can set in `pq.write_table`\r\n\r\n> Should i close this task as it's pretty much a duplicate?\r\n\r\nYes, will close it\r\n"
+        }
+    ]
+}

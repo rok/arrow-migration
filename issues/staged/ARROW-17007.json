@@ -1,0 +1,22 @@
+{
+    "issue": {
+        "title": "[Rust][Parquet] array reader for list columns fails to decode if batches fall on row group boundaries",
+        "body": "***Note**: This issue was originally created as [ARROW-17007](https://issues.apache.org/jira/browse/ARROW-17007). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis appears to be a variant of ARROW-9790, but specifically for list columns. Affects the latest released version of the rust crates arrow and parquet (17.0.0).\r\n```java\n\r\nuse arrow::array::{Int32Builder, ListBuilder};\r\nuse arrow::datatypes::{DataType, Field, Schema};\r\nuse arrow::record_batch::RecordBatch;\r\nuse parquet::arrow::{ArrowReader, ArrowWriter, ParquetFileArrowReader};\r\nuse parquet::file::properties::WriterProperties;\r\nuse parquet::file::reader::SerializedFileReader;\r\nuse std::error::Error;\r\nuse std::sync::Arc;\r\nuse tempfile::NamedTempFile;\r\n\r\nfn main() -> Result<(), Box<dyn Error>> {\r\n    let schema = Arc::new(Schema::new(vec![\r\n        Field::new(\"int\", DataType::Int32, false),\r\n        Field::new(\r\n            \"list\",\r\n            DataType::List(Box::new(Field::new(\"item\", DataType::Int32, true))),\r\n            false,\r\n        ),\r\n    ]));\r\n    let temp_file = NamedTempFile::new()?;\r\n\r\n    let mut writer = ArrowWriter::try_new(\r\n        temp_file.reopen()?,\r\n        schema.clone(),\r\n        Some(\r\n            WriterProperties::builder()\r\n                .set_max_row_group_size(8)\r\n                .build(),\r\n        ),\r\n    )?;\r\n    for _ in 0..2 {\r\n        let mut int_builder = Int32Builder::new(10);\r\n        let mut list_builder = ListBuilder::new(Int32Builder::new(10));\r\n        for i in 0..10 {\r\n            int_builder.append_value(i)?;\r\n            list_builder.append(true)?;\r\n        }\r\n        let batch = RecordBatch::try_new(\r\n            schema.clone(),\r\n            vec![\r\n                Arc::new(int_builder.finish()),\r\n                Arc::new(list_builder.finish()),\r\n            ],\r\n        )?;\r\n        writer.write(&batch)?;\r\n    }\r\n    writer.close()?;\r\n\r\n    let file_reader = Arc::new(SerializedFileReader::new(temp_file.reopen()?)?);\r\n    let mut file_reader = ParquetFileArrowReader::new(file_reader);\r\n    let mut record_reader = file_reader.get_record_reader(8)?;\r\n    assert_eq!(8, record_reader.next().unwrap()?.num_rows());\r\n    assert_eq!(8, record_reader.next().unwrap()?.num_rows());\r\n    assert_eq!(4, record_reader.next().unwrap()?.num_rows());\r\n    Ok(())\r\n}\r\n```\r\nFails with `Error: ParquetError(\"Parquet error: Not all children array length are the same!\")`",
+        "created_at": "2022-07-07T18:34:51.000Z",
+        "updated_at": "2022-07-07T20:52:39.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Parquet",
+            "Component: Rust",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-07-07T20:52:39.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-07-07T20:52:39.950Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17007?focusedCommentId=17563969) by Kouhei Sutou (kou):*\nCould you report this to https://github.com/apache/arrow-rs/issues/new/choose ?\r\nWe've changed Apache Arrow Rust's issue tracker to https://github.com/apache/arrow-rs/issues on GitHub from here."
+        }
+    ]
+}

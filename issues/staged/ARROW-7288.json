@@ -1,0 +1,138 @@
+{
+    "issue": {
+        "title": "[C++][R] read_parquet() freezes on Windows with Japanese locale",
+        "body": "***Note**: This issue was originally created as [ARROW-7288](https://issues.apache.org/jira/browse/ARROW-7288). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe following example on read_parquet()'s doc freezes (seems to wait for the result forever) on my Windows.\r\n\r\ndf <- read_parquet(system.file(\"v0.7.1.parquet\", package=\"arrow\"))\r\n\r\nThe CRAN checks are all fine, which means the example is successfully executed on the CRAN Windows. So, I have no idea why it doesn't work on my local.\r\n\r\n<https://cran.r-project.org/web/checks/check_results_arrow.html>\r\n\r\nHere's my session info in case it helps:\r\n```java\n\r\n> sessioninfo::session_info()\r\n\r\n- Session info ---------------------------------------------------------------------------------\r\n setting  value\r\n version  R version 3.6.1 (2019-07-05)\r\n os       Windows 10 x64\r\n system   x86_64, mingw32\r\n ui       RStudio\r\n language en\r\n collate  Japanese_Japan.932\r\n ctype    Japanese_Japan.932\r\n tz       Asia/Tokyo\r\n date     2019-12-01\r\n\r\n- Packages -------------------------------------------------------------------------------------\r\n package     * version  date       lib source\r\n arrow       * 0.15.1.1 2019-11-05 [1] CRAN (R 3.6.1)\r\n assertthat    0.2.1    2019-03-21 [1] CRAN (R 3.6.0)\r\n bit           1.1-14   2018-05-29 [1] CRAN (R 3.6.0)\r\n bit64         0.9-7    2017-05-08 [1] CRAN (R 3.6.0)\r\n cli           1.1.0    2019-03-19 [1] CRAN (R 3.6.0)\r\n crayon        1.3.4    2017-09-16 [1] CRAN (R 3.6.0)\r\n fs            1.3.1    2019-05-06 [1] CRAN (R 3.6.0)\r\n glue          1.3.1    2019-03-12 [1] CRAN (R 3.6.0)\r\n magrittr      1.5      2014-11-22 [1] CRAN (R 3.6.0)\r\n purrr         0.3.3    2019-10-18 [1] CRAN (R 3.6.1)\r\n R6            2.4.1    2019-11-12 [1] CRAN (R 3.6.1)\r\n Rcpp          1.0.3    2019-11-08 [1] CRAN (R 3.6.1)\r\n reprex        0.3.0    2019-05-16 [1] CRAN (R 3.6.0)\r\n rlang         0.4.2    2019-11-23 [1] CRAN (R 3.6.1)\r\n rstudioapi    0.10     2019-03-19 [1] CRAN (R 3.6.0)\r\n sessioninfo   1.1.1    2018-11-05 [1] CRAN (R 3.6.0)\r\n tidyselect    0.2.5    2018-10-11 [1] CRAN (R 3.6.0)\r\n withr         2.1.2    2018-03-15 [1] CRAN (R 3.6.0)\r\n\r\n[1] C:/Users/hiroaki-yutani/Documents/R/win-library/3.6\r\n[2] C:/Program Files/R/R-3.6.1/library\r\n```",
+        "created_at": "2019-12-02T01:54:00.000Z",
+        "updated_at": "2021-02-04T00:48:04.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-02-02T12:16:05.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-01-16T11:57:54.315Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17016839) by Hiroaki Yutani (yutannihilation):*\nThis seems a locale-dependent problem. In my locale,\r\n\r\n```r\n\r\nSys.setlocale(\"LC_ALL\", 'Japanese')\r\n```\r\n\r\nthe problem is reproducible. But, if I change the locale to\r\n\r\n```r\n\r\nSys.setlocale(\"LC_ALL\", 'English')\r\n```\r\n\r\nit works fine."
+        },
+        {
+            "created_at": "2020-01-16T15:32:55.538Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17017039) by Neal Richardson (npr):*\nThanks, that's helpful. ARROW-7018 is another locale/encoding issue, so we're collecting a few of these."
+        },
+        {
+            "created_at": "2020-06-17T17:17:35.127Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17138660) by Neal Richardson (npr):*\nI did some digging here and was surprised by what I found. On macOS, I can `Sys.setlocale(\"LC_ALL\", \"ja_JP.UTF-8\")` and this works fine. On Windows, I can consistently reproduce this, and I broke down the steps of what's being called to isolate where it is hanging. I had suspected that the problem was in translating the Arrow memory to R, that Arrow was assuming/requiring UTF-8 and R choked on something. However, we're failing on instantiating the `ParquetFileReader`. \r\n\r\nDecomposing what `read_parquet` does, this hangs on the last line:\r\n\r\n```r\n\r\nSys.setlocale(\"LC_ALL\", \"Japanese\")\r\nlibrary(arrow)\r\nf <- system.file(\"v0.7.1.parquet\", package = \"arrow\")\r\ncon <- ReadableFile$create(f)\r\nprops <- ParquetReaderProperties$create()\r\narrow:::parquet___arrow___FileReader__OpenFile(con, props)\r\n```\r\n\r\nSo we'll need to investigate what that is doing in C++."
+        },
+        {
+            "created_at": "2020-06-17T18:51:48.408Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17138729) by Neal Richardson (npr):*\nI ran the full R test suite on Windows in the Japanese locale, and in addition to the read_parquet test, it froze on `open_dataset` with Parquet files. Writing Parquet files, reading CSV, JSON, Feather, etc. were all fine. So I'm increasingly convinced that this is an issue in the Parquet C++ library. cc `[~bkietz]`"
+        },
+        {
+            "created_at": "2020-06-17T19:20:47.207Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17138743) by Ben Kietzman (bkietz):*\nI've run the C++ test suite on Windows in the Japanese locale and didn't observe any freezing"
+        },
+        {
+            "created_at": "2020-09-07T16:59:09.140Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17191794) by Antoine Pitrou (apitrou):*\n`[~npr]` Do you have Visual Studio installed? Can you obtain a stack trace?\r\n\r\nSee <https://docs.microsoft.com/en-us/visualstudio/debugger/debug-using-the-just-in-time-debugger?view=vs-2019>"
+        },
+        {
+            "created_at": "2020-09-07T20:14:04.461Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17191851) by Neal Richardson (npr):*\nI don't have VS, no. Since R uses mingw though, would it be helpful anyway?"
+        },
+        {
+            "created_at": "2020-09-07T20:44:43.029Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17191856) by Antoine Pitrou (apitrou):*\nVisual Studio Community is free and should be enough to get a (graphical) debugger.\u00a0 Hopefully you can get at least a stack trace?\r\n\r\n(or ask someone at RStudio to help you with that?)\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-09-07T20:45:19.071Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17191857) by Antoine Pitrou (apitrou):*\nIn any case, there **has** to be a way to debug R extension code on Windows, right?"
+        },
+        {
+            "created_at": "2020-09-07T21:26:47.726Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17191866) by Neal Richardson (npr):*\nPreviously (I forget the particular JIRA) we were not able to get a C++ library build with debug symbols on the (old) Rtools toolchain. So when I've run with gdb, all it says (in the case of segfault, which this is not) is \"yep, it crashed\". \r\n\r\nTo be clear, I believe the issue is in the parquet C++ library as compiled with the Rtools 35 toolchain. I don't recall if I've tried with Rtools 40. And FWIW there was a JIRA about running the C++ test suite on the library as built by Rtools, and we didn't succeed in getting a build. "
+        },
+        {
+            "created_at": "2020-09-13T02:55:06.380Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17194918) by Hiroaki Yutani (yutannihilation):*\n> To be clear, I believe the issue is in the parquet C++ library as compiled with the Rtools 35 toolchain. I don't recall if I've tried with Rtools 40.\r\n\r\nFWIW, I quickly tried the CRAN precompiled binary for R 4.0.2, which I believe uses Rtools 40, but it seems the code still freezes on Japanese locale (I haven't used Windows for a while, so there might be a chance my setup is not correct)."
+        },
+        {
+            "created_at": "2020-09-13T20:29:32.887Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17195120) by Neal Richardson (npr):*\nThanks, yes R 4.0.2 is on the new Rtools, so unfortunately that means we can't hope that this problem will go away on its own."
+        },
+        {
+            "created_at": "2020-09-23T15:36:51.672Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17200900) by Antoine Pitrou (apitrou):*\nIt seems you can get a debug build using \"RelWithDebInfo\" instead of \"Debug\". That may give you a usable stack trace.\r\n\r\n(edit: this is a release build but with debug information added... as the name suggests)"
+        },
+        {
+            "created_at": "2020-12-29T23:27:04.739Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17256202) by Antoine Pitrou (apitrou):*\n`[~jonkeane]` Is this something you could try to diagnose?"
+        },
+        {
+            "created_at": "2021-01-24T04:03:18.404Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17270817) by Hiroaki Yutani (yutannihilation):*\nRecently I saw a similar problem on a different R package, and it turned out std::regex has problem when it's used in Japanese locale (and possibly in other multi-byte locales) and the pattern contains square brackets:\r\n\r\nhttps://sourceforge.net/p/mingw-w64/mailman/message/37203914/\r\n\r\nAs Arrow's C++ code related to Parquet uses std::regex, this might matter here as well.\r\n\r\nhttps://github.com/apache/arrow/blob/67d0c2e38011cd883059e3a9fd0ea08088661707/cpp/src/parquet/metadata.cc#L63\r\n\r\nIf my guess is correct, this is hard to fix properly, as we'll need to wait until std::regex is fixed in GCC's side and it gets backported to Rtools.\r\nSo we need some workaround (e.g. setlocale(LC_COLLATE, \"C\")) instead.\r\n\r\nBut, before that, I'm wondering if it's still possible to build the code with PARQUET_USE_BOOST_REGEX to see if std::regex really matters.\r\n\r\nhttps://github.com/apache/arrow/blob/67d0c2e38011cd883059e3a9fd0ea08088661707/cpp/src/parquet/metadata.cc#L37"
+        },
+        {
+            "created_at": "2021-01-24T16:26:27.829Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17270918) by Neal Richardson (npr):*\nWow, good find! Will try to get a build with that enabled to test out this theory."
+        },
+        {
+            "created_at": "2021-01-24T16:49:48.593Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17270924) by Jeroen (jeroenooms):*\nThis may be the underlying bug in libstdc++: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=98723"
+        },
+        {
+            "created_at": "2021-01-25T13:10:44.848Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17271301) by Antoine Pitrou (apitrou):*\nThe std::regex issue is very likely to be the culprit. This means that R builds for Windows (or any MinGW-based build for Windows) will need to use boost::regex."
+        },
+        {
+            "created_at": "2021-01-25T19:53:09.193Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17271636) by Jeroen (jeroenooms):*\nNot sure if reintroducing the boost dependency is really desirable. Perhaps certain functions can be run in C locale, either by the R package or in the C++ code?\r\n\r\n"
+        },
+        {
+            "created_at": "2021-01-25T19:57:02.711Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17271640) by Antoine Pitrou (apitrou):*\nThe locale is a process-wide setting, it should not be set in a library."
+        },
+        {
+            "created_at": "2021-01-25T20:05:38.832Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17271646) by Antoine Pitrou (apitrou):*\nNote that we could avoid the boost::regex dependency if we use re2 instead (which is an optional dependency already)."
+        },
+        {
+            "created_at": "2021-01-25T20:06:28.058Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17271648) by Antoine Pitrou (apitrou):*\ncc `[~kou]` \u00a0 because it should affect all MinGW builds on Windows."
+        },
+        {
+            "created_at": "2021-01-25T20:11:03.392Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17271651) by Jeroen (jeroenooms):*\nI know but sometimes it suffices to temporary set the locale to C before a call and then set it back right after, to get locale independent behavior for that single call. If this really only affects mingw-w64 on certain languages, that may be an easier workaround."
+        },
+        {
+            "created_at": "2021-01-25T20:13:17.397Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17271653) by Antoine Pitrou (apitrou):*\nThat doesn't avoid the problem. You could have other threads running that have locale-dependent results (for example running non-Arrow functions)."
+        },
+        {
+            "created_at": "2021-01-25T22:07:37.932Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17271703) by Neal Richardson (npr):*\nI've made 2 PRs for us to consider: #9320 that changes cmake to require boost on mingw, #9321 that works around the issue in R by temporarily setting the locale, as `[~jeroenooms]` proposed. We can evaluate which of the two we want to pursue. If someone wants to use re2 instead, they can try that, or we can make a separate issue for it."
+        },
+        {
+            "created_at": "2021-01-26T00:50:00.644Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17271748) by Kouhei Sutou (kou):*\nThanks for notifying this to me.\r\nI like re2 dependency than boost::regex dependency.\r\nBecause we don't need boost::regex without test/benchmark but we need re2 with Compute/Gandiva/Flight."
+        },
+        {
+            "created_at": "2021-01-26T21:45:56.603Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17272444) by Neal Richardson (npr):*\nOk, I started on replacing boost with re2 in Parquet but got stuck because I think it's a bigger C++ refactor needed. At least I cleared out some of the cmake stuff. See https://github.com/apache/arrow/pull/9332. `[~kou]` could you or someone else pick up from here?"
+        },
+        {
+            "created_at": "2021-02-02T12:16:05.822Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17277076) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 9367\n<https://github.com/apache/arrow/pull/9367>"
+        },
+        {
+            "created_at": "2021-02-04T00:45:34.380Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17278446) by Hiroaki Yutani (yutannihilation):*\nThanks for fixing!"
+        },
+        {
+            "created_at": "2021-02-04T00:48:04.274Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7288?focusedCommentId=17278447) by Neal Richardson (npr):*\nThanks for your help `[~yutannihilation]`! Wouldn't have been able to solve the riddle without you."
+        }
+    ]
+}

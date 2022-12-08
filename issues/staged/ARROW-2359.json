@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[C++] Type objects produced by DataType factory are not thread safe",
+        "body": "***Note**: This issue was originally created as [ARROW-2359](https://issues.apache.org/jira/browse/ARROW-2359). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nTYPE_FACTORY() macro that produces type shortcuts (boolean(), int32(), utf8() and so on) uses static shared_ptr inside. There are race conditions possible against shared_ptr's reference counter.",
+        "created_at": "2018-03-27T15:51:58.000Z",
+        "updated_at": "2018-03-29T23:05:58.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2018-03-29T23:05:29.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-03-27T17:16:32.681Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2359?focusedCommentId=16415948) by Antoine Pitrou (apitrou):*\nDid you encounter actual issues with this? `shared_ptr` is defined to use thread-safe reference counting, and the singleton pattern used in TYPE_FACTORY() is supposed to be thread-safe in C++11 (see https://stackoverflow.com/questions/1661529/is-meyers-implementation-of-the-singleton-pattern-thread-safe )."
+        },
+        {
+            "created_at": "2018-03-28T12:28:32.437Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2359?focusedCommentId=16417266) by Anton Shmigirilov (isolenta):*\nYes, I have issue with this. It's reproduced in whole project that uses Arrow. Part of project reads RecordBatch using\u00a0RecordBatchStreamReader, performs access to Schema (RecordBatch::schema()) and field's type(). Such reading executes in concurrent threads. Executable built with gcc's ThreadSanitizer and here is part of sanitizer's output:\r\n\r\nAtomic write of size 4 at 0x7b100000c008 by thread T5:\r\n #0 __tsan_atomic32_fetch_add <null> (libtsan.so.0+0x000000064aa0)\r\n #1 __atomic_add /usr/include/c++/7/ext/atomicity.h:53 (exec+0x0000008a68c3)\r\n #2 __atomic_add_dispatch /usr/include/c++/7/ext/atomicity.h:96 (exec+0x0000008a68c3)\r\n #3 std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_add_ref_copy() /usr/include/c++/7/bits/shared_ptr_base.h:138 (FDIOExec+0x0000008a68c3)\r\n #4 std::__shared_count<(__gnu_cxx::_Lock_policy)2>::__shared_count(std::__shared_count<(__gnu_cxx::_Lock_policy)2> const&) /usr/include/c++/7/bits/shared_ptr_base.h:691 (exec+0x0000008a68c3)\r\n #5 std::__shared_ptr<arrow::DataType, (__gnu_cxx::_Lock_policy)2>::__shared_ptr(std::__shared_ptr<arrow::DataType, (__gnu_cxx::_Lock_policy)2> const&) /usr/include/c++/7/bits/shared_ptr_base.h:1121 (exec+0x0000008a68c3)\r\n #6 std::shared_ptr<arrow::DataType>::shared_ptr(std::shared_ptr<arrow::DataType> const&) /usr/include/c++/7/bits/shared_ptr.h:119 (exec+0x0000008a68c3)\r\n #7 arrow::Field::type() const /usr/local/fdio-deps/lib/../include/arrow/type.h:244 (exec+0x0000008a68c3)\r\n #8 func_reader() (exec+0x0000008a68c3)\r\n\r\nPrevious write of size 8 at 0x7b100000c008 by thread T4:\r\n #0 operator new(unsigned long) <null> (libtsan.so.0+0x00000006f846)\r\n #1 __gnu_cxx::new_allocator<std::_Sp_counted_ptr_inplace<arrow::StringType, std::allocator<arrow::StringType>, (__gnu_cxx::_Lock_policy)2> >::allocate(unsigned long, void const\\*) /usr/include/c++/7/ext/new_allocator.h:111 (libarrow.so.0+0x000000167307)\r\n #2 func_reader() (exec+0x000000897a38)\r\n\r\nIt hard to reproduce it on simple synthetic test, but I will try it.\r\n\r\nstd::shared_ptr declared as thread safe in relation to control block, but as I understand it, safety is guaranteed only in case of modifying control block's internals\u00a0which happened because copying shared_ptr itself (with sharing common control block). But in case of TYPE_FACTORY implementation, we have not only common/shared control block internals, but common (because static) shared_ptr internals itself. I guess this place is unsafe.\r\n\r\nAnother one opinion about this. Shared_ptr have been designed to maintain complex object's lifecycle in case of copying, moving and so on. In case of TYPE_FACTORY we haven't advantages of shared_ptr, we have single instance of object with lifetime corresponding whole process's lifetime. I guess is't not quite correct usage of the concept, in my opinion."
+        },
+        {
+            "created_at": "2018-03-28T13:24:59.852Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2359?focusedCommentId=16417315) by Antoine Pitrou (apitrou):*\n> But in case of TYPE_FACTORY implementation, we have not only common/shared control block internals, but common (because static) shared_ptr internals itself.\r\n\r\nThat doesn't sound accurate to me. TYPE_FACTORY returns a _copy_ of the static shared_ptr. Also, the thread stacks you posted don't show any call to TYPE_FACTORY, so it seems unlikely that it plays a part here.\r\n\r\nAfter googling a bit, it seems TSAN sometimes produces false positives with gcc. That may be one of those. Perhaps you can try with clang?"
+        },
+        {
+            "created_at": "2018-03-28T15:32:47.368Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2359?focusedCommentId=16417556) by Anton Shmigirilov (isolenta):*\n>\u00a0TYPE_FACTORY returns a\u00a0_copy_\u00a0of the static shared_ptr\r\n\r\nIf so, it's unclear for me why is shared_ptr there. Or, why is static object there. Only reason is saving memory a bit? But RAII should help to mange memory reasonable.\r\n\r\nAnyway, I propose to think if such pattern is reasonable here.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-03-28T15:36:37.950Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2359?focusedCommentId=16417565) by Antoine Pitrou (apitrou):*\nI don't know what the rationale is, though the aim may be to avoid lots of spurious allocations. `[~wesmckinn]`\r\n\r\nHowever, the question is whether there is an actual issue with the singleton pattern here, and I'm not convinced there is."
+        },
+        {
+            "created_at": "2018-03-28T18:48:01.975Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2359?focusedCommentId=16417917) by Phillip Cloud (cpcloud):*\nAlso, http://en.cppreference.com/w/cpp/memory/shared_ptr states the following:\r\n\r\n```Java\n\r\nAll member functions (including copy constructor and copy assignment) can be called by multiple threads on different instances of shared_ptr without additional synchronization even if these instances are copies and share ownership of the same object.\r\n```\r\n\r\nThese functions return a copy of a `shared_ptr`."
+        },
+        {
+            "created_at": "2018-03-28T19:19:17.932Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2359?focusedCommentId=16417958) by Wes McKinney (wesm):*\nIs it possible there is a race condition in the initialization of the global static variable? Seems pretty esoteric"
+        },
+        {
+            "created_at": "2018-03-28T19:38:14.426Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2359?focusedCommentId=16417995) by Antoine Pitrou (apitrou):*\nC++11 guarantees the initialization cannot involve any race condition (see Stack Overflow post above)."
+        },
+        {
+            "created_at": "2018-03-28T22:05:22.007Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2359?focusedCommentId=16418191) by Anton Shmigirilov (isolenta):*\nIt seems original topic message is incorrect. It looks like there aren't races in singleton itself. There is another race condition in my code somewhere, it's related to arrow::DataType usages and it's eliminated if singleton is removed using proposed patch. Anyway, this JIRA task has wrong description and can be removed or renamed, if needed. Guys, sorry for confuse. (But I still think that static shared_ptr is over-engineering ;) )"
+        }
+    ]
+}

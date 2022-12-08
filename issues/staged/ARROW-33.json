@@ -1,0 +1,73 @@
+{
+    "issue": {
+        "title": "C++: Implement zero-copy array slicing",
+        "body": "***Note**: This issue was originally created as [ARROW-33](https://issues.apache.org/jira/browse/ARROW-33). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSliced array results will retain a reference to the parent's data buffer",
+        "created_at": "2016-03-02T23:49:32.000Z",
+        "updated_at": "2017-02-13T16:34:41.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2017-02-06T16:26:04.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2016-03-30T06:02:09.780Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-33?focusedCommentId=15217459) by Feng Guangyuan (qq272101359@163.com):*\nHi, there.\nI\u2019d like to work on this, if convenient. Thanks.\n\nI have a draft implementation that adds a function to Array class like below:\n`code`\nArray slice(int32_t start, int32_t length);\n`code`\nIt will return an Array with the reference to the parent Array\u2019s raw data buffer and index scope information.\nThe function won\u2019t copy the real data, and it just contains the concerned data buffer\u2019s location and length.\n"
+        },
+        {
+            "created_at": "2016-03-31T16:56:48.684Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-33?focusedCommentId=15220213) by Uwe Korn (uwe):*\nHi [~qq272101359@163.com],\n\nit would be best if you push your code and open a pull request on github. Then someone can review it and give you feedback on it."
+        },
+        {
+            "created_at": "2016-04-01T09:28:24.658Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-33?focusedCommentId=15221449) by Feng Guangyuan (qq272101359@163.com):*\nIssue resolved by pull request 56.\nhttps://github.com/apache/arrow/pull/56\n\nHowever, there are some confusions.\n1.If it's necessary to add the slicing methods into ListArray, UnionArray etc.\n2.Before slice(...) returns an Array, which is better the Array contains a base class Buffer\nor a derived Buffer.\n3.null_bitmap also to be sliced concurrently may be better.\nPlease feel free to give me any advice.\n\nThanks. Uwe L. Korn.\n: )\n"
+        },
+        {
+            "created_at": "2016-12-19T23:50:53.720Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-33?focusedCommentId=15762678) by Wes McKinney (wesm):*\nFrom a strictly C++ implementation perspective, the most robust way to support array slicing will be to add an `offset` member to the base Array class. Otherwise, the bitmap must be copied. `[~xhochy]` what do you think about this? This is most likely what we'll end up doing in pandas 2.0, for example. "
+        },
+        {
+            "created_at": "2016-12-20T08:28:15.153Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-33?focusedCommentId=15763624) by Uwe Korn (uwe):*\nFine with me. I wouldn't have considered it zero-copy if we copied the whole bitmap ;)"
+        },
+        {
+            "created_at": "2017-02-02T01:38:57.507Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-33?focusedCommentId=15849252) by Wes McKinney (wesm):*\n`[~xhochy]` I'd like to do this soon. The trouble is that anywhere where we access the raw buffers in the Array will be affected \u2013 this includes in libparquet_arrow. It will also result in some API changes because we'll need additional constructors that take an offset parameter. And anywhere we touch bitmaps will need to be more careful to account for the offset (and in IPC, we'll have to do bitmap copies when the offset is nonzero, e.g. https://github.com/apache/arrow/blob/master/cpp/src/arrow/ipc/adapter.cc#L65)"
+        },
+        {
+            "created_at": "2017-02-02T01:40:03.426Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-33?focusedCommentId=15849254) by Wes McKinney (wesm):*\nOn this note, I don't think it will be too difficult to implement this, but we should make a list of all the code we need to review for \"naked\" buffer access. Let me know your thoughts"
+        },
+        {
+            "created_at": "2017-02-02T07:36:37.157Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-33?focusedCommentId=15849584) by Uwe Korn (uwe):*\nThis sounds like a good thing to do before the 0.2 release. In parquet-cpp I often already use an offset for the bitmaps, partly it's combined with the array offset which we need to separate."
+        },
+        {
+            "created_at": "2017-02-04T04:51:06.780Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-33?focusedCommentId=15852590) by Wes McKinney (wesm):*\nI started looking at this. I forgot about the null count \u2013 with the current null count requirement, adding an offset member would require inspecting the bitmap on calling `Array::Slice` to determine the number of nulls in the sliced range. \n\nOne possible workaround is to make `Array::null_count` virtual, and set the `null_count_` member to ~~1 when it is not known, so for sliced arrays it would need to be computed and cached the first time you call {{arr~~>null_count()}}. "
+        },
+        {
+            "created_at": "2017-02-04T08:16:47.582Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-33?focusedCommentId=15852689) by Uwe Korn (uwe):*\nWe should not need to make `null_count` virtual as the handling of valid bitmaps is the same for all arrays. Just checking in the main implementation if it is `<0` and then recompute should be enough. Given that we use the `null_count` mostly for checking if the number of nulls is 0, and if not we go into the more expensive code path, I think the solution to compute on first `null_count()` is the most reasonable."
+        },
+        {
+            "created_at": "2017-02-04T14:16:01.608Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-33?focusedCommentId=15852807) by Wes McKinney (wesm):*\nAgreed, that was also my conclusion after more thought. Will put up a patch once I write enough tests to cover areas of concern"
+        },
+        {
+            "created_at": "2017-02-04T23:47:26.167Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-33?focusedCommentId=15852991) by Wes McKinney (wesm):*\nAs an idle thought: one consequence of this functionality is the arrays with offset != 0 (or that were constructed from foreign memory spaces / no guarantees about how the memory was allocated) in generally may not have padded / aligned buffers. So when we go to implement SIMD integration / hardware intrinsics, we'll need to be careful about this"
+        },
+        {
+            "created_at": "2017-02-06T13:22:01.685Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-33?focusedCommentId=15853974) by Wes McKinney (wesm):*\nPR in progress here: https://github.com/apache/arrow/pull/322"
+        },
+        {
+            "created_at": "2017-02-06T16:26:04.451Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-33?focusedCommentId=15854293) by Wes McKinney (wesm):*\nIssue resolved by pull request 322\n<https://github.com/apache/arrow/pull/322>"
+        }
+    ]
+}

@@ -1,0 +1,81 @@
+{
+    "issue": {
+        "title": "[Python] `df.to_parquet('s3://...', partition_cols=...)` fails with `'NoneType' object has no attribute '_isfilestore'`",
+        "body": "***Note**: This issue was originally created as [ARROW-5156](https://issues.apache.org/jira/browse/ARROW-5156). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAccording to <https://pandas.pydata.org/pandas-docs/stable/user_guide/io.html#partitioning-parquet-files>, writing a parquet to S3 with `partition_cols` should work, but it fails for me. Example script:\r\n```java\n\r\nimport pandas as pd\r\nimport sys\r\n\r\nprint(sys.version)\r\nprint(pd._version_)\r\ndf = pd.DataFrame([{'a': 1, 'b': 2}])\r\n\r\ndf.to_parquet('s3://my_s3_bucket/x.parquet', engine='pyarrow')\r\nprint('OK 1')\r\n\r\ndf.to_parquet('s3://my_s3_bucket/x2.parquet', partition_cols=['a'], engine='pyarrow')\r\nprint('OK 2')\r\n```\r\nOutput:\r\n```\n\r\n3.5.2 (default, Feb 14 2019, 01:46:27)\r\n[GCC 4.2.1 Compatible Apple LLVM 10.0.0 (clang-1000.11.45.5)]\r\n0.24.2\r\nOK 1\r\nTraceback (most recent call last):\r\nFile \"./t.py\", line 14, in <module>\r\ndf.to_parquet('s3://my_s3_bucket/x2.parquet', partition_cols=['a'], engine='pyarrow')\r\nFile \"/Users/vshih/.pyenv/versions/3.5.2/lib/python3.5/site-packages/pandas/core/frame.py\", line 2203, in to_parquet\r\npartition_cols=partition_cols, **kwargs)\r\nFile \"/Users/vshih/.pyenv/versions/3.5.2/lib/python3.5/site-packages/pandas/io/parquet.py\", line 252, in to_parquet\r\npartition_cols=partition_cols, **kwargs)\r\nFile \"/Users/vshih/.pyenv/versions/3.5.2/lib/python3.5/site-packages/pandas/io/parquet.py\", line 118, in write\r\npartition_cols=partition_cols, **kwargs)\r\nFile \"/Users/vshih/.pyenv/versions/3.5.2/lib/python3.5/site-packages/pyarrow/parquet.py\", line 1227, in write_to_dataset\r\n_mkdir_if_not_exists(fs, root_path)\r\nFile \"/Users/vshih/.pyenv/versions/3.5.2/lib/python3.5/site-packages/pyarrow/parquet.py\", line 1182, in _mkdir_if_not_exists\r\nif fs._isfilestore() and not fs.exists(path):\r\nAttributeError: 'NoneType' object has no attribute '_isfilestore'\r\n```\r\n\u00a0\r\n\r\nOriginal issue -\u00a0<https://github.com/apache/arrow/issues/4030>",
+        "created_at": "2019-04-10T08:38:33.000Z",
+        "updated_at": "2021-05-15T09:03:21.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-05-15T09:03:21.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-04-22T12:00:33.377Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5156?focusedCommentId=16823052) by Wes McKinney (wesm):*\n`[~jreback]` `[~mdurant]` did something change here, or was this just never tested?"
+        },
+        {
+            "created_at": "2019-04-22T13:14:12.401Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5156?focusedCommentId=16823092) by Martin Durant (mdurant):*\nI wasn't involved in the pandas code here. The Dask code I am pretty sure does check this parameter, but of course the implementation will be different."
+        },
+        {
+            "created_at": "2019-05-22T15:17:17.174Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5156?focusedCommentId=16845979) by Martin Durant (mdurant):*\nHappy to add `_isfilestore` to s3fs/fsspec - I assume it just should return True?"
+        },
+        {
+            "created_at": "2019-08-22T22:25:22.476Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5156?focusedCommentId=16913747) by Wes McKinney (wesm):*\nping `[~jorisvandenbossche]` `[~jreback]`"
+        },
+        {
+            "created_at": "2019-09-05T02:14:17.973Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5156?focusedCommentId=16922986) by Wes McKinney (wesm):*\nMoving out of 0.15.0 as it's not clear where the problem is"
+        },
+        {
+            "created_at": "2019-09-11T13:35:53.924Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5156?focusedCommentId=16927572) by david cottrell (cottrell):*\nI'm hitting this and it seems there is something to do with how the paths and filesystems get resolved in (for example\u00a0_```_get_filesystem_and_path``` in pyarrow). I'm not quite clear on what is intended there across all the different fs types. \r\n\r\n\u00a0\r\nFrom the pandas side, the following seems to work (write_to_dataset is being called in the code path corresponding to parittion_cols not being None).\r\n\r\nIn [122]: api\r\nOut[122]: <pandas.io.parquet.PyArrowImpl at 0x7f3c6cfa6470>\r\n\r\nIn [121]: api.api.parquet.write_to_dataset(table, path + '/more', partition_cols=partition_cols, filesystem=s3fs.S3FileSystem()) # works properly for me\r\n\r\nIn [120]: api.api.parquet.write_to_dataset(table, path + '/more', partition_cols=partition_cols) # silent fails (no file written) or maybe I need to flush.\r\n\r\n\r\nAt this point the minimal change seems like on the pandas side (will try to post a branch soon) but I suspect that is not the **correct** fix. Likely something to do with the chain of (path, fs) (fs, path) resolvers in pyarrow/parquet.py and pyarrow/filesystem.py\r\n"
+        },
+        {
+            "created_at": "2019-09-11T14:19:41.369Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5156?focusedCommentId=16927613) by david cottrell (cottrell):*\nI had a go at the pandas change but was hitting other errors to do with schemas. For now, people should know that a workaround is simply to do something like this at the lower level:\r\n\r\n\r\n\r\n```python\n\r\n    table = pa.Table.from_pandas(df, preserve_index=preserve_index)\r\n    filesystem = None\r\n    if _is_s3_path(filename):\r\n        import s3fs\r\n        filesystem = s3fs.S3FileSystem()\r\n    pq.write_to_dataset(table, root_path=filename,\r\n                        partition_cols=partition_cols, preserve_index=preserve_index, use_dictionary=True, filesystem=filesystem)\r\n```\r\n"
+        },
+        {
+            "created_at": "2019-09-11T14:22:21.695Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5156?focusedCommentId=16927617) by Martin Durant (mdurant):*\nNote that it is the intent of the filesystem approach to be able to work with any backend, not only S3; there should be no S3-specific code. I don't know what `_is_s3_path` does, but `fsspec.filesystem()` or similar is probably what you actually want."
+        },
+        {
+            "created_at": "2019-09-12T13:48:34.907Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5156?focusedCommentId=16928543) by david cottrell (cottrell):*\nAh yeah, I guess fsspec is the new fs api target.\u00a0\r\n\r\nCross linking this:\u00a0<https://github.com/pandas-dev/pandas/issues/27596>\u00a0not sure hwo that works with jira."
+        },
+        {
+            "created_at": "2020-05-12T09:21:43.961Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5156?focusedCommentId=17105266) by Joris Van den Bossche (jorisvandenbossche):*\nSo this is solved on the pandas side (they will now infer \"s3://...\" strings and ensure to pass a s3fs filesystem in those cases). \r\n\r\nHowever, we should still support \"s3://..\" strings natively on the pyarrow side as well (in `parquet.read_table/write_to_dataset/ParquetDataset` etc)."
+        },
+        {
+            "created_at": "2020-05-12T13:06:32.852Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5156?focusedCommentId=17105408) by Martin Durant (mdurant):*\nNote that with something like\u00a0<https://github.com/pandas-dev/pandas/pull/33549>\u00a0, fsspec would offer pandas the ability to read from **several** backends (including s3, gcs, azure datalake/blob, ssh, ftp, web/http/hdfs) with very little code, and all of these are available to pyarrow too. With the current code, you can already read/write your pyarrow parquet to any of these without any code on your end."
+        },
+        {
+            "created_at": "2020-05-12T13:39:26.928Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5156?focusedCommentId=17105437) by Wes McKinney (wesm):*\nThat's good, but we are building native C++ filesystem implementations so that they can be used in C, R, Ruby, Java, etc.. So we need to make sure that we can access our native filesystems from Python "
+        },
+        {
+            "created_at": "2021-02-20T03:16:38.315Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5156?focusedCommentId=17287476) by Wes McKinney (wesm):*\n`[~jorisvandenbossche]` is this still an issue?"
+        },
+        {
+            "created_at": "2021-05-12T16:34:39.834Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5156?focusedCommentId=17343351) by Antoine Pitrou (apitrou):*\n`[~jorisvandenbossche]` Is this still an issue?"
+        },
+        {
+            "created_at": "2021-05-14T23:29:35.141Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5156?focusedCommentId=17344920) by Victor Shih (vshih):*\nI just tested in Python 3.8.5, Pandas 1.1.1 (Mac) and it appears to work now.\r\n\r\nI don't know what the conventions are about resolving or closing; please advise."
+        },
+        {
+            "created_at": "2021-05-15T09:03:00.959Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5156?focusedCommentId=17345000) by Antoine Pitrou (apitrou):*\nThank you for checking `[~vshih]` ! I'm going to close this issue now."
+        }
+    ]
+}

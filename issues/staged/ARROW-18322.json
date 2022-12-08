@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] source installation from pip without flight",
+        "body": "***Note**: This issue was originally created as [ARROW-18322](https://issues.apache.org/jira/browse/ARROW-18322). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n`{color:#569cd6}ENV{color}{color:#d4d4d4} ARROW_FLIGHT {color}{color:#ce9178}'OFF'{color`}\r\n`{color:#569cd6}ENV{color}{color:#d4d4d4} ARROW_GANDIVA {color}{color:#ce9178}'OFF'{color`}\r\n`{color:#569cd6}ENV{color}{color:#d4d4d4} ARROW_PLASMA {color}{color:#ce9178}'OFF'{color`}\r\n`{color:#569cd6}ENV{color}{color:#d4d4d4} PYARROW_WITH_FLIGHT {color}{color:#ce9178}'OFF'{color`}\r\n`{color:#569cd6}ENV{color}{color:#d4d4d4} PYARROW_WITH_GANDIVA {color}{color:#ce9178}'OFF'{color`}\r\n`{color:#569cd6}ENV{color}{color:#d4d4d4} PYARROW_WITH_PLASMA {color}{color:#ce9178}'OFF'{color`}\r\n`{color:#ce9178}python -m pip install pyarrow{color`}\r\n`\u00a0`\r\n`{color:#ce9178}...{color`}\r\n`\u00a0`\r\n`CMake Error at CMakeLists.txt:262 (find_package):`\r\n`\u00a0`\r\n`By not providing \"FindArrowFlight.cmake\" in CMAKE_MODULE_PATH this project`\r\n`\u00a0`\r\n`has asked CMake to find a package configuration file provided by`\r\n`\u00a0`\r\n`\"ArrowFlight\", but CMake did not find one.`\r\n`\u00a0`\r\n`\u00a0`\r\n`\u00a0`\r\n`Could not find a package configuration file provided by \"ArrowFlight\" with`\r\n`\u00a0`\r\n`any of the following names:`\r\n`\u00a0`\r\n`\u00a0`\r\n`\u00a0`\r\n`ArrowFlightConfig.cmake`\r\n`\u00a0`\r\n`arrowflight-config.cmake`\r\n`\u00a0`\r\n`Add the installation prefix of \"ArrowFlight\" to CMAKE_PREFIX_PATH or set`\r\n`\u00a0`\r\n`\"ArrowFlight_DIR\" to a directory containing one of the above files. If`\r\n`\u00a0`\r\n`\"ArrowFlight\" provides a separate development package or SDK, be sure it`\r\n`\u00a0{color:#ce9178}{\\{ has been installed.`{color}}}\r\n`\u00a0`\r\n\r\nOS: ubuntu 22\r\n\r\nPython: 3.9",
+        "created_at": "2022-11-14T15:51:57.000Z",
+        "updated_at": "2022-11-16T09:43:18.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-11-15T20:57:00.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-11-14T20:38:02.778Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18322?focusedCommentId=17634039) by Kouhei Sutou (kou):*\nHow did you install Apache Arrow C++?"
+        },
+        {
+            "created_at": "2022-11-14T20:57:17.692Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18322?focusedCommentId=17634047) by Alan Snow (snowman2):*\nHere is what I followed: <https://github.com/OSGeo/gdal/blob/58ab718542a7b5ceb94e3f24a5acc0b18ac1efb2/docker/ubuntu-full/Dockerfile#L223-L231>\r\n\r\n```\n\r\n# Install Arrow C++\r\nRUN apt-get install -y -V cmake ca-certificates lsb-release wget \\\r\n    && wget https://apache.jfrog.io/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb \\\r\n    && apt-get install -y -V ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb \\\r\n    && apt-get update \\\r\n    && apt-get install -y -V libarrow-dev=10.0.0-1 libparquet-dev=10.0.0-1 libarrow-dataset-dev=10.0.0-1 \\\r\n    && rm -rf /var/lib/apt/lists/*\r\n```"
+        },
+        {
+            "created_at": "2022-11-15T00:17:51.352Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18322?focusedCommentId=17634089) by Kouhei Sutou (kou):*\nThanks.\r\n\r\nAdding the following line after the `apt-get install -y -V libarrow-dev=10.0.0-1 libparquet-dev=10.0.0-1 libarrow-dataset-dev=10.0.0-1` line is workaround:\r\n\r\n```\n\r\n&& sed -i -e 's/ARROW_FLIGHT \"ON\"/ARROW_FLIGHT \"OFF\"/' /usr/lib/x86_64-linux-gnu/cmake/Arrow/ArrowOptions.cmake \\\r\n```\r\n\r\n`[~alenka]` Could you work on this? The following patch may fix this:\r\n\r\n```\n\r\ndiff --git a/python/pyarrow/src/CMakeLists.txt b/python/pyarrow/src/CMakeLists.txt\r\nindex 7d943b52e4..87a106c594 100644\r\n--- a/python/pyarrow/src/CMakeLists.txt\r\n+++ b/python/pyarrow/src/CMakeLists.txt\r\n@@ -253,7 +253,7 @@ if(ARROW_BUILD_STATIC AND MSVC)\r\n   target_compile_definitions(arrow_python_static PUBLIC ARROW_STATIC)\r\n endif()\r\n \r\n-if(ARROW_FLIGHT AND ARROW_BUILD_SHARED)\r\n+if(PYARROW_WITH_FLIGHT AND ARROW_FLIGHT AND ARROW_BUILD_SHARED)\r\n# Must link to shared libarrow_flight: we don't want to link more than one\r\n# copy of gRPC into the eventual Cython shared object, otherwise gRPC calls\r\n# fail with weird errors due to multiple copies of global static state (The\r\ndiff --git a/python/setup.py b/python/setup.py\r\nindex bcc427f87d..3c8437b0e2 100755\r\n--- a/python/setup.py\r\n+++ b/python/setup.py\r\n@@ -270,6 +270,8 @@ class build_ext(_build_ext):\r\n                               'PYARROW_WITH_PARQUET_ENCRYPTION')\r\n             append_cmake_bool(self.with_hdfs,\r\n                               'PYARROW_WITH_HDFS')\r\n+            append_cmake_bool(self.with_flight,\r\n+                              'PYARROW_WITH_FLIGHT')\r\n \r\n# Windows\r\n             if self.cmake_generator:\r\n```"
+        },
+        {
+            "created_at": "2022-11-15T05:12:16.773Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18322?focusedCommentId=17634165) by Alenka Frim (alenka):*\nSure, will make a PR today."
+        },
+        {
+            "created_at": "2022-11-15T20:57:00.924Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18322?focusedCommentId=17634523) by Kouhei Sutou (kou):*\nIssue resolved by pull request 14642\n<https://github.com/apache/arrow/pull/14642>"
+        }
+    ]
+}

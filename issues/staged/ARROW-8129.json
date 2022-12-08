@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[C++][Compute] Refine compare sorting kernel",
+        "body": "***Note**: This issue was originally created as [ARROW-8129](https://issues.apache.org/jira/browse/ARROW-8129). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSorting kernel implements two comparison functions, [CompareValues](https://github.com/apache/arrow/blob/ab21f0ee429c2a2c82e4dbc5d216ab1da74221a2/cpp/src/arrow/compute/kernels/sort_to_indices.cc#L67) use array.Value() for numeric data and [CompareViews](https://github.com/apache/arrow/blob/ab21f0ee429c2a2c82e4dbc5d216ab1da74221a2/cpp/src/arrow/compute/kernels/sort_to_indices.cc#L72) uses array.GetView() for non-numeric ones. It can be simplified by using GetView() only as all data types support GetView().\r\n\r\nTo my surprise, benchmark shows about 40% performance improvement after the change.\r\n\r\nAfter some digging, I find in current code, the [comparison callback](https://github.com/apache/arrow/blob/ab21f0ee429c2a2c82e4dbc5d216ab1da74221a2/cpp/src/arrow/compute/kernels/sort_to_indices.cc#L94) is not inlined (check disassembled code), it leads to a function call. It's very bad for this hot loop. Using only GetView() fixes this issue, code inlined okay.",
+        "created_at": "2020-03-16T08:33:24.000Z",
+        "updated_at": "2020-04-10T14:38:02.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-03-17T12:48:09.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-03-17T01:39:34.342Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8129?focusedCommentId=17060566) by Pierre Belzile (belzilep):*\nYibo,\r\n\r\nGiven that you are looking at this, I wonder if the following wouldn't be faster for CompareValues:\r\n```java\n\r\nauto values_begin = values.raw_values(); // this also exists everywhere\r\nstd::stable_sort(indices_begin, nulls_begin,\r\n [values_begin](uint64_t left, uint64_t right) {\r\n\u00a0 return *(values_begin + left) < *(values_begin + right);\r\n });\r\n\r\n```\r\nIt avoids dereferencing the shared_ptr data_ and adding the offset twice for each comparisons."
+        },
+        {
+            "created_at": "2020-03-17T03:21:26.493Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8129?focusedCommentId=17060602) by Yibo Cai (yibocai):*\nPierre,\r\n\r\nAnother 10% performance improvement is observed after applying your change. The only problem is binary/string types don't have raw_values() member function.\r\n\r\nDisassembled code shows the difference (may be not very accurate as it's hard to locate the original code after compiler optimization)\r\n\r\n```c\n\r\n*(values_begin + left) < *(values_begin + right);\r\n\r\n7b6d29:       49 8b 7c fd 00          mov    0x0(%r13,%rdi,8),%rdi\r\n7b6d2e:       4b 39 7c cd 00          cmp    %rdi,0x0(%r13,%r9,8)\r\n```\r\n\r\n```c\n\r\nvalues.GetView(left) < values.GetView(right);\r\n\r\n7ba98f:       4c 8b 49 08             mov    0x8(%rcx),%r9\r\n7ba993:       4c 8b 51 20             mov    0x20(%rcx),%r10\r\n7ba997:       4d 8b 49 20             mov    0x20(%r9),%r9\r\n7ba99b:       49 8d 1c da             lea    (%r10,%rbx,8),%rbx\r\n7ba99f:       49 8d 3c fa             lea    (%r10,%rdi,8),%rdi\r\n7ba9a3:       4a 8b 3c cf             mov    (%rdi,%r9,8),%rdi\r\n7ba9a7:       4a 39 3c cb             cmp    %rdi,(%rbx,%r9,8)\r\n```"
+        },
+        {
+            "created_at": "2020-03-17T12:48:09.247Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8129?focusedCommentId=17060893) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 6640\n<https://github.com/apache/arrow/pull/6640>"
+        }
+    ]
+}

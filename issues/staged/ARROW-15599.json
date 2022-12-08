@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[R] Convert a column as a sub-second timestamp from CSV file with the `T` col type option",
+        "body": "***Note**: This issue was originally created as [ARROW-15599](https://issues.apache.org/jira/browse/ARROW-15599). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI tried to read the csv column type as timestamp, but I could only get it to work well when `col_types` was not specified.\r\n\r\nI'm sorry if I missed something and this is the expected behavior. (It would be great if you could add an example with `col_types` in the documentation.)\r\n\r\n```r\n\r\nlibrary(arrow)\r\n#>\r\n#> Attaching package: 'arrow'\r\n#> The following object is masked from 'package:utils':\r\n#>\r\n#>     timestamp\r\n\r\nt_string <- tibble::tibble(\r\n  x = \"2018-10-07 19:04:05.005\"\r\n)\r\n\r\nwrite_csv_arrow(t_string, \"tmp.csv\")\r\n\r\nread_csv_arrow(\r\n  \"tmp.csv\",\r\n  as_data_frame = FALSE\r\n)\r\n#> Table\r\n#> 1 rows x 1 columns\r\n#> $x <timestamp[ns]>\r\n\r\nread_csv_arrow(\r\n  \"tmp.csv\",\r\n  col_names = \"x\",\r\n  col_types = \"?\",\r\n  skip = 1,\r\n  as_data_frame = FALSE\r\n)\r\n#> Table\r\n#> 1 rows x 1 columns\r\n#> $x <timestamp[ns]>\r\n\r\nread_csv_arrow(\r\n  \"tmp.csv\",\r\n  col_names = \"x\",\r\n  col_types = \"T\",\r\n  skip = 1,\r\n  as_data_frame = FALSE\r\n)\r\n#> Error: Invalid: In CSV column #0: CSV conversion error to timestamp[s]: invalid value '2018-10-07 19:04:05.005'\r\n\r\nread_csv_arrow(\r\n  \"tmp.csv\",\r\n  col_names = \"x\",\r\n  col_types = \"T\",\r\n  as_data_frame = FALSE,\r\n  skip = 1,\r\n  timestamp_parsers = \"%Y-%m-%d %H:%M:%S\"\r\n)\r\n#> Error: Invalid: In CSV column #0: CSV conversion error to timestamp[s]: invalid value '2018-10-07 19:04:05.005'\r\n```",
+        "created_at": "2022-02-07T13:45:13.000Z",
+        "updated_at": "2022-08-17T06:41:01.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-03-02T14:02:29.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-07T21:47:25.962Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15599?focusedCommentId=17488436) by Nicola Crane (thisisnic):*\nThanks for reporting this!\r\n\r\nHere's a reprex with more verbose output.\r\n\r\n```r\n\r\nlibrary(arrow)\r\n#> \r\n#> Attaching package: 'arrow'\r\n#> The following object is masked from 'package:utils':\r\n#> \r\n#>     timestamp\r\ntf <- tempfile()\r\nwrite.csv(data.frame(x = '2018-10-07 19:04:05.005'), tf, row.names = FALSE)\r\n\r\n# successfully read in file\r\nread_csv_arrow(tf, as_data_frame = TRUE)\r\n#> # A tibble: 1 \u00d7 1\r\n#>   x                  \r\n#>   <dttm>             \r\n#> 1 2018-10-07 20:04:05\r\n\r\n# the unit here is seconds - doesn't work\r\nread_csv_arrow(\r\n  tf,\r\n  col_names = \"x\",\r\n  col_types = \"T\",\r\n  skip = 1\r\n)\r\n#> Error in `handle_csv_read_error()`:\r\n#> ! Invalid: In CSV column #0: CSV conversion error to timestamp[s]: invalid value '2018-10-07 19:04:05.005'\r\n#> /home/nic2/arrow/cpp/src/arrow/csv/converter.cc:550  decoder_.Decode(data, size, quoted, &value)\r\n#> /home/nic2/arrow/cpp/src/arrow/csv/parser.h:123  status\r\n#> /home/nic2/arrow/cpp/src/arrow/csv/converter.cc:554  parser.VisitColumn(col_index, visit)\r\n\r\n# the unit here is ms - doesn't work\r\nread_csv_arrow(\r\n  tf,\r\n  col_names = \"x\",\r\n  col_types = \"t\",\r\n  skip = 1\r\n)\r\n#> Error in `handle_csv_read_error()`:\r\n#> ! Invalid: In CSV column #0: CSV conversion error to time32[ms]: invalid value '2018-10-07 19:04:05.005'\r\n#> /home/nic2/arrow/cpp/src/arrow/csv/converter.cc:550  decoder_.Decode(data, size, quoted, &value)\r\n#> /home/nic2/arrow/cpp/src/arrow/csv/parser.h:123  status\r\n#> /home/nic2/arrow/cpp/src/arrow/csv/converter.cc:554  parser.VisitColumn(col_index, visit)\r\n\r\n# the unit here is inferred as ns - does work!\r\nread_csv_arrow(\r\n  tf,\r\n  col_names = \"x\",\r\n  col_types = \"?\",\r\n  skip = 1,\r\n  as_data_frame = FALSE\r\n)\r\n#> Table\r\n#> 1 rows x 1 columns\r\n#> $x <timestamp[ns]>\r\n```\r\n\r\nIt looks like what's happening here is that the `col_types` compact representations are mapped to a timestamp with units in seconds (\"T\") or time32 objects with units in milliseconds (\"t\"), but the data itself is actually to nanosecond precision.  \r\n\r\nYou could get round this for now by specifying a schema for the names and column types instead of the `readr` shortcodes:\r\n\r\n```r\n\r\nread_csv_arrow(\r\n  tf,\r\n  schema = schema(x = timestamp(unit = \"us\")),\r\n  skip = 1\r\n)\r\n```\r\n\r\nThat said, this is something we should either fix or document."
+        },
+        {
+            "created_at": "2022-02-08T14:16:16.338Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15599?focusedCommentId=17488874) by SHIMA Tatsuya (eitsupi):*\nThank you for showing how to specify the schema, it would be great if the reference page included such an example as there are users who would like to specify more details than using `col_types`."
+        },
+        {
+            "created_at": "2022-02-08T14:37:13.949Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15599?focusedCommentId=17488899) by Nicola Crane (thisisnic):*\nThat's an excellent idea `[~eitsupi]` - didn't realise there wasn't an example of it in the docs but it'd be useful to have."
+        },
+        {
+            "created_at": "2022-02-09T13:26:25.314Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15599?focusedCommentId=17489549) by SHIMA Tatsuya (eitsupi):*\npyarrow has aliases for each timestamp type without time zone, which can be specified as a string.\r\n<https://github.com/apache/arrow/blob/d59dbbc36c7950e58332d081d47c2d43ea898215/python/pyarrow/types.pxi#L2761-L2764>\r\n\r\nIf the current policy is to emphasize compatibility with `readr::read_csv`, then ideally, the col_types \"T\" option would be great if one of the these options or one of timestamp with timezone types was automatically applied."
+        },
+        {
+            "created_at": "2022-03-02T14:02:29.577Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15599?focusedCommentId=17500186) by Jonathan Keane (jonkeane):*\nIssue resolved by pull request 12474\n<https://github.com/apache/arrow/pull/12474>"
+        }
+    ]
+}

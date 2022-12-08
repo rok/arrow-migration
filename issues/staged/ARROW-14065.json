@@ -1,0 +1,65 @@
+{
+    "issue": {
+        "title": "[C++] FixedSizeBinaryBuilder behaves incorrectly since v5.0 with \"Resize+Advance\" operation",
+        "body": "***Note**: This issue was originally created as [ARROW-14065](https://issues.apache.org/jira/browse/ARROW-14065). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWith the following code, we first \"Resize\" a builder, then fill the content, and finally use \"Advance\" to move the pointer to the end,\r\n\r\n\u00a0```cpp\r\n#include <iostream>\r\n#include <memory>\r\n\r\n#include \"arrow/array/array_binary.h\"\r\n#include \"arrow/array/builder_binary.h\"\r\n#include \"arrow/status.h\"\r\n#include \"arrow/util/config.h\"\r\n\r\nint main(int argc, char\\*\\* argv) {\r\n    struct S {\r\n      int64_t a;\r\n      double b;\r\n    };\r\n    arrow::FixedSizeBinaryBuilder b1(arrow::fixed_size_binary(sizeof(S)));\r\n\r\n    arrow::FixedSizeBinaryBuilder b4(arrow::fixed_size_binary(sizeof(S)));\r\n    b4.Resize(10);\r\n\r\n    // ... fill the array data in random-access fashion ...\r\n\r\n    b4.Advance(10);\r\n\r\n    std::shared_ptr<arrow::FixedSizeBinaryArray> a4;\r\n    b4.Finish(&a4);\r\n\r\n    std::cout << \"array length: \" << a4->length() << std::endl;\r\n    std::cout << \"buffer size: \" << a4->values()->size() << std::endl;\r\n\r\n    return 0;\r\n}\r\n```\r\n\r\nThe output is 10 and 160 with arrow 4.0 (which is desired behavior) however arrow 5.0 yields 10 and 0, which means the length of array is not 0 but the underlying buffer is a null pointer.\r\n\r\nThe same error doesn't happen to other types, e.g., IntBuilders.\r\n\r\n",
+        "created_at": "2021-09-22T07:26:10.000Z",
+        "updated_at": "2022-08-27T14:41:45.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-10-08T04:49:28.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-09-22T07:27:54.319Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14065?focusedCommentId=17418457) by Tao He (sighingnow):*\nThe behaviour is changed by this commit: https://github.com/apache/arrow/commit/e990d177b1f1 , more specifically, changed by the diff in \"Resize()\" in `cpp/src/arrow/buffer_builder.h`.\r\n\r\nI'm not sure if user can expect \"Resize + Advance\" always works, though."
+        },
+        {
+            "created_at": "2021-09-22T16:17:31.097Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14065?focusedCommentId=17418694) by Antoine Pitrou (apitrou):*\nI would suggest using Reserve() instead of Resize() here. Does it work for you?"
+        },
+        {
+            "created_at": "2021-09-22T16:18:53.635Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14065?focusedCommentId=17418696) by Antoine Pitrou (apitrou):*\nAlso, if you're really filling the data in non-increasing order, you probably don't benefit a lot from the ArrayBuilder classes, do you? You could fill up your buffers by yourself..."
+        },
+        {
+            "created_at": "2021-09-22T17:17:06.738Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14065?focusedCommentId=17418725) by Tao He (sighingnow):*\nReserve() doesn't work for FixedSizeBinaryBuilder as well.\r\n\r\nCompared with other builders, e.g., IntBuilders, `FixedSizeBinaryBuilder` has an extra \"bytes_builder\" (a ResizableBufferBuilder), and doesn't override the \"Advance()\" method.\r\n\r\nI would like to confirm if we can reply on the \"Resize/Reserve + Advance\" behaviour? Is it by-design or just happen to work? If is it by-design and expected to work, then we need to fix the FixedSizeBinaryBuilder, IMO."
+        },
+        {
+            "created_at": "2021-09-27T10:05:58.940Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14065?focusedCommentId=17420639) by Antoine Pitrou (apitrou):*\nI think the honest answer is that Advance isn't exercised or tested a lot in the Arrow C++ codebase, so there may be a bug to fix there :-)\r\n\r\nTheoretically, Reserve + Advance should definitely work IMHO."
+        },
+        {
+            "created_at": "2021-09-29T11:12:31.850Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14065?focusedCommentId=17422062) by Tao He (sighingnow):*\nI have submitted a pull request to fix the behaviour. Hope it could be included in the next release."
+        },
+        {
+            "created_at": "2021-09-29T11:39:23.585Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14065?focusedCommentId=17422072) by Antoine Pitrou (apitrou):*\nLooking at the API exposed by array builders, I'm not even sure how Advance() is supposed to be used. How do you fill the null bitmap, for example?"
+        },
+        {
+            "created_at": "2021-09-29T11:46:17.035Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14065?focusedCommentId=17422073) by Tao He (sighingnow):*\nWe have a `PodBuilder` which inherits from the `FixedSizeBinaryBuilder`. There's a protect method that will expose its internal pointer and we use the PodBuilder for further data processing. After filling the data, we call the \"Advance\" method to get a `FixedSizeBinaryBuilder`."
+        },
+        {
+            "created_at": "2021-09-29T11:55:18.016Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14065?focusedCommentId=17422077) by Antoine Pitrou (apitrou):*\nThat would be one way of doing it, but it's certainly not supported."
+        },
+        {
+            "created_at": "2021-09-29T11:58:11.899Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14065?focusedCommentId=17422081) by Antoine Pitrou (apitrou):*\nI've proposed to deprecate ArrayBuilder::Advance on the mailing-list:\r\n\r\n<https://lists.apache.org/thread.html/r304b1266632c641a1d940aeb18426f1c069335feddb5f562513cde34%40%3Cdev.arrow.apache.org%3E>\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-09-29T12:57:06.031Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14065?focusedCommentId=17422101) by Tao He (sighingnow):*\nThe bitmap buffer is never touched and is a nullptr, and that is valid for arrow arrays. In our compute engine we also assume there's no null values in arrays and tables.\r\n\r\nIts ok to me to depreated. If we have no plan for guarantee the semanticis, deprecation is better than undocumented/unspecified behaviour, IMO."
+        },
+        {
+            "created_at": "2022-08-27T14:41:45.538Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14065?focusedCommentId=17585828) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

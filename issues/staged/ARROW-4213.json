@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Flight] C++ and Java implementations are incompatible",
+        "body": "***Note**: This issue was originally created as [ARROW-4213](https://issues.apache.org/jira/browse/ARROW-4213). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nA C++ client cannot request streams from a Java service, nor can it decode the schema from GetFlightInfo.\r\n\r\nSchema: in Java, GetFlightInfo encodes the schema directly via flatbuffers. C++ expects it to be encoded as an IPC message. This isn't a problem in Java as a method exists to decode such schemas, but in C++ the API for reading such a schema isn't really exposed. I'm willing to submit a patch for this, but it's not clear to me which scheme is preferred.\r\n\r\nStreams: in Java, DoGet starts with an ArrowMessage containing a schema. C++ does not expect this and segfaults when it tries to decode the message as a record batch. Based on the presentations I've seen, I think C++ is in the wrong here; I have a patch to fix this that I could clean up and submit.",
+        "created_at": "2019-01-09T21:02:18.000Z",
+        "updated_at": "2019-01-29T16:47:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: FlightRPC",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-01-29T16:47:14.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-01-09T21:37:57.947Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4213?focusedCommentId=16738680) by Wes McKinney (wesm):*\nRe: schemas, I think that IPC messages should be used; those are the \"public\" way to transmit Flatbuffers message payloads. cc `[~jnadeau]` for comment\r\n\r\nRe: DoGet; shouldn't the receiver already have the schema after calling GetFlightInfo? It would seem wasteful for each endpoint to send the schema again.\r\n\r\nThere are some complications to consider relating to dictionary encoding \u2013 dictionaries are probably going to come over the wire first in a DoGet operation. There are comments in the C++ codebase about this\r\n\r\ncc `[~pitrou]`"
+        },
+        {
+            "created_at": "2019-01-09T21:55:32.152Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4213?focusedCommentId=16738694) by Jacques Nadeau (jnadeau):*\nI'm not sure on DoGet.\u00a0I can imagine situations where it should be\u00a0unnecessary to re-request a ticket but possibly a schema has changed since the ticket was generated. I can be convinced of not\u00a0including but it also seems nice to include. In part this is nice because the node that got the flight info message may\u00a0not be the same one that ultimately consumes the ticket. In those cases, being able to give someone a ticket and that alone is enough to reconstruct a stream of arrow records seems\u00a0desirable. Basically making a flight stream self describing. I think of it as similar to a Parquet\u00a0or an Avro file where a directory may all be the same but it is still nice to have each file describe itself.\r\n\r\nWith regards to the IPC message,\u00a0I mostly disagree with `[~wesmckinn]`'s perspective. The Flatbuffers definition of schema is a\u00a0public serialization from the\u00a0format perspective it seems weird to\u00a0add an arbitrary envelope. Some of the codebases may chosen to hide that\u00a0structure but I think those are\u00a0code construction/style choices as opposed to something that the format instructs/defines."
+        },
+        {
+            "created_at": "2019-01-09T22:05:11.694Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4213?focusedCommentId=16738706) by Wes McKinney (wesm):*\nI would be OK with sending the schema always in DoGet.\r\n\r\nOn the IPC message, I think we are saying different things. We have the Flatbuffers `Message` type which has the metadata version and can represent different kinds of IPC messages\r\n\r\nhttps://github.com/apache/arrow/blob/master/format/Message.fbs#L93\r\n\r\nIn https://github.com/apache/arrow/blob/87feee3d941ee41fb39b25411e108bef40a55995/java/vector/src/main/java/org/apache/arrow/vector/types/pojo/Schema.java#L168, the schema is being serialized as the Schema type. I'm just saying to put the Schema inside a Message. It has the side benefit of including the metadata version so the reader can check for protocol version compatibility. \r\n\r\nIn C++, the Schema is serialized here\r\n\r\n- https://github.com/apache/arrow/blob/master/cpp/src/arrow/flight/internal.cc#L205\n  \n  This calls `WriteSchemaMessage` https://github.com/apache/arrow/blob/e0f70bbf9bc8eb909373abaaf0b4c9f50bc0a2d6/cpp/src/arrow/ipc/writer.cc#L784 which puts the Schema inside the Message union\n  \n  https://github.com/apache/arrow/blob/ce9c6e3914274dcaf7806159ea5373e0cb632727/cpp/src/arrow/ipc/metadata-internal.cc#L690"
+        },
+        {
+            "created_at": "2019-01-10T20:59:57.343Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4213?focusedCommentId=16739767) by David Li (lidavidm):*\nEither way I'm willing to submit a patch for this, and to add integration tests. For the tests, I'd like to do something similar to the existing integration tests, where each language provides a Flight client/server implementation that requests/generates data according to the JSON spec, then the driver validates the data from the wire. Does this sound like the right approach?"
+        },
+        {
+            "created_at": "2019-01-15T22:20:27.554Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4213?focusedCommentId=16743443) by David Li (lidavidm):*\nHere's another incompatibility, this time with a C++ server and Java client. (I discovered this in the process of putting together rough integration tests for Flight.)\r\n\r\nIn C++, the serializer for IpcPayload always writes the body tag (flight/server.cc:143), even if there are no body messages. On the Java side, this causes ArrowMessage to read and create an empty ArrowBuf object. However, when ArrowMessage.asSchema is later called, an exception will be raised as Java asserts that an ArrowMessage containing a schema has no body objects. gRPC silently swallows the exception, causing the client to hang.\r\n\r\nIn Java, ArrowMessage.asInputStream explicitly checks if the message represents a schema, and if so, uses a different code path that does not write a body at all. I think C++ should have a similar check, and perhaps C++ should also make the same assertion during deserialization."
+        },
+        {
+            "created_at": "2019-01-22T19:38:00.504Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4213?focusedCommentId=16749054) by David Li (lidavidm):*\nOne more: a Java client can't call GetInfo on a C++ server. In C++, arrow::flight::internal::SchemaToString writes the length of the serialized schema first, while Java does not (Schema.toByteArray); Java gets confused when it then tries to read the schema. It's not enough to reliably break things - a Java client will often still parse a (nonsensical) schema."
+        },
+        {
+            "created_at": "2019-01-29T16:47:14.534Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4213?focusedCommentId=16755195) by Wes McKinney (wesm):*\nIssue resolved by pull request 3477\n<https://github.com/apache/arrow/pull/3477>"
+        }
+    ]
+}

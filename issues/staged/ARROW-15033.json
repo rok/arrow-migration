@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[Python] No way to create ListArray from sub-arrays",
+        "body": "***Note**: This issue was originally created as [ARROW-15033](https://issues.apache.org/jira/browse/ARROW-15033). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI'd like to create a `ListArray` from a list of sub-arrays, similar to how `StructArray.from_arrays` can create a `StructArray` from a sequence of names and arrays. A similarly-named function, `ListArray.from_arrays` does exist, but it does something completely different.",
+        "created_at": "2021-12-08T20:44:08.000Z",
+        "updated_at": "2022-01-27T14:46:45.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-12-09T11:09:45.354Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15033?focusedCommentId=17456350) by Joris Van den Bossche (jorisvandenbossche):*\nCan you give an example of what you would like to achieve? (i.e. small example of such a list of sub-arrays, and what the resulting ListArray would look like)\r\n\r\nFor example, the generic `pa.array` function to construct arrays will take a list or arrays of sub-lists/arrays:\r\n\r\n```Java\n\r\nIn [60]: pa.array([[1, 2], [1, 2, 3]])\r\nOut[60]: \r\n<pyarrow.lib.ListArray object at 0x7f0b10ff1ac0>\r\n[\r\n  [\r\n    1,\r\n    2\r\n  ],\r\n  [\r\n    1,\r\n    2,\r\n    3\r\n  ]\r\n]\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-12-09T13:46:11.446Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15033?focusedCommentId=17456453) by Vlad Firoiu (vladfi):*\nHere's what I'm looking for:\r\n```python\n\r\nreference = pa.array([[1, 2, 3], [4, 5, 6]])\r\n\r\nsub_arrays = [\r\n  pa.array([1, 4]),\r\n  pa.array([2, 5]),\r\n  pa.array([3, 6]),\r\n]\r\n\r\nlist_array = pa.ListArray.from_sub_arrays(sub_arrays)\r\nassert list_array == reference\r\n```"
+        },
+        {
+            "created_at": "2021-12-09T13:47:45.336Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15033?focusedCommentId=17456454) by Vlad Firoiu (vladfi):*\nCurrent workaround is to use a `StructArray` with keys `('0', '1', ...)` instead:\r\n```python\n\r\nint64 = pa.int64()\r\ntype_ = pa.struct({'0': int64, '1': int64, '2': int64})\r\nreference = pa.array([\r\n  {'0': 1, '1': 2, '2': 3},\r\n  {'0': 4, '1': 5, '2': 6},\r\n], type=type_)\r\n\r\nsub_arrays = [\r\n  pa.array([1, 4]),\r\n  pa.array([2, 5]),\r\n  pa.array([3, 6]),\r\n]\r\n\r\nstruct_array = pa.StructArray.from_arrays(sub_arrays, names=['0', '1', '2'])\r\nassert struct_array == reference\r\n```"
+        },
+        {
+            "created_at": "2022-01-27T14:46:45.209Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15033?focusedCommentId=17483189) by Joris Van den Bossche (jorisvandenbossche):*\n`[~vladfi]` sorry for the slow follow-up here. \r\n\r\nBut, a struct array and list array are fundamentally different (memory-wise), and what you show for StructArray doesn't translate that well to ListArray.\r\n\r\nA struct array has different fields where each field is stored as a separate, contiguous array. So creating this StructArray from those individual arrays as you show in your example makes sense. \r\n\r\nHowever, a ListArray doesn't have separate fields. The values of the ListArray are all contigously stored in memory in a single array. So for example, your reference array in\r\n\r\n```Java\n\r\nreference = pa.array([[1, 2, 3], [4, 5, 6]])\r\n```\r\n\r\nhas the values stored as [1, 2, 3, 4, 5, 6]:\r\n\r\n```Java\n\r\nIn [19]: reference.values\r\nOut[19]: \r\n<pyarrow.lib.Int64Array object at 0x7f75bec218e0>\r\n[\r\n  1,\r\n  2,\r\n  3,\r\n  4,\r\n  5,\r\n  6\r\n]\r\n```\r\n\r\nSo for that reason, it is less logical to create it from the arrays in the way your want in the `from_sub_arrays` example. Moreover, this is actually also only possible if you would have a FixedSizeListArray, and not a variable size ListArray (eg you can have `pa.array([[1, 2], [3, 4, 5]])`, which wouldn't be able to be created with `from_sub_arrays`).\r\n\r\nIn the end, if you have such sub-arrays, and mentally consider them as such, I think using a StructArray is more natural (although the fact you need to \"make up\" names can certainly be a downside here, if there are no natural names in your application).\r\n\r\nAlternatively, if you have such sub-arrays like that, and want to create a ListArray from it, you can do some manipulation of the sub-arrays to get them into the layout needed by Arrow. For example:\r\n\r\n```Java\n\r\nIn [26]: flat_array = [val for row in zip(*sub_arrays) for val in row]\r\n\r\nIn [27]: flat_array\r\nOut[27]: \r\n[<pyarrow.Int64Scalar: 1>,\r\n <pyarrow.Int64Scalar: 2>,\r\n <pyarrow.Int64Scalar: 3>,\r\n <pyarrow.Int64Scalar: 4>,\r\n <pyarrow.Int64Scalar: 5>,\r\n <pyarrow.Int64Scalar: 6>]\r\n```\r\n\r\nand then use `FixedSizeListArray.from_arrays`. However, that's a bit complicated by the fact that this results in pyarrow Scalars, which are not handled very well in the `pa.array` constructor. So for this option, you would first have to convert you pyarrow sub-arrays to numpy arrays or python lists.\r\n\r\n\u2014\r\n\r\nThat said, while IMO a dedicated creation function is not warranted here, it could be useful to have functionality that could convert a StructArray (with fields of all same type) into a FixedSizeListArray and vice versa.\r\n \r\n"
+        }
+    ]
+}

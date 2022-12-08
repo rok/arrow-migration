@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Python] Writing to parquet crashes when writing a ListArray of empty lists ",
+        "body": "***Note**: This issue was originally created as [ARROW-2744](https://issues.apache.org/jira/browse/ARROW-2744). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen writing a ListArray which contains only empty lists to Parquet, Pyarrow crashes. Here is a minimal code snippet which reproduces the crash:\r\n```java\n\r\nimport pyarrow as pa\r\nfrom pyarrow import parquet as pq\r\n\r\narray = pa.array([[]], type=pa.list_(pa.int32()))\r\ntable = pa.Table.from_arrays([array], [\"A\"])\r\npq.write_table(table, \"tmp.parq\")\n```\r\nWhen the ListArray has at least one non-empty list, the issue disappears.\r\n\r\n\u00a0",
+        "created_at": "2018-06-26T07:39:41.000Z",
+        "updated_at": "2018-07-23T21:08:43.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-07-23T21:08:37.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-06-26T11:42:29.243Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2744?focusedCommentId=16523605) by Antoine Pitrou (apitrou):*\nThanks for reporting here. I can definitely reproduce on git master."
+        },
+        {
+            "created_at": "2018-06-26T15:47:40.759Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2744?focusedCommentId=16523889) by Antoine Pitrou (apitrou):*\nThe gdb backtrace:\r\n```Java\n\r\n#0  0x00007f09b40fa770 in arrow::Buffer::data (this=0x0) at ../src/arrow/buffer.h:119\r\n#1  0x00007f09a8685155 in parquet::arrow::(anonymous namespace)::ArrowColumnWriter::TypedWriteBatch<parquet::DataType<(parquet::Type::type)1>, arrow::Int32Type> (\r\n    this=0x7ffd577fc660, array=..., num_levels=2, def_levels=0x18d2d40, rep_levels=0x1730f40) at /home/antoine/parquet-cpp/src/parquet/arrow/writer.cc:415\r\n#2  0x00007f09a8680a37 in parquet::arrow::(anonymous namespace)::ArrowColumnWriter::Write (this=0x7ffd577fc660, data=...)\r\n    at /home/antoine/parquet-cpp/src/parquet/arrow/writer.cc:895\r\n#3  0x00007f09a867d6b8 in parquet::arrow::(anonymous namespace)::ArrowColumnWriter::Write (this=0x7ffd577fc660, data=..., offset=0, size=2)\r\n    at /home/antoine/parquet-cpp/src/parquet/arrow/writer.cc:341\r\n#4  0x00007f09a868adb9 in parquet::arrow::FileWriter::Impl::WriteColumnChunk (this=0x1ad7830, data=..., offset=0, size=2)\r\n    at /home/antoine/parquet-cpp/src/parquet/arrow/writer.cc:995\r\n#5  0x00007f09a868114d in parquet::arrow::FileWriter::WriteColumnChunk (this=0x1c1b0d0, data=..., offset=0, size=2)\r\n    at /home/antoine/parquet-cpp/src/parquet/arrow/writer.cc:1025\r\n#6  0x00007f09a8681a85 in parquet::arrow::FileWriter::WriteTable (this=0x1c1b0d0, table=..., chunk_size=2)\r\n    at /home/antoine/parquet-cpp/src/parquet/arrow/writer.cc:1100\r\n[...]\r\n```"
+        },
+        {
+            "created_at": "2018-06-26T16:13:51.514Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2744?focusedCommentId=16523926) by Antoine Pitrou (apitrou):*\nHere is the crux of the issue;\r\n```Java\n\r\n>>> arr = pa.array([[]], type=pa.list_(pa.int32()))\r\n>>> arr.buffers()\r\n[<pyarrow.lib.Buffer at 0x7f1b7f68f0d8>,\r\n <pyarrow.lib.Buffer at 0x7f1b7f68f998>,\r\n None,\r\n None]\r\n>>> arr = pa.array([[1]], type=pa.list_(pa.int32()))\r\n>>> arr.buffers()\r\n[<pyarrow.lib.Buffer at 0x7f1b93163378>,\r\n <pyarrow.lib.Buffer at 0x7f1b7ee387d8>,\r\n <pyarrow.lib.Buffer at 0x7f1b7ee38998>,\r\n <pyarrow.lib.Buffer at 0x7f1b7ee385a8>]\r\n```\r\n\r\nWe have two solutions:\r\n1. Fix parquet-cpp so that it accepts null data buffers\n1. Fix pyarrow so that it never generates list arrays with empty data buffers\n   \n   In general this issue with buffers possibly being null (or None in Python) seems to regularly crop up in various places.\n   `[~wesmckinn]`, what do you think?"
+        },
+        {
+            "created_at": "2018-06-26T16:50:47.098Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2744?focusedCommentId=16523971) by Antoine Pitrou (apitrou):*\nPerhaps one clean way of solving this would be to add a Normalize feature to ArrayData such that:\r\n \\* all buffers except buffers[0] must be non-null\r\n \\* if a buffer is null (with index > 0, i.e. not the null bitmap), it is replaced with an empty buffer\r\n \\* normalizing is run recursively on child data\r\n\r\nCreating an Array from an ArrayData would automatically normalize the ArrayData."
+        },
+        {
+            "created_at": "2018-06-27T14:48:19.551Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2744?focusedCommentId=16525164) by Antoine Pitrou (apitrou):*\nWhen trying the normalization idea, it turns out that some places rely on null data buffers in an array:\r\n- feather, notably for null arrays (but not only it seems)\n- conversion from Numpy struct arrays, because it eases rechunking of the null bitmap\n  \n  Another issue with the normalization issue is that we're changing user-supplied data without being asked to, which may lead to surprising bugs/issues."
+        },
+        {
+            "created_at": "2018-06-27T22:42:26.487Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2744?focusedCommentId=16525698) by Wes McKinney (wesm):*\nThis is a tricky problem, since auto-normalizing would also have microperformance implications that might be undesirable. \r\n\r\nIn some cases, null is actually an acceptable value. For example: consider a nullable array with all non-null values. We (currently) consider it acceptable for the validity bitmap to be null in this case. \r\n\r\nThis problem has come up enough that I think we should continue to investigate all of the nuances so we know how best to proceed. With your proposed solutions, changing pyarrow to not yield lists with null buffers seems like a reasonable fix. We should also fix parquet-cpp to not segfault on a null buffer. "
+        },
+        {
+            "created_at": "2018-07-23T21:08:37.068Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2744?focusedCommentId=16553409) by Wes McKinney (wesm):*\nIssue resolved by pull request 2243\n<https://github.com/apache/arrow/pull/2243>"
+        }
+    ]
+}

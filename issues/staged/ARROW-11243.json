@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[C++] Parse time32 from string and infer in CSV reader",
+        "body": "***Note**: This issue was originally created as [ARROW-11243](https://issues.apache.org/jira/browse/ARROW-11243). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen reading a CSV with read_csv_arrow() with date types and time types, the dates are read as datetimes rather than dates and times are read as characters rather than time.\r\n\r\nThe first problem can be fixed by supplying date32() to schema(), though better inference would be nice. However, supplying time32() to schema() causes an error.\r\n\r\nHere is a sample dataset, also attached.\r\n\r\ndate,time,reading\r\n 2021-01-01,00:00:00,67.8\r\n 2021-01-01,00:00:00,72.4\r\n 2021-01-01,00:00:00,63.1\r\n 2021-01-01,00:05:00,67.8\r\n\r\nReading with readr::read_csv() results in a tibble with three columns: date, time, dbl, as expected.\r\n\u00a0\r\n```r\n\r\nsamp_readr <- readr::read_csv('sampledata.csv')\r\nsamp_readr\r\n```\r\n\r\n```r\n\r\n# A tibble: 4 x 3\r\n  date       time   reading\r\n  <date>     <time>   <dbl>\r\n1 2021-01-01 00'00\"    67.8\r\n2 2021-01-01 00'00\"    72.4\r\n3 2021-01-01 00'00\"    63.1\r\n4 2021-01-01 05'00\"    67.8\r\n```\r\n\r\nReading with arrow::read_csv_arrow() without providing schema() results in a tibble with three columns: dttm,\u00a0chr, dbl.\r\n\r\n```r\n\r\nsamp_arrow_plain <- arrow::read_csv_arrow('sampledata.csv')\r\nsamp_arrow_plain\r\n```\r\n```r\n\r\n# A tibble: 4 x 3\r\n  date                time     reading\r\n  <dttm>              <chr>      <dbl>\r\n1 2020-12-31 19:00:00 00:00:00    67.8\r\n2 2020-12-31 19:00:00 00:00:00    72.4\r\n3 2020-12-31 19:00:00 00:00:00    63.1\r\n4 2020-12-31 19:00:00 00:05:00    67.8\r\n```\r\n\r\nReading with arrow::read_csv_arrow() and providing date=date32() via schema() to col_types results in a tibble with three columns: date,\u00a0chr, dbl.\r\n\r\n```r\n\r\nsamp_arrow_date <- arrow::read_csv_arrow('sampledata.csv', col_types=schema(date=date32()))\r\nsamp_arrow_date\r\n```\r\n```r\n\r\n# A tibble: 4 x 3\r\n  date       time     reading\r\n  <date>     <chr>      <dbl>\r\n1 2021-01-01 00:00:00    67.8\r\n2 2021-01-01 00:00:00    72.4\r\n3 2021-01-01 00:00:00    63.1\r\n4 2021-01-01 00:05:00    67.8\r\n```\r\n\r\nReading with arrow::read_csv_arrow() and providing time=time32() via schema() to col_types generates an error.\r\n\r\n```r\n\r\nsamp_arrow_time <- arrow::read_csv_arrow('sampledata.csv', col_types=schema(time=time32()))\r\n```\r\n```r\n\r\nError in csv___TableReader__Read(self) : \r\n  NotImplemented: CSV conversion to time32[ms] is not supported\r\n```\r\n\r\nThe same error occurs when using compact string notation.\r\n\r\n```r\n\r\nsamp_arrow_string <- arrow::read_csv_arrow('sampledata.csv', col_types='DTc', col_names=c('date', 'time', 'reading'), skip=1)\r\n```\r\n```r\n\r\nError in csv___TableReader__Read(self) : \r\n  NotImplemented: CSV conversion to time32[ms] is not supported\r\n```\r\n\r\nThis is something in the internals, so far beyond me to figure out a fix, but I saw it in action and wanted to report it.",
+        "created_at": "2021-01-13T22:01:07.000Z",
+        "updated_at": "2021-07-27T09:55:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-07-27T09:55:15.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-01-13T22:40:01.032Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11243?focusedCommentId=17264465) by Neal Richardson (npr):*\nThanks. The error message comes from https://github.com/apache/arrow/blob/master/cpp/src/arrow/csv/converter.cc#L621, and it's true, there is no case defined for Type::TIME32. There also is no cast method to convert/parse the string to time32 after the fact.\r\n\r\nI'll split to a separate issue the date vs. datetime type inference: ARROW-11247."
+        },
+        {
+            "created_at": "2021-01-14T15:46:50.815Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11243?focusedCommentId=17264970) by Jared Lander (jaredlander):*\nMy work around was using dplyr::mutate() and \\{hms} to convert the character to time after collecting the data, but that seems less than ideal for real workflows."
+        },
+        {
+            "created_at": "2021-01-14T16:14:16.095Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11243?focusedCommentId=17264989) by Neal Richardson (npr):*\nYeah you can fix it when you're pulling the data into R but that's not going to help for purely Arrow workflows. \r\n\r\nIn other news, I did make a fix for the date type detection and that was just merged, so it will make it into the 3.0.0 release we're about to do."
+        },
+        {
+            "created_at": "2021-01-14T16:20:35.135Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11243?focusedCommentId=17264995) by Jared Lander (jaredlander):*\nI saw that fix. Glad it was easy. Guessing the time fix is harder."
+        },
+        {
+            "created_at": "2021-06-23T16:35:14.115Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11243?focusedCommentId=17368336) by Antoine Pitrou (apitrou):*\nCan someone explain in plain terms what the desired behaviour should be? `[~npr]`"
+        },
+        {
+            "created_at": "2021-06-23T16:43:17.256Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11243?focusedCommentId=17368339) by Neal Richardson (npr):*\nIf I recall, the idea would be to add a type detector where if the values matched the pattern [0-9]\\{2}:[0-9]\\{2}:[0-9]\\{2}, then we infer the column type as Time32.\r\n\r\nSeparately, and IDK if there was another issue made for this, there should be a way to convert a string to Time32 (maybe strptime is the way now)."
+        },
+        {
+            "created_at": "2021-06-23T16:52:49.522Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11243?focusedCommentId=17368345) by Antoine Pitrou (apitrou):*\nThe accepted format would be `HH:MM:SS`, right?"
+        },
+        {
+            "created_at": "2021-06-23T16:56:39.909Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11243?focusedCommentId=17368346) by Neal Richardson (npr):*\nI suppose so, though IDK whether we would want to support fractional seconds too. (Maybe strptime is the way in the CSV reader too?)"
+        },
+        {
+            "created_at": "2021-06-23T17:47:18.447Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11243?focusedCommentId=17368383) by Weston Pace (westonpace):*\nIf we add a Time32 converter we should probably support the ISO-8601 definition for time.\u00a0 It has two forms, the obvious one...\r\n\r\n\u00a0\r\n\r\nHH:MM:SS\r\n\r\nHH:MM:SS.sss...\r\n\r\nHH:MM\r\n\r\n\u00a0\r\n\r\n...and then there is another form where the colons are omitted but everything is prefixed with T\r\n\r\n\u00a0\r\n\r\nTHH\r\n\r\nTHHMM\r\n\r\nTHHMMSS\r\n\r\nTHHMMSSsss"
+        },
+        {
+            "created_at": "2021-07-27T09:55:15.616Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11243?focusedCommentId=17387943) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 10782\n<https://github.com/apache/arrow/pull/10782>"
+        }
+    ]
+}

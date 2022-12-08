@@ -1,0 +1,70 @@
+{
+    "issue": {
+        "title": "[Python/C++] Provide a way to specify the file path in parquet ColumnChunkMetaData",
+        "body": "***Note**: This issue was originally created as [ARROW-5349](https://issues.apache.org/jira/browse/ARROW-5349). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAfter ARROW-5258 / https://github.com/apache/arrow/pull/4236 it is now possible to collect the file metadata while writing different files (then how to write those metadata was not yet addressed -> original issue ARROW-1983).\r\n\r\nHowever, currently, the `file_path` information in the ColumnChunkMetaData object is not set. This is, I think, expected / correct for the metadata as included within the single file; but for using the metadata in the combined dataset `_metadata`, it needs a file path set.\r\n\r\nSo if you want to use this metadata for a partitioned dataset, there needs to be a way to specify this file path. \r\nIdeas I am thinking of currently: either, we could specify a file path to be used when writing, or expose the `set_file_path` method on the Python side so you can create an updated version of the metadata after collecting it.\r\n\r\ncc `[~pearu]` `[~mdurant]`",
+        "created_at": "2019-05-16T13:51:45.000Z",
+        "updated_at": "2019-05-27T19:02:07.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-05-26T12:22:36.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-05-16T22:14:15.501Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5349?focusedCommentId=16841768) by Wes McKinney (wesm):*\nThere is an API available to set the file path\r\n\r\nhttps://github.com/apache/arrow/blob/master/cpp/src/parquet/metadata.h#L218\r\n\r\nI would recommend adding a method on `parquet::ParquetFileWriter` that will set this attribute to a particular value for all column chunk metadata created. This method can be exposed then in Python"
+        },
+        {
+            "created_at": "2019-05-21T15:03:45.088Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5349?focusedCommentId=16844924) by Rick Zamora (rjzamora):*\nI submitted a WIP PR to address this issue (<https://github.com/apache/arrow/pull/4361>).\u00a0\r\n\r\nNote that my background is limited in both C++ and Parquet, so the current solution is a bit messy.\u00a0 I\u00a0am\u00a0happy to\u00a0hear suggestions on a better approach."
+        },
+        {
+            "created_at": "2019-05-22T08:32:15.152Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5349?focusedCommentId=16845670) by Joris Van den Bossche (jorisvandenbossche):*\n`[~mdurant]` fastparquet only sets the file_path in the `_metadata` pooled metadata, and not in the metadata that is included in the footer of the file itself. Do you know if this is the common practice among other implementations that create such partitioned datasets?"
+        },
+        {
+            "created_at": "2019-05-22T13:25:37.053Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5349?focusedCommentId=16845871) by Martin Durant (mdurant):*\nNo, I don't have an explicit reference for this, and I believe I got the original model from spark (i.e., presumably same as hive), which I suppose would make it \"common\" by itself. I think it's the only thing that makes sense, since each data file should be readable in isolation, and there would be no way of knowing it was part of a collection and that the paths should therefore be ignored. At a guess, the design of the standard may have foreseen data-only chunk files, without footer information."
+        },
+        {
+            "created_at": "2019-05-22T13:36:18.850Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5349?focusedCommentId=16845879) by Joris Van den Bossche (jorisvandenbossche):*\nThanks. It is actually also quite clear in the thrift file description of `file_path`: \"File where column data is stored.  If not set, assumed to be same file as metadata.  This path is relative to the current file.\""
+        },
+        {
+            "created_at": "2019-05-22T13:40:19.334Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5349?focusedCommentId=16845883) by Joris Van den Bossche (jorisvandenbossche):*\nGiven that, for the API, it might make more sense to actually add a way to set the file path directly on the metadata object, instead of passing it to `ParquetFileWriter`. So that as a user of this API in python, you can set the path yourself on the metadata object that is returned by `pq.ParquetWriter` (which is appended to the metadata_collector)."
+        },
+        {
+            "created_at": "2019-05-22T13:44:01.085Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5349?focusedCommentId=16845885) by Martin Durant (mdurant):*\nAgreed on that last point, to let the caller set the path - if only because this is basically what fastparquet does."
+        },
+        {
+            "created_at": "2019-05-22T13:45:06.048Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5349?focusedCommentId=16845886) by Martin Durant (mdurant):*\n>\u00a0I think it's acceptable to set the path in the file's internal metadata.\r\n\r\n\u00a0\r\n\r\nA library loading that data file in isolation can (and maybe **should**) be confused by this, though. Maybe that would not be typical operation, but we shouldn't preclude it."
+        },
+        {
+            "created_at": "2019-05-22T14:16:16.519Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5349?focusedCommentId=16845908) by Rick Zamora (rjzamora):*\nOkay - the file path should not be\u00a0set in the footer metadata (only in _metadata).\u00a0\u00a0Does this mean that a mechanism for setting the file_path in C++ is completely unnecessary?\u00a0 My understanding is that the\u00a0motivation for\u00a0this issue was to populate the file_path for the following step of writing the metadata file.\u00a0 Is it sufficient to add a python-only mechanism to set the\u00a0path? Or should we leave it up to the user to modify the metadata object themselves?"
+        },
+        {
+            "created_at": "2019-05-22T14:33:56.760Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5349?focusedCommentId=16845920) by Martin Durant (mdurant):*\nIt depends on what is passed back to the caller: just the metadata object, or some indication of which file it went into (sorry, I don't know the API that's being built exactly). If the caller defines which file to write to, it would seem reasonable to let it set this attribute on the metadata object before writing to `_metadata`. However, that might be muddied if partitioning is also happening upon write and you end up with multiple files for each piece."
+        },
+        {
+            "created_at": "2019-05-22T14:51:56.886Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5349?focusedCommentId=16845947) by Martin Durant (mdurant):*\n>\u00a0\u00a0in which this would be wrong if it is inside the file itself\r\n\r\n\u00a0\r\n\r\nAgreed, the path would be wrong. Even in the simpler case, above, you could say it was wrong based on the thrift template - and this could make sense, as it maybe implies opening a new file.\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-05-26T12:22:36.811Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5349?focusedCommentId=16848420) by Uwe Korn (uwe):*\nIssue resolved by pull request 4386\n<https://github.com/apache/arrow/pull/4386>"
+        },
+        {
+            "created_at": "2019-05-27T09:22:05.088Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5349?focusedCommentId=16848753) by Joris Van den Bossche (jorisvandenbossche):*\nSummary of the resolution: https://github.com/apache/arrow/pull/4386 resolves that one can set the file path on the FileMetadata object returned by the arrow parquet writers (through metadata_collector). Which means that a user of the python API (such as dask) can set the appropriate file path for the collected metadata objects before combining them.\r\n\r\nFor future reference, here is a small partitioned dataset written by PySpark:  [test_pyspark_dataset.zip](test_pyspark_dataset.zip) "
+        }
+    ]
+}

@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[R] Segfault in to_dataframe_parallel with deeply nested structs",
+        "body": "***Note**: This issue was originally created as [ARROW-10114](https://issues.apache.org/jira/browse/ARROW-10114). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nA .jsonl file (newline separated JSON) created from open data available at <ftp://ftp.libris.kb.se/pub/spa/swepub-deduplicated-2019-12-29.zip> is used with the R package arrow (installed from CRAN) using the following statement:\r\n\r\n> arrow::read_json_arrow(\"~/.config/swepub/head.jsonl\")\r\n\r\nIt crashes RStudio with no error message. At the R prompt, the error message is:\r\n\r\nError in Table__to_dataframe(x, use_threads = option_use_threads()) : \r\n SET_VECTOR_ELT() can only be applied to a 'list', not a 'integer'\r\n\r\nThe file \"head.jsonl\" above was created from the extracted zip's .jsonl file with the \\*nix \"head -1 $BIG_JSONL_FILE\" command. It can be parsed with jsonlite and tidyjson.\r\n\r\nAlso got this error message at one point:\r\n\r\n> arrow::read_json_arrow(\"head.jsonl\", as_data_frame = TRUE)\r\n\r\n\\*\\*\\* caught segfault \\*\\*\\*\r\naddress 0x8, cause 'memory not mapped'\r\n\r\nTraceback:\r\n 1: structure(x, extra_cols = colonnade[extra_cols], class = \"pillar_squeezed_colonnade\")\r\n 2: new_colonnade_sqeezed(out, colonnade = x, extra_cols = extra_cols)\r\n 3: pillar::squeeze(x$mcf, width = width)\r\n 4: format.trunc_mat(mat)\r\n 5: format(mat)\r\n 6: format.tbl(x, ..., n = n, width = width, n_extra = n_extra)\r\n 7: format(x, ..., n = n, width = width, n_extra = n_extra)\r\n 8: paste0(..., collapse = \"\\n\")\r\n 9: cli::cat_line(format(x, ..., n = n, width = width, n_extra = n_extra))\r\n10: print.tbl(x)\r\n11: (function (x, ...) UseMethod(\"print\"))(x)",
+        "created_at": "2020-09-28T10:52:14.000Z",
+        "updated_at": "2020-11-01T22:51:37.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-10-09T22:26:20.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-09-30T23:34:28.166Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10114?focusedCommentId=17205139) by Neal Richardson (npr):*\nThanks for the report. That data file you linked is quite large--could you attach a minimal sample of it that reproduces the issue?\r\n\r\nSomething that may help: the error is coming from the code that is converting the Arrow Table into an R data.frame, which means that read_json_arrow has parsed the file into a Table (the steps are json to Arrow, Arrow to R, and it's the second one that's failing). So `tab <- arrow::read_json_arrow(\"~/.config/swepub/head.jsonl\", as_data_frame = FALSE)` will give you an Arrow Table you can work with, and maybe from there you can select rows/columns and figure out which one(s) are problematic."
+        },
+        {
+            "created_at": "2020-10-01T08:54:44.720Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10114?focusedCommentId=17205379) by Markus Skyttner (mskyttner):*\nHi and thanks for taking a look!\r\n\r\n\u00a0\r\n\r\nI prepared an all-inclusive one-liner reprex with a smaller part of the data, requiring docker, so if you have it, run:\r\n\r\n`docker run --rm mskyttner/issue:ARROW-10114`\r\n\r\n\u00a0\r\n\r\nThe data and a reprex-script is bundled therein (.jsonl data slice and .R reprex file),\u00a0 you can inspect those and get a prompt there with:\r\n\r\n`docker run --rm -it mskyttner/issue:ARROW-10114 bash`\r\n\r\n\u00a0\r\n\r\nOr use the .jsonl file uploaded to this gist <https://gist.github.com/mskyttner/6700d6a7fe4c3d296f449171897a3ed6>\r\n\r\n\u00a0\r\n\r\nWill also attach Dockerfile and reprex-script.\r\n\r\n\u00a0\r\n\r\nIt seems that the .jsonl JSON file is valid and possible to parse with jsonlite for example.\r\n\r\nHow should I debug / figure out what is problematic when I work with the Arrow Table?\r\n\r\n\u00a0\r\n\r\nIs it the nested structure of the JSON which doesn't convert to a table in a straightforward way, some type mappings or so?\r\n\r\n\u00a0\r\n\r\nKind regards,\r\n\r\n\u00a0\r\n\r\n// Markus\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-10-01T15:47:56.036Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10114?focusedCommentId=17205629) by Neal Richardson (npr):*\nThanks for the reprex. I did some exploration and think I've narrowed down the bug a bit.\u00a0\r\n\r\nSo we can read the JSON file into Arrow ok:\r\n\u00a0\r\n```r\n\r\ntab <- read_json_arrow(\"head.jsonl\", as_data_frame=FALSE)\r\nnames(tab)\r\n## [1] \"master\"            \"publications\"      \"publication_count\"\r\n```\r\n\r\nNext I tried to convert each column individually to R, hoping to isolate which column was problematic, but as it turned out, all three could convert. You can even re-assemble them into a data.frame, which is what you'd expect `as.data.frame(tab)` to do itself:\r\n\r\n```r\n\r\ndf <- data.frame(\r\n  master = as.vector(tab$master), \r\n  publications = as.vector(tab$publications), \r\n  publication_count = as.vector(tab$publication_count)\r\n)\r\n```\r\n\r\nI looked at the Table__to_dataframe source to see what it might be doing differently than just that and saw that there are two different code paths, one that uses multithreading (default) and one that doesn't. So I tried switching to the non-parallel version, and **that** worked:\r\n\r\n```Java\n\r\noptions(arrow.use_threads=FALSE)\r\ndf <- read_json_arrow(\"head.jsonl\")\r\n```\r\n\r\nSo my conclusion is that the parallel conversion is somehow not stable."
+        },
+        {
+            "created_at": "2020-10-09T22:26:20.953Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10114?focusedCommentId=17211448) by Neal Richardson (npr):*\nIssue resolved by pull request 8411\n<https://github.com/apache/arrow/pull/8411>"
+        }
+    ]
+}

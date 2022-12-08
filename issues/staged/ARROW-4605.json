@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Rust] Move filter and limit code from DataFusion into compute module",
+        "body": "***Note**: This issue was originally created as [ARROW-4605](https://issues.apache.org/jira/browse/ARROW-4605). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFilterRelation and the new LimitRelation (in ARROW-4464) contain code for filtering and limiting arrays that could now be pushed down into the compute module.",
+        "created_at": "2019-02-17T19:22:06.000Z",
+        "updated_at": "2019-02-24T23:29:34.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-02-24T23:29:27.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-02-18T21:35:52.082Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4605?focusedCommentId=16771388) by Nicolas Trinquier (ntrinquier):*\n`[~andygrove]` did you mean to move the functions as they are? They both do some kind of filtering on the data, what do you think of re-implementing them as a more generic function?\r\n\r\nSome along those lines:\r\n```java\n\r\nfn filter(a: &Array, predicate: Fn(usize) -> bool) -> Result<ArrayRef> {\r\n...\r\n\r\n  for i in 0..b.len() {\r\n    if predicate(i) {\r\n      builder.append_value(a.value(i))?\r\n    }\r\n  }\r\n...\r\n}\r\n```\r\n\u00a0\r\n\r\nPredicates would look like this:\r\n```java\n\r\nlet limit_predicate = |index| { index < limit_value }\r\nlet filter_predicate = |index| { filter_bools.value(index) }\r\n```\r\nI do not know a/ if this pattern is very rustacean, and b/ if the abstraction is worth it (i.e. in the case of limit we would still allocate a buffer for the full size and iterate through all the elements whereas we could save space and return early).\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-02-18T22:00:29.082Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4605?focusedCommentId=16771404) by Nicolas Trinquier (ntrinquier):*\nMaybe it's better to have 2 functions and define 2 macros, for limit and filter."
+        },
+        {
+            "created_at": "2019-02-19T04:37:13.314Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4605?focusedCommentId=16771558) by Neville Dipale (nevi_me):*\nHi `[~ntrinquier]`, for filter, you might consider\u00a0\r\nfn filter(a: &Array, predicate: &BooleanArray)\r\nso the predicate evaluation\u00a0is evaluated once, and a boolean array passed to filter each array."
+        },
+        {
+            "created_at": "2019-02-19T21:32:37.195Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4605?focusedCommentId=16772352) by Nicolas Trinquier (ntrinquier):*\n[filter](https://github.com/apache/arrow/blob/a65798a0ed3a96cfcd765e84615321da25ae17c8/rust/datafusion/src/execution/filter.rs#L89) has already the signature you suggest [~nevi_me].\r\n\r\nHowever for limit it is only a usize, not an array of bools, so I initially suggested to have one function to do both filter and limit, with the signature:\r\n filter(a: &Array, predicate: Fn(usize) -> bool) -> Result<ArrayRef>\r\n but on second though I am not sure this is worth it because of the performance implications. We might be better off using macros. What do you think?"
+        },
+        {
+            "created_at": "2019-02-24T23:29:27.950Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4605?focusedCommentId=16776439) by Andy Grove (andygrove):*\nIssue resolved by pull request 3741\n<https://github.com/apache/arrow/pull/3741>"
+        }
+    ]
+}

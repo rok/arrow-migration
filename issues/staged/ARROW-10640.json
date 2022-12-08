@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[C++] An \"if_else\" kernel to combine two arrays based on a mask",
+        "body": "***Note**: This issue was originally created as [ARROW-10640](https://issues.apache.org/jira/browse/ARROW-10640). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n(from discussion in ARROW-9489 with `[~maartenbreddels]`)\r\n\r\nA general \"where\" kernel like `np.where` (https://numpy.org/doc/stable/reference/generated/numpy.where.html) seems a generally useful kernel to have, and could also help mimicking some other python (setitem-like) operations. \r\n\r\nThe concrete use case in ARROW-9489 is to basically do a `fill_null(array[string], array[string])` which could be expressed as `where(is_null(arr), arr2, arr)`. ",
+        "created_at": "2020-11-18T10:04:51.000Z",
+        "updated_at": "2021-07-02T08:22:47.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-06-03T18:19:24.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-11-18T10:11:50.080Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10640?focusedCommentId=17234451) by Antoine Pitrou (apitrou):*\nA boolean entry can be true, false or null. Shouldn't the kernel combine three arrays? (of course, you're free to pass the same input twice)."
+        },
+        {
+            "created_at": "2020-11-18T10:59:41.457Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10640?focusedCommentId=17234481) by Maarten Breddels (maartenbreddels):*\nAnother idea would be to have a 'choose' like kernel <https://numpy.org/doc/stable/reference/generated/numpy.choose.html>\u00a0\r\n\r\n`choose(array[int], a0, a1, ... an)` where the first argument should be indices referring to array aX. `where` could then be implemented by casting the boolean to an int.\r\n\r\nSomething that might also be interesting would be to 'zip' the arguments. Something like this:\r\n\r\n\u00a0\r\n```java\n\r\ncondition # boolean array\r\nar        # some array of length N\r\nassert len(condition) == len(ar)\r\n\r\nar1 = ar.filter(condition)\r\nar2 = ar.filter(pc.invert(condition))\r\nx1 = expensive_calculation1(ar1)\r\nx2 = expensive_calculation2(ar2)\r\nassert len(x1) + len(x2) == len(ar)\r\nx = pc.zip(condition, x1, x2) # length N again\n```\r\n\u00a0This would allow for a vectorized ternary like operation equivalent to\r\n```java\n\r\n[expensive_calculation1(ar[i]) if condition[i] else expensive_calculation2(ar[i]) for i in range(len(ar))]\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-11-19T14:42:55.460Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10640?focusedCommentId=17235523) by Joris Van den Bossche (jorisvandenbossche):*\n> A boolean entry can be true, false or null. Shouldn't the kernel combine three arrays? (of course, you're free to pass the same input twice).\r\n\r\nYes, that's indeed a possibility. Now, I think we could also decide that a null in the mask (or the indices) becomes a null in the output (I suppose the 3-arrays approach is more generally flexible, but might also be less performant compared to simply propagating the validity bitmask?)\r\n\r\n\u2014\r\n\r\n`np.choose` indeed sounds as a generalization of where. No idea how much it is used though, and if it would be worth the added complexity compared to `np.where` (although it might not be that more complex)\r\n\r\nThe \"zip\" seems useful as well. Basically you could say it is the same as \"where\", but where the arrays only have those number of elements as needed to fill in the output array. In that sense, could also have such a generalized zip (or interleave), similarly as \"choose\" generalizes \"where\": `zip(array[int], x1, x2, ..., xn)` using an array of indices instead of a boolean mask.\r\n\r\n\r\n"
+        },
+        {
+            "created_at": "2020-11-19T16:12:40.289Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10640?focusedCommentId=17235563) by Maarten Breddels (maartenbreddels):*\nYes, that would maybe be the 'ultimate' variant, but I think the integer variation would be quite difficult to implement compared to the booleans, which only has to deal with 2 arrays."
+        },
+        {
+            "created_at": "2020-11-19T16:14:39.578Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10640?focusedCommentId=17235569) by Neal Richardson (npr):*\nIn R this is called `ifelse` https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/ifelse"
+        },
+        {
+            "created_at": "2020-11-23T09:25:18.707Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10640?focusedCommentId=17237243) by Joris Van den Bossche (jorisvandenbossche):*\nAnd in SQL, this is related to a \"CASE WHEN\" clause: https://www.postgresqltutorial.com/postgresql-case/ (although here you can provide multiple boolean conditions, and it's also using expressions instead of actual boolean masks, but that's something to optimize only when there is a query engine)"
+        },
+        {
+            "created_at": "2021-01-05T19:04:29.480Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10640?focusedCommentId=17259143) by Joris Van den Bossche (jorisvandenbossche):*\nNote there is some discussion about this on https://github.com/apache/arrow/pull/9024"
+        },
+        {
+            "created_at": "2021-05-18T14:46:11.384Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10640?focusedCommentId=17346972) by David Li (lidavidm):*\nI think to summarize the discussion (including from the PR), we can call this `if_else` which uses a Boolean mask to select from one of two input arrays/scalars.\r\n\r\nA null mask value outputs a null.\r\n\r\nA True mask value outputs the LHS scalar/corresponding value from the LHS array.\r\n\r\nA False mask value outputs the RHS scalar/corresponding value from the RHS value.\r\n\r\nHence:\r\n```\n\r\nif_else([True, False, null], 1, 0) -> [1, 0, null]\r\nif_else([True, False, null], null, 0) -> [null, 0, null]\r\nif_else([True, False, null], 1, null) -> [1, null, null\n```\r\nWe can file separate issues for CASE WHEN/choose."
+        },
+        {
+            "created_at": "2021-06-03T18:19:24.984Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10640?focusedCommentId=17356636) by David Li (lidavidm):*\nIssue resolved by pull request 10410\n<https://github.com/apache/arrow/pull/10410>"
+        }
+    ]
+}

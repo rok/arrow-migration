@@ -1,0 +1,34 @@
+{
+    "issue": {
+        "title": "[Rust] [DataFusion] Create physical plan enum to wrap execution plan",
+        "body": "***Note**: This issue was originally created as [ARROW-9481](https://issues.apache.org/jira/browse/ARROW-9481). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nBy wrapping the execution plan structs in an enum, we make it possible to build a tree representing the physical plan just like we do with the logical plan. This makes it easy to print physical plans and also to apply transformations to it.\r\n```java\n\r\n pub enum PhysicalPlan {\r\n    /// Projection.\r\n    Projection(Arc<ProjectionExec>),\r\n    /// Filter a.k.a predicate.\r\n    Filter(Arc<FilterExec>),\r\n    /// Hash aggregate\r\n    HashAggregate(Arc<HashAggregateExec>),\r\n    /// Performs a hash join of two child relations by first shuffling the data using the join keys.\r\n    ShuffledHashJoin(ShuffledHashJoinExec),\r\n    /// Performs a shuffle that will result in the desired partitioning.\r\n    ShuffleExchange(Arc<ShuffleExchangeExec>),\r\n    /// Reads results from a ShuffleExchange\r\n    ShuffleReader(Arc<ShuffleReaderExec>),\r\n    /// Scans a partitioned data source\r\n    ParquetScan(Arc<ParquetScanExec>),\r\n    /// Scans an in-memory table\r\n    InMemoryTableScan(Arc<InMemoryTableScanExec>),\r\n}\n```\r\n### \u00a0",
+        "created_at": "2020-07-15T14:20:25.000Z",
+        "updated_at": "2020-08-25T01:42:28.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Component: Rust - DataFusion",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2020-08-25T01:42:28.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-07-21T08:03:45.253Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9481?focusedCommentId=17161844) by Jorge Leit\u00e3o (jorgecarleitao):*\nThe main tradeoff between an enum and a trait is flexibility vs performance: an enum is fast because it uses static dispatching, while a trait (with `dyn`) is slower because it uses dynamic dispatching (vtables in c++). OTOH, an enum is hard-coded and thus the enumeration cannot be extended to other objects, while traits can be extended (by implementing the trait).\r\n\r\nOne concern with this proposal is that it makes it impossible to extend the library with other physical plans without adding items to the enum. IMO enums should only be used for either:\r\n1. things that are very well known to be immutable, such as types, operators, etc.\n1. things that are performance critical\n   \n   I do not see physical plans fit in any of the categories above: they are just a representation of a computation, which has a type, a name, and a function about how it is executed.\n   \n   Could you provide more info about the use-case? Maybe I am missing something."
+        },
+        {
+            "created_at": "2020-07-21T11:21:55.323Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9481?focusedCommentId=17161955) by Jorge Leit\u00e3o (jorgecarleitao):*\nRelated to this: changing any enum requires changing all code that uses it and does not have a match `_ => \\{...}`, i.e. in general adding a new item to an enum is backward incompatible."
+        },
+        {
+            "created_at": "2020-07-21T11:54:03.651Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9481?focusedCommentId=17161968) by Andy Grove (andygrove):*\nThe main motivation for enum is to enable optimization rules to understand the plan. For example, perhaps I want a rule that will replace a SortMergeJoin with a BroadcastHashJoin under certain circumstances. Using enum means this can be done with pattern matching. I suppose the alternative to enum is to try casting the operator to a known type instead. I agree that the enum approach is problematic in terms of extensibility."
+        },
+        {
+            "created_at": "2020-08-25T01:42:28.988Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9481?focusedCommentId=17183668) by Andy Grove (andygrove):*\nWe are going to explore a pure trait-based approach rather than introducing an enum, because enums cannot be extended by users of this crate."
+        }
+    ]
+}

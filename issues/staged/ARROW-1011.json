@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[Format] Clarify requirements around buffer padding in validity bitmaps",
+        "body": "***Note**: This issue was originally created as [ARROW-1011](https://issues.apache.org/jira/browse/ARROW-1011). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis has come up in https://github.com/apache/arrow/pull/673 and in prior discussions. \n\nThe basic summary is that we should not write non-zero padding bytes in IPC messages. However: one cannot in general rely on the padding being non-zero when the data is in memory (for example: zero-copy slices of Arrow arrays/vectors).\n\nI think it would be good to clarify this point in Layout.md \u2013 namely that what gets written to the wire should be deterministic. However, in-memory algorithms should not in general expect the padding region to have a particular value. As an example, a popcount on a validity bitmap would want to exclude padding bytes from the computation. Other elementwise SIMD operations are free to use the padding bytes as they wish, with a known caveat. \n\ncc [~cloud_fan]",
+        "created_at": "2017-05-11T21:14:49.000Z",
+        "updated_at": "2017-05-17T19:41:35.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Format",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2017-05-14T01:28:31.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-05-12T01:42:07.667Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1011?focusedCommentId=16007504) by Wenchen Fan (cloud_fan):*\nI think the padding is already well defined in the memory layout specification:\n1. \"Unless otherwise noted, padded bytes do not need to have a specific value\", which means in general, the value of padding bytes is unspecified.\n2. \"A 1 (set bit) for index j indicates that the value is not null, while a 0 (bit not set) indicates that it is null. Bitmaps are to be initialized to be all unset at allocation time (this includes padding)\", which means the value of padding bytes for null bitmap is always 0.\n\nDid I miss something?"
+        },
+        {
+            "created_at": "2017-05-14T01:10:49.505Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1011?focusedCommentId=16009561) by Wes McKinney (wesm):*\nIt's possible we could draw a distinction between data in memory and data that is put on the wire. \n\nAs an example, consider an int32 array with 10 elements and no nulls. Then we may allocate a single buffer:\n\n- data buffer: 64 bytes\n\nin the case of the data buffer, only 40 bytes have a specified value. It might be that an implementation zeros out all of its memory. But when we write this data to the streaming format, it would be better for the padding bytes to be zeros. So when we are unloading this array for writing on the wire:\n\n- data buffer: 64 bytes length, 40 initialized bytes\n- write first 40 bytes\n- write 24 bytes of 0s\n\nthis replaces the current logic where we write the contents of the buffer exactly, independent of the \"effective range\".\n\nAs one practical matter, it's not practical to write 0 bytes for the contents of null cells, per our prior discussion on GitHub. \n\nI don't this is a big deal; we can always stick with the current language in the document and say that the padding bytes may have any value."
+        },
+        {
+            "created_at": "2017-05-14T01:28:31.648Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1011?focusedCommentId=16009565) by Wes McKinney (wesm):*\nIssue resolved by pull request 673\n<https://github.com/apache/arrow/pull/673>"
+        }
+    ]
+}

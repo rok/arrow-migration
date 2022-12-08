@@ -1,0 +1,56 @@
+{
+    "issue": {
+        "title": "pyarrow parquet writer converts uint32 columns to int64",
+        "body": "***Note**: This issue was originally created as [ARROW-9215](https://issues.apache.org/jira/browse/ARROW-9215). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\npyarrow parquet writer changes uint32 columns to int64. This change is not made for other types and uint8, uint16, and uint64 columns retain their type.\r\n```python\n\r\nIn [1]: import pandas as pd\r\n\r\nIn [2]: import pyarrow as pa\r\n\r\nIn [3]: import pyarrow.parquet as pq\r\n\r\nIn [5]: df = pd.DataFrame({'a':pd.Series([1,2,3], dtype='uint32')})\r\n\r\nIn [6]: padf = pa.Table.from_pandas(df)\r\n\r\nIn [7]: padf\r\nOut[7]: \r\npyarrow.Table\r\na: uint32\r\n\r\nIn [8]: pq.write_table(padf, 'pa.parquet')\r\n\r\nIn [9]: pq.read_table('pa.parquet')\r\nOut[9]: \r\npyarrow.Table\r\na: int64\r\n```",
+        "created_at": "2020-06-24T02:35:47.000Z",
+        "updated_at": "2022-08-27T14:42:08.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-06-24T07:40:39.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-06-24T07:40:27.560Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9215?focusedCommentId=17143603) by Uwe Korn (uwe):*\nThis is expected behaviour as long as you are writing Parquet files with `version='1.0'`. There unsigned types are not yet supported in the specification and as uint32 columns can be larger than the range of int32, they must be saved as int64 to not truncate any values."
+        },
+        {
+            "created_at": "2020-06-25T04:28:21.997Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9215?focusedCommentId=17144637) by Devavret Makkar (devavret):*\n> as uint32 columns can be larger than the range of int32, they must be saved as int64 to not truncate any values\r\n\r\nOk but the same is true for uint16 and uint8. That they need int32 and int16 respectively to not truncate any values. However those are not converted."
+        },
+        {
+            "created_at": "2020-06-25T17:55:32.009Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9215?focusedCommentId=17145701) by Uwe Korn (uwe):*\nNo, for uint8 and uint16 it doesn't make a difference as Parquet only has two physical integer sizes (int32 and int64). uint16 and uint8 are always stored as int32 on disk with an uintX annotation. As both cannot overflow in int32, there is no need to pack them into an int64.\r\n\r\nNote that the storage overhead of storing uint8 in an int32 column is not 4x but in reality much much smaller. Thus there is no pressing need for a physical uint8 type."
+        },
+        {
+            "created_at": "2020-06-26T04:39:19.912Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9215?focusedCommentId=17146007) by Devavret Makkar (devavret):*\nThe physical size requirements seem unrelated as uint32 also takes 32 bits. It can be stored as an int32 and casted back when reading.\r\n\r\nBut if it's necessary for efficient RLE to not use this method (because this would mess with bit packing) then uint32 could be stored as a physical int64 (as it is right now) but then casted back when reading."
+        },
+        {
+            "created_at": "2020-06-26T05:45:08.168Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9215?focusedCommentId=17146023) by Micah Kornfield (emkornfield@gmail.com):*\nI think this goes back to Uwe's first point.\u00a0 Are you using Version 1.0 or Version 2.0 for parquet metadata.\u00a0 I believe the defaults have changed in the last couple of releases.\u00a0 What version of pyarrow are you using?"
+        },
+        {
+            "created_at": "2021-02-03T10:25:46.836Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9215?focusedCommentId=17277886) by Joris Van den Bossche (jorisvandenbossche):*\nI stumbled on this issue while further researching PARQUET-1972 (switching to 2.0 as default). \r\nSo it seems that I mistakenly thought we were not using logical type annotations for ints (so couldn't preserve anything else as int32/int64), but it seems this is actually only for the `uint32` case that I tested with. \r\n\r\nNow, what I still don't fully understand from the explanation above is why for uint32 we don't store it physically as int32, but for unint64 we actually are fine with doing that (also for version 1.0). "
+        },
+        {
+            "created_at": "2021-02-03T11:00:35.222Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9215?focusedCommentId=17277907) by Uwe Korn (uwe):*\nFor uint64, we have no better option than int64 and have to live with some kind of overflows. For uint32 where some values don't fit into int32, we can definitely fit all possible values inside the int64 range, thus we can avoid overflows by upcasting to int64."
+        },
+        {
+            "created_at": "2021-02-03T11:12:31.449Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9215?focusedCommentId=17277915) by Joris Van den Bossche (jorisvandenbossche):*\nYeah, I understand that for uint32 there is a \"safe\" alternative while for uint64 that doesn't exist (so it's certainly a trade-off). But I assume the reason we use this safe alternative (with `version=\"1.0\"`)  is to avoid old readers to interpret the uint32 data wrongly as its physical int32 type (which would silently give wrong numbers for values outside of the int32 range but within the uint32 range). But, the same thing currently can happen for uint64 columns, as far as I understand it correctly? \r\n\r\nSo if we deem it OK for uint64 to write it in a way that potentially cannot be read by old readers, why not be consistent for uint32?  \r\n(and I know \"because it is possible to be safe\" is a good reason to not be consistent, to be clear, just trying to understand the trade-offs/choices made here)"
+        },
+        {
+            "created_at": "2021-02-03T11:17:09.286Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9215?focusedCommentId=17277918) by Uwe Korn (uwe):*\nYes, \"because it is possible to be safe\" is exactly the reason for this inconsistency."
+        },
+        {
+            "created_at": "2022-08-27T14:42:08.602Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9215?focusedCommentId=17586064) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

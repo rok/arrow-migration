@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Python] Support reading specific partitions from a partitioned parquet dataset",
+        "body": "***Note**: This issue was originally created as [ARROW-1956](https://issues.apache.org/jira/browse/ARROW-1956). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI want to read specific partitions from a partitioned parquet dataset.  This is very useful in case of large datasets.  I have attached a small script that creates a dataset and shows what is expected when reading (quoting salient points below).\r\n\r\n1. There is no way to read specific partitions in Pandas\n1. In pyarrow I tried to achieve the goal by providing a list of files/directories to ParquetDataset, but it didn't work: \n1. In PySpark it works if I simply do:\n   ```none\n   \n   spark.read.options('basePath', 'datadir').parquet(*list_of_partitions)\n   ```\n   \n   I also couldn't find a way to easily write partitioned parquet files.  In the end I did it by hand by creating the directory hierarchies, and writing the individual files myself (similar to the implementation in the attached script).  Again, in PySpark I can do \n   ```none\n   \n   df.write.partitionBy(*list_of_partitions).parquet(output)\n   ```\n   to achieve that.\n",
+        "created_at": "2017-12-29T06:58:03.000Z",
+        "updated_at": "2020-11-12T17:14:20.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-11-12T17:14:20.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-12-29T18:59:54.438Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1956?focusedCommentId=16306461) by Wes McKinney (wesm):*\nIf someone could propose a desired API for pyarrow, then a patch for this could be written"
+        },
+        {
+            "created_at": "2017-12-29T21:03:12.228Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1956?focusedCommentId=16306537) by Suvayu Ali (suvayu):*\nHi Wes,\r\n\r\nInspired by the way PySpark does it, I propose the following.\r\n\r\n- Writing partitioned datasets:\n  ```none\n  \n  writer = PartitionedParquetWriter(basepath, partitions, schema, ...)\n  ```\n    Rest of the arguments could be identical to ParquetWriter.  For that\n    matter, we can also have:\n  ```java\n  \n  writer = ParquetWriter(where, ..., compression='snappy', partitions=[])\n  ```\n    For a single file, all constructor arguments are as it is currently,\n    and `partitions` is ignored, however when `where` is a directory,\n    `partitions` must be a list of column names to partition on.\n  \n- Reading partitioned datasets:\n  ```java\n  \n  dst = ParquetDataset(path_or_paths, validate_schema=True, basepath=None)\n  ```\n    When `basepath` is `None`, we have the current behaviour, whereas if\n    `basepath` is a path, directory hierarchies are detected in\n    `path_or_paths`, and each sub-directory is treated as a parquet\n    partition in the usual fashion.\n  \n  What do you think?\n  \n  If there is someone to provide guidance, I can also work on the implementation.  I have lots of free time from the second week of January.\n  \n  Thanks,"
+        },
+        {
+            "created_at": "2018-07-03T11:21:34.210Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1956?focusedCommentId=16531217) by George Sakkis (gsakkis):*\n+1 to bump this\u00a0from minor priority; it's effectively a blocker for working with non-trivial datasets with hundreds/thousands of partitions where only a few are needed."
+        },
+        {
+            "created_at": "2018-07-03T12:22:08.459Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1956?focusedCommentId=16531290) by Uwe Korn (uwe):*\n`[~gsakkis]` Can you please submit a PR for this?"
+        },
+        {
+            "created_at": "2018-07-06T16:58:42.656Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1956?focusedCommentId=16535115) by Robbie Gruener (rgruener):*\nCan this not already be done using the filters argument on a dataset?\u00a0https://github.com/apache/arrow/blob/master/python/pyarrow/parquet.py#L713"
+        },
+        {
+            "created_at": "2018-09-07T19:16:51.929Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1956?focusedCommentId=16607546) by Ying Wang (yingw787):*\nI don't know if this is helpful to people, but I found myself needing to ingest an entire Parquet dataset at once (database company) and I came up with this:\r\n\r\n\u00a0\r\n\r\n```python\r\n\r\nimport pyarrow.parquet as pq\r\n\r\n\u00a0\r\n\r\ndataset = pq.ParquetDataset('/path/to/dataset')\r\n\r\ndataset_pieces = dataset.pieces # ParquetDataset is composed of a list of ParquetDatasetPieces\r\n\r\nfor dataset_piece in dataset_pieces:\r\n\r\n\u00a0 \u00a0 df = dataset_piece.read(partitions=dataset.partitions).to_pandas() # dataset.partitions is ParquetPartitions object\r\n\r\n1. do whatever with dataframe\n   \n   ```\n   \n   It'll be slow but you can parallelize it as you want and each dataframe will contain the full dataset schema (as opposed to reading the individual ParquetFile which will not include partition keys as part of the schema)."
+        },
+        {
+            "created_at": "2020-11-12T17:14:14.186Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1956?focusedCommentId=17230803) by Ben Kietzman (bkietz):*\nThis can be accomplished with `read_table`, which will infer partitioning from directory structure and read only partitions specified by a given filter. For example to read only partitions 3 and 7:\r\n\r\n```Java\n\r\npq.read_table('base_dir', filters=[\r\n    [['partition_id', '==', 3]],\r\n    [['partition_id', '==', 7]],\r\n])\r\n```"
+        }
+    ]
+}

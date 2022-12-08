@@ -1,0 +1,55 @@
+{
+    "issue": {
+        "title": "[Packaging][C++][Python] Published apt packages incompatible with pip binary wheels",
+        "body": "***Note**: This issue was originally created as [ARROW-12585](https://issues.apache.org/jira/browse/ARROW-12585). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe have a shared library that uses the shared `libarrow` and `libplasma` plasma libraries. Our shared library is then eventually loaded by a python process where we use also `pyarrow`. To avoid compilation of arrow/plasma we are installing the `libarrow-dev` and `libplasma-dev` apt packages (as per the official [instructions](https://arrow.apache.org/install/)) and the binary wheel of `pyarrow`.\r\n\r\nEach method brings its own copy of `libarrow.so.400`, and it turns out the two libraries are not equal: the library contained within `pyarrow` is compiled most probably with an older gcc version than that installed via apt, which is compiled using the newer CXX11 ABI from stdlibc++. This wouldn't have any visible effects, except that `std::string` is used (and maybe more affected types) in some arrow API points. The difference in the ABI used to compile `libarrow.so.400` eventually means they contain differently named symbols. \r\n\r\nBack to our shared library, we load it in a python process. When this happens, and if the `pyarrow` has already been imported, then **its** copy of `libarrow.so.400` is already in memory, and loading our shared library doesn't load the \"apt\" copy of `libarrow.so.400`. This means our library doesn't trigger the loading of the copy of `libarrow.so.400` that it was compiled against, and if our library refers to one of the symbols that has changed name then it fails to load due to this missing symbol.\r\n\r\nI've attached a fairly minimal example: a Dockerfile prepares a system with libarrow-dev from apt and a binary pyarrow wheel from PyPI. It then compiles a shared library against libarrow-dev. The command ran by default by the container is a small test that runs python and loads the example shared library, both with and without loading pyarrow first. When pyarrow is loaded first then a missing symbol error happens and the shared library fails to load.\r\n\r\nI've experienced this in an Ubuntu-based linux distro and against Arrow 4.0.0, but I'd assume this happens in other distros and versions.\r\n\r\nThe workaround we are using at the moment is simple: we are installing a pyarrow version that is different from the arrow version installed via apt. We are lucky we can run in this mixed-version, multiple-libraries-loaded scenario, but it might not be for everyone.",
+        "created_at": "2021-04-28T13:41:07.000Z",
+        "updated_at": "2021-05-25T03:52:16.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Packaging",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-05-01T21:52:05.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-04-28T16:39:25.500Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12585?focusedCommentId=17334863) by Antoine Pitrou (apitrou):*\nHow is your shared library loaded? Using `dlopen`?\r\n\r\n"
+        },
+        {
+            "created_at": "2021-04-28T16:39:56.635Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12585?focusedCommentId=17334865) by Antoine Pitrou (apitrou):*\nOh, I see, it's just linked in a regular way. "
+        },
+        {
+            "created_at": "2021-04-28T16:44:58.430Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12585?focusedCommentId=17334868) by Antoine Pitrou (apitrou):*\nTo be honest, I'm not sure this is a use case we want to support. There are other potential issues (for example if two different versions of Arrow are involved), as Arrow C++ doesn't have a stable ABI.\r\n\r\nYou should be able to link against the `pyarrow` version of `libarrow.so` instead.\r\n\r\ncc `[~kou]` `[~uwe]` for more opinions."
+        },
+        {
+            "created_at": "2021-04-28T22:16:17.500Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12585?focusedCommentId=17335038) by Kouhei Sutou (kou):*\nWe don't support this use case. You should not mix libarrow via APT and libarrow in wheel.\r\n\r\nHere are supported scenarios:\r\n\r\n1. Install libarrow-dev and python3-pip via APT and pyarrow by `pip3 install --no-binary pyarrow pyarrow`.\r\n2. (This scenario may not be supported) Install pyarrow wheel and build your shared library with libarrow.so in pyarrow wheel. (You need to call `pyarrow.create_library_symlinks()` to use `-llibarrow`.)\r\n3. Install arrow-cpp and pyarrow in conda-forge and build your shared library with libarrow.so in arrow-cpp."
+        },
+        {
+            "created_at": "2021-04-29T02:47:29.513Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12585?focusedCommentId=17335105) by Rodrigo Tobar (rtobar):*\n`[~apitrou]`, `[~kou]` thanks for your comments. I was afraid this might not have been something you may support, but I still wanted to report it for future reference.\r\n\r\nFrom the scenarios above:\r\n 1. I wanted to avoid compiling anything if possible. However I **did** try exactly what you sugest, only to find that pyarrow cannot be built because arrow-python cannot be found. This was also the case when trying to build pyarrow from the original git sources. I saw pyarrow has a number of toggles to pass down cmake options and other compilation flags, but I didn't play with all of them to be honest. In case it helps, this is the error:\r\n\r\n```Java\n\r\n  -- Could NOT find ArrowPython (missing: ArrowPython_DIR)\r\n  CMake Error at /usr/share/cmake-3.16/Modules/FindPackageHandleStandardArgs.cmake:146 (message):\r\n    Could NOT find ArrowPython (missing: ARROW_PYTHON_INCLUDE_DIR\r\n    ARROW_PYTHON_LIB_DIR) (found version \"4.0.0\")\r\n```\r\n\r\nYou can duplicate this using the image posted in this ticket, starting a container from it with a bash terminal. Uninstall `pyarrow`, install `libarrow-python400` and try to install `pyarrow` from source (will need to `apt install git` as well).\r\n\r\n2. I'm not sure how this would work with a cmake-based project? I guess I'd have to stop using arrow's export cmake config.\r\n\r\n3. I always avoid conda when possible, but if this time it could be an option. I tried this out and I can build my library and load it together with pyarrow."
+        },
+        {
+            "created_at": "2021-04-30T20:30:24.334Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12585?focusedCommentId=17337610) by Kouhei Sutou (kou):*\n1. You need to install not only `libarrow-python-dev` but also `pkg-config` because our CMake support has a problem. See  ARROW-12175 for details.\r\n\r\n2. You need to use low-level `find_library` and `find_path` instead of high-level `find_package`."
+        },
+        {
+            "created_at": "2021-05-01T13:34:27.187Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12585?focusedCommentId=17337795) by Rodrigo Tobar (rtobar):*\n1 . Thanks, I managed to compile pyarrow this way. Annoyingly using `--no-binary pyarrow` ends up including having to compile `numpy` as well (even though it's already installed). This is more like a pip/setuptools issue though, but the end result is that I end up compiling too many things.\r\n2. I tried compiling against the headers and lib that come with the pyarrow wheel (manually as a first try, I can work out the cmake bits later). The compilation works, but by default the end result is the same: because a newer compiler is used, my shared library expects a symbol with a name that doesn't exist in the library from pyarrow. I can however compile my shared library with `-D_GLIBCXX_USE_CXX11_ABI=0`, in which case it will have references to the symbols as present in pyarrow's libarrow.\r\n\r\nI think I'm currently leaning towards option #2, as it's the one that requires less compilation. Thanks again `[~kou]` and `[~apitrou]` for all the support, and I hope this can be useful for future reference."
+        },
+        {
+            "created_at": "2021-05-01T21:52:05.225Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12585?focusedCommentId=17337887) by Kouhei Sutou (kou):*\nThanks for sharing your try.\r\nI close this."
+        },
+        {
+            "created_at": "2021-05-25T03:52:16.156Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12585?focusedCommentId=17350770) by Rodrigo Tobar (rtobar):*\nJust leaving a comment here for posterity: I went ahead and tried option #2 from my [previous comment](https://issues.apache.org/jira/browse/ARROW-12585?focusedCommentId=17337795&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-17337795). However our software links not only to plasma but to other libraries compiled against the newer gcc ABI, so it's actually not possible to compile all of it with `-D_GLIBCXX_USE_CXX11_ABI=0`. Without huge effort this option is then not realistic.\r\n\r\nThe only option left then is to compile pyarrow from sources against a system installation of libarrow/libplasma."
+        }
+    ]
+}

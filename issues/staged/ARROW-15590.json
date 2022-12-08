@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[C++] Add support for joins to the Substrait consumer",
+        "body": "***Note**: This issue was originally created as [ARROW-15590](https://issues.apache.org/jira/browse/ARROW-15590). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe streaming execution engine supports joins.  The Substrait consumer does not currently consume joins.  We should add support for this.  We may want to split this PR into subtasks as there are many different kinds of joins and we may not support all of them immediately.",
+        "created_at": "2022-02-05T02:36:33.000Z",
+        "updated_at": "2022-06-01T00:50:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-06-01T00:50:54.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-04-29T15:55:50.068Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15590?focusedCommentId=17530074) by Vibhatha Lakmal Abeykoon (vibhatha):*\nWhile looking into Substrait-Join integration, I observed that, the Substrait spec provides the following properties for a join operation.\r\n\r\n- Left Input\u00a0\n- Right Input\n- Join Expression\n- Join Type\n  \n  \n  While in Arrow API, the HashJoinOptions are (minimum options)\n  \n  \n- left keys\n- right keys\n- join type\n  \n  \n  To translate the Substrait inputs and obtain left and right keys, is there a way to extract the `FieldPath` from an expression?\u00a0\n  We are not supporting experssions on join-key, right? AFAIK there is only a filter expression available. Please correct me if I am on a wrong path.\n  \n  cc `[~westonpace]` `[~lidavidm]` \u00a0"
+        },
+        {
+            "created_at": "2022-04-29T19:16:29.945Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15590?focusedCommentId=17530201) by Weston Pace (westonpace):*\nThe Substrait spec (the website) doesn't always match the .proto yet.  This is not a great thing but it's a work in progress.  Feel free to open some PRs against the site if you want.  In the meantime I find it easier to work with the proto:\r\n\r\n```\n\r\nmessage JoinRel {\r\n  RelCommon common = 1;\r\n  Rel left = 2;\r\n  Rel right = 3;\r\n  Expression expression = 4;\r\n  Expression post_join_filter = 5;\r\n\r\n  JoinType type = 6;\r\n  ...\r\n}\r\n```\r\n\r\nThe `post_join_filter` is not on the site today and should match `HashJoinNodeOptions::filter`.\r\n\r\n`LeftInput` and `RightInput` correspond to the inputs specified when adding a join to a plan and so they aren't in `HashJoinNodeOptions`:\r\n\r\n```\n\r\nMakeExecNode(\"hashjoin\", plan.get(), {LeftInput, RightInput}, join_options));\r\n```\r\n\r\nYou are correct that we do not handle expressions in general for the join condition.  So I think the best thing to do here initially is restrict the set of allowed plans.  If the expression is not a call then reject it.  If the expression is a call then it must be one of two functions, \"equal\" or \"is_not_distinct_from\".  In either case the function has two arguments.  Both arguments must be a `FieldReference`.  We can convert from a Substrait `FieldReference` to an Arrow `FieldRef` and so that will give you left keys and right keys.  There is an Arrow options `HashJoinNodeOptions::key_cmp`.  If the Substrait function is \"equal\" then use `JoinKeyCmp::Eq`.  If the Substrait function is \"is_not_distinct_from\" then use `JoinKeyCmp::Is`.\r\n\r\nWith the above approach you will always have exactly one left key, one right key, and one join type.\r\n\r\nLater (could be in this PR or a follow-up) we can also handle expressions that are an and'ed set of equality expressions:\r\n\r\n```\n\r\nand(equal(field(3),field(5)), equal(field(1),field(7)), equal(field(2), field(12)))\r\n```\r\n\r\nIn this case the number of keys/join types you have would depend on the number of equality expressions in the and (3 in the above example)."
+        },
+        {
+            "created_at": "2022-04-29T22:39:32.284Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15590?focusedCommentId=17530265) by Vibhatha Lakmal Abeykoon (vibhatha):*\n`[~westonpace]` \u00a0A clear explanation. Thank you."
+        },
+        {
+            "created_at": "2022-05-06T06:51:35.005Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15590?focusedCommentId=17532668) by Vibhatha Lakmal Abeykoon (vibhatha):*\n`[~westonpace]` \u00a0added a draft PR: <https://github.com/apache/arrow/pull/13078>\r\n\r\nAlso included the missing features that needs to be supported as a followup PR via the JIRA:https://issues.apache.org/jira/browse/ARROW-16485"
+        },
+        {
+            "created_at": "2022-06-01T00:50:54.837Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15590?focusedCommentId=17544654) by Weston Pace (westonpace):*\nIssue resolved by pull request 13078\n<https://github.com/apache/arrow/pull/13078>"
+        }
+    ]
+}

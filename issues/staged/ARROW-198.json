@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[Java] OutOfMemoryError for vector test case",
+        "body": "***Note**: This issue was originally created as [ARROW-198](https://issues.apache.org/jira/browse/ARROW-198). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen executing vector component  TestValueVector test cases(testVariableVectorReallocation,testFixedVectorReallocation),exception can be seen.\n\nException:\njava.lang.Exception: Unexpected exception, expected<org.apache.arrow.vector.util.OversizedAllocationException> but was<org.apache.arrow.memory.OutOfMemoryException>\n\nwhere the issue comes from:\npublic void testFixedVectorReallocation() {\n....\n try {\n      vector.allocateNew(expectedValueCapacity);   <-- where the exception comes from\n....\n\nanalysis:\n\nallocateNew will invoke classes from io.netty.buffer from memory component and finally invoke netty third party package.I assume there is no issue when invoking  memory  part.Then I trace that the issue is caused by oversizing value of initialCapacity setting when invoking AbstractByteBufAllocator class in third party netty-buffer-4.0.27.final.jar. I create a test case which can reproduces the issue. value of parameter initialCapacity and maxCapacity are obtained from debugging procedure\n\npublic void testAllocator(){\n                int initialCapacity=2147483644;\n\t\tint maxCapacity=2147483647;\n\t\tByteBuf buf = UnpooledByteBufAllocator.DEFAULT.directBuffer(initialCapacity, maxCapacity);\n}\n\nAnd I checked the rooted affected class java.nio.Bits:\n\nstatic void reserveMemory(long size, int cap) {\n.....\nif (totalCapacity + cap > maxMemory)\n    throw new OutOfMemoryError(\"Direct buffer memory\");\n.....\n\nmaxMemory can only be set to 1836056576 at most,but cap(initialCapacity) was 2147483644 at this moment.",
+        "created_at": "2016-05-12T23:49:10.000Z",
+        "updated_at": "2018-07-27T15:24:18.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-05-10T16:58:11.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2016-05-14T16:36:16.254Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-198?focusedCommentId=15283603) by Laurent Goujon (laurent):*\nisn't it ARROW-113?"
+        },
+        {
+            "created_at": "2016-05-22T18:41:03.022Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-198?focusedCommentId=15295672) by Fangzhou (lfz_carlos):*\nI think  ARROW-113 provides the solution for this problem.Let me check fix with the updated build"
+        }
+    ]
+}

@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[Python][CI] Nightly dask integration jobs fail",
+        "body": "***Note**: This issue was originally created as [ARROW-9353](https://issues.apache.org/jira/browse/ARROW-9353). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nOn dask latest:\r\n\r\n```Java\n\r\n=================================== FAILURES ===================================\r\n___________________________ test_dataframe_picklable ___________________________\r\n\r\n    def test_dataframe_picklable():\r\n        from pickle import loads, dumps\r\n    \r\n        cloudpickle = pytest.importorskip(\"cloudpickle\")\r\n        cp_dumps = cloudpickle.dumps\r\n    \r\n        d = _compat.makeTimeDataFrame()\r\n        df = dd.from_pandas(d, npartitions=3)\r\n        df = df + 2\r\n    \r\n# dataframe\r\n        df2 = loads(dumps(df))\r\n        assert_eq(df, df2)\r\n>       df2 = loads(cp_dumps(df))\r\nE       ValueError: unsupported pickle protocol: 5\r\n\r\nopt/conda/envs/arrow/lib/python3.7/site-packages/dask/dataframe/tests/test_dataframe.py:1623: ValueError\r\n```\r\n\r\nhttps://github.com/ursa-labs/crossbow/runs/844367735\r\n\r\n\r\nDask master has many more failures: https://github.com/ursa-labs/crossbow/runs/844351816",
+        "created_at": "2020-07-07T16:27:38.000Z",
+        "updated_at": "2020-07-09T10:14:28.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-07-09T10:14:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-07-08T09:07:53.525Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9353?focusedCommentId=17153418) by Joris Van den Bossche (jorisvandenbossche):*\nThe error with dask latest, that doesn't seem related to pyarrow, but rather an issue with dask's tests in combination with the new cloudpickle release. Opened an issue for it on the dask side: https://github.com/dask/dask/issues/6374"
+        },
+        {
+            "created_at": "2020-07-08T09:17:36.684Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9353?focusedCommentId=17153420) by Joris Van den Bossche (jorisvandenbossche):*\n2 of the failures with dask master are known. I opened an issues about it on the dask side a while ago: https://github.com/dask/dask/issues/6243 (with not yet a clear conclusion). I should have opened an issue on our side as well, and probably it's better to skip those tests, so we can actually detect of other tests start failing (as now we just ignore it since it's failing for so long).\r\n\r\nThere is a third failure that seems new, will look into that:\r\n\r\n```Java\n\r\n______________________ test_illegal_column_name[pyarrow] _______________________\r\n\r\ntmpdir = local('/tmp/pytest-of-root/pytest-0/test_illegal_column_name_pyarr0')\r\nengine = 'pyarrow'\r\n\r\n    def test_illegal_column_name(tmpdir, engine):\r\n# Make sure user is prevented from preserving a \"None\" index\r\n# name if there is already a column using the special `null_name`\r\n        null_name = \"__null_dask_index__\"\r\n        fn = str(tmpdir.join(\"test.parquet\"))\r\n        df = pd.DataFrame({\"x\": [1, 2], null_name: [4, 5]}).set_index(\"x\")\r\n        df.index.name = None\r\n        ddf = dd.from_pandas(df, npartitions=2)\r\n    \r\n# If we don't want to preserve the None index name, the\r\n# write should work, but a UserWarning should be raised\r\n        with pytest.raises(UserWarning) as w:\r\n>           ddf.to_parquet(fn, engine=engine, write_index=False)\r\nE           Failed: DID NOT RAISE <class 'UserWarning'>\r\n```"
+        },
+        {
+            "created_at": "2020-07-08T14:12:40.824Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9353?focusedCommentId=17153631) by Joris Van den Bossche (jorisvandenbossche):*\ncc `[~rjzamora]` do you have any idea why that test (I think you added it recently) would be failing with pyarrow master? Because from looking at the code, this warning only depends on the _dask dataframe_ itself, before any writing logic with pyarrow comes in."
+        },
+        {
+            "created_at": "2020-07-08T15:46:57.157Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9353?focusedCommentId=17153709) by Rick Zamora (rjzamora):*\nInteresting - I will look into this.\u00a0 However, I am already a bit confused, because I am not able to reproduce the failure with the latest pyarrow and dask on my local machine.\r\n\r\nRegarding the other dask.dataframe tests that are failing (relating to schema validation) - You are correct to ignore those failures for now - I think it is fine that pyarrow is now preventing the creation of a _metadata file with an inconsistent schema.\u00a0 In the ongoing dask.dataframe ArrowEngine refactor, it will become the users responsibility to define the schema in cases like this.\u00a0 In the future, we can try to come up with a way to auto-detect the correct schema if/when this shift of responsibility proves problematic."
+        },
+        {
+            "created_at": "2020-07-08T15:51:45.558Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9353?focusedCommentId=17153713) by Joris Van den Bossche (jorisvandenbossche):*\nAh, forgot to mention that: I also can't reproduce this locally .. (would for some reason on CI those warnings be suppressed?)\r\n\r\n> Regarding the other dask.dataframe tests that are failing (relating to schema validation) - You are correct to ignore those failures for now\r\n\r\nYep, that's what I am doing https://github.com/apache/arrow/pull/7675"
+        },
+        {
+            "created_at": "2020-07-08T16:16:27.564Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9353?focusedCommentId=17153726) by Rick Zamora (rjzamora):*\n>\u00a0would for some reason on CI those warnings be suppressed?\r\n\r\nNot sure.\u00a0 It does seem that the UserWarning we are looking for is included in the summary:\r\n\r\n\r\n```java\n\r\n\u00a0=============================== warnings summary ===============================\r\n6012opt/conda/envs/arrow/lib/python3.8/site-packages/dask/dataframe/io/tests/test_parquet.py::test_local[pyarrow-pyarrow]\r\n6013  /opt/conda/envs/arrow/lib/python3.8/site-packages/pyarrow/compat.py:24: FutureWarning: pyarrow.compat has been deprecated and will be removed in a future release\r\n6014    warnings.warn(\"pyarrow.compat has been deprecated and will be removed in a \"\r\n6015\r\n6016opt/conda/envs/arrow/lib/python3.8/site-packages/dask/dataframe/io/tests/test_parquet.py: 18 tests with warnings\r\n6017  /opt/conda/envs/arrow/lib/python3.8/site-packages/pyarrow/util.py:39: FutureWarning: pyarrow.compat.guid is deprecated as of 1.0.0, please use pyarrow.util.guid instead\r\n6018    warnings.warn(msg, FutureWarning)\r\n6019\r\n6020opt/conda/envs/arrow/lib/python3.8/site-packages/dask/dataframe/io/tests/test_parquet.py::test_illegal_column_name[pyarrow]\r\n6021  /opt/conda/envs/arrow/lib/python3.8/site-packages/dask/dataframe/io/parquet/core.py:399: UserWarning: If read back by Dask, column named __null_dask_index__ will be set to the index (and renamed to None).\r\n6022    warnings.warn(\r\n6023\r\n6024-- Docs: https://docs.pytest.org/en/latest/warnings.html\r\n6025=========================== short test summary info ============================\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-07-08T16:28:28.625Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9353?focusedCommentId=17153738) by Joris Van den Bossche (jorisvandenbossche):*\nAh, that's a good catch. But then it's even more a mystery to me why it's not catched by pytest ..."
+        },
+        {
+            "created_at": "2020-07-08T16:38:04.112Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9353?focusedCommentId=17153743) by Rick Zamora (rjzamora):*\nPerhaps it is just that the test should be using `pytest.warns` rather than `pytest.raises` to check for a UserWarning - I can submit a PR to dask, but not sure if that will fix this failure (since both work for me locally).\r\n\r\n\u00a0\r\n\r\nEDIT: Opened dask#6378 to try this:\u00a0<https://github.com/dask/dask/pull/6378>"
+        },
+        {
+            "created_at": "2020-07-08T16:53:42.629Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9353?focusedCommentId=17153755) by Joris Van den Bossche (jorisvandenbossche):*\nAh, good catch. Yeah, I would say that's an error in the dask test.\r\n\r\nNow I am actually wondering how this even worked .. ;)\r\n\r\n```Java\n\r\nIn [11]: import warnings                                                                                                                                                                                           \r\n\r\nIn [12]: with pytest.raises(UserWarning) as w: \r\n    ...:     warnings.warn(\"test\", UserWarning) \r\n    ...:                                                                                                                                                                                                           \r\n/home/joris/miniconda3/envs/dev/bin/ipython:2: UserWarning: test\r\n  \r\n---------------------------------------------------------------------------\r\nFailed                                    Traceback (most recent call last)\r\n<ipython-input-12-48c4066af4e3> in <module>\r\n      1 with pytest.raises(UserWarning) as w:\r\n----> 2     warnings.warn(\"test\", UserWarning)\r\n      3 \r\n\r\n~/miniconda3/envs/dev/lib/python3.7/site-packages/_pytest/python_api.py in __exit__(self, *tp)\r\n    734         __tracebackhide__ = True\r\n    735         if tp[0] is None:\r\n--> 736             fail(self.message)\r\n    737         self.excinfo.__init__(tp)\r\n    738         suppress_exception = issubclass(self.excinfo.type, self.expected_exception)\r\n\r\n~/miniconda3/envs/dev/lib/python3.7/site-packages/_pytest/outcomes.py in fail(msg, pytrace)\r\n    117     \"\"\"\r\n    118     __tracebackhide__ = True\r\n--> 119     raise Failed(msg=msg, pytrace=pytrace)\r\n    120 \r\n    121 \r\n\r\nFailed: DID NOT RAISE <class 'UserWarning'>\r\n```\r\n\r\n(so this might depend on some pytest setting)"
+        },
+        {
+            "created_at": "2020-07-08T17:00:59.182Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9353?focusedCommentId=17153760) by Joris Van den Bossche (jorisvandenbossche):*\nOK, so now we know why it fails, I am going to skip this test as well at https://github.com/apache/arrow/pull/7675, so the integration tests are green for the rest. We can remove that skip again once the next dask release is out"
+        },
+        {
+            "created_at": "2020-07-09T10:14:08.342Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9353?focusedCommentId=17154418) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 7675\n<https://github.com/apache/arrow/pull/7675>"
+        }
+    ]
+}

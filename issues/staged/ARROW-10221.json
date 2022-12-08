@@ -1,0 +1,24 @@
+{
+    "issue": {
+        "title": "[JS] toArray() method ignores nulls on some types.",
+        "body": "***Note**: This issue was originally created as [ARROW-10221](https://issues.apache.org/jira/browse/ARROW-10221). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe .toArray() javascript method of vectors includes a shortcut to return the underlying typed array; but this doesn't respect null values, and so can return the wrong number.\r\n\r\n\u00a0\r\n\r\n```\r\n\r\nv = arrow.Vector.from(\\{values: [1, 2, 3, 4, 5, null, 6],type: new arrow.Int32()})\r\n\r\nv.toArray()[5] // Incorrectly returns '0'\r\n\r\nv.get(5) // Correctly returns null\r\n\r\n```\r\n\r\n\u00a0\r\n\r\nSolution: Eliminate the fast method, always return Javascript arrays. It might be better to keep the old method in cases where there are guaranteed no nulls.",
+        "created_at": "2020-10-07T19:12:02.000Z",
+        "updated_at": "2022-03-19T10:52:58.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: JavaScript",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-01-17T02:55:47.397Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10221?focusedCommentId=17476930) by Dominik Moritz (domoritz):*\nI think it's nice to have the fast `toArray`. We do have `toJSON`, which always takes the slow path. However, I agree that it could be confusing to accidentally miss nulls. And always using `toJSON` isn't good since it would always take the slow pass even when we have no nulls. \r\n\r\nBtw, I found that `NaN` is a valid value in typed arrays even though null is not. \r\n\r\nI think two three best solutions are\r\n- Leave this as they are and ask people to use `toJSON` if they want to guarantee to have nulls. We could add a way for users to get the null mask (there already is `isValid(index)` but you need to ask for each value). Or we could have a way for people to define null values (e.g. as -1 or NaN)\n- Take the slow path when the data type for the vector is nullable. Unfortunately, a user would have no easy option to take the fast pass anymore. Maybe we could have an option to force the fast pass?\n  \n  I'm not happy with either but "
+        },
+        {
+            "created_at": "2022-03-19T10:52:58.131Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10221?focusedCommentId=17509248) by Ben Schmidt (bmschmidt):*\nMaybe it could\u00a0 be as simple as just checking if `array.nullCount > 0` before returning the typed array? That's a lot less common than a column being nullable. If so, happy to take another pass at this. If there are actually nulls there, it seems pretty dicey to return something with a known wrong value. I suppose an escape hatch/exposing null mask couldn't hurt.\r\n\r\n(I think I found this problem when accessing the index array of a Uint16 dictionary. In that context null was getting translated from 'nothing' to 'the first key in whatever order they were put in,'\u00a0\r\n\r\n\r\nAlso... NaN does work on Float32 arrays, but not on Ints.\r\n\r\nNot sure there's a correct behavior on the below, but '0' is weird.\r\n```\r\n\r\narrow.vectorFromArray([1, 2, 3, NaN, 4], new arrow.Int8()).get(3)\r\n```"
+        }
+    ]
+}

@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] editable install (pip install -e .) is failing ",
+        "body": "***Note**: This issue was originally created as [ARROW-5210](https://issues.apache.org/jira/browse/ARROW-5210). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFollowing the python development documentation on building arrow and pyarrow (<https://arrow.apache.org/docs/developers/python.html#build-and-test),> building pyarrow inplace with\u00a0`python setup.py build_ext --inplace` works fine.\r\n\r\n\u00a0\r\n\r\nBut if you want to also install this inplace version in the current python environment (editable install / development install) using pip (`pip install -e .`), this fails during the `built_ext` / cmake phase:\r\n```none\n\r\n\u00a0\r\n    -- Looking for python3.7m\r\n\u00a0\u00a0\u00a0 -- Found Python lib /home/joris/miniconda3/envs/arrow-dev/lib/libpython3.7m.so\r\n\u00a0\u00a0\u00a0 CMake Error at cmake_modules/FindNumPy.cmake:62 (message):\r\n\u00a0\u00a0\u00a0\u00a0\u00a0 NumPy import failure:\r\n\r\n\u00a0\u00a0\u00a0\u00a0\u00a0 Traceback (most recent call last):\r\n\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 File \"<string>\", line 1, in <module>\r\n\r\n\u00a0\u00a0\u00a0\u00a0\u00a0 ModuleNotFoundError: No module named 'numpy'\r\n\r\n\u00a0\u00a0\u00a0 Call Stack (most recent call first):\r\n\u00a0\u00a0\u00a0\u00a0\u00a0 CMakeLists.txt:186 (find_package)\r\n\r\n\r\n\u00a0\u00a0\u00a0 -- Configuring incomplete, errors occurred!\r\n\u00a0\u00a0\u00a0 See also \"/home/joris/scipy/repos/arrow/python/build/temp.linux-x86_64-3.7/CMakeFiles/CMakeOutput.log\".\r\n\u00a0\u00a0\u00a0 See also \"/home/joris/scipy/repos/arrow/python/build/temp.linux-x86_64-3.7/CMakeFiles/CMakeError.log\".\r\n\u00a0\u00a0\u00a0 error: command 'cmake' failed with exit status 1\r\nCleaning up...\r\n```\r\n\u00a0\r\n\r\nAlternatively, doing\u00a0`python setup.py develop` to achieve the same still works.\r\n\r\n\u00a0",
+        "created_at": "2019-04-24T09:44:58.000Z",
+        "updated_at": "2021-08-05T15:31:21.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-08-05T13:44:23.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-04-24T13:42:08.448Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5210?focusedCommentId=16825155) by Joris Van den Bossche (jorisvandenbossche):*\nWith pip 19.1 (released yesterday), one needs to do `pip install -e . --no-use-pep517 --no-build-isolation` to get it running with our current set-up."
+        },
+        {
+            "created_at": "2019-04-24T13:53:32.546Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5210?focusedCommentId=16825170) by Joris Van den Bossche (jorisvandenbossche):*\nThe reason it is currently failing is because we don't list numpy as a build requirement (not in `setup_requires`\u00a0and not in `pyproject.toml`). \r\n\r\nThis also seems to indicate the that current `pyproject.toml` is actually not tested (because building a wheel using an isolated environment based on the build dependencies specified in the file, should fail with missing numpy).\r\n\r\nPatch by `[~pitrou]` :\r\n\r\n\u00a0\r\n```none\n\r\ndiff --git a/python/pyproject.toml b/python/pyproject.toml\r\nindex 712647e4f..a6c51ec20 100644\r\n--- a/python/pyproject.toml\r\n+++ b/python/pyproject.toml\r\n@@ -16,4 +16,4 @@\r\n# under the License.\r\n\u00a0\r\n\u00a0[build-system]\r\n-requires = [\"setuptools\", \"wheel\", \"setuptools_scm\", \"cython >= 0.29\"]\r\n+requires = [\"setuptools\", \"wheel\", \"setuptools_scm\", \"cython >= 0.29\", \"numpy >= 1.14\"]\r\ndiff --git a/python/setup.py b/python/setup.py\r\nindex 907524a60..63014a80a 100755\r\n--- a/python/setup.py\r\n+++ b/python/setup.py\r\n@@ -542,19 +542,20 @@ class BinaryDistribution(Distribution):\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 return True\r\n\u00a0\r\n\u00a0\r\n+numpy_requires = 'numpy >= 1.14'\r\n+\r\n\u00a0install_requires = (\r\n-\u00a0\u00a0\u00a0 'numpy >= 1.14',\r\n+\u00a0\u00a0\u00a0 numpy_requires,\r\n\u00a0\u00a0\u00a0\u00a0 'six >= 1.0.0',\r\n\u00a0\u00a0\u00a0\u00a0 'futures; python_version < \"3.2\"',\r\n\u00a0\u00a0\u00a0\u00a0 'enum34 >= 1.1.6; python_version < \"3.4\"',\r\n\u00a0)\r\n\u00a0\r\n+setup_requires = ['setuptools_scm', 'cython >= 0.29', numpy_requires]\r\n\u00a0\r\n# Only include pytest-runner in setup_requires if we're invoking tests\r\n\u00a0if {'pytest', 'test', 'ptr'}.intersection(sys.argv):\r\n-\u00a0\u00a0\u00a0 setup_requires = ['pytest-runner']\r\n-else:\r\n-\u00a0\u00a0\u00a0 setup_requires = []\r\n+\u00a0\u00a0\u00a0 setup_requires.append('pytest-runner')\r\n\u00a0\r\n\u00a0\r\n\u00a0setup(\r\n@@ -581,7 +582,7 @@ setup(\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 'write_to': os.path.join(scm_version_write_to_prefix,\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 'pyarrow/_generated_version.py')\r\n\u00a0\u00a0\u00a0\u00a0 },\r\n-\u00a0\u00a0\u00a0 setup_requires=['setuptools_scm', 'cython >= 0.29'] + setup_requires,\r\n+\u00a0\u00a0\u00a0 setup_requires=setup_requires,\r\n\u00a0\u00a0\u00a0\u00a0 install_requires=install_requires,\r\n\u00a0\u00a0\u00a0\u00a0 tests_require=['pytest', 'pandas', 'hypothesis',\r\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 'pathlib2; python_version < \"3.4\"'],\n```\r\n\u00a0\r\n\r\nwith that patch, one still needs `pip install -e . --no-use-pep517` (for the latest pip 19.1 release) to specify to pip that we _do_ want to do an editable install. \r\n\r\nBut I would actually argue that even if the above is fixed, doing `pip install -e . --no-use-pep517 --no-build-isolation` is better, as when doing an editable install, you don't need to the build isolation feature of numpy, you just want to build pyarrow against your existing development environment."
+        },
+        {
+            "created_at": "2021-08-05T13:43:33.842Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5210?focusedCommentId=17394016) by Antoine Pitrou (apitrou):*\nThis seems fixed now, as `numpy` is listed in `pyproject.toml`."
+        },
+        {
+            "created_at": "2021-08-05T14:40:22.777Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5210?focusedCommentId=17394072) by Joris Van den Bossche (jorisvandenbossche):*\nIt might still make sense to include the command to do an editable install in the contributing docs (eg I think it's still good to use the `--no-build-isolation` for regular contributors?)"
+        },
+        {
+            "created_at": "2021-08-05T15:31:21.861Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5210?focusedCommentId=17394123) by Antoine Pitrou (apitrou):*\nHmm, perhaps. Personally, I do `python setup.py develop` since the build steps are displayed verbosely :-)"
+        }
+    ]
+}

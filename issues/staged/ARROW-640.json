@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[Python] Arrow scalar values should have a sensible __hash__ and comparison",
+        "body": "***Note**: This issue was originally created as [ARROW-640](https://issues.apache.org/jira/browse/ARROW-640). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n```\nIn [86]: arr = pa.from_pylist([1, 1, 1, 2])\n\nIn [87]: set(arr)\nOut[87]: {1, 2, 1, 1}\n\nIn [88]: arr[0] == arr[1]\nOut[88]: False\n\nIn [89]: arr\nOut[89]: \n<pyarrow.array.Int64Array object at 0x7f8c8c739e08>\n[\n  1,\n  1,\n  1,\n  2\n]\n```",
+        "created_at": "2017-03-16T14:20:00.000Z",
+        "updated_at": "2018-03-26T21:54:47.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-03-26T21:54:40.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-03-16T18:58:35.454Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-640?focusedCommentId=15928649) by Wes McKinney (wesm):*\nSort of related to ARROW-47. Probably not worth adding a scalar object model in C++ at this point and keeping the value wrapper layer in Python-land"
+        },
+        {
+            "created_at": "2018-03-11T20:13:43.629Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-640?focusedCommentId=16394627) by Alex Hagerman (alexhagerman):*\nI think this has changed since the original ticket. The comparison appears to be working. Tested this with string and numbers. Also getting an error on set now. Going to continue looking into this, but if anybody has thoughts on this I'd be happy to hear them. Also from_pylist appears to have been removed, but I didn't find it searching the change log on github only an addition in 0.3. I'm going to look at the history of __eq__ on ArrayValue and as_py then work on what would make sense for __hash__.\r\n```java\n\r\n%load_ext Cython\r\nimport pyarrow as pa\r\n\r\npylist = [1,1,1,2]\r\narr = pa.array(pylist)\r\narr\r\n<pyarrow.lib.Int64Array object at 0x7fbad56e4c28>\r\n[\r\n  1,\r\n  1,\r\n  1,\r\n  2\r\n]\r\narr[0] == arr[1]\r\nTrue\r\narr[0] == arr[3]\r\nFalse\r\nword_list = ['test', 'not the same', 'test', 'nope']\r\nword_list[0] == word_list[2]\r\nTrue\r\nword_list[0] == word_list[1]\r\nFalse\r\npa.array.__eq__\r\n<method-wrapper '__eq__' of builtin_function_or_method object at 0x7fbaab609990>\r\nset(arr)\r\n---------------------------------------------------------------------------\r\nTypeError                                 Traceback (most recent call last)\r\n<ipython-input-9-ba21c71e79f9> in <module>()\r\n----> 1 set(arr)\r\n\r\nTypeError: unhashable type: 'pyarrow.lib.Int64Value'\r\narr_list = pa.from_pylist([1, 1, 1, 2])\r\n---------------------------------------------------------------------------\r\nAttributeError                            Traceback (most recent call last)\r\n<ipython-input-10-30966022c9ed> in <module>()\r\n----> 1 arr_list = pa.from_pylist([1, 1, 1, 2])\r\n\r\nAttributeError: module 'pyarrow' has no attribute 'from_pylist'\r\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-03-12T03:40:16.124Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-640?focusedCommentId=16394770) by Wes McKinney (wesm):*\n`pyarrow.from_pylist` is now `pyarrow.array`"
+        },
+        {
+            "created_at": "2018-03-13T15:34:27.668Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-640?focusedCommentId=16397116) by Antoine Pitrou (apitrou):*\n`[~alexhagerman]`, you'll need to be careful for hashing to be consistent with Python scalars (in other words, for every hashable x and y where `x == y`, `hash\\(x) == hash\\(y)` should also be true).\r\n\r\nThe simplest way to do that is probably to convert the Arrow value to a Python scalar, though that may not be the fastest:\r\n```python\n\r\ndef __hash__(self):\r\n    return hash(self.as_py())\r\n```\r\n\r\nOtherwise you'll need to reproduce the exact hashing algorithm that Python uses."
+        },
+        {
+            "created_at": "2018-03-14T00:39:41.046Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-640?focusedCommentId=16397909) by Alex Hagerman (alexhagerman):*\nThanks `[~pitrou]` this was actually what I had implemented locally so glad to see I was on the right track. Tonight I was working on doing a little bit of benchmarking and writing the tests. Any specific loads or types you might want to see related to the speed concern? Or is it better to get a consistent hash implementation like this setup in a PR and then worry about speed?"
+        },
+        {
+            "created_at": "2018-03-14T10:16:45.585Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-640?focusedCommentId=16398355) by Antoine Pitrou (apitrou):*\nI don't think we're concerned about particular workloads for now. Something like `%timeit hash\\(x)` (in IPython syntax) is a good micro-benchmark for this.\r\n\r\nInteger is the main type that I think might be use in a hashing context so you may want to write a native hash implementation for them, while letting other types defer to `as_py`. \r\n\r\nAlso in some cases (such as StructValue), the `as_py` fallback won't work. We may or may not care about this immediately (i.e. if you only want to implement numbers, we can open an issue for the other types)."
+        },
+        {
+            "created_at": "2018-03-15T02:08:47.934Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-640?focusedCommentId=16399783) by Alex Hagerman (alexhagerman):*\nSounds good. Just to verify Integer only or Number types in general? I've got a deployment happening during the day right now, so I'll hopefully be able to wrap up a version one this weekend and do a PR for review.\r\n\r\nYou mentioned for items like StructValue the as_py fallback won't work. Similarly with ListValue I would expect both of these to raise a TypeError: Unhashable Type, but I'll check the current behavior. Depending on what that is do you have any thoughts if the hash() TypeError should be raised on mutable types like standard python behavior? Wanted to check so I don't conflict with existing expected behavior if this has been handled previously and to look at tying it in with __eq__."
+        },
+        {
+            "created_at": "2018-03-15T11:53:31.504Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-640?focusedCommentId=16400283) by Antoine Pitrou (apitrou):*\n> Just to verify Integer only or Number types in general?\r\n\r\nIntegers seem to be the most useful case right now.\r\n\r\n> do you have any thoughts if the hash() TypeError should be raised on mutable types like standard python behavior?\r\n\r\nArrow scalars should be immutable AFAICT, since they're just a view over an (immutable) Arrow arrow.\r\n"
+        },
+        {
+            "created_at": "2018-03-18T21:21:27.714Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-640?focusedCommentId=16404189) by Alex Hagerman (alexhagerman):*\nI've added the __hash__ for ints and opened a PR. __eq__ was already in place using as_py() in relation to the original ticket. Happy to look into the other types and explore different ways to handle hashing them as well as any extension of as_py that might be needed if some direction or new tickets could be provided. Otherwise I'll look at what else is open that I might be able to help with.\r\n\r\nTiming information is below.\r\n\r\nimport pyarrow as pa\r\narr = pa.array([1,1,2,1])\r\na = arr[0]\r\n%timeit a.__hash__()\r\n265 ns \u00b1 1.72 ns per loop (mean \u00b1 std. dev. of 7 runs, 1000000 loops each)"
+        },
+        {
+            "created_at": "2018-03-26T21:54:40.707Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-640?focusedCommentId=16414619) by Wes McKinney (wesm):*\nIssue resolved by pull request 1765\n<https://github.com/apache/arrow/pull/1765>"
+        }
+    ]
+}

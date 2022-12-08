@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[C++] Alignment not enforced; undefined behavior in Parquet writer",
+        "body": "***Note**: This issue was originally created as [ARROW-18141](https://issues.apache.org/jira/browse/ARROW-18141). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIt is possible to create arrays using unaligned memory addresses (e.g. for int64). This seems to be in line with the arrow specification which as far as I understand does not require alignment [1].\r\n\r\nHowever, the C++ standard requires alignment, e.g. 8 byte alignment for int64. It is undefined behavior (UB) to create an unaligned pointer / accessing data via an unaligned pointer.\r\n\r\nTypically, this is not an issue in practice on x86, since gcc and other compilers mostly emit instructions that can deal with unaligned data. However, for gcc 6.3.0 (and probably up to including gcc versions 7.X), this code:\r\n\r\n<https://github.com/apache/arrow/blob/4591d76fce2846a29dac33bf01e9ba0337b118e9/cpp/src/parquet/statistics.cc#L355>\r\n\r\ncreates an aligned move instruction (movdqa) for the expression `{}values[i]{`}. This, in turn, triggers a SIGSEGV in case `values` is called via an unaligned buffer. Later compiler versions (in particular gcc 9.X used to build the wheels published on pypi) will emit instructions that can deal with unaligned data (movdqu instead of movdqa).\r\n\r\nThe python script \"test1.py\" reproduces this issue on python-level; note that it will only trigger a SIGSEGV if compiling arrow with a compiler that emits movdqa for the code linked above, e.g. by using gcc 6.3.0 to compile arrow.\r\n\r\nIn the wild, unaligned buffers are rare, but can appear, e.g. as a result of deserializing pandas dataframes / numpy arrays using pickle protocol 5 that allows out-of-band byte buffers that are re-used as arrow array buffers.\r\n\r\nI think the line to first enter the UB regime is this reinterpret_cast:\r\n\r\n\r\nhttps://github.com/apache/arrow/blob/33f2c0ec8e281fc4fe8c03b07ed2d32e343d9b0e/cpp/src/parquet/column_writer.cc#L1592\r\n\r\n[1]<https://arrow.apache.org/docs/format/Columnar.html#buffer-alignment-and-padding> merely \"recommends\" that buffers are aligned, but does not require it.",
+        "created_at": "2022-10-24T11:39:40.000Z",
+        "updated_at": "2022-10-31T18:05:00.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-24T15:37:12.822Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18141?focusedCommentId=17623251) by Antoine Pitrou (apitrou):*\nHmm, this is unfortunate. It's true that we mostly don't test for unaligned buffers."
+        },
+        {
+            "created_at": "2022-10-24T16:09:26.672Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18141?focusedCommentId=17623264) by Antoine Pitrou (apitrou):*\nCould you try with draft PR https://github.com/apache/arrow/pull/14488 (I don't have gcc 6.3.0 here)?"
+        },
+        {
+            "created_at": "2022-10-27T06:58:36.894Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18141?focusedCommentId=17624891) by Jochen Ott (jott):*\nThanks for the quick fix. Unfortunately, I currently don't have the time to try this on full arrow (I've set up all dependencies and such for arrow 5.0.0, so I'd need to backport this ...). However, I'm pretty confident this fixes the issue, as I tried the following code on godbolt.org (note that I had to slightly modify SafeLoadAs to compile on 6.3.0):\r\n```c++\n\r\n#include <inttypes.h>\r\n#include <algorithm>\r\n#include <type_traits>\r\n#include <cstring>\r\n\r\ntemplate <typename T>\r\ninline std::enable_if_t<std::is_trivially_copyable<T>::value, T> SafeLoadAs(\r\n    const uint8_t* unaligned) {\r\n  typename std::remove_const<T>::type ret;\r\n  std::memcpy(&ret, unaligned, sizeof(T));\r\n  return ret;\r\n}\r\n\r\nstd::pair<int64_t, int64_t> minmax(const int64_t * values, int64_t n) {\r\n    int64_t minval = 0, maxval = 0; // obviously not correct, but not important here\r\n    for(int64_t i=0; i<n; ++i){\r\n        // \"old\":\r\n        int64_t value = values[i];\r\n        // \"new\":\r\n        // int64_t value = SafeLoadAs<int64_t>((const uint8_t *)(values + i));\r\n        minval = std::min(minval, value);\r\n        maxval = std::max(maxval, value);\r\n    }\r\n    return std::make_pair(minval, maxval);\r\n}\r\n```\r\nUsing compiler options \"-O3 -march=sandybridge\", gcc 6.3.0 produces the probelmatic, aligned instruction \"vmovdqa\" for the \"old\" code. For the \"new\" variant, it produces \"vmovdqu\", though, which seems like the best we could hope for."
+        },
+        {
+            "created_at": "2022-10-27T07:18:12.988Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18141?focusedCommentId=17624906) by Antoine Pitrou (apitrou):*\n`[~jott]` I'm sure it fixes this particular code path. My question was more if there were other similar issues down the road."
+        },
+        {
+            "created_at": "2022-10-27T07:27:13.932Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18141?focusedCommentId=17624913) by Jochen Ott (jott):*\nI did not find any other issues down the road, i.e. writing out parquet files with \"write_statistics=False\" works with unaligned buffers. Having said that, I would not be surprised\u00a0 if there are more latent bugs similar to that (i.e. UB due to unaligned access on code-level that do not manifest because current compilers emit instructions that work even for unaligned data). To catch those, I think a code-level review of all the reinterpret_casts or array access would probably the best way to catch those."
+        },
+        {
+            "created_at": "2022-10-31T17:52:59.325Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18141?focusedCommentId=17626725) by Antoine Pitrou (apitrou):*\nOk, thanks for the feedback. I have found a couple other places to migrate, otherwise I will declare the PR ready."
+        }
+    ]
+}

@@ -1,0 +1,70 @@
+{
+    "issue": {
+        "title": "[C++][Python] Run Arrow Python C++ with pytest and make sure they are run by the CI",
+        "body": "***Note**: This issue was originally created as [ARROW-17016](https://issues.apache.org/jira/browse/ARROW-17016). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAfter <https://github.com/apache/arrow/pull/13311> is merged{~~}, the tests for C PyArrow should be moved to Cython and the documentation about running the tests with GTest should be removed.{~~} we should:\r\n - try to run the tests from the pytest to make the whole process of code quality check simplified.\r\n - make sure the CI runs these PyArrow C++ test. Currently they are not being run on the CI due to all the builds having GTest not bundled, see: <https://arrow.apache.org/docs/dev/developers/python.html#testing-pyarrow-c>\r\n\r\nThe\u00a0 migration of the tests to Cython has not proved as a good option as there are couple of tests that should stay in the C++, for example \r\n[TestMoves](https://github.com/apache/arrow/blob/master/python/pyarrow/src/python_test.cc#L48-L62) and similar. For this reason we will find some other solution to keep using GTest and run them with pytest, if possible.",
+        "created_at": "2022-07-08T11:58:46.000Z",
+        "updated_at": "2022-10-05T20:08:02.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: task"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-03T16:45:04.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-16T10:17:56.095Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17016?focusedCommentId=17605763) by Alenka Frim (alenka):*\nThe approach on how we use `GTest` in `PyArrow C\\+\\+` needs a change. Currently it depends on `GTest` being built from source with `Arrow C\\+\\+`. There are two approaches I see to change that:\r\n \\* expect `GTest` to be installed with `Arrow C\\+\\+` and use `find_package(GTest REQUIRED)`\r\n \\* require `GTest` as a test dependency for `PyArrow C\\+\\+` separately\r\n\r\nThe first approach seems the best: `PyArrow C\\+\\+` tests would be built if `ARROW_BUILD_TESTS=on` and in that case `GTest` is installed. Then I would try to use `pytest` to run the C\\\\ tests. I do think I had some issues with finding the package when doing the refactoring work and am not sure it will work out of the box.\r\n\r\n`[~raulcd]` thank you for helping me with brainstorming for ideas!\r\n\r\n`[~kou]`, `[~apitrou]` could I get your feedback on this?"
+        },
+        {
+            "created_at": "2022-09-16T10:36:32.764Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17016?focusedCommentId=17605766) by Antoine Pitrou (apitrou):*\nThe big drawback with requiring Arrow C++ tests to be built is that it makes the build time significantly longer (there are _many_ C++ tests).\r\n\r\nSo I would be in favor of making GTest an (optional) dependency of PyArrow C++."
+        },
+        {
+            "created_at": "2022-09-16T10:54:18.783Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17016?focusedCommentId=17605771) by Alenka Frim (alenka):*\nIn that case there will have to be extra environment variable specified by the developer/user before building PyArrow to turn the tests on for PyArrow separately. I am fine with this approach and can go with that.\r\n\r\nThere was also a question Raul had on this approach when we brainstormed and I wonder also: will we have to, in this case, have similar third party dependency infrastructure as we do for Arrow C++ to download third party dependencies? Or will that not be needed only for GTest?"
+        },
+        {
+            "created_at": "2022-09-16T10:57:36.661Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17016?focusedCommentId=17605772) by Antoine Pitrou (apitrou):*\nHmm, that's a good question. `[~kou]` what do you think?"
+        },
+        {
+            "created_at": "2022-09-16T20:51:51.850Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17016?focusedCommentId=17605990) by Kouhei Sutou (kou):*\nSorry, I'm not familiar with Cython. Could you explain the reason for the following case? We can't write `TestMoves` family with Cython?\r\n\r\n> there are couple of tests that should stay in the C\\\\, for example `TestMoves` and similar.\r\n\r\nIn general, I don't want PyArrow C\\\\ to have Arrow C\\\\'s `ThirdpartyToolchain.cmake` like feature to reduce maintenance cost. Maintaining `ThirdpartyToolchain.cmake` is high cost for us... So I like the \"migrating PyArrow C\\\\ tests from GTest based to pytest\\Cython based\" approach if possible. If we can remove GTest dependency from PyArrow C\\\\, PyArrow C\\\\+ depends on only our Arrow C\\\\ related CMake packages.\r\n\r\nIs `TestMoves` family only the blocker of the approach? Or are there  more blockers?"
+        },
+        {
+            "created_at": "2022-09-16T21:04:55.764Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17016?focusedCommentId=17605992) by Antoine Pitrou (apitrou):*\nCython does not really allow to express C++ concepts precisely. So some tests have to be written in C++.\r\nIf we don't want to use GTest, then we could perhaps still write some tests in C++, have them return a `Status`, then execute them from pytest?\r\n\r\nDraft example:\r\n```c++\n\r\n#define ASSERT_EQ(x, y) { \\\r\n  auto&& _left = (x); \\\r\n  auto&& _right = (y); \\\r\n  if (_left != _right) { \\\r\n    return Status::Invalid(\"Expected equality but \", _left, \" != \", _right); \\\r\n  } \\\r\n}\r\n\r\nStatus TestOwnedRefMoves() {\r\n  std::vector<OwnedRef> vec;\r\n  PyObject *u, *v;\r\n  u = PyList_New(0);\r\n  v = PyList_New(0);\r\n  {\r\n    OwnedRef ref(u);\r\n    vec.push_back(std::move(ref));\r\n    ASSERT_EQ(ref.obj(), nullptr);\r\n  }\r\n  vec.emplace_back(v);\r\n  ASSERT_EQ(Py_REFCNT(u), 1);\r\n  ASSERT_EQ(Py_REFCNT(v), 1);\r\n  return Status::Ok();\r\n}\r\n```\r\n\r\n```python\n\r\n# Cython test code\r\n\r\ndef test_owned_ref_moves():\r\n    check_status(TestOwnedRefMoves())\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-09-17T06:46:33.129Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17016?focusedCommentId=17606052) by Alenka Frim (alenka):*\nI think the suggestion to keep this tests in C++ but return a Status and then check these in the Cython is great, thank you for such a clear example!\r\n\r\nI will start with implement this approach first thing and add it to the draft PR for this issue. If it works well I will continue with this work and ping once the PR is ready.\r\n\r\nThank you `[~kou]` `[~apitrou]` !!"
+        },
+        {
+            "created_at": "2022-09-21T09:18:34.798Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17016?focusedCommentId=17607625) by Alenka Frim (alenka):*\n`[~apitrou]` would it make sense to leave all the C++ test where they are (even the decimal group) and have them return a Status also? Or would you rather see this group separately in Cython?"
+        },
+        {
+            "created_at": "2022-09-21T10:13:48.091Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17016?focusedCommentId=17607656) by Antoine Pitrou (apitrou):*\nWe could keep all the C++ tests if that's easier, yes."
+        },
+        {
+            "created_at": "2022-09-21T10:16:33.679Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17016?focusedCommentId=17607659) by Alenka Frim (alenka):*\nAt this point it is not necessarily easier (almost half of the decimal tests are already in Cython and I haven't tried the last approach to turn them into Status in the C++ yet. But am asking as it seems it would be nicer to have them all in one place."
+        },
+        {
+            "created_at": "2022-09-21T10:18:07.862Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17016?focusedCommentId=17607661) by Antoine Pitrou (apitrou):*\nHmm. Yes, it would actually be nicer to have them all in the same place and using the same idiom, IMHO."
+        },
+        {
+            "created_at": "2022-09-21T10:24:19.717Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17016?focusedCommentId=17607664) by Alenka Frim (alenka):*\nGreat, thanks for quick feedback!"
+        },
+        {
+            "created_at": "2022-10-03T16:45:04.287Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17016?focusedCommentId=17612365) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 14117\n<https://github.com/apache/arrow/pull/14117>"
+        }
+    ]
+}

@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "pyarrow: Segfault with pyarrow.deserialize_pandas",
+        "body": "***Note**: This issue was originally created as [ARROW-2459](https://issues.apache.org/jira/browse/ARROW-2459). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFollowing up from <https://github.com/apache/arrow/issues/1884>\u00a0wherein I found that calling deserialize_pandas in the linked app.py script in the repo linked below causes the app.py process to segfault.\r\n\r\nI initially observed this on OS X, but have since confirmed that the behavior exists on Linux as well.\r\n\r\nRepo containing example: <https://github.com/travisbrady/sanic-arrow>\u00a0\r\n\r\nAnd more generally: what is the right way to get a Java-based HTTP microservice to talk to a Python-based HTTP microservice using Arrow as the serialization format? I'm exchanging DataFrame type objects (they are pandas.DataFrame's on the Python side) between the two services for real-time scoring in a few xgboost models implemented in Python.",
+        "created_at": "2018-04-14T01:13:59.000Z",
+        "updated_at": "2018-05-04T08:55:37.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-05-04T08:55:37.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-04-14T15:35:36.235Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2459?focusedCommentId=16438389) by EmericP (EmericP):*\nI can reproduce the issue easily on both Linux and MacOS. The segfault happens in libarrow:\r\n```\n\r\n==20185== Process terminating with default action of signal 11 (SIGSEGV)\r\n==20185==\u00a0 Bad permissions for mapped region at address 0x536E696\r\n==20185==\u00a0\u00a0\u00a0 at 0xB7B36A6: arrow::ipc::Message::ReadFrom(std::shared_ptr<arrow::Buffer> const&, arrow::io::InputStream*, std::unique_ptr<arrow::ipc::Message, std::default_delete<arrow::ipc::Message> >*) (in /usr/lib/python3.5/site-packages/pyarrow/libarrow.so.0)\r\n==20185==\u00a0\u00a0\u00a0 by 0xB7B4490: arrow::ipc::ReadMessage(arrow::io::InputStream*, std::unique_ptr<arrow::ipc::Message, std::default_delete<arrow::ipc::Message> >*) (in /usr/lib/python3.5/site-packages/pyarrow/libarrow.so.0)\r\n==20185==\u00a0\u00a0\u00a0 by 0xB7B5A0C: arrow::ipc::InputStreamMessageReader::ReadNextMessage(std::unique_ptr<arrow::ipc::Message, std::default_delete<arrow::ipc::Message> >*) (in /usr/lib/python3.5/site-packages/pyarrow/libarrow.so.0)\r\n==20185==\u00a0\u00a0\u00a0 by 0xB7BDF41: arrow::ipc::ReadMessageAndValidate(arrow::ipc::MessageReader*, arrow::ipc::Message::Type, bool, std::unique_ptr<arrow::ipc::Message, std::default_delete<arrow::ipc::Message> >*) [clone .constprop.261] (in /usr/lib/python3.5/site-packages/pyarrow/libarrow.so.0)\r\n==20185==\u00a0\u00a0\u00a0 by 0xB7C69E0: arrow::ipc::RecordBatchStreamReader::RecordBatchStreamReaderImpl::ReadSchema() (in /usr/lib/python3.5/site-packages/pyarrow/libarrow.so.0)\r\n==20185==\u00a0\u00a0\u00a0 by 0xB7C0EB5: arrow::ipc::RecordBatchStreamReader::Open(std::unique_ptr<arrow::ipc::MessageReader, std::default_delete<arrow::ipc::MessageReader> >, std::shared_ptr<arrow::RecordBatchReader>*) (in /usr/lib/python3.5/site-packages/pyarrow/libarrow.so.0)\r\n==20185==\u00a0\u00a0\u00a0 by 0xB7C0FB3: arrow::ipc::RecordBatchStreamReader::Open(arrow::io::InputStream*, std::shared_ptr<arrow::RecordBatchReader>*) (in /usr/lib/python3.5/site-packages/pyarrow/libarrow.so.0)\r\n==20185==\u00a0\u00a0\u00a0 by 0xB3770C7: __pyx_pw_7pyarrow_3lib_18_RecordBatchReader_3_open(_object*, _object*) (in /usr/lib/python3.5/site-packages/pyarrow/lib.cpython-35m-x86_64-linux-gnu.so)\r\n==20185==\u00a0\u00a0\u00a0 by 0x288CAB: PyEval_EvalFrameEx (in /usr/bin/python3)\r\n==20185==\u00a0\u00a0\u00a0 by 0x28E0DE: PyEval_EvalCodeEx (in /usr/bin/python3)\r\n==20185==\u00a0\u00a0\u00a0 by 0x2CA5D2: ??? (in /usr/bin/python3)\r\n==20185==\u00a0\u00a0\u00a0 by 0x311646: PyObject_Call (in /usr/bin/python3)\n```"
+        },
+        {
+            "created_at": "2018-04-17T19:25:23.373Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2459?focusedCommentId=16441371) by Joshua Storck (joshuastorck):*\nYou are not using symmetric calls in app.py and test_request.py. Here's an example that works just fine:\r\n\r\n```python\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nimport numpy as np\r\nimport io\r\n\r\ndf = pd.DataFrame([dict(a=99, b=100.0), dict(a=5, b=77.77)])\r\nprint(df.to_string())\r\nserialized_df = pa.serialize_pandas(df)\r\nbb = io.BytesIO(serialized_df)\r\n\r\nbb = pa.py_buffer(bb.getvalue())\r\ndf = pa.deserialize_pandas(bb)\r\nprint(df.to_string())\r\n```\r\n\r\nIf that works, can I close this?"
+        },
+        {
+            "created_at": "2018-04-18T21:54:55.926Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2459?focusedCommentId=16443243) by Travis Brady (travisbrady):*\n`[~joshuastorck]` \u00a0In general I'd say PyArrow should never segfault. Throw a `ValueError` or something, but a hard crash of the interpreter is not acceptable in production."
+        },
+        {
+            "created_at": "2018-05-03T02:32:42.931Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2459?focusedCommentId=16461855) by Licht Takeuchi (Licht-T):*\nSeems fixed at the latest master branch.\r\n<https://gist.github.com/Licht-T/1f0b5e79084123879b07a9388d7ab138>\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-05-04T08:55:37.563Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2459?focusedCommentId=16463577) by Uwe Korn (uwe):*\nThanks `[~Licht-T]` for testing this."
+        }
+    ]
+}

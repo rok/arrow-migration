@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] List<Extension> arrays aren't supported in to_pandas calls",
+        "body": "***Note**: This issue was originally created as [ARROW-17535](https://issues.apache.org/jira/browse/ARROW-17535). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nEXTENSION is not in the list of types allowed.  I think in order to enable EXTENSION we need to be able to call to_pylist or similar on the original extension array from C++ code, in case there were user provided overrides.  Off the top of my head one way of doing this would be to pass through an additional std::unorderd_map<Array\\*, PyObject\\*> where PyObject is the bound to_pylist python function.  Are there other alternative that might be cleaner?",
+        "created_at": "2022-08-26T02:14:00.000Z",
+        "updated_at": "2022-10-15T18:40:01.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-25T23:00:59.510Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17535?focusedCommentId=17609261) by Chang She (changhiskhan):*\nWhat I was thinking is the following possibilities:\r\n\r\n1. If the ExtensionType is associated with an ExtensionArray subtype that overrides \u201cto_pandas\u201d, we could do the to_pandas call on the list values array and then use the offsets to create the proper pandas array\r\n\r\n2. If the ExtensionType is associated with an ExtensionScalar, then you can call to_polish on the values array and then use the offsets to construct the pandas array\r\n\r\nFor computer vision data this is actually fairly important as very often we have a list-of-labels or list-of-Box2d per row (image)"
+        },
+        {
+            "created_at": "2022-10-04T09:02:12.582Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17535?focusedCommentId=17612532) by Joris Van den Bossche (jorisvandenbossche):*\nThere is currently an open PR (https://github.com/apache/arrow/pull/14238) that addresses this (partly) by just using the storage array conversion. At the moment this doesn't take into account that the ExtensionType might define a custom conversion to numpy and/or pandas in Python. But my question: are we OK with for now falling back to storage array conversion? \r\n\r\nOn the one hand, that would be consistent with StructArray, where we also fall back to the storage array at the moment. On the other hand, if we want to solve this more \"properly\" later, that would mean another change in behaviour. "
+        },
+        {
+            "created_at": "2022-10-04T09:19:01.897Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17535?focusedCommentId=17612539) by Joris Van den Bossche (jorisvandenbossche):*\nOn the actual issue:\r\n\r\n>  I think in order to enable EXTENSION we need to be able to call to_pylist or similar on the original extension array from C++ code, in case there were user provided overrides\r\n\r\nFor other list arrays, we actually do not convert to lists but to numpy arrays:\r\n\r\n```Java\n\r\nIn [3]: pa.array([[1, 2], [3, 4, 5]]).to_numpy(zero_copy_only=False)\r\nOut[3]: array([array([1, 2]), array([3, 4, 5])], dtype=object)\r\n\r\nIn [4]: pa.array([[1, 2], [3, 4, 5]]).to_pandas().values\r\nOut[4]: array([array([1, 2]), array([3, 4, 5])], dtype=object)\r\n```\r\n\r\nSo it could also be an option to keep using arrays, instead of using lists in case of ExtensionType. And then, if we can somehow convert the list array's values to a single array (calling into the Python `to_numpy` or `to_pandas`, since that can be overridden?), then we could continue slicing this into pieces and put that in the resulting array, as we do now (I think this is basically the first possibility that `[~changhiskhan]` mentions?)\r\n\r\n> 2. If the ExtensionType is associated with an ExtensionScalar, then you can call to_polish on the values array and then use the offsets to construct the pandas array\r\n\r\nThat actually brings up a question: if an ExtensionType defines an ExtensionScalar (but not an associciated pandas dtype, or custom to_numpy conversion), should we use this scalar's `as_py()` for the to_numpy/to_pandas conversion as well for plain extension arrays? (not the nested case) \r\n\r\nBecause currently, if you have an ExtensionArray like that (for example using the example from the docs: https://arrow.apache.org/docs/dev/python/extending_types.html#custom-scalar-conversion), we still use the storage type conversion for to_numpy/to_pandas, and only use the scalar's conversion in `to_pylist`.\r\n"
+        },
+        {
+            "created_at": "2022-10-12T13:39:46.842Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17535?focusedCommentId=17616428) by Joris Van den Bossche (jorisvandenbossche):*\nNote: the actual conversion to_pandas is now \"working\" after ARROW-17813 (https://github.com/apache/arrow/pull/14238), by falling back to the storage array (the same for to_numpy) as mentioned above (https://issues.apache.org/jira/browse/ARROW-17535?focusedCommentId=17612532&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-17612532). \r\nFor to_pandas, it would be good if we can still improve this using the conversion defined by the ExtensionType, as discussed above."
+        },
+        {
+            "created_at": "2022-10-15T18:40:01.446Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17535?focusedCommentId=17618152) by Micah Kornfield (emkornfield):*\nYeah, so I agree with the conclusion that scalar conversion should currently not be used, as it isn't used today except in to_pylist.  I think even using the to_pandas call might be tricky but if it can work, then it would be a good idea to pursue as the approach I outlined above could get complicated.\r\n\r\n\r\n"
+        }
+    ]
+}

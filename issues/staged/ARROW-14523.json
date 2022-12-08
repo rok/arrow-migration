@@ -1,0 +1,58 @@
+{
+    "issue": {
+        "title": "[C++][Python] S3FileSystem write_table can lose data",
+        "body": "***Note**: This issue was originally created as [ARROW-14523](https://issues.apache.org/jira/browse/ARROW-14523). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe have seen odd behavior in very rare occasions when writing a parquet table to s3 using the S3FileSystem (<font color=\"#000080\">from </font>pyarrow.fs <font color=\"#000080\">import </font>S3FileSystem).\u00a0 Even though the application returns without errors, data would be missing from the bucket.\u00a0 It appears that internally it's doing a S3 multipart upload, but it's not handling a special error condition and returning a 200.\u00a0 Per [AWS Docs ](https://aws.amazon.com/premiumsupport/knowledge-center/s3-resolve-200-internalerror/) CompleteMultipartUpload (which is being called) can return a 200 response with an InternalError payload and needs to be treated as a 5XX. It appears this isn't happening with pyarrow and instead it's a success which is causing the caller to **think** their data was uploaded but actually it's not.\u00a0\r\n\r\nDoing a s3 list-parts call for the <upload-id> for the InternalError request shows the parts are still there and not completed.\r\n\r\nFrom our S3 access logs with <my-key> and <upload-id> sanitized for security\u00a0\r\n\n|operation|key|requesturi_operation|requesturi_key|requesturi_httpprotoversion|httpstatus|errorcode|\r|\n|-|-|-|-|-|-|-|-|\n|REST.PUT.PART|<my-key>-SNAPPY.parquet|PUT|/<my-key>-SNAPPY.parquet?partNumber=1&uploadId=<upload-id>|HTTP/1.1|200|-|\r|\n|REST.POST.UPLOAD|<my-key>-SNAPPY.parquet|POST|/<my-key>-SNAPPY.parquet?uploadId=<upload-id>|HTTP/1.1|200|InternalError|\r|\n|REST.POST.UPLOADS|<my-key>-SNAPPY.parquet|POST|/<my-key>-SNAPPY.parquet?uploads|HTTP/1.1|200|-|\r<br>\r<br>\u00a0|\n",
+        "created_at": "2021-10-29T22:24:54.000Z",
+        "updated_at": "2021-11-05T20:35:12.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-11-04T15:15:03.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-10-30T09:01:30.572Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14523?focusedCommentId=17436265) by Antoine Pitrou (apitrou):*\nHow is this supposed to be done with the AWS C++ API? We're using this API:\r\n\r\n<https://sdk.amazonaws.com/cpp/api/LATEST/class_aws_1_1_s3_1_1_s3_client.html#ac4b5211a2b2e499d8094e4f13bb3c29c>\r\n\r\nAs you can see, either the API returns an error (and we propagate it to the caller), or it returns a `CompleteMultipartUploadResult` which doesn't have any attribute to check for errors in the response body."
+        },
+        {
+            "created_at": "2021-10-30T09:05:09.318Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14523?focusedCommentId=17436266) by Antoine Pitrou (apitrou):*\nAnd it seems to be a bug in the AWS C++ SDK:\r\n\r\n<https://github.com/aws/aws-sdk-cpp/issues/658>\r\n\r\nYikes."
+        },
+        {
+            "created_at": "2021-10-30T10:07:35.938Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14523?focusedCommentId=17436278) by Antoine Pitrou (apitrou):*\nWorkaround will probably be to reimplement `CompleteMultipartUpload` in our own\u00a0`S3Client` subclass:\r\n\r\n<https://github.com/aws/aws-sdk-cpp/blob/main/aws-cpp-sdk-s3/source/S3Client.cpp#L250-L275>\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-10-31T19:56:44.527Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14523?focusedCommentId=17436541) by Mark Seitter (seittema):*\n`[~apitrou]` Sorry I wasn't sure exactly how those calls are made (I will admit I'm new in this space).\u00a0 Nice find on the SDK bug, but like you said Yikes! they have never resolved it in c++ sdk.\u00a0 Out of curiosity, Is there a reason pyarrow is always multipart uploads and also putobject?\u00a0 Seems wasteful to upload via multipart if you only have 1 part (ie the object size is small) since it's making 3 API calls vs just one (more $$$ and latency too).\u00a0 I understand using multipart for very large files to break into parts, but analyzing all our calls it seems we never have more than 1 part number on an upload."
+        },
+        {
+            "created_at": "2021-10-31T19:58:44.220Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14523?focusedCommentId=17436543) by Antoine Pitrou (apitrou):*\nThe filesystem API doesn't know up front what the total file size will be, which is why it always uses multipart upload. Perhaps we could have a one-shot file write API that would use another API for shorter uploads. That said, that API probably wouldn't be used by the Parquet writer..."
+        },
+        {
+            "created_at": "2021-10-31T23:52:34.081Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14523?focusedCommentId=17436571) by Mark Seitter (seittema):*\nAhh ok that makes sense if you don't know the file size.\u00a0 Agreed, I think only thing maybe you could do is have a flag/option that would let you tell the filesystem API to use single-file upload that a user could pass in if they know the file is less than 5GB (max a single put can do).\u00a0 That would let someone like us who has a max file size of 30MB to reduce our cost and improvement performance by skipping multipart calls (and bypassing this current bug too :) ). But ultimately I'm very surprised AWS hasn't fixed this bug in their SDK yet."
+        },
+        {
+            "created_at": "2021-11-01T19:32:26.260Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14523?focusedCommentId=17436996) by Antoine Pitrou (apitrou):*\nOkay, I think a slightly gory workaround will be possible. Will continue tomorrow."
+        },
+        {
+            "created_at": "2021-11-02T17:53:55.506Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14523?focusedCommentId=17437498) by Antoine Pitrou (apitrou):*\nWhich Python version do you use? Are you using binary wheel or conda packages? We may be able to produce a test package for you with the candidate fix."
+        },
+        {
+            "created_at": "2021-11-02T20:14:42.971Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14523?focusedCommentId=17437563) by Mark Seitter (seittema):*\n`[~apitrou]` We are using Python 3.9 and we install via pip today.\u00a0 Not entirely sure what we can test on our side though unfortunately since this is an edge case which we have yet to be able to reproduce on demand.\u00a0 We are in talks with AWS if there is a way to produce this issue for testing across our code (we use multipart in many places also)."
+        },
+        {
+            "created_at": "2021-11-04T15:15:03.181Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14523?focusedCommentId=17438781) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 11594\n<https://github.com/apache/arrow/pull/11594>"
+        }
+    ]
+}

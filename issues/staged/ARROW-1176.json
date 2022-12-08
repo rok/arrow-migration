@@ -1,0 +1,93 @@
+{
+    "issue": {
+        "title": "[C++] Replace WrappedBinary with Tensorflow's StringPiece",
+        "body": "***Note**: This issue was originally created as [ARROW-1176](https://issues.apache.org/jira/browse/ARROW-1176). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nInstead of using the very simple `WrappedBinary` class, we may want to use Tensorflow's `StringPiece`\u00a0to handle binary cells: https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/lib/core/stringpiece.h",
+        "created_at": "2017-07-02T18:49:27.000Z",
+        "updated_at": "2018-12-06T03:23:35.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2018-12-06T03:23:35.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-08-09T14:31:12.935Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16574911) by Antoine Pitrou (apitrou):*\nRather than using a third-party class, we could use a backport of either `std::span` or `std::string_view`:\r\n- https://github.com/martinmoene/span-lite\n- https://github.com/mariokonrad/backport\n  \n  `[~cpcloud]` what do you think?\n"
+        },
+        {
+            "created_at": "2018-08-09T14:37:02.246Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16574919) by Wes McKinney (wesm):*\nIf the C++17 `std::string_view` does everything we need, then that seems preferable to me"
+        },
+        {
+            "created_at": "2018-08-09T14:50:51.674Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16574942) by Antoine Pitrou (apitrou):*\nSomewhat better (at least better-documented) `string_view` backports:\r\n- https://github.com/martinmoene/string-view-lite\n- https://github.com/bitwizeshift/string_view-standalone\n"
+        },
+        {
+            "created_at": "2018-08-09T17:18:39.066Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16575157) by Phillip Cloud (cpcloud):*\nWe'll probably want to use either `string_view` (or `span` if available) in abseil for this.\r\n\r\nThere are some fairly nasty subtleties with `string_view` (and I would assume `span`) that are likely to cause us major headaches. Just some things to be aware of:\r\n\r\n1. https://github.com/isocpp/CppCoreGuidelines/issues/1038#issuecomment-332404952 (and that whole thread)\n1. https://foonathan.net/blog/2017/03/22/string_view-temporary.html"
+        },
+        {
+            "created_at": "2018-08-09T17:23:53.015Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16575161) by Antoine Pitrou (apitrou):*\nWell, that's not worse than returning raw pointers as we do currently."
+        },
+        {
+            "created_at": "2018-08-09T17:24:41.230Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16575164) by Antoine Pitrou (apitrou):*\nSeems like `span` may bound-check, which might hurt performance, so I think we'd be better off with `string_view`."
+        },
+        {
+            "created_at": "2018-08-09T17:38:50.571Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16575187) by Phillip Cloud (cpcloud):*\nThe span in abseil does not appear to bounds check https://github.com/abseil/abseil-cpp/blob/92020a042c0cd46979db9f6f0cb32783dc07765e/absl/types/span.h#L373"
+        },
+        {
+            "created_at": "2018-08-09T17:39:26.102Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16575189) by Phillip Cloud (cpcloud):*\n... unless you want it to: https://github.com/abseil/abseil-cpp/blob/92020a042c0cd46979db9f6f0cb32783dc07765e/absl/types/span.h#L381"
+        },
+        {
+            "created_at": "2018-08-09T17:43:37.238Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16575194) by Phillip Cloud (cpcloud):*\nThere are also other reasons to use abseil. We could probably contribute much of our signed int128 implementation upstream to them"
+        },
+        {
+            "created_at": "2018-08-09T17:45:59.910Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16575202) by Wes McKinney (wesm):*\nI'd be on board with taking on Abseil (ARROW-1669) as a dependency"
+        },
+        {
+            "created_at": "2018-08-10T09:45:12.867Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16576027) by Antoine Pitrou (apitrou):*\nAbstractly, Abseil seems very nice, but it will complicate the build chain a bit. Also, we may have the same linking problems as with boost, if we start using a non-header-only primitive in two different shared libraries (such we had with boost::regex as some point). I think we only solved that issue by removing use of non-header-only primitives...\r\n"
+        },
+        {
+            "created_at": "2018-08-10T10:19:31.268Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16576059) by Antoine Pitrou (apitrou):*\nOr perhaps that problem doesn't exist if using static linking for Abseil. C++ linking is a bit of a jungle..."
+        },
+        {
+            "created_at": "2018-08-10T19:56:56.633Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16576784) by Uwe Korn (uwe):*\nStatic linking does sadly not help. This will only make the linking problems harder to debug. Some functions like virtual ones are still loaded in the variant that was first in the resolution scope. -Bsymbolic as linking option should fix this but that brings other problems with it."
+        },
+        {
+            "created_at": "2018-08-11T13:33:48.886Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16577179) by Antoine Pitrou (apitrou):*\nAre the linking problems caused by the way we create (e.g.) `libarrow_python` and `libplasma`, or is it a problem that other projects get as well?"
+        },
+        {
+            "created_at": "2018-08-11T15:37:16.127Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16577214) by Uwe Korn (uwe):*\nIt's a general problem and is always solved on the package manager level or with API versioning. "
+        },
+        {
+            "created_at": "2018-11-14T21:46:51.391Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16687170) by Antoine Pitrou (apitrou):*\nI fear it will be a long time before we can finally switch to manylinux2010. In the meantime, instead of Abseil, I think we could turn to one of the standalone string_view implementations such as <https://github.com/martinmoene/string-view-lite>\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2018-11-14T21:52:25.328Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16687179) by Wes McKinney (wesm):*\nThat would be okay, we probably will want to have an `arrow::string_view` alias anyway"
+        },
+        {
+            "created_at": "2018-11-14T21:53:49.109Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16687180) by Wes McKinney (wesm):*\ncc `[~bkietz]`"
+        },
+        {
+            "created_at": "2018-11-15T18:35:03.254Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1176?focusedCommentId=16688489) by Antoine Pitrou (apitrou):*\nVendored a string_view backport in ARROW-3800, closing this."
+        }
+    ]
+}

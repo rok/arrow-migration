@@ -1,0 +1,30 @@
+{
+    "issue": {
+        "title": "[\u0421++][FlightRPC] Arrow Flight Server / Client cannot be initialized with Ipv6 host",
+        "body": "***Note**: This issue was originally created as [ARROW-10475](https://issues.apache.org/jira/browse/ARROW-10475). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe want to support Arrow Flight compatibility protocol in ClickHouse (<https://github.com/ClickHouse/ClickHouse>). Our code needs Ipv6 support.\r\n\r\nIn our code I wrote:\r\n```java\n\r\nstd::string host = \"[::]\";\r\nint port = 9993;\r\narrow::flight::Location location;\r\nauto status = arrow::flight::Location::ForGrpcTcp(host, port, &location);\r\nstd::cerr << \"Status=\" << status.ToString() << std::endl;\r\nstd::cerr << \"Location=\" << location.ToString() << std::endl; \n```\r\nThe output seems to be ok:\r\n```java\n\r\nStatus=OK\r\nLocation=grpc+tcp://[::]:9993\n```\r\nAfter that I initialized FlightServerBase using method Init(options).\r\n\r\nIn flight library I wrote next 3 lines before [code\\|#L825]\r\n```java\n\r\nstd::cerr << \"Location=\" << location.ToString() << std::endl;\r\nstd::cerr << \"Host=\" << location.uri_->host() << \", Port=\" << location.uri_->port_text() << std::endl;\r\nstd::cerr << \"Host:Port=\" << location.uri_->host() << \":\" << location.uri_->port_text() << std::endl;\n```\r\n\u00a0\r\n\r\nThe output is:\r\n```java\n\r\nLocation=grpc+tcp://[::]:9993\r\nHost=::, Port=9993\r\nHost:Port=:::9993\r\nE1103 03:18:01.978794160 612780 server_chttp2.cc:40]\r\n{\"created\":\"@1604362681.978626229\",\"description\":\"Name or service not known\",\"errno\":-2,\"file\":\"../contrib/grpc/src/core/lib/iomgr/resolve_address_posix.cc\",\"file_line\":108,\"os_error\":\"Name or service not known\",\"syscall\":\"getaddrinfo\",\"target_address\":\":::9993\"}\n```\r\nLocation returns host without square brackets that must be used in addresses with port. The problem is here:\r\n```java\n\r\nstd::stringstream address;\r\naddress << location.uri_->host() << ':' << location.uri_->port_text();\n```\r\nThe same issue\u00a0is also observed in the client [code\\|#L845]",
+        "created_at": "2020-11-03T01:08:49.000Z",
+        "updated_at": "2020-11-16T13:55:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: FlightRPC",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-11-16T13:55:23.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-11-03T23:38:07.993Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10475?focusedCommentId=17225729) by David Li (lidavidm):*\nThanks for the report. It looks like uriparser (the library we use to handle URIs) removes brackets for IPv6 hosts, so we can add them back when we see an IPv6 address."
+        },
+        {
+            "created_at": "2020-11-04T00:18:31.185Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10475?focusedCommentId=17225744) by Zosimova Zhanna (FawnD2):*\nHere is a patch that solved the issue for us:\u00a0[0001-uri-get-ipv6-host-with-port.patch](0001-uri-get-ipv6-host-with-port.patch)"
+        },
+        {
+            "created_at": "2020-11-16T13:55:23.932Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10475?focusedCommentId=17232772) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 8585\n<https://github.com/apache/arrow/pull/8585>"
+        }
+    ]
+}

@@ -1,0 +1,60 @@
+{
+    "issue": {
+        "title": "[C++] Implement arrow::Table::GetSizeInBytes() that returns the sum of all Buffer sizes from the internal ArrayData objects",
+        "body": "***Note**: This issue was originally created as [ARROW-12888](https://issues.apache.org/jira/browse/ARROW-12888). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis function will return the sum of `Buffer::size()` as int64 for all the ArrayData objects spread across the Table columns",
+        "created_at": "2021-05-26T19:41:35.000Z",
+        "updated_at": "2022-07-12T14:04:23.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-05-26T19:43:12.555Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12888?focusedCommentId=17352040) by Wes McKinney (wesm):*\nWhat should this return? "
+        },
+        {
+            "created_at": "2021-05-26T20:34:03.465Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12888?focusedCommentId=17352061) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nunsigned long long"
+        },
+        {
+            "created_at": "2021-05-26T21:49:45.518Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12888?focusedCommentId=17352088) by Niranda Perera (niranda):*\n`[~wesm]` \u00a0 since tables are immutable, we can calculate this value during the construction and keep it as a class member, isn't it? or should we calculate this lazily (and store in as a class member)?"
+        },
+        {
+            "created_at": "2021-05-26T22:11:40.764Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12888?focusedCommentId=17352096) by Weston Pace (westonpace):*\nArrow typically uses signed integers for lengths, mainly because of Java (angry glare) and their lack of support for unsigned integers.\u00a0 Given that arrow::Buffer::size returns int64_t it would seem we could use that here.\r\n\r\n`[~niranda]` I think you're probably right but I don't know if it would have to be done in a first pass at implementation.\u00a0 I feel like the amount of effort put into doing this for `null_count` is non-trivial."
+        },
+        {
+            "created_at": "2021-05-27T00:28:47.216Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12888?focusedCommentId=17352208) by Niranda Perera (niranda):*\nIf we agree on an approach, I can add that this. Isn't this information required for Flight related things?"
+        },
+        {
+            "created_at": "2021-05-27T14:22:25.194Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12888?focusedCommentId=17352515) by David Li (lidavidm):*\nFlight does not require the size. (There is one part where the size is used, but it takes a 'assume everything is ok, serialize, then check the size' approach, instead of requiring the size up front.)"
+        },
+        {
+            "created_at": "2021-05-27T14:26:18.767Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12888?focusedCommentId=17352519) by David Li (lidavidm):*\nAlso note that there's a few caveats. The Python/Cython method computes size by summing up the size of the buffers, but this may be misleading when slices come into play.\r\n```\n\r\n>>> import pyarrow as pa\r\n>>> pa.record_batch([range(1024), range(1024)], names=\"ab\")\r\npyarrow.RecordBatch\r\na: int64\r\nb: int64\r\n>>> batch = pa.record_batch([range(1024), range(1024)], names=\"ab\")\r\n>>> batch.nbytes\r\n16384\r\n>>> batch[512:].nbytes\r\n16384 \n```\r\ni.e. is size the size in memory (AIUI, that's what's desired here), or the serialized size?\r\n\r\nThere is a method that'll compute the actual serialized size, but it works by actually serializing the data, so it's slower:\r\n```\n\r\n>>> pa.ipc.get_record_batch_size(batch)\r\n16576\r\n>>> pa.ipc.get_record_batch_size(batch[512:])\r\n8384\r\n \n```"
+        },
+        {
+            "created_at": "2021-05-27T16:12:46.094Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12888?focusedCommentId=17352599) by Wes McKinney (wesm):*\nI'm still not clear on what the function should return. \r\n\r\nIt could be one of:\r\n\r\n- The size of the Table on the wire in the IPC stream format\n- The sum of the `Buffer::size` for all `Buffer` objects in the Table's columns \n- The sum of all Buffer sizes along with the footprint of all of the constituent C++ structures\n  \n  I suspect it is #1 or #2"
+        },
+        {
+            "created_at": "2021-05-27T19:34:44.918Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12888?focusedCommentId=17352716) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nHi `[~wesm]` \u00a0and team, should be\r\n \\* The sum of the\u00a0`Buffer::size`\u00a0for all\u00a0`Buffer`\u00a0objects in the Table's columns\r\n\r\nWhat are the objects that conform the\u00a0footprint of all of the constituent C++ structures, you mean arrow::Schema, etc?"
+        },
+        {
+            "created_at": "2021-06-01T14:31:02.641Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12888?focusedCommentId=17355138) by Wes McKinney (wesm):*\nC++ objects take up space, so a pedantic interpretation of \"get size in bytes\" would include the sizes of all heap-allocated C++ objects in addition to the allocated buffers. A clearer name for the function would be \"GetSumOfBufferSizes\" "
+        },
+        {
+            "created_at": "2022-07-12T14:04:23.505Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12888?focusedCommentId=17565577) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

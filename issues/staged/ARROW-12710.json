@@ -1,0 +1,40 @@
+{
+    "issue": {
+        "title": "[C++] String concatenate aggregate kernel",
+        "body": "***Note**: This issue was originally created as [ARROW-12710](https://issues.apache.org/jira/browse/ARROW-12710). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nLike MySQL/Impala `group_concat` and PostgreSQL `string_agg`. Takes a string array\u00a0and a separator (possibly optional?) and returns one scalar string (one per group in the case of group aggregation) representing all the string values in the array concatenated together, with the separator\u00a0added between each pair of concatenated values.\r\n\r\nFor example, in the case of no grouping and using separator `\"-\"`, this would take input:\r\n```Java\n\r\nArray<string>\r\n[ \r\n  \"foo\",\r\n  \"bar\",\r\n  \"baz\"\r\n]\r\n```\r\nand return the following string scalar as output:\r\n```Java\n\r\n\"foo-bar-baz\"\r\n```\r\n\u00a0",
+        "created_at": "2021-05-10T14:19:17.000Z",
+        "updated_at": "2022-07-04T17:41:31.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-05-11T09:08:09.227Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12710?focusedCommentId=17342434) by Joris Van den Bossche (jorisvandenbossche):*\nIs this already covered by ARROW-10959? (or I don't fully understand the difference)\r\n\r\nIn Python, you can do a simple concatenation of an array of strings with the `sum()} function, or using {{str.join` for using a separator:\r\n\r\n```Java\n\r\n>>> \",\".join(['a', 'b', 'c'])\r\n'a,b,c'\r\n```"
+        },
+        {
+            "created_at": "2021-05-11T17:12:32.511Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12710?focusedCommentId=17342745) by Ian Cook (icook):*\n`[~jorisvandenbossche]` \u00a0no, this is different from\u00a0ARROW-10959. I added examples to the descriptions of all these string join kernel issues to make the distinctions between them clearer."
+        },
+        {
+            "created_at": "2021-06-08T14:46:41.032Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12710?focusedCommentId=17359401) by Niranda Perera (niranda):*\n`[~icook]` I checked the postgres string_agg (https://www.postgresqltutorial.com/postgresql-aggregate-functions/postgresql-string_agg-function/). It seems to have an `order_by` option. Do you we need that part as well? If not, AFAIU, this would be a straight-forward scalar agg kernel, and I can take it up. :)"
+        },
+        {
+            "created_at": "2021-06-10T15:20:49.268Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12710?focusedCommentId=17361024) by Antoine Pitrou (apitrou):*\nIs our current scalar aggregation has deterministic output order, then we don't need the \"order_by\" option."
+        },
+        {
+            "created_at": "2021-07-13T15:28:13.489Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12710?focusedCommentId=17379970) by Ben Kietzman (bkietz):*\nOur current scalar aggregation has deterministic ordering, but that will fall down rapidly when those functions are used in an ExecPlan (where no ordering is guaranteed).\r\n\r\nIf we implement this as a ScalarAggregateKernel, the KernelState of the string concat agg kernel will need to include ordering criteria so that `merge(move(state1), &state0)` can be guaranteed equivalent to `merge(move(state0), &state1)`. Furthermore, `merge` cannot actually concatenate anything because if we happened to first `merge(move(state0), &state3)` we'd have no way to insert `state1, state2` in the middle later. Actual concatenation would have to wait for `finalize`.\r\n\r\nThose ordering criteria could be synthesized from (for example) fragment/batch indices in a dataset scan, but the presence of O(N) state in a scalar agg kernel's State is suspect to me and I'm not sure it's a great match for ScalarAggregateKernel."
+        },
+        {
+            "created_at": "2022-04-20T12:11:25.416Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12710?focusedCommentId=17524935) by Antoine Pitrou (apitrou):*\nThis is actually doable now by passing a ListScalar to the `binary_join` compute function. For example in Python:\r\n```python\n\r\n>>> arr = pa.array([\"abc\", \"def\", \"ghi\"])\r\n>>> scal = pa.ListArray.from_arrays([0, len(arr)], arr)[0]\r\n>>> scal\r\n<pyarrow.ListScalar: ['abc', 'def', 'ghi']>\r\n>>> pc.binary_join(scal, \"-\")\r\n<pyarrow.StringScalar: 'abc-def-ghi'>\r\n```\r\n\r\n(note that creating the ListScalar is a bit cumbersome in Python, I filed ARROW-16254 for this)\r\n\r\n`[~icook]` Can we then close this issue?"
+        }
+    ]
+}

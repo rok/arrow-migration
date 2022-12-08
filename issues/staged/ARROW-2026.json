@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[Python] Cast all timestamp resolutions to INT96 use_deprecated_int96_timestamps=True",
+        "body": "***Note**: This issue was originally created as [ARROW-2026](https://issues.apache.org/jira/browse/ARROW-2026). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen writing to a Parquet file, if `use_deprecated_int96_timestamps` is True, timestamps are only written as 96-bit integers if the timestamp has nanosecond resolution. This is a problem because Amazon Redshift timestamps only have microsecond resolution but require them to be stored in 96-bit format in Parquet files.\r\n\r\nI'd expect the\u00a0use_deprecated_int96_timestamps flag to cause _all_ timestamps to be written as 96 bits, regardless of resolution. If this is a deliberate design decision, it'd be immensely helpful if it were explicitly documented as part of the argument.\r\n\r\n\u00a0\r\n\r\nTo reproduce:\r\n\r\n\u00a0\r\n\r\n1.\u00a0Create a table with a\u00a0timestamp having microsecond or millisecond resolution, and save it to a Parquet file. Be sure to set `use_deprecated_int96_timestamps` to True.\r\n\r\n\u00a0\r\n```java\n\r\nimport datetime\r\nimport pyarrow\r\nfrom pyarrow import parquet\r\n\r\nschema = pyarrow.schema([\r\n    pyarrow.field('last_updated', pyarrow.timestamp('us')),\r\n])\r\n\r\ndata = [\r\n    pyarrow.array([datetime.datetime.now()], pyarrow.timestamp('us')),\r\n]\r\n\r\ntable = pyarrow.Table.from_arrays(data, ['last_updated'])\r\n\r\nwith open('test_file.parquet', 'wb') as fdesc:\r\n    parquet.write_table(table, fdesc,\r\n                        use_deprecated_int96_timestamps=True)\r\n\r\n```\r\n\u00a0\r\n\r\n2.\u00a0Inspect the file.\u00a0I used parquet-tools:\r\n\r\n\u00a0\r\n```\n\r\ndak@tux ~ $ parquet-tools meta test_file.parquet\r\nfile: \u00a0 \u00a0 \u00a0 \u00a0 file:/Users/dak/test_file.parquet\r\n\r\ncreator:\u00a0 \u00a0 \u00a0 parquet-cpp version 1.3.2-SNAPSHOT\r\n\r\n\r\n\r\nfile schema:\u00a0 schema\r\n\r\n--------------------------------------------------------------------------------\r\n\r\nlast_updated: OPTIONAL INT64 O:TIMESTAMP_MICROS R:0 D:1\r\n\r\n\r\n\r\nrow group 1:\u00a0 RC:1 TS:76 OFFSET:4\r\n\r\n--------------------------------------------------------------------------------\r\n\r\nlast_updated:\u00a0 INT64 SNAPPY DO:4 FPO:28 SZ:76/72/0.95 VC:1 ENC:PLAIN,PLAIN_DICTIONARY,RLE\n```\r\n\u00a0",
+        "created_at": "2018-01-24T18:41:48.000Z",
+        "updated_at": "2018-12-16T01:20:00.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-12-15T22:00:33.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-03-12T03:51:20.119Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2026?focusedCommentId=16394790) by Wes McKinney (wesm):*\nMoving to 0.10.0"
+        },
+        {
+            "created_at": "2018-09-15T14:27:40.720Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2026?focusedCommentId=16616320) by Wes McKinney (wesm):*\nPatches welcome"
+        },
+        {
+            "created_at": "2018-11-21T17:40:20.424Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2026?focusedCommentId=16695014) by Wes McKinney (wesm):*\n`[~kszucs]` can you have a look at this?"
+        },
+        {
+            "created_at": "2018-11-25T17:28:30.927Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2026?focusedCommentId=16698229) by Krisztian Szucs (kszucs):*\nWhat's the expectation here? \r\n\r\nSo currently only NANO timestamps are supported for Int96 writing, should We support all of the units?\r\nOr just document it somewhere?"
+        },
+        {
+            "created_at": "2018-11-25T20:46:02.819Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2026?focusedCommentId=16698283) by Wes McKinney (wesm):*\nI agree that probably the correct fix here is to coerce all timestamps to nanoseconds with INT96 storage, since if you are passing `use_deprecated_int96_timestamps=True` then probably you are using Apache Impala (which is what Redshift Spectrum uses as far as I understand it) or another system that expects int96 nanosecond timestamps. \r\n\r\nIt is a bit of a rough edge to have to go through and convert all your timestamps to nanoseconds before writing to Parquet. \r\n\r\n`[~xhochy]` do you have thoughts about this? "
+        },
+        {
+            "created_at": "2018-11-26T08:57:38.280Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2026?focusedCommentId=16698634) by Uwe Korn (uwe):*\nWe should coerce all timestamps to nanoseconds when this option is set. People will only use this option when they use a system that only supports INT96 timestamps, systems that also support INT64 timestamps in other resolutions would not need the option."
+        },
+        {
+            "created_at": "2018-11-26T14:20:49.366Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2026?focusedCommentId=16699012) by Wes McKinney (wesm):*\n+1. `[~kszucs]` do you want to give this a shot? You'd need to add converter functions to convert to INT96: \r\n\r\nhttps://github.com/apache/arrow/blob/master/cpp/src/parquet/arrow/writer.h#L206\r\n\r\nIt would be unsafe to cast to nanoseconds by multiplication since it may overflow. So the test cases should include values outside the representable range for an int64_t nanosecond timestamp"
+        },
+        {
+            "created_at": "2018-12-12T20:01:33.453Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2026?focusedCommentId=16719385) by Francois Saint-Jacques (fsaintjacques):*\nI'll take it, I have a reasonable fix."
+        },
+        {
+            "created_at": "2018-12-15T01:54:15.478Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2026?focusedCommentId=16721955) by Francois Saint-Jacques (fsaintjacques):*\n```java\n\r\nfile: file:/home/fsaintjacques/src/arrow/python/test_file.parquet \r\ncreator: parquet-cpp version 1.5.1-SNAPSHOT \r\n\r\nfile schema: schema \r\n------------------------------------------------------------------------------\r\nlast_updated: OPTIONAL INT96 R:0 D:1\r\n\r\nrow group 1: RC:1 TS:58 OFFSET:4 \r\n--------------------------------------------------------------------------------\r\nlast_updated: INT96 SNAPPY DO:4 FPO:32 SZ:58/54/0.93 VC:1 ENC:PLAIN_DICTIONARY,PLAIN,R\r\n```"
+        },
+        {
+            "created_at": "2018-12-15T22:00:33.633Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2026?focusedCommentId=16722305) by Wes McKinney (wesm):*\nIssue resolved by pull request 3173\n<https://github.com/apache/arrow/pull/3173>"
+        }
+    ]
+}

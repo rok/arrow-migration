@@ -1,0 +1,66 @@
+{
+    "issue": {
+        "title": "[R][C++] Fix crashing test in test-dataset.R on 32-bit Windows from ARROW-7979",
+        "body": "***Note**: This issue was originally created as [ARROW-8217](https://issues.apache.org/jira/browse/ARROW-8217). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIf we can obtain a gdb backtrace from the failed test in https://github.com/apache/arrow/pull/6638 then we can sort out what's wrong. ",
+        "created_at": "2020-03-25T17:37:37.000Z",
+        "updated_at": "2020-04-07T21:04:47.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-04-01T19:43:59.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-03-25T21:30:03.587Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8217?focusedCommentId=17067094) by Neal Richardson (npr):*\nI managed to run with gdb (included in Rtools) like this: \r\n\r\n```Java\n\r\nC:\\Program Files\\R\\R-3.6.0\\bin\\i386>\\Rtools\\mingw_32\\bin\\gdb R.exe\r\n```\r\n\r\nUnfortunately, there's no backtrace on exit:\r\n\r\n```Java\n\r\nStart test: IPC/Arrow format data\r\n  test-dataset.R#172:1 [success]\r\n  test-dataset.R#173:1 [success]\r\n[Inferior 1 (process 4920) exited with code 030000000005]\r\n(gdb) bt\r\nNo stack.\r\n(gdb)\r\n```\r\n\r\nRetrying with `break exit`, there's nothing useful, presumably because R needs to be rebuilt with debug symbols:\r\n\r\n```Java\n\r\nStart test: IPC/Arrow format data\r\n  test-dataset.R#172:1 [success]\r\n  test-dataset.R#173:1 [success]\r\nBreakpoint 1, 0x767866f5 in msvcrt!exit () from C:\\Windows\\System32\\msvcrt.dll\r\n(gdb) bt\r\n#0  0x767866f5 in msvcrt!exit () from C:\\Windows\\System32\\msvcrt.dll\r\n#1  0x00405787 in ?? ()\r\n#2  0x004013e2 in ?? ()\r\n#3  0x74ea6359 in KERNEL32!BaseThreadInitThunk () from C:\\Windows\\System32\\kernel32.dll\r\n#4  0x77247b74 in ntdll!RtlGetAppContainerNamedObjectPath () from C:\\Windows\\SYSTEM32\\ntdll.dll\r\n#5  0x77247b44 in ntdll!RtlGetAppContainerNamedObjectPath () from C:\\Windows\\SYSTEM32\\ntdll.dll\r\n#6  0x00000000 in ?? ()\r\n(gdb)\r\n```\r\n\r\nOn the one hand, no backtrace could mean that it's not a segfault, just some other hard exit. On the other, googling the exit code comes up with lots of hits suggesting that it is a segfault.\r\n\r\nIf someone wants to tell me other ideas of places to set breakpoints or whatever to try to see what's failing, I can try. I can also try making a DEBUG build of Arrow C++ (this is a release build). I'd rather not have to build R from source to get more debug symbols.\r\n"
+        },
+        {
+            "created_at": "2020-03-25T23:04:14.117Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8217?focusedCommentId=17067209) by Wes McKinney (wesm):*\nA debug build of Arrow should tell you more, it's worth a shot"
+        },
+        {
+            "created_at": "2020-03-25T23:08:38.302Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8217?focusedCommentId=17067211) by Wes McKinney (wesm):*\nIf the R nightly setup can build a DEBUG package I can try to install that and debug myself, too"
+        },
+        {
+            "created_at": "2020-03-26T15:01:24.610Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8217?focusedCommentId=17067747) by Neal Richardson (npr):*\nI can't get a debug build. I tried twice and the build hangs: https://github.com/ursa-labs/arrow-r-nightly/runs/535320005\r\n\r\nI see two options:\r\n\r\n1. Try to write the test that fails in R in C++ and see if that fails somewhere else. It's possible that R itself is not the problem, we just don't have a test that exercises this code path anywhere else. \r\n2. Let this one lie until someone reports it. The exposure of this particular scenario is low right now: you'd have to be an R user, using 32-bit R on Windows, querying a dataset made of IPC/Feather files."
+        },
+        {
+            "created_at": "2020-03-26T17:30:46.838Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8217?focusedCommentId=17067887) by Wes McKinney (wesm):*\nI think a release build with debug symbols would be sufficient, can you try building with `-DARROW_CXXFLAGS=\"-g\"`. If that doesn't work then we can do one of the options you listed"
+        },
+        {
+            "created_at": "2020-03-27T17:37:04.804Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8217?focusedCommentId=17068931) by Neal Richardson (npr):*\nI did a build with -DARROW_CXXFLAGS=\"-g\", no difference. That was on the C++ build only though, any reason to think it would matter to compile the R bindings with that too?\r\n\r\nEven after the hanging build was resolved on master, I still can't get a debug build: https://github.com/ursa-labs/arrow-r-nightly/runs/538449507?check_suite_focus=true#step:7:1126\r\n\r\n```Java\n\r\n[ 16%] Building CXX object src/arrow/CMakeFiles/arrow_static.dir/record_batch.cc.obj\r\nC:/Rtools/mingw_64/bin/../lib/gcc/x86_64-w64-mingw32/4.9.3/../../../../x86_64-w64-mingw32/bin/as.exe: CMakeFiles/arrow_static.dir/array/diff.cc.obj: too many sections (43914)\r\nD:\\a\\_temp\\msys\\msys64\\tmp\\ccqm015L.s: Assembler messages:\r\nD:\\a\\_temp\\msys\\msys64\\tmp\\ccqm015L.s: Fatal error: can't write CMakeFiles/arrow_static.dir/array/diff.cc.obj: File too big\r\nC:/Rtools/mingw_64/bin/../lib/gcc/x86_64-w64-mingw32/4.9.3/../../../../x86_64-w64-mingw32/bin/as.exe: CMakeFiles/arrow_static.dir/array/diff.cc.obj: too many sections (43914)\r\nD:\\a\\_temp\\msys\\msys64\\tmp\\ccqm015L.s: Fatal error: can't close CMakeFiles/arrow_static.dir/array/diff.cc.obj: File too big\r\n```"
+        },
+        {
+            "created_at": "2020-03-27T18:55:07.879Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8217?focusedCommentId=17068983) by Wes McKinney (wesm):*\nIt sort of suggests that that the segfault is originating in the R bindings instead of the C++ library, which would be weird but I suppose it's possible. \r\n\r\nI think the debug build error can be resolved with ARROW-8246"
+        },
+        {
+            "created_at": "2020-04-01T00:50:48.786Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8217?focusedCommentId=17072270) by Wes McKinney (wesm):*\nSince the debug build issue should be resolved, we might make one last attempt to get a backtrace before 0.17.0 goes out"
+        },
+        {
+            "created_at": "2020-04-01T03:15:23.844Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8217?focusedCommentId=17072345) by Neal Richardson (npr):*\nSeems to have worked this time:\u00a0<https://github.com/ursa-labs/arrow-r-nightly/runs/550684026?check_suite_focus=true>\r\n\r\nSo I'll try again with that tomorrow."
+        },
+        {
+            "created_at": "2020-04-01T16:29:29.341Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8217?focusedCommentId=17072938) by Neal Richardson (npr):*\nFinally got a local debug build installed (the R bindings failed on the link step on the 64-bit version but 32-bit worked, and that's all I needed).\r\n\r\nInterestingly, the test executed cleanly, no crash..."
+        },
+        {
+            "created_at": "2020-04-01T19:43:59.522Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8217?focusedCommentId=17073136) by Wes McKinney (wesm):*\nIssue resolved by pull request 6799\n<https://github.com/apache/arrow/pull/6799>"
+        },
+        {
+            "created_at": "2020-04-01T19:44:41.109Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8217?focusedCommentId=17073139) by Wes McKinney (wesm):*\nSee discussion in the PR. It seems that this was \"fixed\" by ARROW-7740. We didn't figure out exactly the reason, though"
+        }
+    ]
+}

@@ -1,0 +1,80 @@
+{
+    "issue": {
+        "title": "[Dataset][Python] Parse a list of fragment paths to gather filters",
+        "body": "***Note**: This issue was originally created as [ARROW-15716](https://issues.apache.org/jira/browse/ARROW-15716). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIs it possible for partitioning.parse() to be updated to parse a list of paths instead of just a single path? \r\n\r\nI am passing the .paths from file_visitor to downstream tasks to process data which was recently saved, but I can run into problems with this if I overwrite data with delete_matching in order to consolidate small files since the paths won't exist. \r\n\r\nHere is the output of my current approach to use filters instead of reading the paths directly:\r\n\r\n```python\n\r\n# Fragments saved during write_dataset \r\n['dev/dataset/fragments/date_id=20210813/data-0.parquet', 'dev/dataset/fragments/date_id=20210114/data-2.parquet', 'dev/dataset/fragments/date_id=20210114/data-1.parquet', 'dev/dataset/fragments/date_id=20210114/data-0.parquet']\r\n\r\n# Run partitioning.parse() on each fragment \r\n[<pyarrow.compute.Expression (date_id == 20210813)>, <pyarrow.compute.Expression (date_id == 20210114)>, <pyarrow.compute.Expression (date_id == 20210114)>, <pyarrow.compute.Expression (date_id == 20210114)>]\r\n\r\n# Format those expressions into a list of tuples\r\n[('date_id', 'in', [20210114, 20210813])]\r\n\r\n# Convert to an expression which is used as a filter in .to_table()\r\nis_in(date_id, {value_set=int64:[\r\n  20210114,\r\n  20210813\r\n], skip_nulls=false})\r\n```\r\n\r\n\r\nMy hope would be to do something like filt_exp = partitioning.parse(paths) which would return a dataset expression.\r\n",
+        "created_at": "2022-02-17T15:11:44.000Z",
+        "updated_at": "2022-11-17T05:09:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-11-07T21:54:28.605Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15716?focusedCommentId=17630046) by Lance Dacey (ldacey):*\nI wanted to check if this is something which might be possible eventually. It would reduce a lot of ugly custom code that I use to achieve the result that I am looking for.\r\n\r\nWrite dataset, collect the fragment paths:\r\n\r\n```python\n\r\ncollector = []\r\nds.write_dataset(\r\n  table, \r\n  base_dir=\"dev/staging\", \r\n  partitioning=[\"date\"], \r\n  partitioning_flavor=\"hive\", \r\n  file_visitor=lambda x: collector.append(x)\r\n)\r\n```\r\n\r\nNext my hope would be parse those paths into a consolidate filter expression which I could use to query the original dataset. This ensures that I read in the entire partition since it is possible that other files already existed before the write step above.\r\n\r\n```python\n\r\n\r\npaths = [file.path for file in collector]\r\npartitioning = ds.partitioning(flavor=\"hive\") \r\nfilter_expression = partitioning.parse(paths) #parse a list of paths, ideally using the \"hive\" shortcut\r\n\r\ndataset = ds.dataset(source=\"dev/staging\", partitioning=partitioning)\r\nnew_table = dataset.to_table(filter=filter_expression)\r\nds.write_dataset(new_table, base_dir=\"dev/final\", existing_data_behavior=\"delete_matching\")\r\n```\r\n"
+        },
+        {
+            "created_at": "2022-11-07T23:56:52.481Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15716?focusedCommentId=17630089) by Weston Pace (westonpace):*\nIf I understand correctly, your goal is to get a list of partitions that were modified during a dataset write.  Is that correct?"
+        },
+        {
+            "created_at": "2022-11-08T04:35:50.387Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15716?focusedCommentId=17630175) by Lance Dacey (ldacey):*\nYes, if I could easily retrieve a list of the unique partitions which were written to that would be helpful. If I could then parse the list of partitions into a dataset expression (used for table(filter=expression)), that would be even better.\r\n\r\nRight now I can get a list of the fragments, parse them into expressions, and from there I can determine the partitions using ds._get_partition_keys()\r\n\r\nFull example below. I am essentially just looking for a potential shortcut, convenience method, or better approach.\r\n\r\nSay these are the fragments which were written during dataset write:\r\n```python\n\r\n['path/to/data/month_id=202105/v1-manual__2022-11-06T22:50:20.parquet',\r\n 'path/to/data/month_id=202106/v1-manual__2022-11-06T22:50:20.parquet',\r\n 'path/to/data/month_id=202107/v1-manual__2022-11-06T22:50:20..parquet']\r\n```\r\n\r\nMy ultimate goal is for a downstream task to filter the dataset for those three partitions (not just the fragments since other files might exist).\r\n\r\n```python\n\r\npartitioning = dataset.partitioning\r\n\r\n#parse each fragment path to get a list of expressions\r\nexpressions = [partitioning.parse(file) for file in paths]\r\n\r\n#get the partitions\r\nfilters = [ds._get_partition_keys(expression) for expression in expressions]\r\n\r\n[{'month_id': 202105}, {'month_id': 202106}, {'month_id': 202107}]\r\n\r\n#Convert to an expression\r\n\r\nfrom pyarrow.parquet import filters_to_expression\r\n\r\nfilters_to_expression(filters)\r\n\r\n<pyarrow.compute.Expression (((month_id == 202105) or (month_id == 202106)) or (month_id == 202107))>\r\n```\r\n\r\n\r\n"
+        },
+        {
+            "created_at": "2022-11-09T06:24:33.140Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15716?focusedCommentId=17630773) by Vibhatha Lakmal Abeykoon (vibhatha):*\n`[~ldacey]` \u00a0I tried the following,\u00a0\r\n```java\n\r\nfrom datetime import datetime\r\nimport pyarrow.dataset as ds\r\ndf = pd.DataFrame({'a': [datetime(2019, 1, 1, 0),\r\ndatetime(2019, 2, 1, 0),\r\ndatetime(2019, 1, 1, 0),\r\ndatetime(2019, 2, 1, 0),\r\ndatetime(2019, 1, 1, 0),\r\ndatetime(2019, 2, 1, 0)],\r\n'b': [20, 30, 40, 50, 60, 10]})\r\ntable = pa.Table.from_pandas(df)\r\npath = tempdir / 'partitioning'\r\n\r\ncollector = []\r\nds.write_dataset(\r\ntable,\r\nbase_dir=path,\r\nformat=\"parquet\",\r\npartitioning=[\"a\"],\r\npartitioning_flavor=\"hive\",\r\nfile_visitor=lambdax: collector.append(x)\r\n)\r\n\u00a0\r\npaths = [file.path for file in collector]\r\npartitioning = ds.partitioning(flavor=\"hive\")\r\n\u00a0\r\ndataset = ds.dataset(source=path, partitioning=partitioning)\r\n\u00a0\r\nfilter_expressions = [dataset.partitioning.parse(path) for path in paths]\r\n\u00a0\r\nnew_table = dataset.to_table(filter=filter_expressions[0])\r\nprint(table)\r\nprint(\"-\" * 80)\r\nprint(new_table)\r\n```\r\n\r\nAre these steps acceptable? Or any issue with this (assume `parse` will be updated to your requirements)\r\nPlease correct me if I am wrong in anyway."
+        },
+        {
+            "created_at": "2022-11-09T06:29:31.637Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15716?focusedCommentId=17630776) by Weston Pace (westonpace):*\n`[~vibhatha]` I'm not sure `new_table = dataset.to_table(filter=filter_expressions[0])` will work.  Won't that create a table from just the first partition?  I think `[~ldacey]` was asking for something like `filter=filter_expressions[0] | filter_expressions[1] | ... | filter_expressions[N]`.\r\n\r\n"
+        },
+        {
+            "created_at": "2022-11-09T06:32:59.792Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15716?focusedCommentId=17630778) by Vibhatha Lakmal Abeykoon (vibhatha):*\nI agree, sorry I didn't finished the statement, properly. What we need now is not to update the `parse` function, but fuse the filter experssions internally or externally and get the expected results, right?"
+        },
+        {
+            "created_at": "2022-11-09T14:38:39.854Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15716?focusedCommentId=17631108) by Lance Dacey (ldacey):*\nYes, ultimate goal is to create a single expression which would filter all unique partitions that had data written into them.\r\n\r\nI added unique partitions there because it is possible for multiple file fragments to be written to the same partition (max_rows during write) - I never tested what happens if you run an expression that has duplicates though. Any idea if that would matter? For example, the filter expression for both of these fragments would be the same:\r\n\r\n'path/to/data/section=a/part-0.parquet',\r\n'path/to/data/section=a/part-1.parquet',\r\n\r\nThe example `[~westonpace]` provided would work great.\r\n\r\n\r\n"
+        },
+        {
+            "created_at": "2022-11-10T16:50:07.762Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15716?focusedCommentId=17631783) by Vibhatha Lakmal Abeykoon (vibhatha):*\n`[~ldacey]` Can we always guarantee that the operator is always going to be a `or` or `and`? Can it be a mix of those operators, when you want to filter out like a band-pass filter. \r\n\r\nI could be misunderstanding the objective here, but just curious. Or should we expose a UDF and let the user decide how it needs to be applied.\r\n\r\ncc `[~westonpace]`"
+        },
+        {
+            "created_at": "2022-11-10T17:02:45.078Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15716?focusedCommentId=17631792) by Weston Pace (westonpace):*\nI am pretty sure the operator is always OR based on:\r\n\r\n> ultimate goal is to create a single expression which would filter all unique partitions that had data written into them.\r\n\r\nAn OR expression would give you all the partitions that had data written.\r\n\r\nIn fact, partition expressions are always disjoint (e.g. x == 7 vs x == 8) so ANDing any of the returned expressions will always give you an empty set.\r\n"
+        },
+        {
+            "created_at": "2022-11-12T03:49:36.423Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15716?focusedCommentId=17632598) by Vibhatha Lakmal Abeykoon (vibhatha):*\nYeah, that is true since it is always the equality operator. But for other comparator operators it won't. So it is better to fuse it at parse rather than at to_table.\u00a0\r\n\r\nBecause when filtering range of values as follows.\r\n```python\n\r\n    import pyarrow.dataset as ds\r\n    df = pd.DataFrame({'a' : [1, 2, 1, 2, 3, 4, 5, 1, 2, 4, 7, 8],\r\n                       'b' : [10, 30, 20, 40, 50, 60, 30, 50, 60, 10, 11, 12]})\r\n    table = pa.Table.from_pandas(df)\r\n    path = tempdir / 'partitioning'\r\n\r\n    collector = []\r\n    ds.write_dataset(\r\n        table,\r\n        base_dir=path,\r\n        format=\"parquet\",\r\n        partitioning=[\"a\"],\r\n        partitioning_flavor=\"hive\",\r\n        file_visitor=lambda x: collector.append(x)\r\n    )\r\n\r\n    paths = [file.path for file in collector]\r\n    partitioning = ds.partitioning(flavor=\"hive\")\r\n\r\n    dataset = ds.dataset(source=path, partitioning=partitioning)\r\n\r\n    filter_expressions = [dataset.partitioning.parse(path) for path in paths]\r\n    \r\n    f11 = ds.field(\"a\") > pc.scalar(3)\r\n    f22 = ds.field(\"a\") < pc.scalar(6)\r\n    f3 = f11 & f22\r\n    print(f3)\r\n    new_table = dataset.to_table(filter=f3)\r\n    print(table.to_pandas())\r\n    print(\"-\" * 80)\r\n    print(new_table.to_pandas())\r\n\r\n```"
+        },
+        {
+            "created_at": "2022-11-14T16:34:07.692Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15716?focusedCommentId=17633927) by Weston Pace (westonpace):*\nI'm not certain I understand.  A partition key will always be an equality operator.  In your above example you would have `a==1 | a == 2 | a == 3 | a == 4 | a == 5 | a == 7 | a == 8`."
+        },
+        {
+            "created_at": "2022-11-14T17:17:45.745Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15716?focusedCommentId=17633952) by Vibhatha Lakmal Abeykoon (vibhatha):*\nYes, I was merely referring to the filter statement at `to_table` it could be any other comparator operator, right?\u00a0"
+        },
+        {
+            "created_at": "2022-11-14T17:32:40.856Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15716?focusedCommentId=17633961) by Weston Pace (westonpace):*\nAh, yes.  So if you wanted to simplify I agree it would be easier to do that before calling `to_table`.  I think I understand now."
+        },
+        {
+            "created_at": "2022-11-15T09:40:07.797Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15716?focusedCommentId=17634264) by Joris Van den Bossche (jorisvandenbossche):*\nTo just OR-combine the different expressions for each of the paths, you can do this automatically with `reduce()` and a list comprehension calling Partitioning.parse on each of the paths (without having to resort to `_get_partition_keys` and `filters_to_expression`). Using your example:\r\n\r\n```Java\n\r\npaths = ['path/to/data/month_id=202105/v1-manual__2022-11-06T22:50:20.parquet',\r\n         'path/to/data/month_id=202106/v1-manual__2022-11-06T22:50:20.parquet',\r\n         'path/to/data/month_id=202107/v1-manual__2022-11-06T22:50:20..parquet']\r\npartitioning = ds.partitioning(pa.schema([('month_id', 'int64')]), flavor=\"hive\")\r\n\r\n\r\n>>> import operator\r\n>>> import functools\r\n>>> functools.reduce(operator.or_, [partitioning.parse(file) for file in paths])\r\n<pyarrow.compute.Expression (((month_id == 202105) or (month_id == 202106)) or (month_id == 202107))>\r\n```\r\n\r\nI think this is what Weston is suggesting to do. It doesn't necessarily give the most efficient filter expression, but that's a direct translation of the subset of paths (if there are many paths, it might be more efficient with isin or a greater/smaller compare kernel)"
+        },
+        {
+            "created_at": "2022-11-15T09:45:17.567Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15716?focusedCommentId=17634267) by Vibhatha Lakmal Abeykoon (vibhatha):*\n`[~jorisvandenbossche]` \u00a0I made the PR to handle this internally within the parse function.\u00a0"
+        },
+        {
+            "created_at": "2022-11-15T09:46:04.471Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15716?focusedCommentId=17634268) by Vibhatha Lakmal Abeykoon (vibhatha):*\nBut I should probably use the reduce operator.\u00a0"
+        }
+    ]
+}

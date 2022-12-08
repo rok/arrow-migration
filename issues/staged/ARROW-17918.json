@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[Python] ExtensionArray.__getitem__ is not called if called from StructArray",
+        "body": "***Note**: This issue was originally created as [ARROW-17918](https://issues.apache.org/jira/browse/ARROW-17918). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIt seems that when getting a value from a StructScalar extension information is lost. See:\r\n\r\n\r\n```python\n\r\nimport pyarrow as pa\r\n\r\nclass ExampleScalar(pa.ExtensionScalar):\r\n    def as_py(self):\r\n        print(\"ExampleScalar.as_py -> {self.value.as_py()}\")\r\n        return self.value.as_py()\r\n\r\nclass ExampleArray(pa.ExtensionArray):\r\n    def __getitem__(self, item):\r\n        return f\"ExampleArray.__getitem__[{item}] -> {self.storage[item]}\"\r\n    def __arrow_ext_scalar_class__(self):\r\n        return ExampleScalar\r\n\r\nclass ExampleType(pa.ExtensionType):\r\n    def __init__(self):\r\n        pa.ExtensionType.__init__(self, pa.int64(), \"ExampleExtensionType\")\r\n    def __arrow_ext_serialize__(self):\r\n        return b\"\"\r\n    def __arrow_ext_class__(self):\r\n        return ExampleArray\r\n\r\nexample_type = ExampleType()\r\narr = pa.array([1, 2, 3])\r\nexample_array = pa.ExtensionArray.from_storage(example_type, arr)\r\nexample_array2 = pa.StructArray.from_arrays([example_array, arr], [\"a\", \"b\"])\r\n\r\nprint(\"\\nExample 1\\n=========\")\r\nprint(example_array[0])\r\nprint(example_array.type)\r\nprint(type(example_array[0]))\r\n\r\nprint(\"\\nExample 2\\n=========\")\r\nprint(example_array2[0])\r\nprint(example_array2[0].type)\r\nprint(example_array2[0][\"a\"])\r\nprint(example_array2[0][\"a\"].type)\r\n```\r\n\r\nReturns:\r\n\r\n```python\n\r\nExample 1\r\n=========\r\nExampleArray.__getitem__[0] -> 1\r\nextension<ExampleExtensionType<ExampleType>>\r\n<class 'str'>\r\n\r\nExample 2\r\n=========\r\n[('a', 1), ('b', 1)]\r\nstruct<a: extension<ExampleExtensionType<ExampleType>>, b: int64>\r\n1\r\nextension<ExampleExtensionType<ExampleType>>\r\n```\r\n",
+        "created_at": "2022-10-03T17:25:51.000Z",
+        "updated_at": "2022-10-04T11:03:13.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-03T17:26:51.121Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17918?focusedCommentId=17612385) by Rok Mihevc (rokm):*\n`[~jorisvandenbossche]` what's your opinion on this?"
+        },
+        {
+            "created_at": "2022-10-03T21:03:35.343Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17918?focusedCommentId=17612437) by Balazs Jeszenszky (jeszyb):*\nThis is not limited to Structs - continuing Rok's example:\r\n```Java\n\r\n>>> a = pa.UnionArray.from_dense(pa.array([0,0,0], type=pa.int8()), pa.array([0,1,2], type=pa.int32()), [example_array])\r\n>>> a[2], a[1], a[0]\r\n(<pyarrow.UnionScalar: 3>, <pyarrow.UnionScalar: 2>, <pyarrow.UnionScalar: 1>)\r\n>>> print(a[2], a[1], a[0])\r\n3 2 1\r\n```"
+        },
+        {
+            "created_at": "2022-10-04T06:48:33.897Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17918?focusedCommentId=17612489) by Joris Van den Bossche (jorisvandenbossche):*\n> It seems that when getting a value from a StructScalar extension information is lost.\r\n\r\nThe type information is not really lost, since the output of your example clearly shows that it still has the extension type (`print(example_array2[0][\"a\"].type)` gives extension type). \r\n\r\nBut to get that extension scalar, it is true that it didn't go through the python level `\\_\\_getitem\\_\\_`. But I don't think we ever made any guarantee about that (it is not mentioned as a way you can customize extension type behaviour in https://arrow.apache.org/docs/dev/python/extending_types.html#defining-extension-types-user-defined-types)\r\n\r\n`[~rokm]` can you give a bit more context about what the goal could be to override `\\_\\_getitem\\_\\_` (that is not achieved by having a custom ExtensionScalar subclass)?\r\n\r\nSidenote: in the example code, the `\\_\\_arrow_ext_scalar_class\\_\\_` needs to be defined on the ExtensionType class, not the ExtensionArray one. That doesn't change that `\\_\\_getitem\\_\\_` is not called, but then the scalar you get from the struct array will use that subclass."
+        },
+        {
+            "created_at": "2022-10-04T11:03:13.128Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17918?focusedCommentId=17612565) by Rok Mihevc (rokm):*\n> `[~rokm]` \u00a0can you give a bit more context about what the goal could be to override\u00a0`__getitem__`\u00a0(that is not achieved by having a custom ExtensionScalar subclass)?\r\n\r\nFor example if the extension is a timestamp with timezone and I want __getitem__ to return epoch time in my local timezone when I print the nested type.\r\n\r\nOr if my extension array has a bigger than memory dictionary that I shard over chunks and I want to return correct values on __getitem__."
+        }
+    ]
+}

@@ -1,0 +1,34 @@
+{
+    "issue": {
+        "title": "[Python] Exported buffers don't expose type information",
+        "body": "***Note**: This issue was originally created as [ARROW-2913](https://issues.apache.org/jira/browse/ARROW-2913). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nUsing the `buffers()` method on array gives you a list of buffers backing the array, but those buffers lose typing information:\r\n```python\n\r\n>>> a = pa.array(range(10))\r\n>>> a.type\r\nDataType(int64)\r\n>>> buffers = a.buffers()\r\n>>> [(memoryview(buf).format, memoryview(buf).shape) for buf in buffers]\r\n[('b', (2,)), ('b', (80,))]\r\n```\r\n\r\nConversely, Numpy exposes type information in the Python buffer protocol:\r\n```python\n\r\n>>> a = pa.array(range(10))\r\n>>> memoryview(a.to_numpy()).format\r\n'l'\r\n>>> memoryview(a.to_numpy()).shape\r\n(10,)\r\n```\r\n\r\nExposing type information on buffers could be important for third-party systems, such as Dask/distributed, for type-based data compression when serializing.\r\n\r\nSince our C++ buffers are not typed, it's not obvious how to solve this. Should we return tensors instead?",
+        "created_at": "2018-07-25T19:01:41.000Z",
+        "updated_at": "2019-02-06T04:58:01.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-02-06T04:58:01.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-07-25T19:55:05.201Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2913?focusedCommentId=16556196) by Wes McKinney (wesm):*\nFrom Arrow's perspective, these buffers are \"just memory\"; they're given an interpretation in the context of the columnar data structure.\r\n\r\nWe could pin some extra metadata on the buffer on the Python side without much work, which would make the exported memory view look like int32, double, etc. That wouldn't be intrusive to any of the C++ API or implementation details"
+        },
+        {
+            "created_at": "2018-07-25T20:03:21.904Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2913?focusedCommentId=16556210) by Antoine Pitrou (apitrou):*\nMy worry with pinning metadata on the Python side is that the metadata is lost if you recreate the Python buffers after passing them through some C++ processing chain. This might not be very important, though, and perhaps we can make this a best-effort thing."
+        },
+        {
+            "created_at": "2018-07-25T20:12:16.763Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2913?focusedCommentId=16556221) by Wes McKinney (wesm):*\nWe could define a PrimitiveTypeBuffer or something similar in C++ but it would seem hard to guarantee that it would be used consistently. I don't know if we'd want to get into the business of automatically \"casting\" untyped buffers"
+        },
+        {
+            "created_at": "2018-07-25T20:15:58.597Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2913?focusedCommentId=16556224) by Antoine Pitrou (apitrou):*\nYes, I don't think so. We could refactor the C++ Buffer class to add optional type information, but then we would have to adapt tons of producer code to pass the information..."
+        }
+    ]
+}

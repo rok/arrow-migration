@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Docs][Python] Improved Tooling/Documentation on Constructing Larger than Memory Parquet",
+        "body": "***Note**: This issue was originally created as [ARROW-14781](https://issues.apache.org/jira/browse/ARROW-14781). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI have ~800GBs of csvs distributed across ~1200 files and a mere 32GB of RAM. My objective is to incrementally build a parquet dataset holding the collection. I can only hold a small subset of the data in memory.\r\n\r\nFollowing the docs as best I could, I was able to hack together a workflow that will do what I need, but it seems overly complex. I hope my problem is not out of scope, so I would love it if there was an effort to:\r\n\r\n1) streamline the APIs to make this more straight-forward\r\n2) better documentation on how to approach this problem\r\n3) out of the box CLI utilities that would do this without any effort on my part\r\n\r\nExpanding on 3), I was imagining something like a `parquet-cat`, `parquet-append`, `parquet-sample`, `parquet-metadata` or similar that would allow interacting with these files from the terminal. As it is, they are just blobs that require additional tooling to get even the barest sense of what is within.\r\n\r\nReproducible example below. Happy to hear what I missed that would have made this more straight-forward. Or that would also generate the parquet metadata at the same time.\r\n\r\nEDIT: made example generate random dataframes so it can be run directly. Was to close to my use case where I was reading files from disk\r\n\r\n```python\n\r\nimport itertools\r\n\r\nimport numpy as np\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nimport pyarrow.dataset as ds\r\n\r\ndef gen_batches():\r\n    NUM_CSV_FILES = 15\r\n    NUM_ROWS = 25\r\n    for _ in range(NUM_CSV_FILES):\r\n        dataf = pd.DataFrame(np.random.randint(0, 100, size=(NUM_ROWS, 5)), columns=list(\"abcde\"))\r\n\r\n# PyArrow dataset would only consume batches iterable\r\n        for batch in pa.Table.from_pandas(dataf).to_batches():\r\n            yield batch\r\n\r\n\r\nbatches = gen_batches()\r\n\r\n# using the write_dataset method requires providing the schema, which is not accessible from a batch?\r\npeek_batch = batches.__next__()\r\n# needed to build a table to get to the schema\r\nschema = pa.Table.from_batches([peek_batch]).schema\r\n\r\n# consumed the first entry of the generator, rebuild it here\r\nrenew_gen_batches = itertools.chain([peek_batch], batches)\r\n\r\nds.write_dataset(renew_gen_batches, base_dir=\"parquet_dst.parquet\", format=\"parquet\", schema=schema)\r\n# attempting write_dataset with an iterable of Tables threw: pyarrow.lib.ArrowTypeError: Could not unwrap RecordBatch from Python object of type 'pyarrow.lib.Table'\r\n```\r\n",
+        "created_at": "2021-11-20T07:35:10.000Z",
+        "updated_at": "2022-04-08T12:33:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Documentation",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-23T10:22:15.371Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14781?focusedCommentId=17447879) by Joris Van den Bossche (jorisvandenbossche):*\n[~ludicrous_speed] question about your example: you have a generator that produces arrow batches. I suppose in your real use case this generator yields batches from reading the individual csv files? \r\nIn case you don't know: the `ds.dataset(..)` also supports reading csv files, which in principle should allow you to write those to parquet as:\r\n\r\n```Java\n\r\ncsv_dataset = ds.dataset(\"...\", format=\"csv\")\r\nds.write_dataset(csv_dataset, \"parquet_dst.parquet\", format=\"parquet\")\r\n```"
+        },
+        {
+            "created_at": "2021-11-23T16:25:51.093Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14781?focusedCommentId=17448104) by Damien Ready (ludicrous_speed):*\nSorry, I lost a bit of the forest from the trees in my write-up.\r\n\r\nYes, I am generating each csv from a function that uses pandas to pull from disk, does some light munging, and then yields a batch. I was inspired by this blurb from the documentation <https://arrow.apache.org/docs/python/dataset.html#writing-large-amounts-of-data> which made me think this was going to be the proper way to create a full parquet collection.\r\n\r\nWhat I failed to communicate is I was hoping there was something of a higher-level interface for what feels like a common interaction: big pile of data into parquet. I can already use pandas to sequentially make individual .parquet files.\r\n\r\n```python\n\r\ndf = pd.read_csv(\"filename.csv\")\r\ndf.to_parquet(\"local.parquet\")\r\n```\r\n\r\nMy thinking was that converting each file into a parquet file was naive, and that the dataset interface would take care of some book-keeping if I informed it there was stream of data. That is, it would create the appropriate metadata files and generate N parquet blocks of standard size (eg 256 MB). In my particular use case, each csv files fits comfortably in RAM, so using the pyarrow interface directly rather than letting pandas handle the transition is more overhead.\r\n\r\nAs an aside, I just checked out the ds.dataset function and the docstring does not mention \u201ccsv\u201d as a valid format."
+        },
+        {
+            "created_at": "2021-11-30T17:16:24.373Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14781?focusedCommentId=17451258) by Weston Pace (westonpace):*\n> As an aside, I just checked out the ds.dataset function and the docstring does not mention \u201ccsv\u201d as a valid format.\r\n\r\nThanks for the heads up.  This is definitely an oversight.  Did you look at Joris' solution:\r\n\r\n```Java\n\r\ncsv_dataset = ds.dataset(\"...\", format=\"csv\")\r\nds.write_dataset(csv_dataset, \"parquet_dst.parquet\", format=\"parquet\")\r\n```\r\n\r\nDoes this work for you or not?  It should be doing roughly the same thing as your snippet.\r\n\r\n> My thinking was that converting each file into a parquet file was naive, and that the dataset interface would take care of some book-keeping if I informed it there was stream of data. That is, it would create the appropriate metadata files and generate N parquet blocks of standard size (eg 256 MB).\r\n\r\nI'm in the process of adding some control over this to write_dataset.  Take a look at ARROW-14426 for more details.  Right now I believe write_dataset will create one giant parquet file for each partition with one row group for each input file.  In the future these should both be configurable."
+        },
+        {
+            "created_at": "2021-11-30T17:25:54.507Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14781?focusedCommentId=17451263) by Weston Pace (westonpace):*\nI've created ARROW-14931 to add the missing format options."
+        },
+        {
+            "created_at": "2021-12-02T05:49:35.247Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14781?focusedCommentId=17452192) by Damien Ready (ludicrous_speed):*\nYes, quickly testing Joris' solution, it does create a parquet file from a csv.\r\n\r\nWould be interested in getting some better control on the write_dataset functionality. In my current situation, the individual csv files are a reasonable size, but I can imagine where each file is small (say 1MB) or large (10+GBs) where I do not want to manage the splits/aggregation myself. In the event I wanted to use this new functionality (automatic evenly sized parquet files), would the above snippet I provided still be the correct approach or is there a different API that would streamline this?"
+        },
+        {
+            "created_at": "2021-12-02T18:52:16.753Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14781?focusedCommentId=17452560) by Weston Pace (westonpace):*\nAs part of 7.0.0 I am working on ARROW-14426 / ARROW-14427 which should offer the customization you are after (assuming I understand your question correctly)."
+        },
+        {
+            "created_at": "2021-12-02T18:53:21.908Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14781?focusedCommentId=17452561) by Weston Pace (westonpace):*\nAh, also ARROW-13703"
+        }
+    ]
+}

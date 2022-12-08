@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[Rust] Possibly incorrect index check assertion in StringArray and BinaryArray",
+        "body": "***Note**: This issue was originally created as [ARROW-7559](https://issues.apache.org/jira/browse/ARROW-7559). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe following code tries to build a list array based on an underlying string array and panics on master (commit acfcdee75acb4b1814f2e727c150a7403d618e8f)\r\n```java\n\r\n #[test]\r\nfn nested_string_array() {\r\n    let strarray = StringArray::from(vec![\"foo\", \"bar\", \"foobar\"]);\r\n\r\n    let nestedData = ArrayData::builder(DataType::List(Box::new(DataType::Utf8)))\r\n        .len(2)\r\n        .add_buffer(Buffer::from(&[0, 2, 3].to_byte_slice()))\r\n        .add_child_data(ArrayData::builder(DataType::Utf8)\r\n            .len(strarray.len())\r\n            .add_buffer(strarray.value_offsets())\r\n            .add_buffer(strarray.value_data())\r\n            .build())\r\n        .build();\r\n    let nestedArray = ListArray::from(nestedData);\r\n\r\n    dbg!(nestedArray);\r\n}\n```\r\nMy guess is that the index check in StringArray.value is incorrect, instead of \r\n\r\n\r\n```java\n\r\n    pub fn value(&self, i: usize) -> &str {\r\n        assert!(\r\n            i + self.offset() < self.data.len(),\r\n            \"StringArray out of bounds access\"\r\n        );\r\n```\r\nit should probably compare `i` without adding the offset. The same check is also done in `BinaryArray`. Changing this results in the expected output of\r\n```java\n\r\n[arrow/src/array/array.rs:2460] nestedArray = ListArray\r\n[\r\n  StringArray\r\n[\r\n  \"foo\",\r\n  \"bar\",\r\n],\r\n  StringArray\r\n[\r\n  \"foobar\",\r\n],\r\n]\r\n \n```",
+        "created_at": "2020-01-13T10:41:12.000Z",
+        "updated_at": "2020-01-14T04:36:42.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-01-14T04:36:42.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-01-14T02:39:49.026Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7559?focusedCommentId=17014817) by Paddy Horan (paddyhoran):*\nThanks `[~jhorstmann]`.\r\n\r\nIt took a while to convince myself but I agree with your suggested fix, I posted a PR [here](https://github.com/apache/arrow/pull/6180) to fix it.\r\n\r\nFYI - `ArrayData` is fairly low level, you can use the other builders so you don't have to manage the offsets, etc. yourself, see the test I added in the PR (which is basically your exact example above)."
+        },
+        {
+            "created_at": "2020-01-14T04:36:42.885Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7559?focusedCommentId=17014858) by Neville Dipale (nevi_me):*\nIssue resolved by pull request 6180\n<https://github.com/apache/arrow/pull/6180>"
+        }
+    ]
+}

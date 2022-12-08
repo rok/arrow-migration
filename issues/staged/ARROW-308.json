@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "UnionListWriter.setPosition() should not call startList()",
+        "body": "***Note**: This issue was originally created as [ARROW-308](https://issues.apache.org/jira/browse/ARROW-308). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nUnionListWriter.setPosition() is implemented as follows:\n```Java\n  @Override\n  public void setPosition(int index) {\n    super.setPosition(index);\n    startList();\n  }\n```\n\nIt works fine, but if you run the following code:\n```Java\n    MapVector parent = new MapVector(\"parent\", allocator, null);\n    ComplexWriter writer = new ComplexWriterImpl(\"root\", parent);\n    MapWriter rootWriter = writer.rootAsMap();\n\n    rootWriter.start();\n    rootWriter.bigInt(\"int\").writeBigInt(0);\n    rootWriter.list(\"list\").startList();\n    rootWriter.list(\"list\").bigInt().writeBigInt(0);\n    rootWriter.list(\"list\").endList();\n    rootWriter.end();\n\n    rootWriter.setPosition(1);\n    rootWriter.start();\n    rootWriter.bigInt(\"int\").writeBigInt(1);\n    rootWriter.end();\n\n    rootWriter.setPosition(2);\n    rootWriter.bigInt(\"int\").writeBigInt(2);\n    rootWriter.start();\n    rootWriter.list(\"list\").startList();\n    rootWriter.list(\"list\").bigInt().writeBigInt(2);\n    rootWriter.list(\"list\").endList();\n    rootWriter.end();\n    writer.setValueCount(3);\n\n    for (int i = 0; i < 3; i++) {\n      parent.getReader().setPosition(i);\n      System.out.printf(\"%d: %s%n\", i, parent.getReader().readObject());\n    }\n```\n\nYou get:\n```\n0: {\"root\":{\"int\":0,\"list\":[0]}}\n1: {\"root\":{\"int\":1,\"list\":[]}}\n2: {\"root\":{\"int\":2,\"list\":[2]}}\n```\n\nEven though we didn't write anything in the 2nd row \"list\", it shows up as empty instead of null. I tracked the problem to UnionListWriter.setPosition() calling startList() which marks the row as not null even if we don't write anything to it.\n",
+        "created_at": "2016-09-28T02:03:01.000Z",
+        "updated_at": "2016-10-04T23:01:42.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2016-09-29T21:36:33.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2016-09-28T19:30:21.115Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-308?focusedCommentId=15530623) by Abdel Hakim Deneche (adeneche):*\nopenend [PR#150](https://github.com/apache/arrow/pull/150)"
+        },
+        {
+            "created_at": "2016-09-29T16:09:07.943Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-308?focusedCommentId=15533196) by Abdel Hakim Deneche (adeneche):*\n-~~The fix I merged is incomplete, many writers are working under the assumption that UnionListWriter.setPosition() also calls startList(). Working on proper fix, but if it takes too long I will probably just revert the merged PR until I get it done~~-"
+        }
+    ]
+}

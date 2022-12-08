@@ -1,0 +1,80 @@
+{
+    "issue": {
+        "title": "[C++] CSV add convert option to attempt 32bit number inferences",
+        "body": "***Note**: This issue was originally created as [ARROW-13028](https://issues.apache.org/jira/browse/ARROW-13028). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen types are being inferred by CSV the numbers are always 64 bit. For large data sets it could be better to use 32 bit types to save over all memory. To do this it would be useful to add an option to ConvertOptions to try 32 bit numbers before 64 bit. By default this option would be disabled.",
+        "created_at": "2021-06-09T18:57:17.000Z",
+        "updated_at": "2022-09-27T16:50:23.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-09T19:04:31.233Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13028?focusedCommentId=17360291) by Antoine Pitrou (apitrou):*\nI'm unsure how much flexibility we want to add to CSV type inference. You can of course pass column types explicitly if you want to optimize memory footprint.\r\n\r\n`[~npr]`  `[~jonkeane]` What do you think?"
+        },
+        {
+            "created_at": "2021-06-09T19:09:54.214Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13028?focusedCommentId=17360295) by Jonathan Keane (jonkeane):*\nYeah, I tend to agree that if one needs to / wants to manage that conversion explicit column types is the way to go (and that interface has the benefit of also allowing one to control other types of other columns). \r\n\r\nThis is an empirical question (and almost certainly vary by the data), but what would a miss look like performance wise for trying 32bit and then having to change to 64bit after the fact? That would involve some computation, correct? Or can we do that conversion for free / without rewriting the representation?"
+        },
+        {
+            "created_at": "2021-06-09T19:19:05.194Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13028?focusedCommentId=17360301) by Weston Pace (westonpace):*\nThe problem is that the miss may not be detected until some # of blocks have been processed.\u00a0 The file-based CSV reader handles this by going backwards through all the already-processed blocks and upcasting to the looser type.\u00a0 So it can be a non-trivial performance hit.\u00a0 However, the streaming CSV (used by the datasets API) isn't so lenient.\u00a0 It infers type based on the first block (default 1MB) of data alone.\u00a0 The complexity of doing otherwise is pretty significant.\u00a0 I think could cause an issue here.\u00a0 If the large >32 bit value doesn't happen until after the first block you will get parsing errors."
+        },
+        {
+            "created_at": "2021-06-09T19:19:12.010Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13028?focusedCommentId=17360302) by Antoine Pitrou (apitrou):*\nThere would be a conversion from int32 to int64 indeed. The conversion is cheap compared to the actual CSV parsing, so should be a minor concern, though."
+        },
+        {
+            "created_at": "2021-06-09T20:04:58.178Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13028?focusedCommentId=17360323) by Nate Clark (neworld):*\nIdeally one would pass the column types if they are known but for my use case I am using the type inference of the reader to know what the types of the columns are. When relying on the reader to get the types the only way to get 32 bit values would be to re-parse the csv forcing the type to a 32bit value and if it isn't a 32 bit value it will fail.\r\n\r\n\u00a0\r\n\r\nIt is true that if one of the later blocks did have a 64bit number that would cause a parsing error but the same would be true if the column was inferred as int but it was in fact a float or the column is empty 40% of the time and the first block happens to not have data for the column. This is more of a limitation that the schema is determined by the first block and cannot change after that.\r\n\r\n\u00a0\r\n\r\nOne of the reasons that the default is to not try 32bit values is to avoid the potential parse errors on subsequent blocks so this should only really be used if the caller knows all numeric columns can be represented in 32 bit or can handle the parse error."
+        },
+        {
+            "created_at": "2021-06-09T21:17:43.730Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13028?focusedCommentId=17360401) by Nate Clark (neworld):*\nI was already working on this and discovered something which might be a problem with my idea. It looks like any numeric value can be parsed as a float even if the precision of the string is too much for a float. Because of this the float parse will succeed even if it is better to parse it as a double.\r\n\r\nIs this by design or accident?"
+        },
+        {
+            "created_at": "2021-08-05T16:31:26.541Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13028?focusedCommentId=17394176) by Nate Clark (neworld):*\nIs there any interest in adding this for at least ints? If not I can just close this ticket."
+        },
+        {
+            "created_at": "2021-08-05T16:53:18.696Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13028?focusedCommentId=17394197) by Antoine Pitrou (apitrou):*\nSorry for not answering earlier:\r\n\r\n> Is this by design or accident?\r\n\r\nI would say by accident, but I'm not sure what you mean with \"the precision of the string is too much for a float\". Strictly speaking, some very short decimal numbers are not exactly representable in binary floating-point, for example \"0.3\". Should we reject them?\r\n\r\n> Is there any interest in adding this for at least ints? \r\n\r\nPotentially. `[~npr]` `[~jonkeane]` what do you think?\r\n"
+        },
+        {
+            "created_at": "2021-08-11T14:42:09.033Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13028?focusedCommentId=17397395) by Nate Clark (neworld):*\n>> Is this by design or accident?\r\n\r\n> I would say by accident, but I'm not sure what you mean with \"the precision of the string is too much for a float\". Strictly speaking, some very short decimal numbers are not exactly representable in binary floating-point, for example \"0.3\". Should we reject them?\r\n\r\nI was thinking something like `3.78946546156984798497501e10` can be better represented as double than a float. But as you point out there are values which cannot be fully represented in either, so there might not be a good way to detect when double should be used instead of float."
+        },
+        {
+            "created_at": "2021-09-21T05:40:48.716Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13028?focusedCommentId=17417922) by Eduardo Ponce (edponce):*\nI think that having CSV infer to largest type is more robust/safe and use explicit column types for other conversions.\r\nIf inference is set to be from smallest to largest, then where does these decisions end?\r\nDo we infer first as signed or unsigned integers? Int8 vs. int32, etc? Half-float vs float vs double?\r\nWe can definitely decide to simply try signed int32 and float as the smallest integral type, but it stills feels a bit opinionated."
+        },
+        {
+            "created_at": "2021-09-27T14:14:06.664Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13028?focusedCommentId=17420767) by Nate Clark (neworld):*\nI agree that largest type could be considered safest especially for floating point.\r\nIn theory it could start at int8 and work from there is any interest in that, but signed vs unsigned is probably not as beneficial.\r\nFor floating point the detection is more difficult since it is already considered an imprecise format so parsers will force values to fit to the size and detection of double vs float would have to be done outside the parser.\r\nI did put out the linked MR for int32 detection so that you can see at least that implemented."
+        },
+        {
+            "created_at": "2021-09-27T14:19:26.362Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13028?focusedCommentId=17420774) by Antoine Pitrou (apitrou):*\nI agree with Eduardo that it feels a bit opinionated. If we want to allow users to influence integer inference, at least a more general setting should probably be exposed than a simple boolean option to try 32-bit inference.\r\n\r\n`[~npr]` `[~icook]` what do you think?"
+        },
+        {
+            "created_at": "2021-10-13T13:34:13.309Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13028?focusedCommentId=17428226) by Nate Clark (neworld):*\n`[~apitrou]` what would you envision as a more generic setting for influencing the type inference? Something like an enum to indicate only infer 64bit, attempt 32bit int, force 32bit float?"
+        },
+        {
+            "created_at": "2022-02-09T14:40:25.704Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13028?focusedCommentId=17489594) by Nate Clark (neworld):*\n`[~apitrou]` is it worth keeping this ticket open to discuss this further or should this be closed because there is no interest in implementing this behavior? "
+        },
+        {
+            "created_at": "2022-02-09T16:30:51.822Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13028?focusedCommentId=17489671) by Antoine Pitrou (apitrou):*\nWell, it's probably worth keeping open for now. But the solution should revolve around a more future-proof setting than the proposed boolean setting."
+        },
+        {
+            "created_at": "2022-09-27T16:50:23.135Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13028?focusedCommentId=17610149) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned per [project policy](https://arrow.apache.org/docs/dev/developers/bug_reports.html#issue-assignment). Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

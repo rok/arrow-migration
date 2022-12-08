@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "[C#] System.Memory  Span.CopyTo - Crashes on Net Framework ",
+        "body": "***Note**: This issue was originally created as [ARROW-7040](https://issues.apache.org/jira/browse/ARROW-7040). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe following code crashes on 8 cores.\r\n```java\n\r\n        public async Task StringArrayBuilder_StressTest()\r\n        {\r\n            var wait = new List<Task>();            \r\n            for (int i = 0; i < 30; ++i)\r\n            {\r\n                var data = Enumerable.Range(0, 1000).Select(x => $\"Item {x + 1}\").ToArray();                \r\n                var t = Task.Run(() =>\r\n                {\r\n                    for (int j = 0; j < 10000000; ++j)\r\n                    {\r\n                        var builder = new StringArray.Builder();\r\n                        builder.AppendRange(data);\r\n                    }\r\n                });                \r\n                wait.Add(t);\r\n            }            \r\n\r\n            await Task.WhenAll(wait);\r\n        } \n```\r\n\u00a0\r\n\r\nIt does not happen with the primitive arrays.\u00a0 (ie IntArrayBuilder)\r\n\r\nI suspect it is due to the offset array / and all the copy / resizing going on\r\n\r\n\u00a0\r\n\r\nUpdate - it seems that the problem is in the underlying **ArrowBuffer.Builder<T>**\r\n```java\n\r\n         public async Task ValueBuffer_StressTest()\r\n        {\r\n            var wait = new List<Task>();            \r\n            for (int i = 0; i < 30; ++i)\r\n            {\r\n                var data = Enumerable.Range(0, 1000).Select(x => $\"Item {x + 1}\").ToArray();                \r\n                var t = Task.Run(() =>\r\n                {\r\n                    for (int j = 0; j < 10000000; ++j)\r\n                    {\r\n                        ArrowBuffer.Builder<byte> ValueBuffer = new ArrowBuffer.Builder<byte>();                        \r\n                        foreach (var d in data)\r\n                        {\r\n                            ValueBuffer.Append(Encoding.UTF8.GetBytes(d));\r\n                        }\r\n                    }\r\n                });                \r\n                wait.Add(t);\r\n            }            \r\n            await Task.WhenAll(wait);\r\n        }\n```\r\n\u00a0\r\n\r\nUpdate 2:\r\n\r\nThis is due to a confirmed bug in System.Memory - The implications are that Span.CopyTo needs to be removed / replaced.\u00a0\r\n\r\nThis is method is used internally by ArrowBuffer so I can't work around this easily.\u00a0\r\n\r\nSolutions\r\n1. Change the code\n   1. Remove it out right (including disable span in FlatBuffer)\n   1. create a multi target nuget where the offending code has compile blocks #If (NETFRAMEWORK) - and disable span in FlatBuffers only for net framework build \n1. wait for a System.Memory fix?\n   \n   \u00a0\n   \n   I suspect option 2 won't happen anytime soon. \u00a0\n   \n   \u00a0",
+        "created_at": "2019-10-31T15:42:42.000Z",
+        "updated_at": "2022-07-12T14:04:21.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C#",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-31T21:06:08.718Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7040?focusedCommentId=16964387) by Anthony Abate (abbot):*\nthis might not be an arrow issue - it might be an issue in the System.Memory code - I reported a bug here:\u00a0 <https://github.com/dotnet/corefx/issues/42276>\r\n\r\n\r\nIt still is an open issue for us though because the current Array Builder implementation of arrow is currently crashing using strings and many threads.\u00a0\u00a0 I am considering creating a separate builder for strings that internally uses byte[] instead of Spans to see if that makes the problem go away\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-01-03T04:40:12.006Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7040?focusedCommentId=17007222) by Anthony Abate (abbot):*\ncreated a PR for this:\r\n\r\nhttps://github.com/apache/arrow/pull/6122"
+        },
+        {
+            "created_at": "2022-07-12T14:04:21.123Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7040?focusedCommentId=17565549) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

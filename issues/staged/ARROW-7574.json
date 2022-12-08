@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[Rust] FileSource read implementation is seeking for each single byte",
+        "body": "***Note**: This issue was originally created as [ARROW-7574](https://issues.apache.org/jira/browse/ARROW-7574). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\non current master branch\r\n```java\n\r\n$ RUST_BACKTRACE=1 strace target/debug/parquet-read tripdata.parquet\r\n...\r\nlseek(3, -8, SEEK_END)                  = 2937\r\nread(3, \",\\10\\0\\0PAR1\", 8192)           = 8\r\nlseek(3, 845, SEEK_SET)                 = 845\r\nread(3, \"\\25\\2\\31\\334H schema\"..., 8192) = 2100\r\n...\r\nlseek(5, 4, SEEK_SET)                   = 4\r\nread(5, \"\\25\\0\\25\\310\\1\\25P,\\25\\n\\25\\0\\25\\10\\25\\10\\0346\\0(\\02000000000000\"..., 8192) = 2941\r\nlseek(5, 5, SEEK_SET)                   = 5\r\nread(5, \"\\0\\25\\310\\1\\25P,\\25\\n\\25\\0\\25\\10\\25\\10\\0346\\0(\\020000000000000\"..., 8192) = 2940\r\nlseek(5, 6, SEEK_SET)                   = 6\r\nread(5, \"\\25\\310\\1\\25P,\\25\\n\\25\\0\\25\\10\\25\\10\\0346\\0(\\0200000000000000\"..., 8192) = 2939\r\nlseek(5, 7, SEEK_SET)                   = 7\r\nread(5, \"\\310\\1\\25P,\\25\\n\\25\\0\\25\\10\\25\\10\\0346\\0(\\02000000000000000\"..., 8192) = 2938\r\nlseek(5, 8, SEEK_SET)                   = 8\r\nread(5, \"\\1\\25P,\\25\\n\\25\\0\\25\\10\\25\\10\\0346\\0(\\020000000000000000\"..., 8192) = 2937\r\nlseek(5, 9, SEEK_SET)                   = 9\r\nread(5, \"\\25P,\\25\\n\\25\\0\\25\\10\\25\\10\\0346\\0(\\0200000000000000004\"..., 8192) = 2936\r\nlseek(5, 10, SEEK_SET)                  = 10\r\nread(5, \"P,\\25\\n\\25\\0\\25\\10\\25\\10\\0346\\0(\\0200000000000000004\\30\"..., 8192) = 2935\r\n```\r\n\u00a0Notice the seek position being incremented by one, despite reading up to 8192 bytes at a time. Interestingly this does not seem to have a big performance impact on a local file system with linux, but becomes a problem when working with a custom implementation of ParquetReader, for example for reading from s3.\r\n\r\nThe problem seems to be in\r\n```Java\n\r\nimpl<R: ParquetReader> Read for FileSource<R>\r\n```\r\n\r\nwhich is unconditionally calling\r\n\r\n```Java\n\r\nreader.seek(SeekFrom::Start(self.start as u64))?\r\n```\r\n\r\nInstead it should probably keep track of the current position and only seek on the first read.",
+        "created_at": "2020-01-14T15:18:40.000Z",
+        "updated_at": "2020-05-15T13:48:14.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-05-15T13:48:14.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-04-22T13:21:34.917Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7574?focusedCommentId=17089670) by Mark Hildreth (markhildreth):*\nAlthough this issue was reported first, ARROW-7681 appears to be trying to solve the same problem, and has some pull requests looking to make the change."
+        },
+        {
+            "created_at": "2020-05-15T13:47:28.003Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7574?focusedCommentId=17108299) by J\u00f6rn Horstmann (jhorstmann):*\nI retested this with the current master and it seems indeed to be fixed. There are still seeks where the file position should already be at the right position, but doing those for every 8192 bytes should not be a problem.\r\n```java\n\r\nlseek(5, 4, SEEK_SET)                   = 4\r\nread(5, \"\\25\\0\\25\\260\\200\\200\\1\\25\\272\\354\\37,\\25\\234\\263\\6\\25\\0\\25\\10\\25\\10\\0346\\0(\\02000000\"..., 8192) = 8192\r\nmmap(NULL, 262144, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7f66eca90000\r\nlseek(5, 8196, SEEK_SET)                = 8196\r\nread(5, \"J N\\0001J N\\00416J\\320\\7\\0006J\\240\\17\\0006J\\320\\7\\0006J\\320\\7\\0006J\"..., 252765) = 252765 \n```"
+        }
+    ]
+}

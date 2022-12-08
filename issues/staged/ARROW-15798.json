@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[R][C++] Discussion: Plans for date casting from int to support an origin option?",
+        "body": "***Note**: This issue was originally created as [ARROW-15798](https://issues.apache.org/jira/browse/ARROW-15798). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n2 questions:\r\n- plans to support an origin option for int -> date32 casting?\n- plans to support double -> date32 casting? \n  =======================\n  Currently the casting from integer to date works, but assumes epoch (1970-01-01) as the origin.\u00a0\n  ```r\n  \n  > a <- Array$create(32L)\n  > a$cast(date32())\n  Array\n  <date32[day]>\n  [\n    1970-02-02\n  ]\n  ```\n  \n  Would it make sense to have an `origin` option that would allow the user to fine tune the casting? For example, in R the `base::as.Date()` function has such an argument\n  ```r\n  \n  > as.Date(32, origin = \"1970-01-02\")\n  [1] \"1970-02-03\"\n  ```\n  \n  We have a potential workaround in R (once we support date & duration arithmetic), but I was wondering if there might me more general interest for this. \n  \n  A secondary aspect (as my R example shows) R support casting to date not only from integers, but also doubles. Would there be interesting in that? Need be I can split this into several tickets.  \n  \n  Are there any plans in either of these 2 directions?",
+        "created_at": "2022-02-28T14:33:43.000Z",
+        "updated_at": "2022-03-22T09:24:15.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-28T14:47:24.041Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15798?focusedCommentId=17498945) by Rok Mihevc (rokm):*\nWe've discussed origin in context of rounding (https://github.com/apache/arrow/pull/11818#issuecomment-999499229) where it's arguably much more important (rounding to 50years with origin 1970 or origin 2000 will return different results). There was no interest yet, but that could just be the lack of users."
+        },
+        {
+            "created_at": "2022-02-28T15:42:59.451Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15798?focusedCommentId=17498974) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nThanks, `[~rokm]`. It looks like `origin` could be really useful in several transformations and hence it might justify a direct approach instead of numerous workarounds. "
+        },
+        {
+            "created_at": "2022-02-28T16:00:00.475Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15798?focusedCommentId=17498988) by Rok Mihevc (rokm):*\nCould you list the workarounds so we can evaluate the work-to-benefit ratio?\r\n\r\nAlso note that arrow spect states epoch starts 1970-01-01 (https://github.com/apache/arrow/blob/master/format/Schema.fbs#L244)."
+        },
+        {
+            "created_at": "2022-02-28T16:12:25.320Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15798?focusedCommentId=17499001) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nFor example, in R if we want to have a binding to `as.Date()` with origin, without an option, we would have to use some arithmetic to support an origin different from epoch, something like:\r\n```r\n\r\nas.Date(integer, origin = \"1970-01-02\")\r\n# will be implemented in several steps\r\n# step 1 figure out period from epoch\r\nperiod = origin - epoch\r\n# step 2 add the integer and period to epoch\r\nresult = epoch + period + integer\r\n```\r\n\r\nWorkarounds would be needed for any `lubridate` functionality that supports an `origin` argument. \r\n\r\nYep, arrow indeed states that. I think this is related, but slightly different - namely an implicit arrow assumption that `origin` is always epoch. This assumption, for lubridate, is not accurate. \r\n"
+        },
+        {
+            "created_at": "2022-02-28T18:32:18.069Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15798?focusedCommentId=17499115) by Rok Mihevc (rokm):*\nYeah, I think your suggestion is valid. We can use temporal subtract kernel: `subtract(timestamp, subtract(1970-01-01 - origin))`. This is pretty harmless and clean.\r\nHowever maybe there are cases in lubridate where origin of a timestamp changes output of a function? I don't know how common origin is in lubridate, but I see it is in clock where [e.g. flooring uses it](https://clock.r-lib.org/articles/recipes.html#flooring-by-days). Do we know of such things in lubridate?\r\n"
+        },
+        {
+            "created_at": "2022-03-01T14:55:39.135Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15798?focusedCommentId=17499592) by Joris Van den Bossche (jorisvandenbossche):*\nPandas also has such an `origin` keyword in `pd.to_datetime` (I seem to remember that it can, for example, be useful for data coming from Matlab).\r\n\r\nIf we want to add something like this, I think we should add it as a separate kernel (to specifically convert integers/doubles to timestamp or date), and not add this to Cast."
+        },
+        {
+            "created_at": "2022-03-01T21:48:27.739Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15798?focusedCommentId=17499780) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nAFAIK flooring does not use origin (yet) in `lubridate`. There\u00a0are/were some discussions around it, but with no outcome yet. `origin` seems to be mainly used in the coercion/ casting methods for numerics (`as_date`, `as_datetime` etc).  "
+        },
+        {
+            "created_at": "2022-03-03T11:58:41.871Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15798?focusedCommentId=17500701) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\n`[~jorisvandenbossche]` \u00a0& `[~rokm]` \u00a0I am also bumping a bit into conversion from double/ float into date.\u00a0\r\n\r\nIn R we could do something like this:\r\n\r\n```r\n\r\n# convert a double to date \r\nas.Date(34.56, origin = \"1970-01-01\")\u00a0\r\n#> [1] \"1970-02-04\"\r\n```\r\n\r\nbut then add to it and spill over into the following day\r\n```r\n\r\nas.Date(34.56, origin = \"1970-01-01\") + 0.45\r\n#> [1] \"1970-02-05\"\r\n```\r\n\r\ndue to the fact that (under the hood) the numerical representation is intact\r\n```r\n\r\nas.numeric(as.Date(34.56, origin = \"1970-01-01\"))\r\n#> [1] 34.56\r\n``` \r\n\r\n`date64()` might be the solution, but the roundtrip to R results in `date64()` being converted as date-time and not date\r\n```r\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\n#> See arrow_info() for available features\r\n\r\na <- Array$create(34.56)\r\n(a*86400*1000)$cast(int64())$cast(date64())\r\n#> Array\r\n#> <date64[ms]>\r\n#> [\r\n#>   1970-02-04\r\n#> ]\r\n```\r\n\r\nIn a dplyr pipeline:\r\n```r\n\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\nlibrary(arrow, warn.conflicts = FALSE)\r\n#> See arrow_info() for available features\r\n\r\ndf <- tibble::tibble(\r\n  a = 34.56\r\n)\r\n\r\ndf %>% \r\n  mutate(b = as.Date(a, origin = \"1970-01-01\"))\r\n#> # A tibble: 1 \u00d7 2\r\n#>       a b         \r\n#>   <dbl> <date>    \r\n#> 1  34.6 1970-02-04\r\n\r\ndf %>% \r\n  arrow_table() %>% \r\n  mutate(b = as.Date(a, origin = \"1970-01-01\")) %>% \r\n  collect()\r\n#> # A tibble: 1 \u00d7 2\r\n#>       a b         \r\n#>   <dbl> <dttm>    \r\n#> 1  34.6 1970-02-04 14:26:24\r\n```"
+        },
+        {
+            "created_at": "2022-03-03T14:52:37.920Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15798?focusedCommentId=17500810) by Jonathan Keane (jonkeane):*\nIn response to what Drago\u0219 posted there, I do wonder if date64 being turned into POSIXct when it comes back to R. That seems a bit off. Though there is some precision lost going from integer of MS to a float with fractional days (due to float imprecision) if we did date64 -> date backed by a float, but that has at least logical type consistency there. Thoughts?"
+        },
+        {
+            "created_at": "2022-03-03T16:08:06.523Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15798?focusedCommentId=17500852) by Rok Mihevc (rokm):*\nIdeally we would not have lossy roundtrips. Date as a float could be implemented as an extension array. But it's a messy approach."
+        }
+    ]
+}

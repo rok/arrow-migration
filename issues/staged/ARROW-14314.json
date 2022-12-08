@@ -1,0 +1,72 @@
+{
+    "issue": {
+        "title": "[C++] Sorting dictionary array not implemented",
+        "body": "***Note**: This issue was originally created as [ARROW-14314](https://issues.apache.org/jira/browse/ARROW-14314). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFrom R, taking the stock `mtcars` dataset and giving it a dictionary type column:\r\n\r\n```Java\n\r\nmtcars %>% \r\n  mutate(cyl = as.factor(cyl)) %>% \r\n  Table$create() %>% \r\n  arrange(cyl) %>% \r\n  collect()\r\n\r\nError: Type error: Sorting not supported for type dictionary<values=string, indices=int8, ordered=0>\r\n../src/arrow/compute/kernels/vector_array_sort.cc:427  VisitTypeInline(type, this)\r\n../src/arrow/compute/kernels/vector_sort.cc:148  GetArraySorter(*physical_type_)\r\n../src/arrow/compute/kernels/vector_sort.cc:1206  sorter.Sort()\r\n../src/arrow/compute/api_vector.cc:259  CallFunction(\"sort_indices\", {datum}, &options, ctx)\r\n../src/arrow/compute/exec/order_by_impl.cc:53  SortIndices(table, options_, ctx_)\r\n../src/arrow/compute/exec/sink_node.cc:292  impl_->DoFinish()\r\n../src/arrow/compute/exec/exec_plan.cc:297  iterator_.Next()\r\n../src/arrow/record_batch.cc:318  ReadNext(&batch)\r\n../src/arrow/record_batch.cc:329  ReadAll(&batches)\r\n```",
+        "created_at": "2021-10-13T20:55:28.000Z",
+        "updated_at": "2022-10-20T04:59:21.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-17T17:12:02.569Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14314?focusedCommentId=17445377) by Antoine Pitrou (apitrou):*\nIt should be possible to do this efficiently:\r\n\r\n- generate an array of ordinals from the dictionary values: for example `[\"c\", \"a\", \"b\"]` would generate `[2, 0, 1]`, while `[\"c\", \"a\", \"b\", \"b\"]` would generate `[3, 0, 1, 1]` (notice that equal values should give the same ordinal, for stability)\n- generate a dense array by indexing the computed ordinals with the generated indices\n- sort the dense array\n  \n  One complication is to deal with nulls inside the dictionary values, so that stability is enforced for them as well.\n"
+        },
+        {
+            "created_at": "2022-05-10T13:04:03.442Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14314?focusedCommentId=17534326) by Antoine Pitrou (apitrou):*\ncc `[~ArianaVillegas]` if you like playing with algorithms."
+        },
+        {
+            "created_at": "2022-05-12T21:28:00.268Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14314?focusedCommentId=17536350) by Ariana Villegas (ArianaVillegas):*\n`[~apitrou]` \u00a0I have a couple of questions about this issue:\r\n \\* Currently, how are nulls handled in a dictionary array?\r\n \\* Can we do something like this?\r\n \\*\\* Given the following dictionary:\r\n```java\n\r\noriginal_array: ['a', 'c', 'b', 'b', 'a']\r\n\r\nvalues: ['a', 'c', 'b']\r\nindices: [0, 1, 2, 2, 0]\n```\r\n\r\n \\* \r\n \\*\\* Get sort_indices of values, replace indices and values\r\n```java\n\r\nvalues_sorted_idx: [0, 2, 1]\r\n\r\nindices: [0, 2, 1, 1, 0]\r\nvalues: ['a', 'b', 'c']\n```\r\n\r\n \\* \r\n \\*\\* And finally, sort the indices\r\n```java\n\r\nindices: [0, 0, 1, 1, 2]\r\n```\r\n\r\nAnd, if I remember correctly, current sort_indices handles nulls and send them to the end of the array. Please let me know if I'm misunderstanding something."
+        },
+        {
+            "created_at": "2022-05-16T11:34:27.209Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14314?focusedCommentId=17537492) by Antoine Pitrou (apitrou):*\n`[~ArianaVillegas]` Nulls in a dictionary array can be represented in two different ways:\r\n\r\n- nulls in the dictionary values, e.g.:\n  ```Java\n  \n  values: ['a', null, 'b', 'c']\n  indices: [0, 1, 1, 0, 2, 3]\n  ```\n- nulls in the dictionary indices, e.g.:\n  ```Java\n  \n  values: ['a', 'b', 'c']\n  indices: [0, null, null, 0, 1, 2]\n  ```\n  \n  Also, it can be a mixture of both, such as:\n  ```Java\n  \n  values: ['a', null, 'b', 'c']\n  indices: [0, 1, null, 0, 2, 3]\n  ```\n  \n  (all three examples have the same value once decoded)"
+        },
+        {
+            "created_at": "2022-05-16T11:41:40.633Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14314?focusedCommentId=17537495) by Antoine Pitrou (apitrou):*\n`[~ArianaVillegas]` Sorting the dictionary values is not exactly enough, because you must care about stability as well.\r\nFor example this input:\r\n\r\n```Java\n\r\nvalues: ['c', 'a', 'b', 'b']\r\nindices: [0, 1, 3, 2, 3, 0]\r\n```\r\n\r\nShould generate the following sort indices:\r\n```Java\n\r\nsort_indices: [1, 2, 3, 4, 0, 5]\r\n```\r\n\r\n(note \"2, 3, 4\", **not** \"3, 2, 4)"
+        },
+        {
+            "created_at": "2022-05-16T15:42:01.027Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14314?focusedCommentId=17537609) by Ariana Villegas (ArianaVillegas):*\n`[~apitrou]`, maybe this is a naive question, but why sort_indices: [1, 3, 2, 4, 0, 5] is wrong and [1, 2, 3, 4, 0, 5] is right?\u00a0"
+        },
+        {
+            "created_at": "2022-05-16T16:05:33.809Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14314?focusedCommentId=17537625) by Antoine Pitrou (apitrou):*\nBecause the sort must be stable. The values at indices [2, 3, 4] all have the value \"b\", so they must stay in the same order."
+        },
+        {
+            "created_at": "2022-05-16T18:52:24.621Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14314?focusedCommentId=17537728) by Ariana Villegas (ArianaVillegas):*\nOk, I got it.\r\n\r\n`[~apitrou]` In that case, I think we can do something like this:\r\n \\* Given the following dictionary:\r\n```java\n\r\nvalues: ['c', 'a', 'b', 'b']\r\nindices: [0, 1, 3, 2, 3, 0]\r\n```\r\n\r\n \\* Get sort_idx from values and transform it to give the same idx to same values\r\n```java\n\r\nvalues_sort_idx = [1, 2, 3, 0]\r\ntransformed_sort_idx = [3, 0, 1, 1]\n```\r\n\r\n \\* Get sort_idx from transformed indices\r\n```java\n\r\ntransformed_indices = [3, 0, 1, 1, 1, 3]\r\nsort_indices = [1, 2, 3, 4, 0, 5]\n```\r\n\r\nWith nulls, it will work similarly:\r\n \\* Given the following dictionary:\r\n```java\n\r\nvalues: ['a', null, 'b', 'c']\r\nindices: [0, 1, null, 0, 2, 3]\r\n```\r\n\r\n \\* Get sort_idx from values and transform it to give the same idx to same values\r\n```java\n\r\nvalues_sort_idx = [0, 2, 3, 1]\r\ntransformed_sort_idx = [0, 3, 1, 2]\r\n```\r\n\r\n \\* Get sort_idx from transformed indices\r\n```java\n\r\ntransformed_indices = [0, 3, null, 0, 1, 2]\r\nsort_indices = [0, 3, 4, 5, 1, 2]\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-05-17T15:01:29.998Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14314?focusedCommentId=17538262) by Antoine Pitrou (apitrou):*\nIIUC, `transformed_indices = take(transformed_sort_idx, indices)` and `sort_indices = sort_indices(transformed_indices)` ?\r\n\r\nThe remaining problem is, what happens with the following dictionary:\r\n```Java\n\r\nvalues: ['a', null, 'b', 'c']\r\nindices: [0, null, 1, 0, 2, 3]\r\n```\r\n\r\nIt should also get `sort_indices = [0, 3, 4, 5, 1, 2]` as an answer. Does it?"
+        },
+        {
+            "created_at": "2022-05-17T17:17:16.207Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14314?focusedCommentId=17538340) by Ariana Villegas (ArianaVillegas):*\n> `transformed_indices = take(transformed_sort_idx, indices)`\u00a0and\u00a0`sort_indices = sort_indices(transformed_indices)`\u00a0?\r\nYes.\r\n> It should also get sort_indices = [0, 3, 4, 5, 1, 2] as an answer. Does it?\r\nRight now, it doesn't, it result is: [0, 3, 4, 5, 2, 1]\r\n\r\nBut to avoid that, we can replace null values into indices, so the problem will look like this:\r\n\r\nvalues: ['a', null, 'b', 'c']\r\n\r\nindices: [0, null, null, 0, 2, 3]\r\n\r\n\u00a0\r\n\r\n`[~apitrou]`, btw, why do we allow nulls in values? Shouldn't it be easier to have them only in indices?"
+        },
+        {
+            "created_at": "2022-05-18T10:02:40.956Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14314?focusedCommentId=17538702) by Antoine Pitrou (apitrou):*\n> But to avoid that, we can replace null values into indices, so the problem will look like this:\r\n\r\nWe can indeed. Another possibility is to partition nulls away first, then work on non-null values (partitioning is how the sorting implementation already deals with null values for other data types). That might be a bit faster as well.\r\n\r\n> btw, why do we allow nulls in values? Shouldn't it be easier to have them only in indices?\r\n\r\nProbably for compatibility with various data sources.\r\n"
+        },
+        {
+            "created_at": "2022-05-19T16:58:13.183Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14314?focusedCommentId=17539672) by Ariana Villegas (ArianaVillegas):*\nWhere is the sorting implementation?\u00a0\r\n> We can indeed. Another possibility is to partition nulls away first, then work on non-null values (partitioning is how the sorting implementation already deals with null values for other data types). That might be a bit faster as well.\r\nNice, so we'll first partition nulls away and just care about non-nulls values, and at the end just merge both."
+        },
+        {
+            "created_at": "2022-05-19T17:04:23.321Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14314?focusedCommentId=17539680) by Antoine Pitrou (apitrou):*\nYou can find the sorting implementations in `arrow/compute/kernels/vector_sort*` as well as `vector_array_sort.cc`.\r\nSpecifically, the current null partitioning implementations are in `vector_sort_internal.h`, but none of them deals with dictionary arrays, so you'll have to add your own."
+        },
+        {
+            "created_at": "2022-05-19T17:09:11.348Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14314?focusedCommentId=17539684) by Ariana Villegas (ArianaVillegas):*\nOk, I'll try to implement our idea and let you know as soon as I have something you can review."
+        }
+    ]
+}

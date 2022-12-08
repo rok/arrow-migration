@@ -1,0 +1,62 @@
+{
+    "issue": {
+        "title": "[R][C++] PreBuffer is not enabled when scanning parquet via exec nodes",
+        "body": "***Note**: This issue was originally created as [ARROW-14025](https://issues.apache.org/jira/browse/ARROW-14025). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn ExecNode_Scan a ScanOptions object is built up.  If we are reading parquet we should enable pre-buffering.  This is done by creating a ParquetFragmentScanOptions object and enabling pre-buffering.\r\n\r\nAlternatively, we could just default pre-buffering to true for asynchronous scans of parquet data.",
+        "created_at": "2021-09-17T11:55:13.000Z",
+        "updated_at": "2021-10-13T18:48:16.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-10-12T20:13:42.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-10-04T18:25:29.724Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14025?focusedCommentId=17424096) by Neal Richardson (npr):*\n`[~westonpace]` is this the right idea (+/- whatever it takes to get it to compile)? I believe this means we also would be getting whatever FragmentScanOptions the dataset was created with (so that we could correctly query CSVs etc.).\r\n\r\n```Java\n\r\ndiff --git a/r/src/compute-exec.cpp b/r/src/compute-exec.cpp\r\nindex c61f7a3d1..5c60f2ac2 100644\r\n--- a/r/src/compute-exec.cpp\r\n+++ b/r/src/compute-exec.cpp\r\n@@ -113,7 +113,17 @@ std::shared_ptr<compute::ExecNode> ExecNode_Scan(\r\n   arrow::dataset::internal::Initialize();\r\n \r\n   // TODO: pass in FragmentScanOptions\r\n-  auto options = std::make_shared<arrow::dataset::ScanOptions>();\r\n+  if (dataset->type_name() == \"filesystem\") {\r\n+    // HALP: dataset is Dataset but needs to be cast to FileSystemDataset\r\n+    // to have format() method\r\n+    auto fmt = dataset->format();\r\n+    auto options = fmt->default_fragment_scan_options;\r\n+    if (fmt->type_name() == \"parquet\") {\r\n+      options->arrow_reader_properties.pre_buffer_ = true;\r\n+    }\r\n+  } else {\r\n+    auto options = std::make_shared<arrow::dataset::ScanOptions>();\r\n+  }\r\n \r\n   options->use_async = true;\r\n   options->use_threads = arrow::r::GetBoolOption(\"arrow.use_threads\", true);\r\n```"
+        },
+        {
+            "created_at": "2021-10-04T19:17:05.741Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14025?focusedCommentId=17424119) by David Li (lidavidm):*\nSomething like this:\r\n\r\n```cpp\n\r\ndiff --git a/r/src/compute-exec.cpp b/r/src/compute-exec.cpp\r\nindex c61f7a3d1..cd34ad42f 100644\r\n--- a/r/src/compute-exec.cpp\r\n+++ b/r/src/compute-exec.cpp\r\n@@ -114,6 +114,15 @@ std::shared_ptr<compute::ExecNode> ExecNode_Scan(\r\n \r\n   // TODO: pass in FragmentScanOptions\r\n   auto options = std::make_shared<arrow::dataset::ScanOptions>();\r\n+  if (dataset->type_name() == \"filesystem\") {\r\n+    auto fs_dataset = static_cast<const arrow::dataset::FileSystemDataset&>(*dataset);\r\n+    if (fs_dataset.format()->type_name() == \"parquet\") {\r\n+      auto fragment_scan_options = std::make_shared<arrow::dataset::ParquetFragmentScanOptions>();\r\n+      fragment_scan_options->arrow_reader_properties->set_pre_buffer(true);\r\n+      fragment_scan_options->arrow_reader_properties->set_cache_options(arrow::io::CacheOptions::LazyDefaults());\r\n+      options->fragment_scan_options = std::move(fragment_scan_options);\r\n+    }\r\n+  }\r\n \r\n   options->use_async = true;\r\n   options->use_threads = arrow::r::GetBoolOption(\"arrow.use_threads\", true);\r\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-10-04T19:19:40.442Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14025?focusedCommentId=17424122) by Weston Pace (westonpace):*\nPer a brief external discussion with `[~npr]` & `[~lidavidm]` the best thing to do here will be to change the default to prebuffer and make sure we have the CacheOptions set to LazyDefaults."
+        },
+        {
+            "created_at": "2021-10-04T19:24:03.484Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14025?focusedCommentId=17424124) by David Li (lidavidm):*\nIf we really want to avoid the dynamic type checking we could instead set the fragment scan options on the ParquetFileFormat instance when created. I think\u00a0`ParquetFragmentScanOptions$create` and\u00a0`ParquetFileFormat$create` would need to gain some options, or we could just make lazy-caching the only possibility by changing `dataset___ParquetFragmentScanOptions__Make` in dataset.cpp. (This would change all scans, not just ones that go through the exec plan.)"
+        },
+        {
+            "created_at": "2021-10-04T19:39:32.666Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14025?focusedCommentId=17424132) by Neal Richardson (npr):*\nSo the Dataset gets created with ParquetFragmentScanOptions (or whatever format), shouldn't we grab that and start with it? Less important for Parquet perhaps but for CSV don't we need that in order to get parsing options?"
+        },
+        {
+            "created_at": "2021-10-04T19:41:25.757Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14025?focusedCommentId=17424136) by David Li (lidavidm):*\nAh, yeah, we shouldn't just override them completely, you're right."
+        },
+        {
+            "created_at": "2021-10-04T19:42:19.764Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14025?focusedCommentId=17424137) by Weston Pace (westonpace):*\n> So the Dataset gets created with ParquetFragmentScanOptions (or whatever format)\r\n\r\nDoes it?  I mean, this sounds like a good idea, and I like it.  But do we specify scan options when creating a dataset?"
+        },
+        {
+            "created_at": "2021-10-04T19:44:02.735Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14025?focusedCommentId=17424138) by David Li (lidavidm):*\nEr, it's when creating the FooFileFormat, right? That has a `default_fragment_scan_options`. Maybe the easiest thing is to just change the default scan options for the Parquet format to enable pre-buffering."
+        },
+        {
+            "created_at": "2021-10-04T19:47:12.553Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14025?focusedCommentId=17424142) by Neal Richardson (npr):*\nYes, when we create a FileSystemDataset, the FileFormat gets created and it takes an Options object, which for parquet is ParquetFragmentScanOptions. Here are the R defaults: https://github.com/apache/arrow/blob/master/r/R/dataset-format.R#L292-L294"
+        },
+        {
+            "created_at": "2021-10-04T20:04:19.753Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14025?focusedCommentId=17424151) by David Li (lidavidm):*\nSo we could just change that default to TRUE and then in [dataset.cpp](https://github.com/apache/arrow/blob/73f938694438342273cb1238e2085e032021ee1b/r/src/dataset.cpp#L326-L339) also set the cache options. (And if desired, also expose a flag to not set cache options or something.)"
+        },
+        {
+            "created_at": "2021-10-12T20:13:42.533Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14025?focusedCommentId=17427901) by Neal Richardson (npr):*\nIssue resolved by pull request 11386\n<https://github.com/apache/arrow/pull/11386>"
+        }
+    ]
+}

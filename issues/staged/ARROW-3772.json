@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[C++] Read Parquet dictionary encoded ColumnChunks directly into an Arrow DictionaryArray",
+        "body": "***Note**: This issue was originally created as [ARROW-3772](https://issues.apache.org/jira/browse/ARROW-3772). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nDictionary data is very common in parquet, in the current implementation parquet-cpp decodes\u00a0dictionary encoded data always before creating a\u00a0plain arrow array. This process is wasteful since\u00a0we could use arrow's DictionaryArray directly and achieve several benefits:\r\n1. Smaller memory footprint - both in the decoding process and in the resulting arrow table - especially when the dict values are large\n1. Better decoding performance - mostly as a result of the first bullet - less memory fetches and less allocations.\n   \n   I think those\u00a0benefits\u00a0could\u00a0achieve\u00a0significant improvements in runtime.\n   \n   My\u00a0direction for the implementation is to read the indices (through the DictionaryDecoder, after the RLE decoding) and values separately into 2 arrays and create a DictionaryArray\u00a0using them.\n   \n   There are some questions\u00a0to discuss:\n1. Should this be the default behavior for dictionary encoded data\n1. Should it be controlled with a parameter in the API\n1. What should be the policy in case some of the chunks are dictionary encoded and some are not.\n   \n   I started implementing this but would like to\u00a0hear your opinions.",
+        "created_at": "2018-06-13T14:08:14.000Z",
+        "updated_at": "2021-07-17T07:46:57.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-07-26T23:54:38.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-06-13T14:16:58.917Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3772?focusedCommentId=16511198) by Stav Nir (snir):*\n`[~wesmckinn]` Would\u00a0be great to hear your\u00a0thoughts on this."
+        },
+        {
+            "created_at": "2018-06-13T18:58:58.692Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3772?focusedCommentId=16511551) by Wes McKinney (wesm):*\nThis has been discussed many other places \u2013 there may be a JIRA already about this. \r\n\r\nTo your questions\r\n\r\n1. No, I think this should be optional\r\n2. Yes\r\n3. Probably want to fall back to dense output. We could also dictionary encode the non-dictionary encoding stuff using tools in `arrow::compute`, but that will be quite a bit of work.\r\n\r\nThis task is loaded with pitfalls:\r\n\r\n- The dictionary will not be known up front, so the Arrow schema cannot be inferred from the file metadata alone like it is now. The schema will have to be modified later\n- The dictionary will often be different from row group to row group and from file to file \u2013 data written by Spark or Impala or most systems will have this problem\n- A ColumnChunk may start with dictionary encoding and then switch to plain encoding mid stream\n  \n  It's probably because of these complexities that we have not undertaken this work yet. Your help would be appreciated, though. Keep in mind there's a pretty good sized patch up right now on the Arrow decode path: https://github.com/apache/parquet-cpp/pull/462"
+        },
+        {
+            "created_at": "2018-11-12T22:06:58.486Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3772?focusedCommentId=16684422) by Wes McKinney (wesm):*\nMoved issue to Arrow issue tracker"
+        },
+        {
+            "created_at": "2019-02-28T07:42:06.765Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3772?focusedCommentId=16780207) by Hatem Helal (hatem):*\nI'd like to take a stab at this after ARROW-3769"
+        },
+        {
+            "created_at": "2019-06-19T01:37:19.845Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3772?focusedCommentId=16867159) by Wes McKinney (wesm):*\nRealistically I don't think I can get this done this week (or in time for 0.14.0), and I think it would be worth giving the feature some care and attention rather than rushing it. Moving to the 1.0.0 milestone"
+        },
+        {
+            "created_at": "2019-07-18T03:17:35.912Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3772?focusedCommentId=16887577) by Wes McKinney (wesm):*\nI'm looking at this. This is not a small project \u2013 the assumption that values are fully materialized is pretty deeply baked into the library. We also have to deal with the \"fallback\" case where a column chunk starts out dictionary encoded and switches mid-stream because the dictionary got too big. What to do in that case is ambiguous:\r\n\r\n- One option is to dictionary-encode the additional pages, so we could end up with one big dictionary\n- Another option is to optimistically leave things dictionary-encoded, and if we hit the fallback case then we fully materialize. We can always do a cast on the Arrow side after the fact in this case\n  \n  FWIW, the fallback scenario is not at all esoteric because the default dictionary pagesize limit in the C++ library is 1MB. I think Java is the same \n  \n  https://github.com/apache/parquet-mr/blob/master/parquet-column/src/main/java/org/apache/parquet/column/ParquetProperties.java#L44\n  \n  I think adding an option to raise the limit to 2GB or so when writing Arrow DictionaryArray would help. \n  \n  Things are made a bit more complex by the code duplication between parquet/column_reader.cc and parquet/arrow/record_reader.cc. I'll see if there's some things I can do to fix that while I'm working on this"
+        },
+        {
+            "created_at": "2019-07-18T04:27:40.057Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3772?focusedCommentId=16887610) by Micah Kornfield (emkornfield@gmail.com):*\n\"I'm looking at this. This is not a small project \u2013 the assumption that values are fully materialized is pretty deeply baked into the library. We also have to deal with the \"fallback\" case where a column chunk starts out dictionary encoded and switches mid-stream because the dictionary got too big\"\r\n\r\nI don't have context on how we decided originally to designate an entire column dictionary encoded vs a\u00a0chunk/record batch column but it seems like this might be another use-case where the proposal on encoding/compression might make things easier to code (i.e. specify dictionary encoding only on SparseRecordBatches where it makes sense and leave the fallback to dense encoding where it no longer makes sense)."
+        },
+        {
+            "created_at": "2019-07-18T14:58:53.585Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3772?focusedCommentId=16888054) by Wes McKinney (wesm):*\nAt least after ARROW-3144 we have broken the constraint of a constant dictionary across arrays. Having a mix of dictionary-encoded and non-dictionary-encoded arrays is interesting, but regardless there's a lot of refactoring to do in the Parquet library to expose these details"
+        },
+        {
+            "created_at": "2019-07-21T14:08:32.299Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3772?focusedCommentId=16889740) by Wes McKinney (wesm):*\nI'm getting close to having something PR-worthy here, ended up being a can of worms \u2013 there's going to be a lot of follow up issues so I'll try to contain the scope of the work and leave polishing to subsequent PRs."
+        },
+        {
+            "created_at": "2019-07-26T23:54:38.399Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3772?focusedCommentId=16894198) by Wes McKinney (wesm):*\nIssue resolved by pull request 4949\n<https://github.com/apache/arrow/pull/4949>"
+        }
+    ]
+}

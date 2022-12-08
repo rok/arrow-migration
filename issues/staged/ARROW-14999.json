@@ -1,0 +1,56 @@
+{
+    "issue": {
+        "title": "[C++] List types with different field names are not equal",
+        "body": "***Note**: This issue was originally created as [ARROW-14999](https://issues.apache.org/jira/browse/ARROW-14999). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen comparing map types, the names of the fields are ignored. This was introduced in ARROW-7173.\r\n\r\nHowever for list types, they are not ignored. For example,\r\n\r\n```python\n\r\nIn [6]: l1 = pa.list_(pa.field(\"val\", pa.int64()))\r\n\r\nIn [7]: l2 = pa.list_(pa.int64())\r\n\r\nIn [8]: l1\r\nOut[8]: ListType(list<val: int64>)\r\n\r\nIn [9]: l2\r\nOut[9]: ListType(list<item: int64>)\r\n\r\nIn [10]: l1 == l2\r\nOut[10]: False\r\n```\r\n\r\nShould we make list type comparison ignore field names too?",
+        "created_at": "2021-12-06T20:57:39.000Z",
+        "updated_at": "2022-10-31T03:14:35.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-12-07T08:27:07.365Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14999?focusedCommentId=17454463) by Antoine Pitrou (apitrou):*\nIIRC, the reason for ARROW-7173 is that implementations historically chose different field names, so we had to do that for proper interoperation. It doesn't seem to be necessary for list types."
+        },
+        {
+            "created_at": "2021-12-08T08:57:06.602Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14999?focusedCommentId=17455057) by Joris Van den Bossche (jorisvandenbossche):*\nFor list types we also had the inconsistency with the field names between Parquet vs Arrow (but that's of course not between different implementation of Arrow itself). "
+        },
+        {
+            "created_at": "2022-08-10T19:29:00.657Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14999?focusedCommentId=17578135) by Will Jones (willjones127):*\nHere's the issue Joris was talking about: https://issues.apache.org/jira/browse/ARROW-11497\r\n\r\nI encountered this issue again here: https://github.com/delta-io/delta-rs/pull/684#discussion_r941965834\r\n\r\nMy recent experiences have led me to believe that (1) we should not care about field names when comparing ListType and (2) we should enable `use_compliant_nested_type` by default in Parquet writers. I am unable to determine any real use case for a custom field name in a `ListType` (there's only 1 field, so no need for a name to disambiguate), and preserving them and considering them in equality comparisons is proving to be annoying.\r\n\r\nThough if that's not acceptable, I think we should at least provide an an option in the `equals` method to ignore field names in Lists and Maps."
+        },
+        {
+            "created_at": "2022-08-11T10:03:04.913Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14999?focusedCommentId=17578368) by Joris Van den Bossche (jorisvandenbossche):*\n>  am unable to determine any real use case for a custom field name\r\n\r\nWe are starting to use custom field names in the extension types for geospatial data (https://github.com/geopandas/geo-arrow-spec/blob/main/extension-types.md#concrete-examples-of-extension-type-metadata, https://github.com/paleolimbot/geoarrow/). \r\nI don't know if we currently already rely on those names, but we had the intention to do so in the future (cc `[~paleolimbot]`)"
+        },
+        {
+            "created_at": "2022-08-11T15:24:15.240Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14999?focusedCommentId=17578528) by Will Jones (willjones127):*\nDo you expect to be able to roundtrip that from Parquet? It seems like the conclusion of discussion in ARROW-11497 was that we should transition in the long term towards always using \"element\", but maybe we would still be able to roundtrip by casting back based on the Arrow schema saved in the metadata?"
+        },
+        {
+            "created_at": "2022-08-11T20:01:26.938Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14999?focusedCommentId=17578644) by Dewey Dunnington (paleolimbot):*\nYes, we do use those names to communicate some information in the geoarrow spec (although I don't think we need them for type equality since it doesn't affect the storage interpretation)."
+        },
+        {
+            "created_at": "2022-08-16T14:55:52.060Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14999?focusedCommentId=17580355) by Antoine Pitrou (apitrou):*\n`[~paleolimbot]` `[~jorisvandenbossche]` Wouldn't it be better to use custom metadata to convey some information? That would make sure the information is not lost."
+        },
+        {
+            "created_at": "2022-08-18T16:52:24.997Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14999?focusedCommentId=17581439) by Dewey Dunnington (paleolimbot):*\nWe do use metadata (extension type + metadata), although the definition of the extension types is newer than the memory layout, which was the document that proposed the list-child-name-conveying-information strategy. In practice the prototype I wrote mostly ignores the list child names, with the exception being the name of a point array which conveys its dimension (e.g., xy, xyz, xym, or xyzm). Conveying the dimension of the point array using the name was done in part to avoid a parser (to parse extension type metadata since it has to be valid utf8) when writing C kernels (since 'name' at the C data array level is just a null-terminated string). At the time we designed this there was no indication that the roundtripping of the child name would be an issue; however, we could certainly work around it."
+        },
+        {
+            "created_at": "2022-10-24T22:34:10.252Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14999?focusedCommentId=17623449) by Will Jones (willjones127):*\nSo here are the conclusions I've gathered so far:\r\n\r\n1. Equality of ListTypes and MapTypes have different behavior right now: list types with different field names are unequal, but map types with different field names are equal. We should make this behavior consistent and probably have an option in the `.Equals()` method to toggle checking these internal field names.\r\n2. For extension arrays, it's important that we preserve these field names in most operations. That means that even if the default behavior is to ignore field names in equality for List/Map, unit tests for functions should check for field name equality.\r\n\r\nI'm leaning right now that the default for checking equality should be to ignore field names for List/Map (obviously not for struct) in cases where we also don't check metadata. For example, `TypeEquals()` will check metadata and field names, while `DataType::Equals()` will not."
+        },
+        {
+            "created_at": "2022-10-25T08:02:35.063Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14999?focusedCommentId=17623639) by Antoine Pitrou (apitrou):*\n> I'm leaning right now that the default for checking equality should be to ignore field names for List/Map (obviously not for struct) in cases where we also don't check metadata.\r\n\r\nThat sounds reasonable to me."
+        }
+    ]
+}

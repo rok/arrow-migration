@@ -1,0 +1,65 @@
+{
+    "issue": {
+        "title": "[C++] Implement concurrent / buffering InputStream for streaming data use cases",
+        "body": "***Note**: This issue was originally created as [ARROW-501](https://issues.apache.org/jira/browse/ARROW-501). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nRelated to ARROW-500, when processing an input data stream, we may wish to continue buffering input (up to an maximum buffer size) in between synchronous Read calls",
+        "created_at": "2017-01-19T22:31:58.000Z",
+        "updated_at": "2022-08-27T14:41:46.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-10-09T09:54:03.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-06-12T20:16:14.767Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-501?focusedCommentId=16510145) by Wes McKinney (wesm):*\nI've been thinking about this lately. I would like to have a \"Spooler\" abstraction that performs IO or other concurrent work while another thread is doing something else. For example:\r\n\r\n```Java\n\r\nconst int buffer_size = 1 << 20;\r\nInputStreamSpooler spooler(stream, buffer_size);\r\n\r\n// This will start reading the first chunk from stream in a background thread\r\nspooler->Start();\r\n\r\nstd::shared_ptr<Buffer> chunk;\r\n\r\n// This blocks until the chunk is ready, returns it, then begins reading the next chunk right away\r\nwhile (!spooler->is_finished()) {\r\n  RETURN_NOT_OK(spooler->Next(&chunk));\r\n  // Do something with chunk\r\n}\r\n\r\nspooler->Stop();\r\n```\r\n\r\nAre there some concurrency primitives that provide this in libraries like facebook/folly that might help with this type of background concurrency? "
+        },
+        {
+            "created_at": "2018-08-26T21:04:53.215Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-501?focusedCommentId=16593028) by Wes McKinney (wesm):*\nI was thinking we could use `std::future` to implement this, but it seems that there is quite a bit of overhead associated with this in many cases (see e.g. https://www.quora.com/Why-is-C++11-std-future-so-slow). It may be better to spawn a single thread that blocks on a condition variable so that it can be notified when `Next` is called to begin reading the next chunk"
+        },
+        {
+            "created_at": "2018-08-27T17:04:04.930Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-501?focusedCommentId=16593945) by Antoine Pitrou (apitrou):*\nIf we want to do this, I think a simple background thread is the right piece of logic. Note that by definition, it will probably incur additional memory copies, though, unless we add a method allowing partial / best-effort reads.\r\n\r\nEdit : the comment about memory copies only applies if we want a Stream interface. If we define the chunk size upfront, and/or let the readahead wrapper choose chunk size dynamically, then it's not a problem."
+        },
+        {
+            "created_at": "2018-08-27T17:16:20.220Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-501?focusedCommentId=16593968) by Wes McKinney (wesm):*\nWe should think up front about optimizations to enable temporary allocations to be reused. For example, suppose you are reading 1MB at a time, then the spooler could allocated 2 buffers so that while one buffer is being used, the other one can be filled in the background. We would need to have an API to be able to indicate that a buffer is \"done\" and can be reused (and the user would therefore be responsible to not retain any references to that memory elsewhere since it will be overwritten). I can try to mock up some example code if what I'm writing is not clear"
+        },
+        {
+            "created_at": "2018-08-27T17:20:09.885Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-501?focusedCommentId=16593977) by Wes McKinney (wesm):*\nThere's probably different kinds of APIs we need to create for different use cases. For example implementing the current `InputStream` API while allowing background buffering would be immediately helpful in libraries like parquet-cpp"
+        },
+        {
+            "created_at": "2018-08-27T17:30:12.398Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-501?focusedCommentId=16593996) by Antoine Pitrou (apitrou):*\nYes, I understand your idea. There are basically two possible APIs, and we can implement all two:\r\n\r\n1) a `ReadaheadSpooler` object that reads up to N fixed-size buffers in advance (N and buffer size being fixed in the constructor call)\r\n\r\n2) a regular `InputStream` implementation that reads some data ahead speculatively in some internal buffer or queue of buffers, at the cost of risking an additional copy when the user calls `Read(<some given size>)`\r\n\r\nNote that for CSV reading, it would be desirable for the readahead spooler to leave some configurable padding in the front of buffers. This way, if a preceding buffer had an unfinished line at the end, you can copy it in front of the next buffer without having to copy the (much larger) rest of the buffer. Symetrically, some padding at the end of buffers can be useful too (I expect that it might speed up some CSV algorithms)."
+        },
+        {
+            "created_at": "2018-08-27T17:46:45.691Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-501?focusedCommentId=16594020) by Wes McKinney (wesm):*\nMakes sense. In the case of CSV reading, we would want to arrange so that the abstraction does not incur much or any overhead when being used locally with memory-mapped files (so the OS manages IO from the filesystem even if we are dealing semantically with `arrow::Buffer` objects in the C++ code)"
+        },
+        {
+            "created_at": "2018-08-27T19:15:17.392Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-501?focusedCommentId=16594123) by Antoine Pitrou (apitrou):*\nAh... Well, it would make more sense to treat a memory-mapped file as a memory area, not a file. That's the whole point of memory-mapped files after all. I'm not sure the current abstraction makes sense (though there is some magical thought around where people seem to think that mmap() makes things intrinsically faster than read() calls)."
+        },
+        {
+            "created_at": "2018-08-27T19:18:55.386Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-501?focusedCommentId=16594127) by Wes McKinney (wesm):*\nWell, in my experience applications that use mmap are faster than ones that use read(...). But the reasons for it more have to do with primitive IO access patterns (i.e. synchronous calls vs. async) and memory management. We'll have ample room to experience ourselves"
+        },
+        {
+            "created_at": "2019-10-09T09:54:03.366Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-501?focusedCommentId=16947504) by Antoine Pitrou (apitrou):*\nThe readahead iterator and the input stream iterator added in ARROW-6764 should address this need."
+        },
+        {
+            "created_at": "2019-10-09T20:16:08.234Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-501?focusedCommentId=16947962) by Wes McKinney (wesm):*\nWe still don't have a `ReadaheadInputStream` (that implements the `InputStream` interface) but we can add one when it is actually needed. "
+        },
+        {
+            "created_at": "2022-08-27T14:41:46.375Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-501?focusedCommentId=17585836) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

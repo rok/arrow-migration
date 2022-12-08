@@ -1,0 +1,93 @@
+{
+    "issue": {
+        "title": "[Python]\u00a0Build wheels for manylinux2010 tag",
+        "body": "***Note**: This issue was originally created as [ARROW-2461](https://issues.apache.org/jira/browse/ARROW-2461). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThere is now work in progress on an updated manylinux tag based on CentOS6. We should provide wheels for this tag and the old `manylinux1` tag for one release and then switch to the new tag in the release afterwards. This should enable us also to raise the minimum compiler requirement to gcc 4.9 (or higher once conda-forge has migrated to a newer compiler).\r\n\r\nThe relevant PEP is https://www.python.org/dev/peps/pep-0571/",
+        "created_at": "2018-04-15T08:51:40.000Z",
+        "updated_at": "2019-06-25T14:45:32.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-06-25T14:45:17.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-08-30T18:32:42.240Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16597769) by Antoine Pitrou (apitrou):*\nTurns out glibc 2.12, which is the baseline in manylinux2010 but not manylinux1, is required by the Abseil C++ library."
+        },
+        {
+            "created_at": "2018-08-30T18:51:16.110Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16597779) by Wes McKinney (wesm):*\nOy. So RHEL 6 has glibc 2.12 https://distrowatch.com/table.php?distribution=redhat\r\n\r\nThe base image for manylinux1 is centos5 which tracks RHEL 5.\r\n\r\nhttps://distrowatch.com/table.php?distribution=centos\r\n\r\nI don't know if this is a radical proposal but we should promote our manylinux1 image to be based on centos6, which I guess is the same thing as manylinux2010. PyTorch and TensorFlow have already created toolchain problems \u2013 not to say that we should make things worse \u2013 but I am not sure that this would do very much harm compared with, say, using a different compiler (like Clang with statically linked libstdc++ instead of using the RedHat devtoolset)\r\n\r\nI don't know if we are doing ourselves any favors by being stuck on centos5 glibc, and the impacted users may be slow-to-upgrade enterprises which, I would hazard a guess, aren't contributing to Apache Arrow. "
+        },
+        {
+            "created_at": "2018-08-30T18:53:38.618Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16597784) by Wes McKinney (wesm):*\nAccording to https://access.redhat.com/support/policy/updates/errata RedHat has retired RHEL5 and is continuing extended support to those paying for it through end of 2020. I expect these cases to be quite exceptional and not reflecting of the average Arrow adopter or even Python user"
+        },
+        {
+            "created_at": "2018-08-30T19:33:53.361Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16597826) by Antoine Pitrou (apitrou):*\nI'm not sure what you're proposing here. The manylinux1 PEP requires that we don't rely on anything younger than glibc 2.5. So using Abseil in a manylinux1 wheel is out of question (unless we want to be a bad citizen like Tensorflow is).\r\n\r\nNote that manylinux2010 is based on CentOS 6, i.e. its compatibility requirements for base libraries are based on what CentOS 6 provides."
+        },
+        {
+            "created_at": "2018-08-30T19:48:20.246Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16597851) by Wes McKinney (wesm):*\nSo I guess my main question is: If we stop shipping manylinux1 wheels in favor of manylinux2010, will that disrupt users, or will it \"just work\"? Are there other examples of projects using manylinux2010? AFAIK the only thing \"bad\" about using the manylinux1 tag on a wheel built on centos6 would be the minimum glibc version. So while still _bad_ I think it's significantly less bad than what TensorFlow is doing, which is using a non-conforming compile and link procedure, in addition AFAIK to building on a newer Linux image. The only people impacted by this change would be users on very old Linux"
+        },
+        {
+            "created_at": "2018-08-30T19:56:11.373Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16597861) by Antoine Pitrou (apitrou):*\nHa, apparently pip may still not have support for manylinux2010:\r\nhttps://github.com/pypa/pip/pull/5410\r\n\r\nAs for compatibility, the PEP says:\r\n> manylinux1 wheels are considered manylinux2010 wheels. A pip that recognizes the manylinux2010 platform tag will thus install manylinux1 wheels for manylinux2010 platforms \u2013 even when explicitly set \u2013 when no manylinux2010 wheels are available."
+        },
+        {
+            "created_at": "2018-08-30T19:59:21.545Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16597862) by Antoine Pitrou (apitrou):*\n> AFAIK the only thing \"bad\" about using the manylinux1 tag on a wheel built on centos6 would be the minimum glibc version.\r\n\r\nDo we link libstdc++ statically? If so, hopefully that would be the only thing, yes."
+        },
+        {
+            "created_at": "2018-08-30T20:01:33.373Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16597864) by Wes McKinney (wesm):*\nMy understanding is that the libstdc++ details are all handled by RedHat's devtoolset toolchain. So I think what symbols are statically linked and binary compatibility should be the same (save for the glibc issue) whether the build is run on centos5 or centos6"
+        },
+        {
+            "created_at": "2018-08-31T13:36:00.934Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16598735) by Uwe Korn (uwe):*\n`manylinux2010` is sadly not yet finished. Once it's ready, I'm happy to switch to it. This will though require `pip` users to update to the latest patch release."
+        },
+        {
+            "created_at": "2018-08-31T14:46:34.651Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16598797) by Wes McKinney (wesm):*\nIn the meantime, I suggest we experiment with a build image starting from\r\n\r\nhttps://github.com/pypa/manylinux/blob/master/docker/Dockerfile-x86_64#L1\r\n\r\nbut with centos6 instead of centos5. If there are users on ancient Linux, I actually think it would be good to hear from them when they have problems instead of assuming that they exist. I personally would be comfortable dropping support for glibc < 2.12 as long as that's the only thing we are breaking"
+        },
+        {
+            "created_at": "2018-08-31T22:53:39.815Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16599359) by Wes McKinney (wesm):*\nSeems like this probably merits a mailing list discussion. What do you think? At best we have a trade-off to make; my vote would be to choose progress and hope that pypa can catch up with the requirements of hybrid Python/C++ projects"
+        },
+        {
+            "created_at": "2018-09-03T10:40:13.453Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16602007) by Antoine Pitrou (apitrou):*\nYes, we should poll the Arrow mailing-list(s) for this. Also, perhaps we should ask for guidance on [distutils-sig](https://mail.python.org/mm3/archives/list/distutils-sig@python.org/), though I expect the answer there to be slightly negative :-)"
+        },
+        {
+            "created_at": "2018-09-04T22:42:39.827Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16603682) by Wes McKinney (wesm):*\nDone. "
+        },
+        {
+            "created_at": "2018-09-15T14:30:39.254Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16616322) by Wes McKinney (wesm):*\nIt seems this is not pressing for 0.11 since we probably will not be shipping Abseil, so moving to 0.12"
+        },
+        {
+            "created_at": "2018-09-17T15:25:12.740Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16617695) by Antoine Pitrou (apitrou):*\nI also asked on distutils-sig:\r\nhttps://mail.python.org/mm3/archives/list/distutils-sig@python.org/thread/M4MSVY5MPAPXFWHH4PBLE6PEBPOBIA44/"
+        },
+        {
+            "created_at": "2018-10-23T15:51:51.664Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16660863) by Antoine Pitrou (apitrou):*\nHere is the meta-issue for manylinux2010 in Python packaging tools and infrastructure:\r\nhttps://github.com/pypa/manylinux/issues/179\r\n\r\nAt the minimum, I think we need to wait until auditwheel and pip support are merged in (perhaps also the Docker image?). Both have ready PRs but they seem to be stuck waiting for maintainer time."
+        },
+        {
+            "created_at": "2018-11-14T22:06:28.046Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16687199) by Wes McKinney (wesm):*\nI still think it wouldn't be _too_ evil to begin building with CentOS 6 as our base Linux for our wheels. gRPC is going to begin to use Abseil at some point from the look of the repo, and then we might be forced to do this anyway"
+        },
+        {
+            "created_at": "2019-04-22T12:15:12.170Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16823059) by Wes McKinney (wesm):*\nThere is a docker image for manylinux2010 available now\r\n\r\nhttps://discuss.python.org/t/manylinux2010-docker-image-now-available/1471"
+        },
+        {
+            "created_at": "2019-06-25T14:45:17.910Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2461?focusedCommentId=16872404) by Krisztian Szucs (kszucs):*\nIssue resolved by pull request 4675\n<https://github.com/apache/arrow/pull/4675>"
+        }
+    ]
+}

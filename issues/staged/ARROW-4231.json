@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "C++ & Java recordbatch serialization protocol does not match",
+        "body": "***Note**: This issue was originally created as [ARROW-4231](https://issues.apache.org/jira/browse/ARROW-4231). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI have a simple array of int32()<font color=\"#333333\"> \u00a0\\{0, 163, 0, 83, 0, 16}</font>\r\n\r\nIn C++ the output ArrowBuffer of serialized record batch is:\r\n\r\n-116 000200000000120220 6050801201200003302400024000000000\u00a0\u00a0 10024012040801000060000160001000000000002000000000000000000000000000 24000000000001000600000000000000000000000-93000000083000000016000\r\n\r\nIn Java, with the same array the output of serialized record batch in WriteChannel out\u00a0 is:\u00a0\r\n\r\n\u00a0124 000200000000120220 140210160401200024000000000301600003 1002401208040100002000040000600000000000100000000000\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0 24000000000001000600000000000000000000000-93000000083000000016000\r\n\r\n\u00a0",
+        "created_at": "2019-01-10T17:06:46.000Z",
+        "updated_at": "2019-01-23T10:09:59.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-01-23T10:09:59.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-01-10T17:46:56.924Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4231?focusedCommentId=16739638) by Wes McKinney (wesm):*\nCan you please provide code for each operation?\r\n\r\nNote we have made no guarantees of identical bytes at the protocol level as long as the semantic content of the message is the same. This permits implementations to make their own decisions regarding padding / memory allocation. The integration tests validate that the messages are semantically compatible (they are interpreted as being the \"same data\")"
+        },
+        {
+            "created_at": "2019-01-11T11:28:16.785Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4231?focusedCommentId=16740299) by Tanveer (tahmad):*\nData is same in both cases but the problem is with \u00b4message data\u00b4, when a C++ recordbatch is wrapped in plasma object and read in Java, the problem occurs.\r\n\r\nC++\r\n////////////////////////////////////////////////////////////////////////////////////////////////////////\r\n\r\narrow::MemoryPool\\* pool = arrow::default_memory_pool();\r\narrow::Int32Builder flag_builder(pool);\r\n\r\nstd::vector<int32_t> flags_data =\u00a0 \\{0, 163, 0, 83, 0, 16};\r\n\r\nfor (uint32_t i = 0; i < flags_data.size(); i++) {\r\n\u00a0 auto flags = flags_data[i];\r\n\u00a0 flag_builder.Append(flags);\r\n}\r\n\r\n\u00a0 shared_ptr<arrow::Array> flag_array;\r\n\u00a0 flag_builder.Finish(&flag_array);\r\n\r\n\u00a0 std::vector<std::shared_ptr<arrow::Field>> schema_vector = {\r\n\u00a0\u00a0 \u00a0arrow::field(\"flags\", arrow::int32())\r\n\u00a0 };\r\n\u00a0 auto schema = std::make_shared<arrow::Schema>(schema_vector);\r\n\u00a0 shared_ptr<arrow::RecordBatch> batch = arrow::RecordBatch::Make(schema, 1, \\{flag_array});\r\n\r\n\u00a0 std::shared_ptr<arrow::ResizableBuffer> resizable_buffer;\r\n\u00a0 arrow::AllocateResizableBuffer(arrow::default_memory_pool(), 0, &resizable_buffer)\r\n\r\n\u00a0 auto buffer = std::dynamic_pointer_cast<arrow::Buffer>(resizable_buffer);\r\n\u00a0 arrow::ipc::SerializeRecordBatch(\\*batch, arrow::default_memory_pool(), &buffer)\r\n\r\n\r\nJava\r\n////////////////////////////////////////////////////////////////////////////////////////////////////////\r\n\r\nint[] values = new int[]\\{0, 163, 0, 83, 0, 16};\r\n\r\nBufferAllocator alloc1 = new RootAllocator(Long.MAX_VALUE);\r\nArrowBuf valuesb = intBuf(values);\r\n\r\nArrowRecordBatch batch = new ArrowRecordBatch(6, Lists.newArrayList(new ArrowFieldNode(6, 0)), Lists.newArrayList(valuesb));\r\n\r\nByteArrayOutputStream out = new ByteArrayOutputStream();\r\nMessageSerializer.serialize(new WriteChannel(Channels.newChannel(out)), batch);\r\n\r\n\r\n////////////////////////////////////////////////////////////////////////////////////////////////////////"
+        },
+        {
+            "created_at": "2019-01-11T14:10:11.253Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4231?focusedCommentId=16740410) by Wes McKinney (wesm):*\n`[~tahmad]` OK, so the Java and C++ code aren't doing the same thing. `MessageSerializer.serialize` writes a length prefix for the message, the `C++` code does not. "
+        },
+        {
+            "created_at": "2019-01-23T10:09:21.852Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4231?focusedCommentId=16749758) by Tanveer (tahmad):*\nYes. I am able to deserialize it in Java correctly. Thanks"
+        }
+    ]
+}

@@ -1,0 +1,42 @@
+{
+    "issue": {
+        "title": "[Python] Error when reading table with list values from parquet",
+        "body": "***Note**: This issue was originally created as [ARROW-11607](https://issues.apache.org/jira/browse/ARROW-11607). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI'm getting unexpected results when reading tables containing list values and a large number of rows from a parquet file.\r\n\r\nExample code (pyarrow 2.0.0 and 3.0.0):\r\n```java\n\r\nfrom pyarrow import parquet, Table\r\n\r\ndata = [None] * (1 << 20)\r\ndata.append([1])\r\n\r\ntable = Table.from_arrays([data], ['column'])\r\nprint('Expected: %s' % table['column'][-1])\r\n\r\nparquet.write_table(table, 'table.parquet')\r\n\r\ntable2 = parquet.read_table('table.parquet')\r\nprint('Actual:   %s' % table2['column'][-1]\n```\r\nOutput:\r\n```\n\r\nExpected: [1]\r\nActual:   [0]\n```\r\nWhen I decrease the number of rows by 1 (by using (1 << 20) - 1), I get:\r\n```\n\r\nExpected: [1]\r\nActual:   [1]\n```\r\n\r\nFor pyarrow 1.0.1 and 1.0.0, the threshold number of rows is 1 << 15.\r\n\r\nIt seems that this is caused by some overflow and memory corruption because in pyarrow 3.0.0 with more complex values (list of dictionaries with float and datetime):\r\n```\n\r\ndata.append([{'a': 0.1, 'b': datetime.now()}])\r\n```\r\nI'm getting this exception after calling table2.to_pandas() :\r\n```\n\r\n/arrow/cpp/src/arrow/memory_pool.cc:501: Internal error: cannot create default memory pool\n```\r\n\u00a0",
+        "created_at": "2021-02-12T12:36:24.000Z",
+        "updated_at": "2021-02-17T14:52:45.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-02-17T14:52:30.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-02-13T17:48:38.845Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11607?focusedCommentId=17284271) by Micah Kornfield (emkornfield):*\n`[~misogl]` \u00a0thank you for the report.\u00a0 Just out of curiosity did you confirm that the issue isn't with writing?\u00a0"
+        },
+        {
+            "created_at": "2021-02-14T15:49:35.677Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11607?focusedCommentId=17284429) by Micah Kornfield (emkornfield):*\nOne observation is that this value lives directly on a chunking boundary (the num chunks in the returned table is 2, with all the nulls in the prior chunk)."
+        },
+        {
+            "created_at": "2021-02-14T21:10:16.375Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11607?focusedCommentId=17284497) by Michal Glaus (misogl):*\n`[~emkornfield]` I have tested multiple consecutive reads and in version 2.0.0 I'm getting 0 up until this:\r\n```\n\r\nRead no. 176\r\nActual:   [0]\r\nRead no. 177\r\nActual:   [4294967296]\n```\r\n\r\nI have discovered a possible workaround by setting `row_group_size=100_000` in `write_table`. Anything up to `1 << 20` seems to fix the issue (at leaset for my test case).\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-02-14T21:23:59.163Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11607?focusedCommentId=17284499) by Micah Kornfield (emkornfield):*\nSo I now have a repro in C++ Unfortunately most of our unit tests are written against an API that doesn't use RecordBatchReader and thus this edge case wasn't caught there."
+        },
+        {
+            "created_at": "2021-02-15T06:06:27.147Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11607?focusedCommentId=17284551) by Micah Kornfield (emkornfield):*\nIt looks like this is indeed a bug on the read side and it in some cases, I could see how this might cause corruption I think.\u00a0\u00a0\r\n\r\n\u00a0\r\n\r\nThe internal error might be independent.\u00a0 Here is the code that could throw that error:\r\n\r\nhttps://github.com/apache/arrow/blob/f291cd7b96463a2efd40a976123c64fad5c01058/cpp/src/arrow/memory_pool.cc#L440"
+        },
+        {
+            "created_at": "2021-02-17T14:52:30.860Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11607?focusedCommentId=17285859) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 9498\n<https://github.com/apache/arrow/pull/9498>"
+        }
+    ]
+}

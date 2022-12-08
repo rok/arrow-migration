@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[C++] IO: Parameterize I/O coalescing using S3 storage metrics",
+        "body": "***Note**: This issue was originally created as [ARROW-8562](https://issues.apache.org/jira/browse/ARROW-8562). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nRelated to\u00a0https://issues.apache.org/jira/browse/ARROW-7995\r\n\r\nThe adaptive I/O coalescing algorithm uses two parameters:\r\n 1. max_io_gap: Max I/O gap/hole size in bytes\r\n 2. ideal_request_size = Ideal I/O Request size in bytes\r\n\r\nThese parameters can be derived from S3 metrics as described below:\r\n\r\nIn an S3 compatible storage, there are two main metrics:\r\n 1. Seek-time or Time-To-First-Byte (TTFB) in seconds: call setup latency of a new S3 request\r\n 2. Transfer Bandwidth (BW) for data in bytes/sec\r\n\r\n1. Computing max_io_gap:\r\n\r\nmax_io_gap = TTFB \\* BW\r\n\r\nThis is also called Bandwidth-Delay-Product (BDP).\r\n\r\nTwo byte ranges that have a gap can still be mapped to the same read if the gap is less than the bandwidt-delay product\u00a0[TTFB \\* TransferBandwidth], i.e. if the Time-To-First-Byte (or call setup latency of a new S3 request) is expected to be greater than just reading and discarding the extra bytes on an existing HTTP request.\r\n\r\n2. Computing ideal_request_size:\r\n\r\nWe want to have high bandwidth utilization per S3 connections, i.e. transfer large amounts of data to amortize the seek overhead.\r\n But, we also want to leverage parallelism by slicing very large IO chunks. We define two more config parameters with suggested default values to control the slice size and seek to balance the two effects with the goal of maximizing net data load performance.\r\n\r\nBW_util (ideal bandwidth utilization):\r\n This means what fraction of per connection bandwidth should be utilized to maximize net data load.\r\n A good default value is 90% or 0.9.\r\n\r\nMAX_IDEAL_REQUEST_SIZE:\r\n This means what is the maximum single request size (in bytes) to maximize net data load.\r\n A good default value is 64 MiB.\r\n\r\nThe amount of data that needs to be transferred in a single S3 get_object request to achieve effective bandwidth eff_BW = BW_util \\* BW is as follows:\r\n eff_BW = ideal_request_size / (TTFB + ideal_request_size / BW)\r\n\r\nSubstituting TTFB = max_io_gap / BW and eff_BW = BW_util \\* BW, we get the following result:\r\n ideal_request_size = max_io_gap \\* BW_util / (1 - BW_util)\r\n\r\nApplying the MAX_IDEAL_REQUEST_SIZE, we get the following:\r\n ideal_request_size = min(MAX_IDEAL_REQUEST_SIZE, max_io_gap \\* BW_util / (1 - BW_util))\r\n\r\nThe proposal is to create a named constructor in the io::CacheOptions (PR: <https://github.com/apache/arrow/pull/6744>\u00a0created by `[~lidavidm]`) to compute max_io_gap and ideal_request_size from TTFB and BW which will then be passed to reader to configure the I/O coalescing.",
+        "created_at": "2020-04-22T21:47:22.000Z",
+        "updated_at": "2020-05-01T21:48:33.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-05-01T21:39:14.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-04-23T11:00:53.419Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8562?focusedCommentId=17090509) by Antoine Pitrou (apitrou):*\n> The proposal is to create a named constructor in the io::CacheOptions (PR: https://github.com/apache/arrow/pull/6744 created by David Li) to compute max_io_gap and ideal_request_size from TTFB and BW which will then be passed to reader to configure the I/O coalescing.\r\n\r\nThis sounds like a good idea in principle. Can you submit a PR?"
+        },
+        {
+            "created_at": "2020-04-23T16:22:24.946Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8562?focusedCommentId=17090735) by Mayur Srivastava (mayuropensource):*\nI'm going to send a PR soon"
+        },
+        {
+            "created_at": "2020-04-23T16:27:03.910Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8562?focusedCommentId=17090742) by Mayur Srivastava (mayuropensource):*\n`[~apitrou]`, `[~lidavidm]`, I've created a PR for this work: <https://github.com/apache/arrow/pull/7022>\r\n\r\nPlease take a look when you get a chance.\r\n\r\n\u00a0\r\n\r\nThanks,\r\n\r\nMayur"
+        },
+        {
+            "created_at": "2020-05-01T21:39:14.644Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8562?focusedCommentId=17097687) by Wes McKinney (wesm):*\nIssue resolved by pull request 7022\n<https://github.com/apache/arrow/pull/7022>"
+        }
+    ]
+}

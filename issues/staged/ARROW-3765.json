@@ -1,0 +1,26 @@
+{
+    "issue": {
+        "title": "[Gandiva] Segfault when the validity bitmap has not been allocated",
+        "body": "***Note**: This issue was originally created as [ARROW-3765](https://issues.apache.org/jira/browse/ARROW-3765). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis is because the `validity buffer` could be `None`:\r\n```Java\n\r\n>>> df = pd.DataFrame(np.random.randint(0, 100, size=(2**12, 10)))\r\n>>> pa.Table.from_pandas(df).to_batches()[0].column(0).buffers()\r\n[None, <pyarrow.lib.Buffer object at 0x110c1a228>]\r\n>>> df = pd.DataFrame(np.random.randint(0, 100, size=(2**12, 10))*1.0)\r\n>>> pa.Table.from_pandas(df).to_batches()[0].column(0).buffers()\r\n[<pyarrow.lib.Buffer object at 0x11a2b3030>, <pyarrow.lib.Buffer object at 0x11a2b3228>]\n```\r\nBut Gandiva has not implemented it yet, thus accessing a nullptr:\r\n```Java\n\r\nvoid Annotator::PrepareBuffersForField(const FieldDescriptor& desc, const arrow::ArrayData& array_data, EvalBatch* eval_batch) { \r\n    int buffer_idx = 0;\r\n    // TODO:  \r\n    // - validity is optional \r\n    uint8_t* validity_buf = const_cast<uint8_t*>(array_data.buffers[buffer_idx]->data());\r\n    eval_batch->SetBuffer(desc.validity_idx(), validity_buf);\r\n    ++buffer_idx;\r\n```\r\n\u00a0\r\n\r\nReproduce code:\r\n```java\n\r\nframe_data = np.random.randint(0, 100, size=(2**22, 10))\r\ntable = pa.Table.from_pandas(df)\r\nfilt = ...\u00a0 # Create any gandiva filter\r\nr = filt.evaluate(table.to_batches()[0], pa.default_memory_pool()) # segfault\n```\r\n\u00a0Backtrace:\r\n```java\n\r\n* thread #2, queue = 'com.apple.main-thread', stop reason = EXC_BAD_ACCESS (code=1, address=0x10)\r\n * frame #0: 0x00000001060184fc libarrow.12.dylib`arrow::Buffer::data(this=0x0000000000000000) const at buffer.h:162\r\n frame #1: 0x0000000106fbed78 libgandiva.12.dylib`gandiva::Annotator::PrepareBuffersForField(this=0x0000000100624dc8, desc=0x000000010101e138, array_data=0x000000010061f8e8, eval_batch=0x0000000100796848) at annotator.cc:65\r\n frame #2: 0x0000000106fbf4ed libgandiva.12.dylib`gandiva::Annotator::PrepareEvalBatch(this=0x0000000100624dc8, record_batch=0x00000001007a45b8, out_vector=size=1) at annotator.cc:94\r\n frame #3: 0x00000001071449b7 libgandiva.12.dylib`gandiva::LLVMGenerator::Execute(this=0x0000000100624da0, record_batch=0x00000001007a45b8, output_vector=size=1) at llvm_generator.cc:102\r\n frame #4: 0x0000000107059a4f libgandiva.12.dylib`gandiva::Filter::Evaluate(this=0x000000010079c668, batch=0x00000001007a45b8, out_selection=std::__1::shared_ptr<gandiva::SelectionVector>::element_type @ 0x00000001007a43e8 strong=2 weak=1) at filter.cc:106\r\n frame #5: 0x000000010948e002 gandiva.cpython-36m-darwin.so`__pyx_pw_7pyarrow_7gandiva_6Filter_3evaluate(_object*, _object*, _object*) + 1986\r\n frame #6: 0x0000000100140e8b Python`_PyCFunction_FastCallDict + 475\r\n frame #7: 0x00000001001d28ca Python`call_function + 602\r\n frame #8: 0x00000001001cf798 Python`_PyEval_EvalFrameDefault + 24616\r\n frame #9: 0x00000001001d3cf9 Python`fast_function + 569\r\n frame #10: 0x00000001001d2899 Python`call_function + 553\r\n frame #11: 0x00000001001cf798 Python`_PyEval_EvalFrameDefault + 24616\r\n frame #12: 0x00000001001d34c6 Python`_PyEval_EvalCodeWithName + 2902\r\n frame #13: 0x00000001001c96e0 Python`PyEval_EvalCode + 48\r\n frame #14: 0x00000001002029ae Python`PyRun_FileExFlags + 174\r\n frame #15: 0x0000000100201f75 Python`PyRun_SimpleFileExFlags + 277\r\n frame #16: 0x000000010021ef46 Python`Py_Main + 3558\r\n frame #17: 0x0000000100000e08 Python`___lldb_unnamed_symbol1$$Python + 248\r\n frame #18: 0x00007fff6ea72085 libdyld.dylib`start + 1\n```\r\n\u00a0",
+        "created_at": "2018-11-11T22:34:04.000Z",
+        "updated_at": "2018-11-16T07:07:25.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: C++ - Gandiva",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-11-16T06:10:48.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-11-11T22:39:32.897Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3765?focusedCommentId=16683047) by Wes McKinney (wesm):*\nYes, in a number of places we don't allocate a validity bitmap for data without nulls. For large datasets, it would be wasteful to have to create a bitmap with all 1's"
+        },
+        {
+            "created_at": "2018-11-16T06:10:48.240Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3765?focusedCommentId=16689066) by Philipp Moritz (pcmoritz):*\nIssue resolved by pull request 2967\n<https://github.com/apache/arrow/pull/2967>"
+        }
+    ]
+}

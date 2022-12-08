@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[C++][Dataset] Cannot write dataset with dictionary column as partition field",
+        "body": "***Note**: This issue was originally created as [ARROW-10247](https://issues.apache.org/jira/browse/ARROW-10247). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen the column to use for partitioning is dictionary encoded, we get this error:\r\n\r\n```Java\n\r\nIn [9]: import pyarrow.dataset as ds\r\n\r\nIn [10]: part = [\"xxx\"] * 3 + [\"yyy\"] * 3\r\n    ...: table = pa.table([\r\n    ...:     pa.array(range(len(part))),\r\n    ...:     pa.array(part).dictionary_encode(),\r\n    ...: ], names=['col', 'part'])\r\n\r\nIn [11]: part = ds.partitioning(table.select([\"part\"]).schema)\r\n\r\nIn [12]: ds.write_dataset(table, \"test_dataset_dict_part\", format=\"parquet\", partitioning=part)\r\n---------------------------------------------------------------------------\r\nArrowTypeError                            Traceback (most recent call last)\r\n<ipython-input-12-c7b81c9b0bda> in <module>\r\n----> 1 ds.write_dataset(table, \"test_dataset_dict_part\", format=\"parquet\", partitioning=part)\r\n\r\n~/scipy/repos/arrow/python/pyarrow/dataset.py in write_dataset(data, base_dir, basename_template, format, partitioning, schema, filesystem, file_options, use_threads)\r\n    773     _filesystemdataset_write(\r\n    774         data, base_dir, basename_template, schema,\r\n--> 775         filesystem, partitioning, file_options, use_threads,\r\n    776     )\r\n\r\n~/scipy/repos/arrow/python/pyarrow/_dataset.pyx in pyarrow._dataset._filesystemdataset_write()\r\n\r\n~/scipy/repos/arrow/python/pyarrow/error.pxi in pyarrow.lib.check_status()\r\n\r\nArrowTypeError: scalar xxx (of type string) is invalid for part: dictionary<values=string, indices=int32, ordered=0>\r\nIn ../src/arrow/dataset/filter.cc, line 1082, code: VisitConjunctionMembers(*and_.left_operand(), visitor)\r\nIn ../src/arrow/dataset/partition.cc, line 257, code: VisitKeys(expr, [&](const std::string& name, const std::shared_ptr<Scalar>& value) { auto&& _error_or_value28 = (FieldRef(name).FindOneOrNone(*schema_)); do { ::arrow::Status __s = ::arrow::internal::GenericToStatus((_error_or_value28).status()); do { if ((__builtin_expect(!!(!__s.ok()), 0))) { ::arrow::Status _st = (__s); _st.AddContextLine(\"../src/arrow/dataset/partition.cc\", 257, \"(_error_or_value28).status()\"); return _st; } } while (0); } while (false); auto match = std::move(_error_or_value28).ValueUnsafe();;; if (match) { const auto& field = schema_->field(match[0]); if (!value->type->Equals(field->type())) { return Status::TypeError(\"scalar \", value->ToString(), \" (of type \", *value->type, \") is invalid for \", field->ToString()); } values[match[0]] = value.get(); } return Status::OK(); })\r\nIn ../src/arrow/dataset/file_base.cc, line 321, code: (_error_or_value24).status()\r\nIn ../src/arrow/dataset/file_base.cc, line 354, code: task_group->Finish()\r\n```\r\n\r\nWhile this seems a quit normal use case, as this column will typically be repeated many times (and we also support reading it as such with dictionary type, so a roundtrip is currently not possible in that case)\r\n\r\nI tagged it for 2.0.0 for a moment in case it's possible today, but I didn't yet look into how easy it would be to fix.",
+        "created_at": "2020-10-09T12:00:06.000Z",
+        "updated_at": "2021-01-15T16:44:07.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-01-15T16:44:04.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-10-09T12:00:23.397Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10247?focusedCommentId=17210866) by Joris Van den Bossche (jorisvandenbossche):*\ncc `[~bkietz]`"
+        },
+        {
+            "created_at": "2021-01-10T02:43:24.008Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10247?focusedCommentId=17261996) by Lance Dacey (ldacey):*\nWhat is the best workaround for this issue right now? I was playing around with making a new partition schema if a dictionary type was found in my partition columns:\r\n\r\n\u00a0\r\n```java\n\r\npartitioning = None\r\npart_schema = t.select([\"project\", \"date\"]).schema\r\nfields = []\r\nfor part in part_schema:\r\n    if pa.types.is_dictionary(part.type):\r\n        fields.append(pa.field(part.name, part.type.value_type))\r\n    else:\r\n        fields.append(pa.field(part.name, part.type))\r\nnew_schema = pa.schema(fields)\r\npartitioning = ds.partitioning(new_schema, flavor=\"hive\")\r\n```\r\nThis seems to work for me. My only issue is if I have multiple partition columns with different types.\r\n\r\nThis would return an error when I read the dataset with ds.dataset():\r\n```java\n\r\npartitioning = ds.partitioning(pa.schema([('date', pa.date32()), (\"project\", pa.dictionary(index_type=pa.int32(), value_type=pa.string()))]), flavor=\"hive\")\n```\r\nArrowInvalid: No dictionary provided for dictionary field project: dictionary<values=string, indices=int32, ordered=0>\r\n\r\n\u00a0\r\n\r\nAnd this returns dictionaries for both partitions (instead of date being pa.date32()) which is not ideal:\r\n```java\n\r\npartitioning=ds.HivePartitioning.discover(infer_dictionary=True)\n```"
+        },
+        {
+            "created_at": "2021-01-15T10:58:24.795Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10247?focusedCommentId=17265918) by Joris Van den Bossche (jorisvandenbossche):*\n`[~ldacey]` yes, this problem of not being able to specify one column with a dictionary type (and `discover(infer_dictionary=True)` doing it for all columns) is indeed a open issue in the user API. I just noted that on the PR as well: https://github.com/apache/arrow/pull/9130#issuecomment-760801124\r\n\r\nSo with the imminent pyarrow 3.0, you will be able to do:\r\n\r\n```python\n\r\npartitioning = ds.partitioning(\r\n    pa.schema([('date', pa.date32()), (\"project\", pa.dictionary(index_type=pa.int32(), value_type=pa.string()))]),\r\n    flavor=\"hive\", dictionaries={'project': pa.array([... all possible values for the project field ...]}\r\n)\r\n```\r\n\r\nNote that the above is only needed for reading, for writing it will work without specifying those dictionaries keyword manually. I will open a new JIRA to further improve this."
+        },
+        {
+            "created_at": "2021-01-15T11:08:06.945Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10247?focusedCommentId=17265928) by Lance Dacey (ldacey):*\nNice - how would you generally go about finding the array of values? Would it be detected from the file paths, or would I need\u00a0 store it externally somewhere (sometimes new categories could be added into the field without me being aware so explicitly listing them in my code might be weird)?"
+        },
+        {
+            "created_at": "2021-01-15T11:25:03.786Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10247?focusedCommentId=17265940) by Joris Van den Bossche (jorisvandenbossche):*\n> how would you generally go about finding the array of values?\r\n\r\nWell, that's up to you .. (parsing it from the file paths, storing that information somewhere, ..). But, so, my hunch is that we shouldn't actually _require_ the user to pass it, since pyarrow can infer that itself from parsing the file paths if not provided. I opened ARROW-11260 for this."
+        },
+        {
+            "created_at": "2021-01-15T16:44:04.951Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10247?focusedCommentId=17266184) by Ben Kietzman (bkietz):*\nIssue resolved by pull request 9130\n<https://github.com/apache/arrow/pull/9130>"
+        }
+    ]
+}

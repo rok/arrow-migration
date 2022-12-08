@@ -1,0 +1,50 @@
+{
+    "issue": {
+        "title": "[C++][Python] replace_with_mask seg faults when passed ChunkedArray",
+        "body": "***Note**: This issue was originally created as [ARROW-15928](https://issues.apache.org/jira/browse/ARROW-15928). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIt looks like most compute functions that take an array-like can accept a ChunkedArray as well. One exception to that appears to be replace_with_mask which seems to seg fault when the array-like is a chunked array. Here is an example:\r\n\u00a0\r\n\u00a0\r\n```java\n\r\nimport pyarrow as pa \r\nimport pyarrow.compute as pc \r\n\r\nca = pa.chunked_array([[1, 2], [3, 4]]) \r\nmask = [False, True, False, True] \r\n\r\n# works (when we first combine chunks into a single array) \r\na_new = pc.replace_with_mask(ca.combine_chunks(), mask, 0) \r\n\r\n# seg fault (if we try to pass the chunked array) \r\nca_new = pc.replace_with_mask(ca, mask, 0)\n```\r\n\u00a0",
+        "created_at": "2022-03-14T13:01:34.000Z",
+        "updated_at": "2022-04-30T19:04:23.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-04-25T14:38:19.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-14T13:10:45.469Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15928?focusedCommentId=17506232) by Antoine Pitrou (apitrou):*\ncc `[~jorisvandenbossche]` `[~amol-]`"
+        },
+        {
+            "created_at": "2022-03-22T02:17:43.242Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15928?focusedCommentId=17510184) by Kevin Crouse (krcrouse):*\nI believe this issue extends beyond the case listed in the issue. I have a case where I'm trying to update a boolean array with newer information, and I get the same behavior. Very simple tests work, but at even relatively small nontrivial sizes, they segfault. \r\n\r\nHere's a simple example to demonstrate. Note that the same happens if mask is a pyarrow `BooleanArray`, which was my original use case. \r\n\r\n\r\n```python\n\r\nimport pyarrow\r\nimport pyarrow.compute as pc\r\n\r\nabool = pyarrow.array([True, True, False, True, False] * 1000)\r\nmask = [False, False, True, False, True] * 1000\r\nreplace = [True] * pc.value_counts(mask)[True][1].as_py()\r\n\r\n# segfaults\r\nupdate = pc.replace_with_mask(abool, mask, replace)\r\n\r\n# also segfaults\r\narrowreplace = pyarrow.array(replace)\r\nupdate = pc.replace_with_mask(abool, mask, arrowreplace)\r\n```\r\n\r\n\r\n"
+        },
+        {
+            "created_at": "2022-03-31T12:03:28.606Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15928?focusedCommentId=17515284) by David Li (lidavidm):*\n[From GitHub](https://github.com/apache/arrow/issues/12761) there appears to be another failing case:\r\n```\n\r\nimport pyarrow as pa\r\nvalues=pa.array([0,1],pa.int64())\r\nmask=pa.array([True,False],pa.bool_())\r\nreplace=pa.array([5],pa.int64())\r\npa.compute.replace_with_mask(values,mask,replace) \n```\r\nChunked arrays fail because we simply don't implement them and try to evaluate them as arrays. Not sure why it segfaults now, though."
+        },
+        {
+            "created_at": "2022-04-04T16:25:13.104Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15928?focusedCommentId=17516936) by David Li (lidavidm):*\nFWIW, the fix will basically be to either 1) explicitly refuse to run on ChunkedArrays or 2) implement explicit support for ChunkedArrays; I wanted to look at (2) but don't think I'll get a chance to by release time."
+        },
+        {
+            "created_at": "2022-04-04T16:37:38.045Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15928?focusedCommentId=17516938) by Kevin Crouse (krcrouse):*\n`[~lidavidm]` , as I noted in my comment above I believe this is not a ChunkedArray problem and I have the same issue with regular arrow arrays. I also provided an example that consistently seg faults on our machine, but if it's a memory overflow you may not have the same result."
+        },
+        {
+            "created_at": "2022-04-04T16:46:03.124Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15928?focusedCommentId=17516942) by David Li (lidavidm):*\nAh sorry, I've only had time to debug the chunkedarray case so far, I hadn't looked at the rest yet"
+        },
+        {
+            "created_at": "2022-04-05T17:07:40.310Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15928?focusedCommentId=17517574) by David Li (lidavidm):*\nThanks `[~krcrouse]` for the repro above, it seems the other issue is that nulls are handled differently between https://github.com/apache/arrow/blob/master/cpp/src/arrow/compute/kernels/vector_replace.cc#L125-L130 and https://github.com/apache/arrow/blob/master/cpp/src/arrow/compute/kernels/vector_replace.cc#L140-L142"
+        },
+        {
+            "created_at": "2022-04-25T14:38:19.940Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15928?focusedCommentId=17527536) by Krisztian Szucs (kszucs):*\nIssue resolved by pull request 12802\n<https://github.com/apache/arrow/pull/12802>"
+        }
+    ]
+}

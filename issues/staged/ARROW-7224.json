@@ -1,0 +1,76 @@
+{
+    "issue": {
+        "title": "[C++][Dataset] Partition level filters should be able to provide filtering to file systems",
+        "body": "***Note**: This issue was originally created as [ARROW-7224](https://issues.apache.org/jira/browse/ARROW-7224). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen providing a filter for partitions, it should be possible in some cases to use it to optimize file system list calls.\u00a0 This can greatly improve the speed for reading data from partitions because fewer number of directories/files need to be explored/expanded.\u00a0 I've fallen behind on the dataset code, but I want to make sure this issue is tracked someplace.\u00a0 This came up in SO question linked below (feel free to correct my analysis if I missed the functionality someplace).\r\n\r\nReference:\u00a0<https://stackoverflow.com/questions/58868584/pyarrow-parquetdataset-read-is-slow-on-a-hive-partitioned-s3-dataset-despite-u/58951477#58951477>",
+        "created_at": "2019-11-21T07:17:51.000Z",
+        "updated_at": "2021-03-11T17:13:07.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2019-11-21T12:42:19.738Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7224?focusedCommentId=16979242) by Francois Saint-Jacques (fsaintjacques):*\nThere's a confusion between the new dataset API (in C++) and the existing ParquetDataset that is purely in python."
+        },
+        {
+            "created_at": "2019-11-22T05:17:47.119Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7224?focusedCommentId=16979856) by Micah Kornfield (emkornfield@gmail.com):*\n`[~fsaintjacques]` I was intending this to cover the new dataset API.  I figured the python one will be replaced (hopefully some point soon).  If this is covered in the new C++ Dataset API then lets resolve it (I'm not sure anyone has bandwidth to work on the existing python one)."
+        },
+        {
+            "created_at": "2021-02-27T10:59:30.460Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7224?focusedCommentId=17292100) by Andy Douglas (andydoug):*\nIs there any update on this?\r\n\r\nI'm also finding that instantiation a pyarrrow dataset containing a large number of files is slow even when passing paths explicitly. I've tried dropping to the parquet dataset interface and disabling schema validation, but it's still slow.\u00a0\r\n\r\nIn general, is there a way of caching information regarding partitions/files perhaps within the metadata? I was thinking perhaps of a hierarchical setup which was supported by the query language where the query is initially evaluated on the partition/files cache (if present) to determine the list of relevant files. Then a dataset is instantiated by explicitly passing the list of relevant files before finally evaluating the query on this. This could be supported outside of pyarrow but I've struggled to find a way to evaluate the parts of the query relevant to the partitions without separating out into a separate query which is clunky."
+        },
+        {
+            "created_at": "2021-03-08T18:37:33.528Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7224?focusedCommentId=17297639) by Ben Kietzman (bkietz):*\nI'm not sure how this would work; directories viewed by datasets are only listed once (on construction). Thereafter a vector of discovered fragments is maintained internally and (subsets of it, determined by partition expressions) returned by GetFragments(). Filtering on partition expressions will never incur IO"
+        },
+        {
+            "created_at": "2021-03-08T19:26:03.779Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7224?focusedCommentId=17297661) by Andy Douglas (andydoug):*\n`[~bkietz]` \u00a0\u00a0\r\n\r\n> directories viewed by datasets are only listed once (on construction)\r\n\r\nright but for a dataset containing a large number of parquet files (> 100k) the construction can take a long time so too can querying the dataset for a particularly partition. What I was suggesting is the ability to load a cached copy of the mapping from partition to parquet file as a separate metadata dataset. Clearly this cache would be invalidated when the dataset is written to but I have lots of datasets that are read more than they are written, so for me the caching works well. Both the initial load and subsequent querying are much faster (seconds not minutes for the initial load and then tens of seconds for the query)"
+        },
+        {
+            "created_at": "2021-03-08T19:27:39.143Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7224?focusedCommentId=17297664) by Micah Kornfield (emkornfield):*\n`{\\{I think this would require some changing of dataset assumptions (I'm not familiar to say how and if it is worth the work). But it could be done as follows. Knowing a directories look like: \"/{a}/\\{b}/\\{c}/\\{files}\" (either through inference or user provides this) then if a predicate \"a=foo\" instead of listing all objects and caching them a directory listing of \"/foo/*\" could be issued.`}}\r\n\r\nSo this might involve some of the following for datasets:\r\n 1. Making construction lazier.\r\n 2. Tracking which top level structures have been explored and which ones haven't.\r\n 3. Constructing listings in parallel given a predicate.\r\n\r\nA success metric is latency for the first returned data, it seems like the existing datasets contract is optimized around minimizing total latency across all queries.\r\n\r\nIf you think about the common case for a date partitioned datawarehouse then the most common queries are going to be on recent data. Listing only the partitions needed can reduce latency (and potentially by quite a bit if the underlying file system doesn't support reverse lexicographic listing)."
+        },
+        {
+            "created_at": "2021-03-08T19:42:47.398Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7224?focusedCommentId=17297671) by Andy Douglas (andydoug):*\n1. Making construction lazier.\n1. Tracking which top level structures have been explored and which ones haven't.\n1. Constructing listings in parallel given a predicate.\n   \n   All of these would definitely help.\n   \n   I have a use case that involves a dataset with over 1M files on s3. I update the cache file incrementally after an overnight update job completes avoiding having to reindex the entire dataset each time.\n   \n   What would be the suggested approach here?"
+        },
+        {
+            "created_at": "2021-03-09T16:19:24.600Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7224?focusedCommentId=17298151) by Ben Kietzman (bkietz):*\n`[~andydoug]` the metadata you mentioned makes me think of [pyarrow.dataset.parquet_dataset](https://arrow.apache.org/docs/python/dataset.html#working-with-parquet-datasets), which allows construction of a dataset from a single metadata-only parquet file. When such a _metadata file can be written filters will be applied not only to partition keys but also to row group statistics without IO; might be worth a look.\r\n\r\nThe fundamental problem I see is a mismatch in how `pq.ParquetDatset` and `pyarrow.dataset.*` consider filters: the former considers a filter during construction while the latter is intended to handle multiple reads with differing filters. In the latter case, the dataset is intended to _encapsulate_ the mapping between partitions and files:\r\n\r\n```python\n\r\nimport pyarrow.dataset as ds\r\ndataset = ds.dataset('s3://bucket-name/dataset-name', format='parquet')\r\n\r\nkindness_day_filter = ds.field('year') == 2019 & ds.field('month') == 11 & ds.field('day') == 13\r\nkindness_day_table = dataset.to_table(filter=kindness_day_filter)\r\n\r\n# repeat with other filters\r\nkindness_week_filter = ds.field('year') == 2019 & ds.field('month') == 11 & ds.field('day') >= 10 & ds.field('day') <= 16\r\n```\r\n\r\nIf that's neither of these is acceptable, note that `pq.ParquetDataset` can be constructed from a list of paths of data files. If an explicit list of files is available then the dataset can be (repeatedly) constructed without invoking a directory listing method. \r\n\r\nFWIW, we have https://issues.apache.org/jira/browse/ARROW-8163 to track lazier construction of datasets and the only issue I'm aware of which we had for supporting more sophisticated listing behavior is https://issues.apache.org/jira/browse/ARROW-6257 . It seems before lazy construction of a dataset could benefit this case we'd need to also support producing a stream of results from querying a FileSelector `[~apitrou]`\r\n\r\nhttps://github.com/apache/arrow/pull/9632\r\n\r\n`[~jorisvandenbossche]`"
+        },
+        {
+            "created_at": "2021-03-09T16:42:39.711Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7224?focusedCommentId=17298172) by Ben Kietzman (bkietz):*\nAlso worth noting: the case discussed in this thread (of a filter which references each partition field exactly once and specifies an equality condition for each) corresponds to a single subdirectory which needs to be scanned. This is not the case for all filters, but it would be possible to add a special case when such a prefix can be extracted.  This would require the `Partitioning` be explicitly constructed (so that we know without inspection of paths what partition fields are in play), but that's fairly straightforward."
+        },
+        {
+            "created_at": "2021-03-09T16:49:27.461Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7224?focusedCommentId=17298178) by Ben Kietzman (bkietz):*\n>  I have a use case that involves a dataset with over 1M files on s3. I update the cache file incrementally after an overnight update job completes avoiding having to reindex the entire dataset each time.\r\n\r\nAnother potential workaround would be to create a custom FileSystem which replaces directory listing calls with reads of this cache file. In Python, this can be done by subclassing PyFileSystem and [FileSystemHandler](https://arrow.apache.org/docs/python/generated/pyarrow.fs.FileSystemHandler.html#pyarrow.fs.FileSystemHandler) or through [fsspec](https://arrow.apache.org/docs/python/filesystems.html#using-fsspec-compatible-filesystems)"
+        },
+        {
+            "created_at": "2021-03-09T16:52:28.242Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7224?focusedCommentId=17298181) by Micah Kornfield (emkornfield):*\n> Also worth noting: the case discussed in this thread (of a filter which references each partition field exactly once and specifies an equality condition for each) corresponds to a single subdirectory which needs to be scanned. This is not the case for all filters, but it would be possible to add a special case when such a prefix can be extracted. This would require the\u00a0`Partitioning`\u00a0be explicitly constructed (so that we know without inspection of paths what partition fields are in play), but that's fairly straightforward.\r\nAgreed.\u00a0 I'll note that there is actually an interaction with the file system here as well, but specialization for equality is a starting point.\u00a0 For instance >= partition keys is achievable for S3, as well as a range\u00a0 lb <= column <= ub.\u00a0 But strict less then/less than or equal would not achieve the same efficiencies.\u00a0 FWIW, Spark as has APIs for push-down predicates that allow a source to tell it which predicates it can be pushed down effectively and which need to be done as part of the engine (i.e. using compute kernels).\u00a0 A similar abstraction might be useful here."
+        },
+        {
+            "created_at": "2021-03-09T20:59:10.109Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7224?focusedCommentId=17298347) by Antoine Pitrou (apitrou):*\n`[~bkietz]` Can you open a JIRA for the streaming GetFileInfo(FileSelector) request?"
+        },
+        {
+            "created_at": "2021-03-10T15:49:39.716Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7224?focusedCommentId=17298920) by Joris Van den Bossche (jorisvandenbossche):*\n> FWIW, Spark as has APIs for push-down predicates that allow a source to tell it which predicates it can be pushed down effectively and which need to be done as part of the engine (i.e. using compute kernels).\r\n\r\n[~emkornfield@gmail.com] do you have a (doc) reference for this?\r\n\r\nAs `[~bkietz]` mentioned above, a main part of the issue is the \"filtering during construction\" vs \"filtering during query\". Currently you can only provide a filter when actually querying. But do we want to consider adding a kind of `filter` argument for during construction as well? (in case you know that all your subsequent queries will use that filter)"
+        },
+        {
+            "created_at": "2021-03-10T22:01:27.275Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7224?focusedCommentId=17299155) by Ben Kietzman (bkietz):*\nStreaming GetFileInfo: ARROW-11924"
+        },
+        {
+            "created_at": "2021-03-11T17:13:07.458Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7224?focusedCommentId=17299725) by Micah Kornfield (emkornfield):*\n`[~jorisvandenbossche]` \u00a0I think this is the [relevant API](https://github.com/apache/spark/blob/3a299aa6480ac22501512cd0310d31a441d7dfdc/sql/catalyst/src/main/java/org/apache/spark/sql/connector/read/SupportsPushDownFilters.java)\u00a0from DataSourceV2.\u00a0\u00a0\r\n\r\n\u00a0\r\n\r\nIt seems like a bad user experience to expose a \"filter on construction parameter\", but it could be a way to mitigate this.\u00a0 I think workarounds `[~bkietz]` \u00a0proposed are also workable.\u00a0 As I've said before I think supporting the feature that this JIRA is asking for is complex and potentially requires big changes to Datasets so I understand if it isn't immediately prioritized (but I think it can have a large impact for common cases)."
+        }
+    ]
+}

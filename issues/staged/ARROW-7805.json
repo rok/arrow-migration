@@ -1,0 +1,42 @@
+{
+    "issue": {
+        "title": "[C++][Python] HDFS Remove (rm) operation defaults to SkipTrash",
+        "body": "***Note**: This issue was originally created as [ARROW-7805](https://issues.apache.org/jira/browse/ARROW-7805). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe Pyarrow lib (using LIBHDFS) appears to default to a SkipTrash option (which is _not_ the Hadoop default behavior).\u00a0 This turned out to be a pretty major issue for a recent project.\u00a0 The\u00a0HadoopFileSystem `delete` method currently has a default behavior of `recursive=False` I would believe a similar `skipTrash=False` default would be appropriate here.\r\n\r\nOr, if this is not possible it may be appropriate and best to print a `WARNING` or something to the console to warn users that this is a point-of-no-return.\r\n\r\nThe 2 below tests show the difference in default behaviors between `hadoop fs` shell commands and the default `pyarrow` behavior.\r\n\r\n\u00a0\r\n```java\n\r\n# test using hadoop fs shell commands \r\n\r\n# setup test & confirm that file exists \r\n$ testfile=\"/user/myusername/testfile1\" \r\n$ hadoop fs -touchz $testfile && hadoop fs -ls $testfile \r\n-rw-r----- 3 myusername mygroup 0 2020-02-08 13:25 /user/myusername/testfile1 \r\n\r\n# remove the file and confirm that it is moved to the Trash \r\n$ hadoop fs -rm $testfile \r\n20/02/08 13:26:04 INFO fs.TrashPolicyDefault: Moved: 'hdfs://nameservice1/user/myusername/testfile1' to trash at: hdfs://nameservice1/user/.Trash/myusername/Current/user/myusername/testfile1 \r\n\r\n# verify that it is in the Trash \r\n$ hadoop fs -ls /user/.Trash/myusername/Current/user/myusername/testfile1 \r\n-rw-r----- 3 myusername mygroup 0 2020-02-08 13:25 /user/.Trash/myusername/Current/user/myusername/testfile1\r\n\r\n```\r\n```java\n\r\n# test using pyarrow\r\nimport os\r\nimport subprocess\r\n\r\nfrom app import conf\r\n\r\nLIBHDFS_PATH = conf[\"libhdfs_path\"]\r\nos.environ[\"ARROW_LIBHDFS_DIR\"] = LIBHDFS_PATH\r\nimport pyarrow\r\n\r\nTEST_FILE = 'testfile2'\r\nTEST_FILE_PATH = f'/user/myusername/{TEST_FILE}'\r\nTRASH_FILE_PATH = f'/user/.Trash/myusername/Current/user/myusername/{TEST_FILE}'\r\n\r\nfs = pyarrow.hdfs.connect(driver=\"libhdfs\")\r\n\r\ndef setup_test():\r\n    \"\"\"Create the testfile\"\"\"\r\n    print('create test file...')\r\n    subprocess.run(f'hadoop fs -touchz {TEST_FILE_PATH}'.split())\r\n\r\ndef run_test():\r\n    \"\"\"run the removal, try to remove the file and verify if it's moved to the Trash\"\"\"\r\n    setup_test()\r\n    try:\r\n        print(f'check if test file {TEST_FILE} exists: {bool(fs.ls(TEST_FILE))}')\r\n        print(f'attempt to remove: {TEST_FILE}')\r\n        fs.rm(TEST_FILE)\r\n        print(f'file {TEST_FILE} removed successfully')\r\n    except:\r\n        print('encountered an error in run_test')\r\n\r\ndef check_file_in_hdfs_trash():\r\n    try:\r\n        fs.ls(TRASH_FILE_PATH)\r\n    except:\r\n        print(f'test file {TEST_FILE} not found in {TRASH_FILE_PATH}!!')\r\n\r\nrun_test()\r\ncheck_file_in_hdfs_trash()\r\n\r\n# output...\r\ncreate test file...\r\ncheck if test file testfile2 exists: True\r\nattempt to remove: testfile2\r\nfile testfile2 removed successfully\r\ntest file testfile2 not found in /user/.Trash/myusername/Current/user/myusername/testfile2!!\r\n\r\n```\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2020-02-08T19:38:56.000Z",
+        "updated_at": "2021-04-15T16:46:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-04-15T16:46:03.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-02-10T15:42:09.074Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7805?focusedCommentId=17033697) by Wes McKinney (wesm):*\nCan you look at our usage of the libhdfs C APIs and see if we're doing something wrong?"
+        },
+        {
+            "created_at": "2020-02-10T17:31:49.733Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7805?focusedCommentId=17033790) by bb (bbapache):*\nI am not familiar with C so will be limiting here, but I do see this Header file which references `useTrash`:\r\n\r\n[https://github.com/apache/hadoop-common/blob/42a61a4fbc88303913c4681f0d40ffcc737e70b5/hadoop-hdfs-project/hadoop-hdfs/src/main/native/fuse-dfs/fuse_trash.h#L24](https://github.com/c9n/hadoop/blob/a315107901aebc8d0c2b9f530d191673d27922a2/hadoop-hdfs-project/hadoop-hdfs/src/main/native/libhdfs/hdfs.c#L1687)\r\n\r\nAnd this which does not seem to make any reference to the trash options:\r\n\r\n<https://github.com/c9n/hadoop/blob/a315107901aebc8d0c2b9f530d191673d27922a2/hadoop-hdfs-project/hadoop-hdfs/src/main/native/libhdfs/hdfs.c#L1686>\r\n\r\nIt is not clear to me where the default behavior is getting set though.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-02-19T14:45:37.202Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7805?focusedCommentId=17040109) by Antoine Pitrou (apitrou):*\n`[~bbapache]` First, up-to-date Hadoop git repository is here: https://github.com/apache/hadoop/\r\n\r\nSecond, the \"trash\" option does not seem supported by the C `libhdfs` library. We would need to reimplement the logic from this file (from the higher-level FUSE filesystem adapter):\r\nhttps://github.com/apache/hadoop/blob/trunk/hadoop-hdfs-project/hadoop-hdfs-native-client/src/main/native/fuse-dfs/fuse_trash.c\r\n\r\n"
+        },
+        {
+            "created_at": "2020-02-24T18:58:54.127Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7805?focusedCommentId=17043767) by bb (bbapache):*\nOk, thanks.\u00a0 What would you recommend from here?\u00a0 Would it make more sense to open a `libhdfs` Jira for this feature?\u00a0 I would be happy to do so but it may still be beneficial to log a warning, or at the very least update the docstring for the `pyarrow` `rm` method so that users understand the repercussions.\u00a0 Thanks again."
+        },
+        {
+            "created_at": "2020-02-24T19:00:35.111Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7805?focusedCommentId=17043768) by Antoine Pitrou (apitrou):*\nYes, I think filing a feature request to libhdfs (or its parent project, whatever that is) would be a good idea."
+        },
+        {
+            "created_at": "2021-04-15T16:46:03.315Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7805?focusedCommentId=17322312) by Antoine Pitrou (apitrou):*\nI don't think it is worth creating this issue open. You can re-create a trash-like behaviour if you want to."
+        }
+    ]
+}

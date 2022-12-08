@@ -1,0 +1,69 @@
+{
+    "issue": {
+        "title": " [R] Error converting Table with nested structs",
+        "body": "***Note**: This issue was originally created as [ARROW-9676](https://issues.apache.org/jira/browse/ARROW-9676). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen trying to collect data from a dataset based on parquet files with nested structs (column is a struct with 2 structs nested) of moderate size (1Mish rows), R crashes. If I add a filter to reduce the number of rows, the data is parsed. If I select out the struct column, it works great (up to 21M rows). My hunch is the structs resulting in data.frame columns may be the issue. I am curious if there's a way to have arrow import structs as lists instead of data.frames. Thanks for the direction to here\u00a0 `[~neilr8133]`!",
+        "created_at": "2020-08-09T00:47:31.000Z",
+        "updated_at": "2020-11-01T22:53:35.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-11-01T22:51:37.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-08-09T03:01:16.027Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9676?focusedCommentId=17173729) by Neal Richardson (npr):*\nThanks for the report. Could you please provide an example of the shape of data you're trying to read (don't need 1M rows), as well as details on what happens when R crashes?\r\n\r\n"
+        },
+        {
+            "created_at": "2020-08-09T03:53:39.716Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9676?focusedCommentId=17173740) by Nick DiQuattro (Ndiquattro):*\nSure, not sure how to share a reprex of this exactly, but here's how the offending column is displayed after calling `open_dataset()`:\r\n\r\n\r\n` address_cass: struct<analysis: struct<active: string, dpv_cmra: string, dpv_footnotes: string, dpv_match_code: string, dpv_vacant: string, footnotes: string, lacslink_code: string, lacslink_indicator: string>, canidate_index: int64, components: struct<city_name: string, default_city_name: string, delivery_point: string, delivery_point_check_digit: string, extra_secondary_designator: string, extra_secondary_number: string, plus4_code: string, pmb_designator: string, pmb_number: string, primary_number: string, secondary_designator: string, secondary_number: string, state_abbreviation: string, street_name: string, street_postdirection: string, street_predirection: string, street_suffix: string, zipcode: string>, delivery_line_1: string, delivery_line_2: string, delivery_point_barcode: string, input_index: int64, last_line: string, metadata: struct<building_default_indicator: string, carrier_route: string, congressional_district: string, county_fips: string, county_name: string, dst: bool, elot_sequence: string, latitude: double, longitude: double, precision: string, rdi: string, record_type: string, time_zone: string, utc_offset: string, zip_type: string>>`\r\n\r\n\r\n For the crash, after calling `collect()` it hangs until a \"Previous R session was abnormally terminated\" pop-up comes up.\r\n\r\nIn trying it out again for this update, I tried collecting without any select functions (opends() %>% collect()) and these errors showed up before the crash:\r\n\r\n\r\n` Error in Table__to_dataframe(x, use_threads = option_use_threads()) : `\r\n` Value of SET_STRING_ELT() must be a 'CHARSXP' not a 'NULL'Error during wrapup: C stack usage 597002227520 is too close to the limitError: no more error handlers available (recursive errors?); invoking 'abort' restartError: Value of SET_STRING_ELT() must be a 'CHARSXP' not a 'NULL'Error during wrapup: C stack usage 597019012928 is too close to the limitError: no more error handlers available (recursive errors?); invoking 'abort' restartWarning: stack imbalance in '.Call', 29 then 30Warning: stack imbalance in '{', 25 then 26Warning: stack imbalance in 'if', 23 then 20Warning: stack imbalance in 'Unable to render embedded object: File ( Value of SET_STRING_ELT() must be a 'CHARSXP' not a 'NULL'Error during wrapup: C stack usage 597010620000 is too close to the limitError: no more error handlers available (recursive errors?); invoking 'abort' restartWarning: stack imbalance in ') not found.', 15 then 17`\r\n\r\n\r\n Happy to provide any more information, thanks!"
+        },
+        {
+            "created_at": "2020-08-10T18:13:52.496Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9676?focusedCommentId=17174983) by Neal Richardson (npr):*\nThanks. Could you possibly provide some minimal code that reproduces this, possibly with a minimal data file or perhaps generating such a file in your code? It's hard to debug something if I can't trigger the error locally. You could start by trying to read a single file rather than a whole dataset and see if that errors; then maybe you can read it with `as_data_frame=FALSE`, slice out a single row from the Arrow Table, and then write that back out. Or try reading with pyarrow to see if you can slice down to a smaller sample. \r\n\r\nAnother option: create an R data.frame containing a data.frame column (itself maybe containing a data.frame column?), send that to Arrow (`Table$create(...)`), and see if calling `as.data.frame()` on that crashes the same way.\r\n\r\nAlso, if you're trying to read Parquet files with nested data structures, I don't think that's currently supported, though I don't know how it fails (hopefully without crashing). See ARROW-1644."
+        },
+        {
+            "created_at": "2020-08-11T03:47:17.519Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9676?focusedCommentId=17175201) by Nick DiQuattro (Ndiquattro):*\nOK, here's what I got. I have a sample row here:\u00a0<https://gist.github.com/ndiquattro/62334d7adfb792cc311e83752431e7ef>\u00a0\r\n\r\nThere's PII issues, so all the data values are NA. With that row I tried to simulate a larger dataset with:\r\n\r\n\u00a0\r\n\r\n`one_row$n <- 5e6`\r\n\r\n`many_rows <- tidyr::uncount(one_row, n)`\r\n\r\n\u00a0\r\n\r\nTrying to run `many_rows` through `write_parquet()` ended up crashing, similar to reading, so i'm not sure if it entirely recreates the original issue.\r\n\r\n\u00a0\r\n\r\nMaybe helpful, I was able to read in a single file with `as_data_frame = FALSE` and then `$Slice()` different lengths into `as.data.frame()`. A similar error to before would occasionally appear:\r\n\r\n\r\n` Error in Table__to_dataframe(x, use_threads = option_use_threads()) : `\r\n` Value of SET_STRING_ELT() must be a 'CHARSXP' not a 'NULL'Error during wrapup: C stack usage 249898344256 is too close to the limitError: no more error handlers available (recursive errors?); invoking 'abort' restartWarning: stack imbalance in '{', 17 then 20Warning: stack imbalance in 'if', 12 then 16Warning: stack imbalance in '!', 18 then 17``\r\n\r\n\r\n \u00a0What's weird is if I re-ran the same command, with the same slice length, it would parse fine. Sorry for not having a complete example, happy to try and rustle up something more if this isn't enough. Thanks!"
+        },
+        {
+            "created_at": "2020-08-12T20:18:12.492Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9676?focusedCommentId=17176581) by Neal Richardson (npr):*\nHmm. Your example (with all NAs) doesn't error for me. From the error message, it sounds like there's a bug somewhere in the recursive logic that handles the struct arrays, but we're going to need something reproducible in order to identify and ensure that we fix it. \r\n\r\nAside: I don't think your original suggestion of importing struct as R list instead of data.frame would help: a data.frame is just a list with extra attributes. The recursive logic would still be needed to read the struct array, so we need to find that bug and fix it.\r\n\r\nWhat is the origin of the Parquet file you're reading? Since you're hitting an error about `SET_STRING_ELT()` I wonder if you have non-UTF-8 text, or perhaps embedded nuls."
+        },
+        {
+            "created_at": "2020-08-13T23:31:17.055Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9676?focusedCommentId=17177377) by Nick DiQuattro (Ndiquattro):*\nMakes sense about converting to data.frame not being the issue. I've been trying to find a particular row that causes trouble by loading one row at a time with the following code:\r\n\r\n`library(arrow)`\r\n`library(purrr)`\r\n`library(dplyr)`\r\n\r\n`one_file <- read_parquet(\"part-00001-fd97a5a9-f795-4f28-b09f-798077773be8-c000.snappy.parquet\", as_data_frame = FALSE)`\r\n\r\n`convert <- function(index) as.data.frame(one_file$Slice(index, 1))`\r\n`safe_con <- safely(convert)`\r\n\r\n`test <- map(1:10000, safe_con)`\r\n\r\n`map(test, \"error\") %>% discard(is_empty)`\r\n`detect_index(test, ~!is_empty(.$error))`\r\n\r\nThis will sometimes capture a row that generated a similar error as previously mentioned, but then when I investigate the row (running convert() on the index again), it loads fine.\u00a0:(\r\n\r\nThe origin is a pyspark script that is run to convert from newline JSON to parquet elsewhere in our pipeline.\r\n\r\nI hate to have wasted your time, but I can't seem to reliably replicate the error.\u00a0\u00a0"
+        },
+        {
+            "created_at": "2020-08-14T00:05:21.146Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9676?focusedCommentId=17177386) by Neal Richardson (npr):*\nThanks for trying! That's a shame, but it's still useful information to know that the issue is not so simple.\r\n\r\nIf you run this script multiple times, is it the same rows each time that error (at least the first time if not on retry)?"
+        },
+        {
+            "created_at": "2020-08-14T01:19:02.742Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9676?focusedCommentId=17177411) by Nick DiQuattro (Ndiquattro):*\nNope! The map will sometimes run to completion, sometimes inconsistent rows will fail. Maybe I'll have to try again after that nested struct issue you linked above is resolved. Thanks again!"
+        },
+        {
+            "created_at": "2020-10-29T21:06:54.121Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9676?focusedCommentId=17223210) by Neal Richardson (npr):*\n`[~Ndiquattro]` can you see if this is fixed in 2.0.0? I wonder if ARROW-10114 resolved this."
+        },
+        {
+            "created_at": "2020-10-30T23:05:18.700Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9676?focusedCommentId=17223940) by Nick DiQuattro (Ndiquattro):*\n`[~npr]`, Doesn't quite work yet, but doesn't crash my R session now though, so some progress! Instead I get this error:\r\n\r\n`Error in Table__to_dataframe(x, use_threads = option_use_threads()) : `\r\n` cannot handle Array of type`\r\n\r\nKeeping it in Arrow format works and the offending column has this info:\r\n\r\n`$state_specific_fields <map<string, string>>`"
+        },
+        {
+            "created_at": "2020-10-30T23:11:52.375Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9676?focusedCommentId=17223941) by Neal Richardson (npr):*\nAh, ok. We don't yet support map type in R. See https://arrow.apache.org/docs/r/articles/arrow.html#arrow-to-r\r\n\r\nI'll re-title this ticket then to be for map type support."
+        },
+        {
+            "created_at": "2020-10-30T23:19:55.663Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9676?focusedCommentId=17223945) by Nick DiQuattro (Ndiquattro):*\n`[~npr]` Oh, actually, I looked back on our thread and my recent test was on the wrong file. I re-checked and it works now! The previously crashing column shows as a\u00a0\r\n struct<analysis: \r\nwith `as_data_frame = FALSE`, but now it parses as a nested tibble with `as_data_frame = TRUE` !!\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-11-01T22:53:35.180Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9676?focusedCommentId=17224355) by Neal Richardson (npr):*\nOk I made ARROW-10456 for map type support. Feel free to follow that issue if this is something that's important to you."
+        }
+    ]
+}

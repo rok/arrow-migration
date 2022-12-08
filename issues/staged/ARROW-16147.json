@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[C++] ParquetFileWriter doesn't call sink_.Close when using GcsRandomAccessFile",
+        "body": "***Note**: This issue was originally created as [ARROW-16147](https://issues.apache.org/jira/browse/ARROW-16147). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nOn parquet::arrow::FileWriter::Close the underlying sink is not closed. The implementation goes to FileSerializer::Close:\r\n```cpp\n\r\nvoid Close() override {\r\n    if (is_open_) {\r\n      // If any functions here raise an exception, we set is_open_ to be false\r\n      // so that this does not get called again (possibly causing segfault)\r\n      is_open_ = false;\r\n      if (row_group_writer_) {\r\n        num_rows_ += row_group_writer_->num_rows();\r\n        row_group_writer_->Close();\r\n      }\r\n      row_group_writer_.reset();\r\n\r\n      // Write magic bytes and metadata\r\n      auto file_encryption_properties = properties_->file_encryption_properties();\r\n\r\n      if (file_encryption_properties == nullptr) {  // Non encrypted file.\r\n        file_metadata_ = metadata_->Finish();\r\n        WriteFileMetaData(*file_metadata_, sink_.get());\r\n      } else {  // Encrypted file\r\n        CloseEncryptedFile(file_encryption_properties);\r\n      }\r\n    }\r\n  }\r\n```\r\nIt doesn't call sink_->Close(), which leads to resource leaking and bugs.\r\nWith files (they have own close() in destructor) it works fine, but doesn't work with fs::GcsRandomAccessFile. When I calling parquet::arrow::FileWriter::Close the data is not flushed to storage, until manual close of a sink stream (or stack space change).\r\n\r\nIs it done by intention or a bug?",
+        "created_at": "2022-04-07T20:03:24.000Z",
+        "updated_at": "2022-08-31T16:32:03.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-08-31T16:32:03.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-04-07T20:08:37.970Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16147?focusedCommentId=17519140) by Rok Mihevc (rokm):*\n`[~emkornfield]` \u00a0"
+        },
+        {
+            "created_at": "2022-04-07T21:31:17.646Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16147?focusedCommentId=17519176) by Micah Kornfield (emkornfield):*\nThanks for the thorough tests.  It isn't clear to me why we wouldn't close the sink here but I'd be a little concerned in the change of behavior.  unfortunately this isn't specified in the contract.  I think we should fix the GcsOutputFile to close on destruction.\r\n\r\n"
+        },
+        {
+            "created_at": "2022-04-13T09:39:42.867Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16147?focusedCommentId=17521584) by Antoine Pitrou (apitrou):*\nIndeed, we probably shouldn't change behavior here (though the current behavior should be spelled out in the Close() method docstring - incidentally, there is none currently). Is it a problem to close the sink yourself?"
+        },
+        {
+            "created_at": "2022-08-26T16:05:52.059Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16147?focusedCommentId=17585494) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned per [project policy](https://arrow.apache.org/docs/dev/developers/bug_reports.html#issue-assignment). Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        },
+        {
+            "created_at": "2022-08-31T16:31:45.425Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16147?focusedCommentId=17598492) by Rok Mihevc (rokm):*\nI think this was resolved by the linked Micah's PR."
+        }
+    ]
+}

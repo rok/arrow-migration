@@ -1,0 +1,38 @@
+{
+    "issue": {
+        "title": "[CI][Crossbow] Nightly R with sanitizers build fails installing dependencies",
+        "body": "***Note**: This issue was originally created as [ARROW-6957](https://issues.apache.org/jira/browse/ARROW-6957). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSee https://circleci.com/gh/ursa-labs/crossbow/4006 for example. Failure looks like this:\r\n\r\n```Java\n\r\n...\r\ng++ -fsanitize=address,undefined,bounds-strict -fno-omit-frame-pointer -std=gnu++11 -I\"/usr/local/RDsan/lib/R/include\" -DNDEBUG  -I'/usr/local/RDsan/lib/R/site-library/Rcpp/include' -I'/usr/local/RD/lib/R/library/BH/include' -I/usr/local/include  -I. -Ircon -fpic  -fstack-protector-strong -Wformat -Werror=format-security -Wdate-time -D_FORTIFY_SOURCE=2 -g -O0 -Wall -pedantic  -c TokenizerWs.cpp -o TokenizerWs.o\r\n\r\ncc1plus: out of memory allocating 65536 bytes after a total of 31866880 bytes\r\n\r\ncc1plus: out of memory allocating 65536 bytes after a total of 52080640 bytes\r\nvirtual memory exhausted: Cannot allocate memory\r\nvirtual memory exhausted: Cannot allocate memory\r\n/usr/local/RDsan/lib/R/etc/Makeconf:175: recipe for target 'Collector.o' failed\r\nmake[1]: *** [Collector.o] Error 1\r\nmake[1]: *** Waiting for unfinished jobs....\r\n/usr/local/RDsan/lib/R/etc/Makeconf:175: recipe for target 'CollectorGuess.o' failed\r\nmake[1]: *** [CollectorGuess.o] Error 1\r\n/usr/local/RDsan/lib/R/etc/Makeconf:175: recipe for target 'Reader.o' failed\r\nmake[1]: *** [Reader.o] Error 1\r\n/usr/local/RDsan/lib/R/etc/Makeconf:175: recipe for target 'TokenizerWs.o' failed\r\nmake[1]: *** [TokenizerWs.o] Error 1\r\nmake[1]: Leaving directory '/tmp/RtmpvSXO7m/R.INSTALL992bafde57/readr/src'\r\nERROR: compilation failed for package \u2018readr\u2019\r\n* removing \u2018/usr/local/RDsan/lib/R/site-library/readr\u2019\r\nError: Failed to install 'decor' from GitHub:\r\n  (converted from warning) installation of one or more packages failed,\r\n  probably \u2018readr\u2019\r\nExecution halted\r\nERROR: Service 'r-sanitizer' failed to build: The command '/bin/sh -c RDsan -e \"remotes::install_github('romainfrancois/decor')\"' returned a non-zero code: 1\r\n```\r\n\r\nSome thoughts: \r\n\r\n- This dependency is not needed to run the tests--it is a developer dependency, only needed when you're editing the Rcpp code. So we could conditionally not install it if we're on CI.\n- The docker code around this changed in ARROW-6918 last week, around the time this started failing. The installation of this package was moved to a different part of the job, and it appears that `MAKEVARS=-j8` was added. Maybe that's causing more memory to be used concurrently? (Also, I would be shocked if CircleCI gave us a VM with 8 cores, so this seems wasteful and should probably be tuned to whatever the current system has.)\n  \n  cc `[~apitrou]` `[~fsaintjacques]`",
+        "created_at": "2019-10-21T18:31:29.000Z",
+        "updated_at": "2019-12-06T21:13:06.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Continuous Integration",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-12-06T21:13:06.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-21T18:35:11.790Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6957?focusedCommentId=16956368) by Antoine Pitrou (apitrou):*\nThe message \"cc1plus: out of memory allocating 65536 bytes after a total of 31866880 bytes\" clearly means that the VM doesn't have enough memory. Perhaps we should make the MAKEVARS configurable or something, and use a lower number on Circle CI.\r\n\r\nIf R didn't have an entirely braindead build system, it would be able to choose the optimal number of cores by itself. I chose 8 because it worked well for my machine, but of course it won't be optimal for another machine...\r\n\r\nPerhaps a R expert can suggest a better way to choose the number of cores. You know those experts better than I do :)\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-10-21T18:40:53.327Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6957?focusedCommentId=16956373) by Neal Richardson (npr):*\nDoes docker provide a shell for the ENV command such that `MAKEFLAGS=-j$(getconf _NPROCESSORS_ONLN)` or similar would work (https://stackoverflow.com/a/23569003/11897522) ?"
+        },
+        {
+            "created_at": "2019-10-21T18:47:25.872Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6957?focusedCommentId=16956376) by Antoine Pitrou (apitrou):*\nI don't know. Perhaps a Docker expert may be able to answer..."
+        },
+        {
+            "created_at": "2019-10-22T12:26:58.117Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6957?focusedCommentId=16956999) by Francois Saint-Jacques (fsaintjacques):*\n`$(nproc)` should do it, it's part of coreutils very high chance it is installed.\u00a0"
+        },
+        {
+            "created_at": "2019-12-06T21:13:06.353Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6957?focusedCommentId=16990170) by Neal Richardson (npr):*\nIssue resolved by pull request 5986\n<https://github.com/apache/arrow/pull/5986>"
+        }
+    ]
+}

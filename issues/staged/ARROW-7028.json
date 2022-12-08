@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[R] Date roundtrip results in different R storage mode",
+        "body": "***Note**: This issue was originally created as [ARROW-7028](https://issues.apache.org/jira/browse/ARROW-7028). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen saving R-dataframes with parquet and loading them again, the internal representation of Dates changes, leading e.g. to errors when comparing them in dplyr::if_else.\r\n\r\n```Java\n\r\nlibrary(dplyr)\r\n#> \r\n#> Attaching package: 'dplyr'\r\n#> The following objects are masked from 'package:stats':\r\n#> \r\n#> filter, lag\r\n#> The following objects are masked from 'package:base':\r\n#> \r\n#> intersect, setdiff, setequal, union\r\n\r\ntmp = tempdir()\r\ndat = tibble(tag = as.Date(\"2018-01-01\"))\r\ndat2 = tibble(tag2 = as.Date(\"2019-01-01\"))\r\n\r\narrow::write_parquet(dat, file.path(tmp, \"dat.parquet\"))\r\ndat = arrow::read_parquet(file.path(tmp, \"dat.parquet\"))\r\n\r\ntypeof(dat$tag)\r\n#> [1] \"integer\"\r\ntypeof(dat2$tag2)\r\n#> [1] \"double\"\r\n\r\nbind_cols(dat, dat2) %>%\r\n mutate(comparison = if_else(TRUE, tag, tag2))\r\n#> `false` must be a `Date` object, not a `Date` object\r\n```\r\n\r\nCreated on 2019-10-30 by the [reprex package](https://reprex.tidyverse.org) (v0.3.0)",
+        "created_at": "2019-10-30T09:35:31.000Z",
+        "updated_at": "2020-06-17T17:07:16.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-06-17T17:07:02.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-30T09:44:56.049Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7028?focusedCommentId=16962860) by Uwe Korn (uwe):*\ncc `[~npr]` \u00a0This is the issue I talked about on Zulip yesterday. This time with an argument why we should ensure better reconstruction."
+        },
+        {
+            "created_at": "2019-10-30T17:11:38.690Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7028?focusedCommentId=16963238) by Neal Richardson (npr):*\nI actually think this is a dplyr bug. The error message `must be a `Date` object, not a `Date` object` certainly sounds like it. I did some digging in dplyr source, found where that error message comes from, removed the check, and then `if_else` works as expected for Dates because the underlying R methods it calls don't care about the difference between integer and double. For example:\r\n\r\n```Java\n\r\n> dates1 <- structure(18190:18199, class=\"Date\")\r\n> dates1\r\n [1] \"2019-10-21\" \"2019-10-22\" \"2019-10-23\" \"2019-10-24\" \"2019-10-25\"\r\n [6] \"2019-10-26\" \"2019-10-27\" \"2019-10-28\" \"2019-10-29\" \"2019-10-30\"\r\n> typeof(dates1)\r\n[1] \"integer\"\r\n> dates2 <- structure(as.numeric(18180:18189), class=\"Date\")\r\n> dates2\r\n [1] \"2019-10-11\" \"2019-10-12\" \"2019-10-13\" \"2019-10-14\" \"2019-10-15\"\r\n [6] \"2019-10-16\" \"2019-10-17\" \"2019-10-18\" \"2019-10-19\" \"2019-10-20\"\r\n> typeof(dates2)\r\n[1] \"double\"\r\n> dates1[c(TRUE, FALSE)] <- dates2[c(TRUE, FALSE)]\r\n> dates1\r\n [1] \"2019-10-11\" \"2019-10-22\" \"2019-10-13\" \"2019-10-24\" \"2019-10-15\"\r\n [6] \"2019-10-26\" \"2019-10-17\" \"2019-10-28\" \"2019-10-19\" \"2019-10-30\"\r\n```\r\n\r\nI know `dplyr::if_else` is supposed to be stricter than `base::ifelse` but I'm not sure this is appropriate for Dates. I'll file an issue/PR to dplyr about this. If dplyr maintainers disagree, I'm not sure how to proceed on the Arrow side. It strikes me as wrong to cast the underlying integers in the Arrow Date32 type (or whatever we write R Date types as) to doubles, just in case someone might call dplyr::if_else on it. "
+        },
+        {
+            "created_at": "2019-10-30T22:16:17.530Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7028?focusedCommentId=16963474) by Sascha (Daab):*\nIt seems that R itself can handle numeric values as Dates, but also in a slightly inconsistent way.\r\n\r\n``` r\r\nlibrary(dplyr)\r\n#> \r\n#> Attaching package: 'dplyr'\r\n#> The following objects are masked from 'package:stats':\r\n#> \r\n#> filter, lag\r\n#> The following objects are masked from 'package:base':\r\n#> \r\n#> intersect, setdiff, setequal, union\r\n\r\ntmp = tempdir()\r\n\r\ndat1 = tibble(dt = as.Date(1.5, origin = \"1970-01-01\"))\r\ndat2 = tibble(dt = as.Date(1, origin = \"1970-01-01\"))\r\n\r\ndat1\r\n#> # A tibble: 1 x 1\r\n#> dt \r\n#> <date> \r\n#> 1 1970-01-02\r\ndat2\r\n#> # A tibble: 1 x 1\r\n#> dt \r\n#> <date> \r\n#> 1 1970-01-02\r\n\r\nall.equal(dat1$dt, dat2$dt)\r\n#> [1] \"Mean relative difference: 0.3333333\"\r\n\r\nas.POSIXct(dat1$dt)\r\n#> [1] \"1970-01-02 13:00:00 CET\"\r\nas.POSIXct(dat2$dt)\r\n#> [1] \"1970-01-02 01:00:00 CET\"\r\n\r\nall.equal(as.POSIXct(dat1$dt), dat1$dt)\r\n#> [1] TRUE\r\n\r\nas.Date(dat1$dt) %>% as.numeric()\r\n#> [1] 1.5\r\nas.Date(as.POSIXct(dat1$dt)) %>% as.numeric()\r\n#> [1] 1\r\n\r\narrow::write_parquet(dat1, file.path(tmp, \"dat1.parquet\"))\r\ndat1pq = arrow::read_parquet(file.path(tmp, \"dat1.parquet\"))\r\n\r\nall.equal(dat1$dt, dat1pq$dt)\r\n#> [1] \"Mean relative difference: 0.3333333\"\r\n```\r\n\r\n<sup>Created on 2019-10-30 by the [reprex package](https://reprex.tidyverse.org) (v0.3.0)</sup>\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-10-30T22:23:41.111Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7028?focusedCommentId=16963479) by Neal Richardson (npr):*\nIn your example, you don't have any actual integer in the underlying storage:\r\n\r\n```Java\n\r\n> typeof(as.Date(1.5, origin = \"1970-01-01\"))\r\n[1] \"double\"\r\n> typeof(as.Date(1, origin = \"1970-01-01\"))\r\n[1] \"double\"\r\n```\r\n\r\nEven if you give as.Date an integer, it becomes a double because of how it handles `origin`: \r\n\r\n```Java\n\r\n> typeof(as.Date(1L, origin = \"1970-01-01\"))\r\n[1] \"double\"\r\n```\r\n\r\nThis is why I constructed the dates in my example the way I did, to get around that. So this is not a situation you can easily get yourself into with base R functions. A Date is just a numeric (integer or double, doesn't matter) with a \"Date\" class attribute."
+        },
+        {
+            "created_at": "2019-10-31T16:40:58.661Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7028?focusedCommentId=16964195) by Sascha (Daab):*\nJup, agree. Just wanted to say, depending on what you put in your Date class, when saving and loading as parquet you may also run into problems independent of the dplyr-verse as long as parquet converts the numerics to integer..."
+        },
+        {
+            "created_at": "2019-11-04T13:04:58.389Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7028?focusedCommentId=16966644) by Bai Ming (turtledough):*\nHi, I've just recently tried out the arrow R package, and I've ran into a similar issue, so just wanted to flag this out (otherwise it's been working great for me - thanks!).\r\n\r\nThe underlying cause is the same, but I'm working with the data.table package in R, and the change in internal representation causes some date arithmetic and reassignment to the same column to fail (see code example below). Not sure if arrow was meant to work with data.table, but I think it would be helpful to get back the same type of date column after reading.\r\n\r\nIn my case, I tried to convert my \"integer\" Date to \"double\" Date after reading (by converting the column to character and then to Date again), but it was slow as the data was quite large (or perhaps I didn't do it optimally). Eventually I settled on a workaround to simply avoid reassigning to the same column by creating a new column.\r\n```java\n\r\nlibrary(dplyr)\r\nlibrary(data.table)\r\n\r\ntmp = tempdir()\r\ndat = tibble(tag = as.Date(\"2018-01-01\"), group = \"A\")\r\ndat2 = tibble(tag2 = as.Date(\"2019-01-01\"), group = \"A\")\r\n\r\narrow::write_parquet(dat, file.path(tmp, \"dat.parquet\"))\r\ndat = arrow::read_parquet(file.path(tmp, \"dat.parquet\"))\r\n\r\ndt <- as.data.table(dat) # Convert to data.table\r\ndt[, tag := tag + 1, group] # Some date operation to add one day and reassign to same column (This line gives an error)\r\n\r\n# Error in `[.data.table`(dt, , `:=`(tag, tag + 1), group) : \r\n#   Type of RHS ('double') must match LHS ('integer'). To check \r\n#   and coerce would impact performance too much for the fastest cases.\r\n#   Either change the type of the target column, or coerce the RHS of :=\r\n#   yourself (e.g. by using 1L instead of 1)\r\n```"
+        },
+        {
+            "created_at": "2019-11-04T17:05:04.198Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7028?focusedCommentId=16966831) by Neal Richardson (npr):*\nThe error message suggests a workaround that avoids coercion: \r\n\r\n```r\n\r\n> dt[, tag := tag + 1, group] \r\nError in `[.data.table`(dt, , `:=`(tag, tag + 1), group) : \r\n  Type of RHS ('double') must match LHS ('integer'). To check and coerce would impact performance too much for the fastest cases. Either change the type of the target column, or coerce the RHS of := yourself (e.g. by using 1L instead of 1)\r\n\r\n> dt[, tag := tag + 1L, group] \r\n> dt\r\n          tag group\r\n1: 2018-01-02     A\r\n```\r\n"
+        },
+        {
+            "created_at": "2019-11-06T23:51:18.528Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7028?focusedCommentId=16968798) by Bai Ming (turtledough):*\nThanks for the workaround, tested it and it works, will use that instead."
+        },
+        {
+            "created_at": "2020-06-17T17:07:02.787Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7028?focusedCommentId=17138649) by Neal Richardson (npr):*\nIssue resolved by pull request 7415\n<https://github.com/apache/arrow/pull/7415>"
+        }
+    ]
+}

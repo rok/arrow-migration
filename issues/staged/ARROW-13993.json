@@ -1,0 +1,65 @@
+{
+    "issue": {
+        "title": "[C++] Hash aggregate function that returns value from first row in group",
+        "body": "***Note**: This issue was originally created as [ARROW-13993](https://issues.apache.org/jira/browse/ARROW-13993). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIt would be nice to have a hash aggregate function that returns the first value of a column within each hash group.\r\n\r\nIf row order within groups is\u00a0non-deterministic, then effectively this would return one arbitrary value. This is a very computationally cheap operation.\r\n\r\nThis can be quite useful when querying a non-normalized table. For example if you have a table with a `country` column and also a\u00a0`country_abbr`\u00a0column and you want to group by either/both of those columns but return the values from both columns, you could do\r\n```java\n\r\nSELECT country, country_abbr FROM table GROUP BY country, country_abbr\n```\r\nbut it would be more efficient to do\r\n```java\n\r\nSELECT country, first(country_abbr) FROM table GROUP BY country\n```\r\nbecause then the engine does not need to scan all the values of the `country_abbr` column.",
+        "created_at": "2021-09-14T13:53:10.000Z",
+        "updated_at": "2022-06-30T13:46:47.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-02-17T13:13:31.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-09-14T14:10:53.318Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13993?focusedCommentId=17414961) by Ian Cook (icook):*\nA more general solution would be to implement a `hash_take`\u00a0hash aggregate function that takes a scalar integer\u00a0argument `n`\u00a0and returns the `nth`\u00a0row from each hash group."
+        },
+        {
+            "created_at": "2021-12-16T17:51:33.341Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13993?focusedCommentId=17460929) by Antoine Pitrou (apitrou):*\nSince the result would be non-deterministic, I'm not sure I understand the point of  a `hash_take` function compared to the `hash_first` proposal."
+        },
+        {
+            "created_at": "2021-12-20T14:28:49.954Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13993?focusedCommentId=17462643) by Ian Cook (icook):*\n`[~apitrou]` \u00a0I agree, there is probably no point; just a `hash_first` kernel would suffice for all the uses I can imagine"
+        },
+        {
+            "created_at": "2022-02-04T19:05:48.358Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13993?focusedCommentId=17487249) by Weston Pace (westonpace):*\nSo it sounds like we can implement this JIRA as \"pick one column value from the group\" and not \"pick the first column value from the group\".  The latter we can create a new JIRA for (there is some desire for this: see ARROW-15474) and tackle later once we have an idea of how we deal with ordering mid-plan.\r\n\r\nDo we want to consider a name other than `hash_first`?  Maybe `hash_one` or `hash_single`?"
+        },
+        {
+            "created_at": "2022-02-07T13:12:04.761Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13993?focusedCommentId=17488089) by Dhruv Vats (dhruv9vats):*\nJust so I understand this correctly (as I don't have a very formal CS background), when we do:\r\n```sql\n\r\nSELECT country, SUM(customerID) FROM db_table GROUP BY country\n```\r\nfrom a supposed sales table `db_table` that has fields `country` and `{}customerID{`}, we get number of customers _per_ country/group.\r\n\r\nSo here instead sum of all tuples in a group, we just want to return a single tuple from the different groups/country? And, it seems _which_ tuple (like either the first or a specific one) to return is yet to be finalised, right?\r\n\r\nAlso is there a PR or an existing kernel that has a similar boilerplate code to what this will have? (That'll save a disproportionate time going through all the abstractions)."
+        },
+        {
+            "created_at": "2022-02-07T13:16:24.471Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13993?focusedCommentId=17488095) by David Li (lidavidm):*\nYes, we just want a single row per group. Any row will do; the point above is that we can't implement anything else (because the query engine currently lacks support for ordering, beyond sorting outputs at the very end).\r\n\r\nAll hash_ kernels (\"hash aggregate kernels\") are in [`hash_aggregate.cc`](https://github.com/apache/arrow/blob/master/cpp/src/arrow/compute/kernels/hash_aggregate.cc) and it will be very similar to the CountDistinct/Distinct implementation there. "
+        },
+        {
+            "created_at": "2022-02-17T13:13:31.037Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13993?focusedCommentId=17493931) by David Li (lidavidm):*\nIssue resolved by pull request 12368\n<https://github.com/apache/arrow/pull/12368>"
+        },
+        {
+            "created_at": "2022-02-17T15:36:41.859Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13993?focusedCommentId=17494021) by Ian Cook (icook):*\n`[~dhruv9vats]` \u00a0Thanks for doing this! I think we need a follow-up to add `hash_one` to the table of hash aggregate functions in [compute.rst](https://github.com/apache/arrow/blob/master/docs/source/cpp/compute.rst). Could you create an issue for that please?"
+        },
+        {
+            "created_at": "2022-02-17T15:38:30.605Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13993?focusedCommentId=17494023) by David Li (lidavidm):*\nD'oh. Sorry `[~dhruv9vats]` I forgot to note this in the review. Thanks `[~icook]` for catching this."
+        },
+        {
+            "created_at": "2022-02-17T15:39:01.734Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13993?focusedCommentId=17494025) by David Li (lidavidm):*\nSee ARROW-15717."
+        },
+        {
+            "created_at": "2022-02-17T15:48:20.601Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13993?focusedCommentId=17494030) by Ian Cook (icook):*\nThanks!"
+        },
+        {
+            "created_at": "2022-06-30T13:46:47.447Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13993?focusedCommentId=17561056) by Ian Cook (icook):*\nI recently learned that this function is called `any_value` in some SQL dialects (for example in Snowflake: https://docs.snowflake.com/en/sql-reference/functions/any_value.html)"
+        }
+    ]
+}

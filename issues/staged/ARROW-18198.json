@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "IndexOutOfBoundsException when loading compressed IPC format",
+        "body": "***Note**: This issue was originally created as [ARROW-18198](https://issues.apache.org/jira/browse/ARROW-18198). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI encountered this bug when I loaded a dataframe stored in the Arrow IPC format.\r\n\r\n\u00a0\r\n```java\n\r\n// Java Code from \"Apache Arrow Java Cookbook\"\r\nFile file = new File(\"example.arrow\");\r\ntry (\r\n\u00a0 \u00a0 \u00a0 \u00a0 BufferAllocator rootAllocator = new RootAllocator();\r\n\u00a0 \u00a0 \u00a0 \u00a0 FileInputStream fileInputStream = new FileInputStream(file);\r\n\u00a0 \u00a0 \u00a0 \u00a0 ArrowFileReader reader = new ArrowFileReader(fileInputStream.getChannel(), rootAllocator)\r\n) {\r\n\u00a0 \u00a0 System.out.println(\"Record batches in file: \" + reader.getRecordBlocks().size());\r\n\u00a0 \u00a0 for (ArrowBlock arrowBlock : reader.getRecordBlocks()) {\r\n\u00a0 \u00a0 \u00a0 \u00a0 reader.loadRecordBatch(arrowBlock);\r\n\u00a0 \u00a0 \u00a0 \u00a0 VectorSchemaRoot vectorSchemaRootRecover = reader.getVectorSchemaRoot();\r\n\u00a0 \u00a0 \u00a0 \u00a0 System.out.print(vectorSchemaRootRecover.contentToTSVString());\r\n\u00a0 \u00a0 }\r\n} catch (IOException e) {\r\n\u00a0 \u00a0 e.printStackTrace();\r\n} \n```\r\nCall stack:\r\n```\n\r\nException in thread \"main\" java.lang.IndexOutOfBoundsException: index: 0, length: 2048 (expected: range(0, 2024))\r\n\u00a0 \u00a0 at org.apache.arrow.memory.ArrowBuf.checkIndex(ArrowBuf.java:701)\r\n\u00a0 \u00a0 at org.apache.arrow.memory.ArrowBuf.setBytes(ArrowBuf.java:955)\r\n\u00a0 \u00a0 at org.apache.arrow.vector.BaseFixedWidthVector.reAlloc(BaseFixedWidthVector.java:451)\r\n\u00a0 \u00a0 at org.apache.arrow.vector.BaseFixedWidthVector.setValueCount(BaseFixedWidthVector.java:732)\r\n\u00a0 \u00a0 at org.apache.arrow.vector.VectorSchemaRoot.setRowCount(VectorSchemaRoot.java:240)\r\n\u00a0 \u00a0 at org.apache.arrow.vector.VectorLoader.load(VectorLoader.java:86)\r\n\u00a0 \u00a0 at org.apache.arrow.vector.ipc.ArrowReader.loadRecordBatch(ArrowReader.java:220)\r\n\u00a0 \u00a0 at org.apache.arrow.vector.ipc.ArrowFileReader.loadNextBatch(ArrowFileReader.java:166)\r\n\u00a0 \u00a0 at org.apache.arrow.vector.ipc.ArrowFileReader.loadRecordBatch(ArrowFileReader.java:197)\n```\r\nThis bug can be reproduced by a simple dataframe created by pandas:\r\n\r\n\u00a0\r\n```java\n\r\npd.DataFrame({'a': range(10000)}).to_feather('example.arrow') \n```\r\nPandas compresses the dataframe by default. If the compression is turned off, Java can load the dataframe. Thus, I guess the bounds checking code is buggy when loading compressed file.\r\n\r\n\u00a0\r\n\r\nThat dataframe can be loaded in polars, pandas and pyarrow, so it's unlikely to be a pandas bug.\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2022-10-31T12:23:02.000Z",
+        "updated_at": "2022-11-14T14:24:06.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-10-31T13:59:32.127Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18198?focusedCommentId=17626599) by David Li (lidavidm):*\nCC `[~dsusanibara]`"
+        },
+        {
+            "created_at": "2022-11-10T11:15:59.760Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18198?focusedCommentId=17631594) by Georeth Zhou (georeth):*\nany updates?"
+        },
+        {
+            "created_at": "2022-11-10T16:34:15.449Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18198?focusedCommentId=17631765) by David Dali Susanibar Arce (dsusanibara):*\nHi `[~georeth]` let me check that"
+        },
+        {
+            "created_at": "2022-11-14T14:24:06.345Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18198?focusedCommentId=17633831) by David Dali Susanibar Arce (dsusanibara):*\nThere isn't problem for binary file with less than rowCount <= 2048.\r\n\r\nThere is a problem with the Validity Buffer, for example for 2049 rows initially there is assigned 504 buffer size, but at the end is requested 512 length size.\r\n\r\nNeed to continue reviewing for changes needed.\r\n\r\n\u00a0"
+        }
+    ]
+}

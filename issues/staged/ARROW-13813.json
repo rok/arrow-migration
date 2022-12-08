@@ -1,0 +1,44 @@
+{
+    "issue": {
+        "title": "[C++][Dataset] Support URL encoding of partition field values for the file path",
+        "body": "***Note**: This issue was originally created as [ARROW-13813](https://issues.apache.org/jira/browse/ARROW-13813). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn ARROW-12644, we added support for _decoding_ the file paths when reading datasets. So a valid follow-up question: should we also support _encoding_ when writing datasets?\r\n\r\n(see also https://github.com/apache/arrow/issues/11027)\r\n\r\nRereading ARROW-12644, there wasn't yet much discussion on that aspect.\r\n\r\ncc `[~westonpace]` `[~lidavidm]`",
+        "created_at": "2021-08-31T12:10:59.000Z",
+        "updated_at": "2021-09-01T13:20:19.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-31T12:22:07.411Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13813?focusedCommentId=17407292) by David Li (lidavidm):*\nI would think we should be able to."
+        },
+        {
+            "created_at": "2021-08-31T17:59:34.098Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13813?focusedCommentId=17407565) by Weston Pace (westonpace):*\nI think my only concern is that this is something the user should be able to easily do themselves using the compute stuff.  They could use a scanner to read in their data, project the offending column to an encoding kernel, and then partition on the projected column.\r\n\r\nHowever, since we already have segment encoding in partition objects it seems straightforward enough to provide.  It might be a good project to pair with ARROW-11378 if someone is looking for some good beginner C++ tasks."
+        },
+        {
+            "created_at": "2021-08-31T18:05:00.650Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13813?focusedCommentId=17407571) by David Li (lidavidm):*\nThen should we make this JIRA about implementing a URL-encode (and probably a corresponding URL-decode) kernel?"
+        },
+        {
+            "created_at": "2021-08-31T18:55:29.349Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13813?focusedCommentId=17407592) by Weston Pace (westonpace):*\nThat can be a new JIRA.  I think we can keep this open as it is to discuss and track using those kernels to provide utility in a partitioning object."
+        },
+        {
+            "created_at": "2021-08-31T18:55:53.728Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13813?focusedCommentId=17407593) by Weston Pace (westonpace):*\nI'll create the new JIRA"
+        },
+        {
+            "created_at": "2021-09-01T08:07:06.877Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13813?focusedCommentId=17407944) by Joris Van den Bossche (jorisvandenbossche):*\nCurrently we don't support \"transforms\" for the partitioning column (something we maybe should? so that you could also say \"year(date_column)\" to partition on), which means that you need to calculate such URL encoded column up front, which is not necessarily ideal, both performance/memory wise (although in a (lazy/batched) query execution context, this might not matter) and from a usability context.\r\n\r\n(especially for that last point (usability), I think it would be nice to support this within the \"write to partitioned data\" step)\r\n\r\nAnother thought: currently, when you partition on a column with string values, you can easily and silently get invalid directories. Small code snippet:\r\n\r\n```python\n\r\nimport pyarrow.dataset as ds\r\n\r\ntable = pa.table({'a': ['A', 'B', 'A/B', ''], 'b': range(4)})\r\nds.write_dataset(table, \"test_dataset_invalid_strings.parquet\", format=\"parquet\", partitioning=ds.partitioning(table.select(['a']).schema))\r\nds.dataset(\"test_dataset_invalid_strings.parquet/\", partitioning=['a']).to_table().to_pandas()\r\n```\r\n\r\nNot necessarily directly this issue, but related question: should we write this silently? Or should we actually check when creating the file path that the value inserted for the partition field is a \"valid\" string for file paths (so eg no /, not an empty string, ..), and raise an error instead of creating a wrong dataset? Or should we automatically encode those? \r\n(I don't know what the overhead would be of validating those strings, but it would also only be needed for certain data types, eg not if your partition field was originally integer)\r\n\r\n"
+        },
+        {
+            "created_at": "2021-09-01T13:20:19.100Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13813?focusedCommentId=17408162) by David Li (lidavidm):*\n> Currently we don't support \"transforms\" for the partitioning column (something we maybe should? so that you could also say \"year(date_column)\" to partition on), which means that you need to calculate such URL encoded column up front, which is not necessarily ideal, both performance/memory wise (although in a (lazy/batched) query execution context, this might not matter) and from a usability context.\r\nI agree, this would be useful to support. I assume once we have a node for writing, this will be easier.\r\n> should we write this silently? Or should we actually check when creating the file path that the value inserted for the partition field is a \"valid\" string for file paths (so eg no /, not an empty string, ..), and raise an error instead of creating a wrong dataset? Or should we automatically encode those?\r\nOn Windows there are more invalid path characters to consider, but I agree, we should raise an error instead of writing unreadable data. (I think for auto-encoding values, that can be done by bindings and doesn't necessarily have to be done in C++? e.g. the Python/R bindings could offer an option to wrap string partition fields in a URL-encode pass.)"
+        }
+    ]
+}

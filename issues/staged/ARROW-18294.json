@@ -1,0 +1,42 @@
+{
+    "issue": {
+        "title": "[Java][FlightRPC] 'Signature not found' calling `executeUpdate` on FlightSQL prepared statement",
+        "body": "***Note**: This issue was originally created as [ARROW-18294](https://issues.apache.org/jira/browse/ARROW-18294). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHey folks :)\r\n\r\nI'm hitting the 'signature not found' NPE precondition in `ArrowFlightMetaImpl.execute` when I prepare a DML statement and call `executeUpdate` (the prepare step seems to work fine):\r\n\r\n\r\n```Java\n\r\n           Preconditions.java: \u00a0801 \u00a0cfjd.org.apache.arrow.util.Preconditions/checkNotNull\r\n   \u00a0 ArrowFlightMetaImpl.java: \u00a0 86 \u00a0org.apache.arrow.driver.jdbc.ArrowFlightMetaImpl/execute\r\n\u00a0    ArrowFlightMetaImpl.java: \u00a0 96 \u00a0org.apache.arrow.driver.jdbc.ArrowFlightMetaImpl/execute\r\n\u00a0    \u00a0 AvaticaConnection.java: \u00a0548 \u00a0cfjd.org.apache.calcite.avatica.AvaticaConnection/executeQueryInternal\r\nAvaticaPreparedStatement.java: \u00a0152 \u00a0cfjd.org.apache.calcite.avatica.AvaticaPreparedStatement/executeLargeUpdate\r\nAvaticaPreparedStatement.java: \u00a0147 \u00a0cfjd.org.apache.calcite.avatica.AvaticaPreparedStatement/executeUpdate\r\n```\r\n\r\nIt seems that this will always be null in this situation because `AvaticaPreparedStatement.executeLargeUpdate` calls `executeQueryInternal` with a null signature, regardless of the signature in the prepared statement itself (which is non-null)?\r\n\r\nOtherwise, enjoying playing with FlightSQL so far - thanks!\r\n\r\nJames",
+        "created_at": "2022-11-09T10:50:48.000Z",
+        "updated_at": "2022-11-10T11:02:34.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: FlightRPC",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-11-09T21:09:04.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-11-09T14:24:52.416Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18294?focusedCommentId=17631101) by David Li (lidavidm):*\nThanks for reporting. Happy to see that you're giving Flight SQL a try, any feedback there would be appreciated.\r\n\r\nI'll see if I can get this replicated and fixed quickly. We're considering a 10.0.1 release, so it would be nice to include a fix for this."
+        },
+        {
+            "created_at": "2022-11-09T18:21:17.090Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18294?focusedCommentId=17631198) by David Li (lidavidm):*\nWould you be able to give https://github.com/apache/arrow/pull/14616 a spin?"
+        },
+        {
+            "created_at": "2022-11-09T20:40:24.563Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18294?focusedCommentId=17631280) by James Henderson (jarohen):*\nHey, thanks for the quick turnaround! Yep, PR looks good to me - we got another error but that looks unrelated:\r\n\r\n```Java\n\r\n1. Unhandled java.lang.NullPointerException\r\n   Cannot read field \"columns\" because \"signature\" is null\r\n\r\n     AvaticaResultSet.java:   85  cfjd.org.apache.calcite.avatica.AvaticaResultSet/<init>\r\nArrowFlightJdbcVectorSchemaRootResultSet.java:   60  org.apache.arrow.driver.jdbc.ArrowFlightJdbcVectorSchemaRootResultSet/<init>\r\nArrowFlightJdbcFlightStreamResultSet.java:   64  org.apache.arrow.driver.jdbc.ArrowFlightJdbcFlightStreamResultSet/<init>\r\nArrowFlightJdbcFactory.java:   98  org.apache.arrow.driver.jdbc.ArrowFlightJdbcFactory/newResultSet\r\nArrowFlightJdbcFactory.java:   38  org.apache.arrow.driver.jdbc.ArrowFlightJdbcFactory/newResultSet\r\n    AvaticaConnection.java:  566  cfjd.org.apache.calcite.avatica.AvaticaConnection/executeQueryInternal\r\nAvaticaPreparedStatement.java:  152  cfjd.org.apache.calcite.avatica.AvaticaPreparedStatement/executeLargeUpdate\r\nAvaticaPreparedStatement.java:  147  cfjd.org.apache.calcite.avatica.AvaticaPreparedStatement/executeUpdate\r\n```\r\n\r\nWe return -1 as a result count (because we don't yet know how many rows were affected) - it seems Avatica is then interpreting that as a requirement to create and return a result set, which it can't do without a signature - returning any other negative number and our test passes."
+        },
+        {
+            "created_at": "2022-11-09T21:03:18.515Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18294?focusedCommentId=17631290) by James Henderson (jarohen):*\nSeparately, I've merged a PoC of Flight SQL server support for our XTDB Core2 today - it currently supports simple queries, transactions and prepared statements through the Flight SQL client. Still plenty to do, but we're certainly very excited to see what tooling and ecosystem this might open up in the near future!"
+        },
+        {
+            "created_at": "2022-11-09T21:08:53.113Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18294?focusedCommentId=17631292) by David Li (lidavidm):*\nAwesome! Looking forward to seeing it. There's definitely more room for improvement in this driver so hopefully we can work together on that. (Notably, transactions aren't wired up yet, though they're in the protocol.)\r\n\r\nThe Avatica code is a bit cryptic\u2026possibly we could work around that here as well."
+        },
+        {
+            "created_at": "2022-11-09T21:09:04.726Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18294?focusedCommentId=17631293) by David Li (lidavidm):*\nResolved by https://github.com/apache/arrow/pull/14616 "
+        }
+    ]
+}

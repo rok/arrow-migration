@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[C++][R][Python] Support reading from Apache Iceberg tables",
+        "body": "***Note**: This issue was originally created as [ARROW-15135](https://issues.apache.org/jira/browse/ARROW-15135). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis is an umbrella issue for supporting the [Apache Iceberg table format](https://iceberg.apache.org/).\r\n\r\nDremio has a good overview of the format here: https://www.dremio.com/apache-iceberg-an-architectural-look-under-the-covers/",
+        "created_at": "2021-12-16T15:14:27.000Z",
+        "updated_at": "2022-02-02T04:40:24.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-12-16T18:50:02.674Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15135?focusedCommentId=17460970) by Weston Pace (westonpace):*\nSo off the top of my head I think this integration might take the form of a dataset factory:\r\n\r\nThe dataset factory would, given an iceberg table, consult the iceberg metadata.  From that metadata we can get:\r\n - The list of files\r\n - The format of the files (Parquet vs Orc)\r\n - The partitioning scheme\r\n - Potentially the filesystem?\r\n\r\nWe could then take those three things and create an ordinary FileSystemDataset.\r\n\r\nAlternatively, we could create an IcebergDataset and IcebergFragment but I'm not sure there would be anything to gain by doing so.\r\n\r\n"
+        },
+        {
+            "created_at": "2021-12-16T22:27:48.350Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15135?focusedCommentId=17461078) by Will Jones (willjones127):*\nI agree Weston, it should just be a dataset factory. The metadata just determines the list of files.\r\n\r\nI'm not sure this is true of Iceberg, but in my experience with Delta Lake (which has a similar design) the metadata itself can become quite large. So we may want to block this work on an Avro -> Arrow reader (ARROW-1209)."
+        },
+        {
+            "created_at": "2021-12-16T22:44:34.640Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15135?focusedCommentId=17461106) by Will Jones (willjones127):*\nThere is no C++ (or Rust) implementation of Iceberg; the main implementation is in Java. My impression is that writers for these table formats are about 10x more complex than the readers (but I say that having implemented a reader and not a writer :)). I think it's reasonable to start by creating the reader + dataset logic within Arrow, though once we get to the writer I do have some questions as to whether there should just be a C++ implementation managed by the Iceberg project."
+        },
+        {
+            "created_at": "2022-02-02T04:40:24.949Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15135?focusedCommentId=17485561) by Will Jones (willjones127):*\nI was reading over the Iceberg spec, and it occurred to me that a dataset factory wouldn't be sufficient for Iceberg tables. Two main complications:\r\n\r\n1. Columns are stored in files with UUIDs as their names. Once read, they are supposed to be mapped to their real column names. [See docs here](https://iceberg.apache.org/#spec/#column-projection).\n1. V2 of the spec allows for \"row-level deletes\", where metadata files may store either specific rows to delete or a delete predicate, which must be filtered out on read. There are some somewhat complex rules in how these are supposed to be applied. [See deletes docs](https://iceberg.apache.org/#spec/#delete-formats).\n   \n   The [Scan Planning](https://iceberg.apache.org/#spec/#scan-planning) section of the doc gives a good overview. \n   \n   I could see #1 (column mapping) to be something we could add as a feature to existing datasets. \n   \n   But for #2, it seems to me that we would need to implement an IcebergDataset and IcebergFragment like Weston suggested."
+        }
+    ]
+}

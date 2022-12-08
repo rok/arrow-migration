@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[C++] Add DictionaryArray::FromArrays alternate ctor that can check or sanitized \"untrusted\" indices",
+        "body": "***Note**: This issue was originally created as [ARROW-1757](https://issues.apache.org/jira/browse/ARROW-1757). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nRelated to ARROW-1658. This is related to the offset sanitization in `ListArray::FromArrays`",
+        "created_at": "2017-10-30T20:37:30.000Z",
+        "updated_at": "2018-02-06T16:17:57.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2018-02-06T16:17:53.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-01-26T19:21:44.745Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1757?focusedCommentId=16341465) by Panchen Xue (1xuepanchen1):*\nAPI looks like this?\r\n```Java\n\r\nStatus DictionaryArray::FromArrays(const std::shared_ptr<Array>& dictionary,\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0const std::shared_ptr<Array>& indices);\r\n```"
+        },
+        {
+            "created_at": "2018-01-26T21:08:57.502Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1757?focusedCommentId=16341602) by Wes McKinney (wesm):*\nYes, that will do \u2013 we also need a boolean argument\u00a0`ordered`. In the Python bindings the order of the arguments is flipped (http://arrow.apache.org/docs/python/generated/pyarrow.lib.DictionaryArray.html#pyarrow.lib.DictionaryArray.from_arrays).\u00a0\r\n\r\nAnother option is to make this `FromArray(indices, type)` and instead pass a dictionary type instance as `std::shared_ptr<DataType>` (such as produced by `arrow::dictionary`)"
+        },
+        {
+            "created_at": "2018-01-26T23:41:32.536Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1757?focusedCommentId=16341798) by Panchen Xue (1xuepanchen1):*\nA question. Suppose we have the API\r\n```java\n\r\nStatus DictionaryArray::FromArrays(const std::shared_ptr<Array>& indices,\r\n                                   const std::shared_ptr<DataType>& type);\r\n```\r\nWe need to check every element of **indices** to see if each one is valid. In order to do this we need to cast the **indices** to its actual type to access its data\r\n```java\n\r\nstd::shared_ptr<SOME_TYPE> raw_array = std::static_pointer_cast<SOME_TYPE>(indices);\r\n```\r\nThe **indices** in principle may have any integer type (signed or unsigned) and we can get type info from **indices->data()->type** but how can I convert to\u00a0**SOME_TYPE**\u00a0(like Int32Array) to create the correct raw array?"
+        },
+        {
+            "created_at": "2018-01-26T23:57:36.623Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1757?focusedCommentId=16341814) by Wes McKinney (wesm):*\nI believe that dictionary indices are currently constrained to be signed integers. So you can switch on `indices->type_id()` and return error in the `default:` branch. See an example of this here https://github.com/apache/arrow/blob/master/cpp/src/arrow/python/arrow_to_pandas.cc#L1057. See also https://github.com/apache/arrow/blob/master/cpp/src/arrow/type_traits.h to be able to resolve other classes given a particular value type class (like `Int16Type`)."
+        },
+        {
+            "created_at": "2018-01-29T21:06:20.944Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1757?focusedCommentId=16344026) by Panchen Xue (1xuepanchen1):*\nDoes this code look ok?\u00a0\r\n```java\n\r\nStatus DictionaryArray::FromArrays(const std::shared_ptr<DataType>& type,\r\n                                   const std::shared_ptr<Array>& indices) {\r\n  dict_type_ = static_cast<const DictionaryType*>(type.get());\r\n  DCHECK_EQ(type->id(), Type::DICTIONARY);\r\n  DCHECK_EQ(indices->type_id(), dict_type_->index_type()->id());\r\n  int64_t range = dict_type_->dictionary()->length();\r\n\r\n  switch (indices->type_id()) {\r\n  case Type::INT8:\r\n    DCHECK_EQ(SanityCheck<Int8Type>(indices, range), true);\r\n    break;\r\n  case Type::INT16:\r\n    DCHECK_EQ(SanityCheck<Int16Type>(indices, range), true);\r\n    break;\r\n  case Type::INT32:\r\n    DCHECK_EQ(SanityCheck<Int32Type>(indices, range), true);\r\n    break;\r\n  case Type::INT64:\r\n    DCHECK_EQ(SanityCheck<Int64Type>(indices, range), true);\r\n    break;\r\n  default:\r\n    std::stringstream ss;\r\n    ss << \"Categorical index type not supported: \"\r\n       << indices->type()->ToString();\r\n    return Status::NotImplemented(ss.str());\r\n  }\r\n\r\n  auto data = indices->data()->Copy();\r\n  data->type = type;\r\n  SetData(data);\r\n  return Status::OK();\r\n}\r\n\r\n  template <typename ArrowType>\r\n  bool SanityCheck(const std::shared_ptr<Array>& indices,\r\n                   const int64_t range) {\r\n    using ArrayType = typename TypeTraits<ArrowType>::ArrayType;\r\n    std::shared_ptr<ArrayType> array = std::static_pointer_cast<ArrayType>(indices);\r\n\r\n    const auto data = array->raw_values();\r\n    const auto size = sizeof(data) / sizeof(data[0]);\r\n    \r\n    // using decltype because C++11 doesn't allow auto in lambda\r\n    return std::all_of(data, data + size,\r\n      [&range](decltype(data[0]) value){return value >= 0 && value < range;});\r\n  }\r\n```"
+        },
+        {
+            "created_at": "2018-01-29T22:14:46.391Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1757?focusedCommentId=16344108) by Wes McKinney (wesm):*\nCan you open a PR and add some unit tests and we can discuss there? "
+        },
+        {
+            "created_at": "2018-01-29T22:15:51.147Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1757?focusedCommentId=16344111) by Wes McKinney (wesm):*\nNote that this should be a static ctor that returns a new array as an out argument, like `ListArray::FromArrays`"
+        },
+        {
+            "created_at": "2018-02-06T16:17:53.739Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1757?focusedCommentId=16354086) by Wes McKinney (wesm):*\nIssue resolved by pull request 1535\n<https://github.com/apache/arrow/pull/1535>"
+        }
+    ]
+}

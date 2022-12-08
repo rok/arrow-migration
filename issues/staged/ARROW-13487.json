@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[C++][Parquet] Reading dict pages is not reading all values?",
+        "body": "***Note**: This issue was originally created as [ARROW-13487](https://issues.apache.org/jira/browse/ARROW-13487). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhile round tripping dictionary-encoded arrays in dictionary-encoded parquet files in arrow2, I have been unable to have pyarrow read all values from the dictionary page. This contrasts with (py)spark, that can read them.\r\n\r\nAttached to this issue is a parquet file generated from rust's arrow2 whereby I read the IPC \"generated_dictionary\" file and write it into parquet (v1) with dictionary-encoding. I.e. 2 pages, one with the values, the other with the indices.\r\n\r\nThe expected result for the column 0, \"dict0\" is\r\n```python\n\r\nimport pyarrow\r\n\r\npath = \"generated_dictionary\"\r\ngolden_path = f\"../testing/arrow-testing/data/arrow-ipc-stream/integration/1.0.0-littleendian/{path}.arrow_file\"\r\ncolumn = (\"dict0\", 0)\r\n\r\ntable = pyarrow.ipc.RecordBatchFileReader(golden_path).read_all()\r\nexpected = next(c for i, c in enumerate(expected) if i == column[1])\r\nexpected = expected.combine_chunks().tolist()\r\nprint(expected)\r\n# ['nwg\u20ac6d\u20ac', None, None, None, None, None, None, None, None, 'e\u00a3a5\u00b5\u77e2a', None, None, 'rpc\u00a3\u00b5\u00a33', None, None, None, None]\r\n\r\n\r\n# read with pyspark\r\nspark = pyspark.sql.SparkSession.builder.config(\r\n# see https://stackoverflow.com/a/62024670/931303\r\n    \"spark.sql.parquet.enableVectorizedReader\",\r\n    \"false\",\r\n).getOrCreate()\r\n\r\ndf = spark.read.parquet(f\"{golden_path}.parquet\")\r\n\r\nr = df.select(column[0]).collect()\r\n\r\nresult = [r[column[0]] for r in r]\r\nassert expected == result\r\n```\r\nHowever, I have been unable to correctly read it from pyarrow. The result I get:\r\n```python\n\r\ntable = pq.read_table(f\"{path}.parquet\")\r\nresult = table[0]\r\nprint(result.combine_chunks().dictionary)\r\nprint(result.combine_chunks().indices)\r\n[\r\n  \"2lf4\u00b5\u00b5r\",\r\n  \"\",\r\n  \"nwg\u20ac6d\u20ac\",\r\n  \"rpc\u00a3\u00b5\u00a33\",\r\n  \"e\u00a3a5\u00b5\u77e2a\"\r\n]\r\n[\r\n  2,\r\n  null,\r\n  null,\r\n  null,\r\n  null,\r\n  null,\r\n  null,\r\n  null,\r\n  null,\r\n  8,\r\n  null,\r\n  null,\r\n  4,\r\n  null,\r\n  null,\r\n  null,\r\n  null\r\n]\r\n```\r\nwhich is incorrect as the largest index (8) is larger than the len (5) of the values.\r\n\r\nThe indices are being read correctly, but not all values are. For clarity, the buffer in the dictionary page (PLAIN-encoded as per spec) on the attached parquet is:\r\n```python\n\r\n# [\"2lf4\u00b5\u00b5r\", \"\", \"nwg\u20ac6d\u20ac\", \"\", \"rpc\u00a3\u00b5\u00a33\", \"\", \"\", \"\", \"e\u00a3a5\u00b5\u77e2a\", \"\"]\r\n\r\n[\r\n9, 0, 0, 0, 50, 108, 102, 52, 194, 181, 194, 181, 114,\r\n0, 0, 0, 0, \r\n11, 0, 0, 0, 110, 119, 103, 226, 130, 172, 54, 100, 226, 130, 172, \r\n0, 0, 0, 0,\r\n10, 0, 0, 0, 114, 112, 99, 194, 163, 194, 181, 194, 163, 51, \r\n0, 0, 0, 0, \r\n0, 0, 0, 0, \r\n0, 0, 0, 0, \r\n11, 0, 0, 0, 101, 194, 163, 97, 53, 194, 181, 231, 159, 162, 97, \r\n0, 0, 0, 0\r\n]\r\n```\r\nand the reported number of values in the dict page header is 10. I would expect all values to be read directly to the dictionary.\r\n\r\nWe cannot discard the possibility that I am doing something wrong in writing. So far I was able to round-trip these within arrow2 and can read dict-encoded from both pyarrow and pyspark, which suggests that the arrow2 reader is correct.",
+        "created_at": "2021-07-29T04:41:23.000Z",
+        "updated_at": "2021-09-14T04:30:14.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Parquet",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-24T18:19:18.462Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13487?focusedCommentId=17403989) by Antoine Pitrou (apitrou):*\n`[~emkornfield]`"
+        },
+        {
+            "created_at": "2021-08-24T21:41:28.868Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13487?focusedCommentId=17404072) by Micah Kornfield (emkornfield):*\nSo what I believe is happening is someplace in the Arrow decoding path we make the assumption that dictionary values are unique and don't remap indices being read if they arent."
+        },
+        {
+            "created_at": "2021-08-24T21:55:16.090Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13487?focusedCommentId=17404074) by Micah Kornfield (emkornfield):*\n<https://github.com/apache/arrow/blob/f406b531c1e93e97b72b2ff725db05ee18ad32f2/cpp/src/parquet/encoding.cc#L1843>\u00a0is the problematic line.\u00a0 It appears the documentation isn't too specific but what InsertMemoValues does appears to dedupe the values.\u00a0 So I think the two options are:\r\n\r\n1.\u00a0 Make that method act more like a multimap.\r\n\r\n2.\u00a0 Bypass that method and construct a dictionary array without deduping.\r\n\r\n3.\u00a0 Recalculate indices when reading them in (likely has the biggest performance hit but likely lowest amount of downstream impact).\u00a0 I suppose we could also special case this if there are duplicates in the dictionary.\r\n\r\n\u00a0\r\n\r\n`[~wesm]` \u00a0originally wrote this code I think, and I seem to recall there being some issues here so curious if he recalls any downstream issues of not-dedupping."
+        }
+    ]
+}

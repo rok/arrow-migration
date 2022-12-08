@@ -1,0 +1,66 @@
+{
+    "issue": {
+        "title": "[Doc][Python] Mention CSVStreamingReader pitfalls with type inference",
+        "body": "***Note**: This issue was originally created as [ARROW-12482](https://issues.apache.org/jira/browse/ARROW-12482). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nLooks like Arrow infer type for the first batch and apply it for all subsequent batches. But information might be not enough to infer the type correctly for the whole file. For our particular case, Arrow infers some field in the schema as date32 from the first batch but the next batch has an empty field value that can\u2019t be converted to date32.\r\n\r\nWhen I increase the batch size to have such a value in the first batch Arrow set string type (not sure why not nullable date32) for such a field since it can\u2019t be converted to date32 and the whole file is read successfully.\r\n\r\nThis problem can be easily reproduced by using the following code and attached dataset:\r\n```java\n\r\nimport pyarrow as pa\r\nimport pyarrow._csv as pa_csv\r\nimport pyarrow._fs as pa_fs\r\n\r\nread_options: pa_csv.ReadOptions = pa_csv.ReadOptions(block_size=5_000_000)\r\nparse_options: pa_csv.ParseOptions = pa_csv.ParseOptions(newlines_in_values=True)\r\nconvert_options: pa_csv.ConvertOptions = pa_csv.ConvertOptions(timestamp_parsers=[''])\r\nwith pa_fs.LocalFileSystem().open_input_file(\"dataset.csv\") as file:\r\n reader = pa_csv.open_csv(\r\n file, read_options=read_options, parse_options=parse_options, convert_options=convert_options\r\n )\r\n for batch in reader:\r\n table_batch = pa.Table.from_batches([batch])\r\n table_batch\r\n```\r\nError message:\r\n```java\n\r\n for batch in reader:\r\n File \"pyarrow/ipc.pxi\", line 497, in __iter__\r\n File \"pyarrow/ipc.pxi\", line 531, in pyarrow.lib.RecordBatchReader.read_next_batch\r\n File \"pyarrow/error.pxi\", line 84, in pyarrow.lib.check_status\r\n pyarrow.lib.ArrowInvalid: In CSV column #23: CSV conversion error to date32[day]: invalid value ''\r\n```\r\n\u00a0\r\n When we use\u00a0block_size `10_000_000` file can be read successfully since we have the problematic value in the first batch.\r\n\r\nAn error occurs when I try to attach dataset, so you can download it from Google Drive\u00a0[here](https://drive.google.com/file/d/1Vt1yN02dyVumsou_kFs7GTnKT46eE6ja/view?usp=sharing)",
+        "created_at": "2021-04-20T17:14:46.000Z",
+        "updated_at": "2021-07-20T16:57:37.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Documentation",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-04-27T13:25:02.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-04-21T09:06:22.299Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12482?focusedCommentId=17326383) by Antoine Pitrou (apitrou):*\nWell, this is by design. How could we read the file incrementally if the schema could change until the end of the file?\r\n\r\nYou have several solutions here:\r\n- if you want unfailable type inference, use the non-streaming CSV reader\n- if you just want this particular file to succeed, you can indeed increase the block size as you found out\n- you can also set a column type explicitly using `ConvertOptions.column_types`"
+        },
+        {
+            "created_at": "2021-04-21T09:07:29.563Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12482?focusedCommentId=17326384) by Antoine Pitrou (apitrou):*\nRetargetting this as a documentation issue.\r\n\r\n`[~jorisvandenbossche]` `[~jonkeane]`"
+        },
+        {
+            "created_at": "2021-04-21T12:56:10.583Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12482?focusedCommentId=17326510) by Oleksandr Shevchenko (oshevchenko):*\nThanks for a quick reply `[~apitrou]`!\r\nCould you also comment on the conversion error? Not sure why the empty value can't be converted as null for the date32 type. I was trying to change [null_values](https://arrow.apache.org/docs/python/generated/pyarrow.csv.ConvertOptions.html#pyarrow.csv.ConvertOptions.null_values) and a bunch of other confs but didn't find anything which can help with this particular case.\r\n"
+        },
+        {
+            "created_at": "2021-04-21T12:58:58.015Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12482?focusedCommentId=17326514) by Antoine Pitrou (apitrou):*\nIf the empty value was quoted in the CSV file, then it won't be considered as null. You may check whether that's the case."
+        },
+        {
+            "created_at": "2021-04-21T13:31:47.225Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12482?focusedCommentId=17326532) by Oleksandr Shevchenko (oshevchenko):*\nYes, you are right such date is written as quoted empty line (\"\"). Is there any way to configure Arrow to parse it as null as well?"
+        },
+        {
+            "created_at": "2021-04-21T13:52:52.740Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12482?focusedCommentId=17326551) by Antoine Pitrou (apitrou):*\nNot currently, but that could be added as an option."
+        },
+        {
+            "created_at": "2021-04-21T14:02:36.448Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12482?focusedCommentId=17326559) by Oleksandr Shevchenko (oshevchenko):*\nThanks for the clarification!"
+        },
+        {
+            "created_at": "2021-04-22T08:09:30.800Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12482?focusedCommentId=17327168) by Oleksandr Shevchenko (oshevchenko):*\nI also expected that quoted strings like\u00a0\"2015-09-21\" should not be converted to date32 but should be read as a string. Tried to disable `timestamp_parsers=['']` but looks like it's not applied to date types. \r\nIs there any option to disable converting such a string to date32? It could also help to avoid such a problem with empty value conversion."
+        },
+        {
+            "created_at": "2021-04-22T14:55:09.382Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12482?focusedCommentId=17329174) by Antoine Pitrou (apitrou):*\nNo, there is no such option. There are unfortunately many different CSV writers out there, all with slightly different conventions. If you want to make sure the data adheres to a given schema, the best is to give explicit `column_types`.\r\n"
+        },
+        {
+            "created_at": "2021-04-23T10:49:18.064Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12482?focusedCommentId=17330378) by Joris Van den Bossche (jorisvandenbossche):*\nNote that Antoined opened ARROW-12510 for the \"quoted value as null\" issue"
+        },
+        {
+            "created_at": "2021-04-23T10:58:01.973Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12482?focusedCommentId=17330384) by Oleksandr Shevchenko (oshevchenko):*\nThat's great, it's definitely will be useful. Thanks!\r\n Is there any plans to add ability to also disable parsing quoted dates (like \"2015-09-21\") to just read it as string?\r\n Something like [timestamp_parsers](https://arrow.apache.org/docs/python/generated/pyarrow.csv.ConvertOptions.html#pyarrow.csv.ConvertOptions.timestamp_parsers)=[''] allows to do for timestamp types."
+        },
+        {
+            "created_at": "2021-04-27T13:25:02.933Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12482?focusedCommentId=17333227) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 10132\n<https://github.com/apache/arrow/pull/10132>"
+        }
+    ]
+}

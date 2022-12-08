@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[C++][Compute] Remove print statements from unit tests",
+        "body": "***Note**: This issue was originally created as [ARROW-14641](https://issues.apache.org/jira/browse/ARROW-14641). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nUnit tests should avoid unconditional print statements, preferring `SCOPED_TRACE`, `ARROW_SCOPED_TRACE`, or on-fail extra messages like `ASSERT_EQ(1, 2) << \"extra here\";`. There are some in the hash join unit tests",
+        "created_at": "2021-11-09T15:49:15.000Z",
+        "updated_at": "2021-11-21T19:33:12.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-11-20T03:19:59.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-11-09T19:29:27.656Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14641?focusedCommentId=17441332) by Dhruv Vats (dhruv9vats):*\nIs it okay if I give this a shot?\r\n\r\nIf so, could you please point me in the direction I should start looking, as in, the specific files?"
+        },
+        {
+            "created_at": "2021-11-09T19:38:54.534Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14641?focusedCommentId=17441337) by Weston Pace (westonpace):*\nAbsolutely.\u00a0 Do you have permission to assign the issue to yourself?\u00a0 If so, go for it.\u00a0 If not, let us know and we will get you that permission.\r\n\r\nI think this was detected on cpp/src/arrow/compute/exec/hash_join_node_test.cc\r\n\r\n\r\nBeyond that I don't have any list of files but all tests end in _test.cc and probably shouldn't have \"cout\" for the most part so that should be searchable."
+        },
+        {
+            "created_at": "2021-11-09T20:28:12.536Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14641?focusedCommentId=17441349) by Dhruv Vats (dhruv9vats):*\nThis is my first time interacting with Apache Jira, so I don't think I have those permissions.\r\n\r\nAlso, from what I understand, on [this](https://github.com/apache/arrow/blob/8b440d1b5df4a0e58bcaa422b83e6d6ff1213b5f/cpp/src/arrow/compute/exec/hash_join_node_test.cc#L1064) line, the following code:\r\n```java\n\r\nstd::cout << join_type_name << \" \" << key_cmp_str << \" \";\r\nkey_types.Print();\r\nstd::cout << \" payload_l: \";\r\npayload_types[0].Print();\r\nstd::cout << \" payload_r: \";\r\npayload_types[1].Print();\r\nstd::cout << \" num_rows_l = \" << num_rows_l << \" num_rows_r = \" << num_rows_r \r\n          << \" batch size = \" << batch_size\r\n          << \" parallel = \" << (parallel ? \"true\" : \"false\");\r\nstd::cout << std::endl; \n```\r\nShould turn into something like this:\r\n```java\n\r\nARROW_SCOPED_TRACE(join_type_name, \" \",\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0    key_cmp_str, \" \",\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0     \u00a0key_types.Print());\r\nARROW_SCOPED_TRACE(\" payload_l: \", payload_types[0].Print());\r\nARROW_SCOPED_TRACE(\" payload_r: \", payload_types[1].Print());\r\nARROW_SCOPED_TRACE(\" num_rows_l = \", num_rows_l,\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0    \" num_rows_r = \", num_rows_r, \u00a0 \u00a0\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0    \" batch size = \", batch_size,\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0\" parallel = \", (parallel ? \"true\" : \"false\"));\n```\r\nright?\r\n\r\nAlso, the [Print()](https://github.com/apache/arrow/blob/8b440d1b5df4a0e58bcaa422b83e6d6ff1213b5f/cpp/src/arrow/compute/exec/hash_join_node_test.cc#L385) method uses the SCOPED_TRACE macro internally too."
+        },
+        {
+            "created_at": "2021-11-09T21:19:04.963Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14641?focusedCommentId=17441364) by Weston Pace (westonpace):*\nI'd have to look closer at the test to tell for sure but the general idea is that `ARROW_SCOPED_TRACE` (which is just wrapping the google test concept of SCOPED_TRACE if you want to read up on it) should receive the minimum amount of information neccesary to identify the particular test case that is being run.\u00a0 That way, if a test fails, instead of seeing \"Expected 3 and got 7\" you will see something like \"When parallel = true, batch_size=7 we expected 3 and got 7\".\r\n\r\nAt a glance, it looks like that might be more information that is necessary to include in SCOPED_TRACE.\u00a0 For example, if \"test case 7\" always has 20 rows then you don't need to print both test case 7 AND 20 rows (just test case 7 is sufficient).\u00a0 It's possible some of those print statements were included for utility while debugging and developing the unit tests.\u00a0 That kind of print statement can be outright removed (and doesn't need to convert to scoped trace)."
+        },
+        {
+            "created_at": "2021-11-09T21:20:34.901Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14641?focusedCommentId=17441365) by Weston Pace (westonpace):*\nWhy don't you take your best guess and then put up a PR.\u00a0 It will probably be easier for us to discuss specific statements further based on that PR."
+        },
+        {
+            "created_at": "2021-11-20T03:19:59.177Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14641?focusedCommentId=17446745) by Weston Pace (westonpace):*\nIssue resolved by pull request 11663\n<https://github.com/apache/arrow/pull/11663>"
+        }
+    ]
+}

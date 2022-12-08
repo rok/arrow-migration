@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[JS] ESM Tree-Shaking produces broken code",
+        "body": "***Note**: This issue was originally created as [ARROW-12636](https://issues.apache.org/jira/browse/ARROW-12636). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen a JS application depends on `apache-arrow` or any of the ESM variants, Arrow's package.json declares `sideEffects: false` which allows bundlers like Webpack or Rollup to remove all code that's evaluated at the top level of all modules (any code that isn't explicitly imported can be pruned).\r\n\r\n\u00a0\r\n\r\nHowever, there are important top-level side effects that Arrow relies on, e.g. for binding methods on types:\r\n\r\n<https://github.com/apache/arrow/blob/c0445d69088a6fbd9c026ecac6a99c6cd4df4865/js/src/vector/index.ts#L167-L179>\r\n\r\n\u00a0\r\n\r\nSo currently, any JS app that uses tree-shaking and depends on `apache-arrow` or the ESM variants will throw if any of those methods are called, e.g. in my case I see `TypeError: e._chunks[t].get is not a function` when calling `table.get`.\r\n\r\n\u00a0\r\n\r\nIndeed switching to the CJS variants like `@apache-arrow/es2015-cjs` fixes the issue, since the Arrow build does not inject `sideEffects: false` into its package.json for non-ESM variants.\r\n\r\n\u00a0\r\n\r\nFor reference, the `sideEffects: false` logic was introduced in this PR and issue:\r\n\r\n<https://github.com/apache/arrow/pull/8418/>\r\n\r\nhttps://issues.apache.org/jira/browse/ARROW-10255\r\n\r\n\u00a0",
+        "created_at": "2021-05-03T18:45:46.000Z",
+        "updated_at": "2021-10-18T14:31:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: JavaScript",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-07-30T16:59:25.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-07-28T23:04:54.456Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12636?focusedCommentId=17389114) by Dominik Moritz (domoritz):*\nI can repro this issue with a small example:\r\n\r\n```js\n\r\nimport {Table, FloatVector} from 'apache-arrow'\r\n\r\n// Toggle this code. When it's there, the code below works. Why???\r\n// Table.new([FloatVector.from(new Float32Array([]))], ['a'])\r\n\r\nconst bytes2 = Uint8Array.from([65,82,82,79,87,49,0,0,255,255,255,255,120,0,0,0,16,0,0,0,0,0,10,0,12,0,6,0,5,0,8,0,10,0,0,0,0,1,4,0,12,0,0,0,8,0,8,0,0,0,4,0,8,0,0,0,4,0,0,0,1,0,0,0,20,0,0,0,16,0,20,0,8,0,0,0,7,0,12,0,0,0,16,0,16,0,0,0,0,0,0,2,16,0,0,0,28,0,0,0,4,0,0,0,0,0,0,0,1,0,0,0,49,0,0,0,8,0,12,0,8,0,7,0,8,0,0,0,0,0,0,1,32,0,0,0,255,255,255,255,136,0,0,0,20,0,0,0,0,0,0,0,12,0,22,0,6,0,5,0,8,0,12,0,12,0,0,0,0,3,4,0,24,0,0,0,8,0,0,0,0,0,0,0,0,0,10,0,24,0,12,0,4,0,8,0,10,0,0,0,60,0,0,0,16,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,255,255,255,255,0,0,0,0,16,0,0,0,12,0,20,0,6,0,8,0,12,0,16,0,12,0,0,0,0,0,4,0,60,0,0,0,40,0,0,0,4,0,0,0,1,0,0,0,136,0,0,0,0,0,0,0,144,0,0,0,0,0,0,0,8,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,8,0,8,0,0,0,4,0,8,0,0,0,4,0,0,0,1,0,0,0,20,0,0,0,16,0,20,0,8,0,0,0,7,0,12,0,0,0,16,0,16,0,0,0,0,0,0,2,16,0,0,0,28,0,0,0,4,0,0,0,0,0,0,0,1,0,0,0,49,0,0,0,8,0,12,0,8,0,7,0,8,0,0,0,0,0,0,1,32,0,0,0,168,0,0,0,65,82,82,79,87,49]);\r\n\r\nconst table2 = Table.from(bytes2);\r\n\r\nconsole.log(\"table2\", table2);\r\n// thows error: Uncaught TypeError: chunks[0].toArray is not a function\r\nconsole.log(\"table2\", table2.toArray());\r\n```"
+        },
+        {
+            "created_at": "2021-07-30T16:59:25.549Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12636?focusedCommentId=17390673) by Dominik Moritz (domoritz):*\nIssue resolved by pull request 10826\n<https://github.com/apache/arrow/pull/10826>"
+        }
+    ]
+}

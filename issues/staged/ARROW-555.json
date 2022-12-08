@@ -1,0 +1,104 @@
+{
+    "issue": {
+        "title": "[C++] String algorithm library for StringArray/BinaryArray",
+        "body": "***Note**: This issue was originally created as [ARROW-555](https://issues.apache.org/jira/browse/ARROW-555). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis is a parent JIRA for starting a module for processing strings in-memory arranged in Arrow format. This will include using the re2 C++ regular expression library and other standard string manipulations (such as those found on Python's string objects)",
+        "created_at": "2017-02-13T19:24:54.000Z",
+        "updated_at": "2021-10-14T23:27:05.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2019-02-06T03:36:34.476Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=16761415) by Wes McKinney (wesm):*\nNow that re2 is in our toolchain, we can implement kernels for each type of regular expression operation"
+        },
+        {
+            "created_at": "2019-11-26T01:09:43.801Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=16982023) by Wes McKinney (wesm):*\ncc `[~maartenbreddels]`"
+        },
+        {
+            "created_at": "2020-02-03T16:11:51.237Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17029070) by Joris Van den Bossche (jorisvandenbossche):*\nDo we already have a good idea of how we want to approach this? \r\nBecause I think there has been some discussion on implementing custom C++ kernels (similar to other existing kernels in the compute module) vs finding a way to re-use the scalar kernels that are already implemented for gandiva.\r\n\r\nFor reference: Gandiva already has several string functions implemented. Illustration with the python interface for the \"upper\" function:\r\n\r\n```python\n\r\nfrom pyarrow import gandiva\r\ntable = pa.table({'a': ['a', 'b', 'c']})\r\n\r\nbuilder = gandiva.TreeExprBuilder()\r\nnode_a = builder.make_field(table.schema.field(\"a\"))\r\nnode_upper = builder.make_function(\"upper\", [node_a], pa.string())\r\nfield_result = pa.field('res', pa.string())\r\nexpr = builder.make_expression(node_upper, field_result)\r\nprojector = gandiva.make_projector(table.schema, [expr], pa.default_memory_pool())\r\n\r\n>>> projector.evaluate(table.to_batches()[0])\r\n[<pyarrow.lib.StringArray object at 0x7fc324f71580>\r\n [\r\n   \"A\",\r\n   \"B\",\r\n   \"C\"\r\n ]]\r\n```"
+        },
+        {
+            "created_at": "2020-03-04T14:22:12.245Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17051264) by Maarten Breddels (maartenbreddels):*\nRelated:\u00a0https://issues.apache.org/jira/browse/ARROW-7083\r\n\r\nI will probably start working on this a few weeks from now. My initial intention would be to separate the algorithms as much as possible so it would be possible to add them both to gandiva and a 'bare' kernel, or with a minimal amount of refactoring.\r\n\r\n`[~wesm]`: what's your reason to choose re2? Gandiva and vaex both use pcre, but I have no strong preference (except being a bit familiar with pcre).\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-03-04T14:59:36.664Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17051302) by Wes McKinney (wesm):*\nWe've been having some discussions about this topic in other places, e.g. ARROW-7083. One idea that has been proposed is to generate single-function kernels at compile time based on the LLVM IR that Gandiva spits out. So the process would work like this:\r\n\r\n- Generate a library of LLVM IR for all supported Gandiva kernels, with an exported manifest so that you can dynamically determine what kernels are available and what are their input and output signatures\n- Compile that LLVM IR into a C shared library\n- Implement a generic \"invoker\" that takes a C function kernel (the result of compiling the LLVM IR produced by Gandiva) and evaluates it (with memory allocation, etc. as needed)\n  \n  Then the LLVM runtime would not be required to use the output of this process.\n  \n  This would require some investment of time (perhaps not that much) to set up the machinery to enable this, but it would seem to greatly simplify the process of implementing new kernels, especially simple elementwise functions (for numbers, strings, etc.)\n  \n  We've been dancing around this idea for several months now so I would be interested to see if someone would be interested to explore this before tunneling too far in different directions. \n  \n  cc `[~emkornfield]` `[~apitrou]` `[~fsaintjacques]` `[~jnadeau]` `[~ravindra]` for any comments / thoughts if what I've written above jives with prior discussions"
+        },
+        {
+            "created_at": "2020-03-04T17:28:18.612Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17051437) by Antoine Pitrou (apitrou):*\nI think going through LLVM IR is a bit convoluted. More simply, since those functions are already raw C in Gandiva, we could reintegrate those C functions somewhere in Arrow (taking care that the Gandiva toolchain can still compile them to LLVM bitcode).\r\n\r\nIt would also avoid depending on LLVM for builds with Gandiva disabled."
+        },
+        {
+            "created_at": "2020-03-04T17:32:11.142Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17051443) by Antoine Pitrou (apitrou):*\nI'm assuming C functions btw, but those may just as well be C++ functions (with the C wrappers on the Gandiva side). However, they can't use certain C++ stdlib facilities such as `iostream` (hence the split between `Decimal` and `BasicDecimal`)."
+        },
+        {
+            "created_at": "2020-03-04T21:26:38.657Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17051644) by Maarten Breddels (maartenbreddels):*\nWhat are the limitation, and is this somewhere documented? It might be good to keep those in mind."
+        },
+        {
+            "created_at": "2020-03-05T02:25:54.116Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17051752) by Wes McKinney (wesm):*\n`[~apitrou]` that seems reasonable, cross-compilation  (where a code unit is compiled both into a static/shared lib and to LLVM IR at the same time) indeed would be easier. This is a popular technique (e.g. Apache Impala does a lot of it \u2013 see all files with \"-ir\" in them in https://github.com/apache/impala/tree/master/be/src/exprs) so we should try not to reinvent the wheel"
+        },
+        {
+            "created_at": "2020-03-05T02:27:24.632Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17051754) by Wes McKinney (wesm):*\nWe could even use Impala's string exprs (which is what Impala calls its \"kernels\") as a guideline for what we need to have available as Arrow kernels\r\n\r\nhttps://github.com/apache/impala/blob/master/be/src/exprs/string-functions.h\r\n"
+        },
+        {
+            "created_at": "2020-03-06T04:38:46.473Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17053014) by Micah Kornfield (emkornfield@gmail.com):*\n+1 for simplicity, I think it is unlikely I will have time to contribute to this effort in the near future."
+        },
+        {
+            "created_at": "2020-05-11T13:18:45.389Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17104443) by Wes McKinney (wesm):*\nUpdate: I'm in the middle of an overhaul of the API for implementing new Array functions / kernels, with the goal of making it much easier to add new functions (e.g. generating a string function given an inlineable implementation of computing a single value). Once that's done (since I'm working on it right now, it will be this month) I will probably ask someone from my team to make an initial cut at a precompiled string function set based on the functions that are already in Gandiva / LLVM codegen and add new functions (from e.g. Impala or other SQL engines) that are not yet present. The work need not be monolithic so as soon as the framework is in place it should be straightforward to add new functions and test them. Additionally, adding Python bindings for the new functions should also be easy (all you will need is the name of the function you're calling, so some of the Cython binding boilerplate that exists now should also go away). "
+        },
+        {
+            "created_at": "2020-05-11T14:53:42.795Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17104525) by Maarten Breddels (maartenbreddels):*\nI am likely to be able to start working on strings in Arrow this month, so I think the timing is good. Some pointers/examples to get me started would be great."
+        },
+        {
+            "created_at": "2020-05-11T15:00:41.205Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17104530) by Wes McKinney (wesm):*\nCool. I will circle back here once I have a PR up for the work I described in my comment, and will add an example string function to provide a template for adding more functions. "
+        },
+        {
+            "created_at": "2020-05-11T16:54:16.059Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17104666) by Maarten Breddels (maartenbreddels):*\nSomething to consider (or should I move this discussion to the list?), is the support of ASCII vs utf8. I noticed the Gandiva code assumed ASCII (at least not utf8), while Arrow assumes strings are utf8 only. Having written the vaex string code, I'm pretty sure ASCII will be much faster though (you know the byte length of a string in advance). Is there interest in supporting more than utf8, ASCII for instance, or utf16/32? Or should it be utf8 only?"
+        },
+        {
+            "created_at": "2020-05-11T17:15:41.133Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17104685) by Wes McKinney (wesm):*\nHaving ASCII versions of functions sounds fine to me. There is a PR up now for fast ASCII validation also"
+        },
+        {
+            "created_at": "2020-05-21T20:16:34.788Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17113513) by Wes McKinney (wesm):*\nI just made a PR for the new kernels framework that I was talking about\r\n\r\nhttps://github.com/apache/arrow/pull/7240\r\n\r\nThere's a little bit of work still to provide the machinery to generate string kernels from scalar-valued prototypes, but I was thinking I would do that sometime in the next few days and provide an example string kernel for you to use as a template for adding more kernels. Does that sound good? "
+        },
+        {
+            "created_at": "2020-05-22T14:35:52.072Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17114105) by Maarten Breddels (maartenbreddels):*\nSounds good. I think it would help me a lot to see str->scalar and str->str (and possibly a str->[str, str]) example. They can be trivial, like always return [\"a\", \"b\"], but with that, I can probably get up to speed very quickly, if it's not too much to ask.\u00a0"
+        },
+        {
+            "created_at": "2020-05-22T16:33:20.841Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17114217) by Wes McKinney (wesm):*\nYes, that's the idea. I can try to implement `str.split` which would be `String -> List<String>` in Arrow types. "
+        },
+        {
+            "created_at": "2021-02-19T20:23:32.440Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17287347) by Wes McKinney (wesm):*\nWhat items are still outstanding here, could we create additional issues and attach them for visibility?"
+        },
+        {
+            "created_at": "2021-02-19T21:52:18.749Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17287384) by Neal Richardson (npr):*\nWe have a few that aren't linked here, I can attach what I know of."
+        },
+        {
+            "created_at": "2021-05-10T15:34:22.108Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-555?focusedCommentId=17341971) by Ian Cook (icook):*\nI added ~10 issues for new kernels corresponding to commonly used SQL string functions"
+        }
+    ]
+}

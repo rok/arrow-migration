@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[R] Update docs to clarify that stringsAsFactors isn't relevant for parquet/feather",
+        "body": "***Note**: This issue was originally created as [ARROW-7825](https://issues.apache.org/jira/browse/ARROW-7825). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSame issue as reported for feather::read_feather (https://issues.apache.org/jira/browse/ARROW-7823);\r\n\r\n\u00a0\r\n\r\nFor the R arrow package, the \"read_parquet()\" function currently does not respect \"options(stringsAsFactors = FALSE)\", leading to unexpected/inconsistent behavior.\r\n\r\n\u00a0\r\n\r\n**Example:**\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n```java\n\r\nlibrary(arrow)\r\nlibrary(readr)\r\noptions(stringsAsFactors = FALSE)\r\nwrite_tsv(head(iris), 'test.tsv')\r\nwrite_parquet(head(iris), 'test.parquet')\r\nhead(read.delim('test.tsv', sep='\\t')$Species)\r\n# [1] \"setosa\" \"setosa\" \"setosa\" \"setosa\" \"setosa\" \"setosa\"\r\nhead(read_tsv('test.tsv', col_types = cols())$Species)\r\n# [1] \"setosa\" \"setosa\" \"setosa\" \"setosa\" \"setosa\" \"setosa\"\r\nhead(read_parquet('test.parquet')$Species)\r\n# [1] setosa setosa setosa setosa setosa setosa\r\n# Levels: setosa versicolor virginica\r\n```\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n**Versions:**\r\n\r\n- R 3.6.2\n  \n- arrow_0.15.1.9000",
+        "created_at": "2020-02-10T17:27:48.000Z",
+        "updated_at": "2020-05-15T21:34:41.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-05-15T21:34:41.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-02-10T17:33:17.155Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7825?focusedCommentId=17033792) by Neal Richardson (npr):*\nI'm not sure this is valid. `iris$Species` already is factor, so that's preserved when you write to Parquet or Feather, but when you write to a CSV, that is lost. So `stringsAsFactors` is irrelevant because it's not a string in the Parquet/Feather file, unlike in a CSV. "
+        },
+        {
+            "created_at": "2020-02-10T18:13:56.546Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7825?focusedCommentId=17033827) by Keith Hughitt (khughitt):*\n`[~npr]` That's a fair argument and a good point. Preserving the actual type of iris$Species is certainly preferred.\r\n\r\n\u00a0\r\n\r\nThe down-side is still that the rest of the R ecosystem `read_xx` functions are generally not going to behave this way, so I think many users are going to be caught off-guard by this (speaking from experience..)\r\n\r\n\u00a0\r\n\r\nI'm not sure what the best solution is here. In principle, I agree that the current behavior is the most sensible, so perhaps it is just a matter of educating the community to be aware of these differences when working with filetypes that are able to properly encode factor variables.\r\n\r\n\u00a0\r\n\r\nPerhaps just including a note in the `read_feather()` and `read_parquet()` docs mentioning this expected difference in behavior compared with the other read functions?"
+        },
+        {
+            "created_at": "2020-02-10T18:21:10.403Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7825?focusedCommentId=17033832) by Francois Saint-Jacques (fsaintjacques):*\nSide note, the Arrow CSV reader has the options to parse a given column as dictionary type."
+        },
+        {
+            "created_at": "2020-02-10T18:33:18.828Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7825?focusedCommentId=17033841) by Neal Richardson (npr):*\n`[~khughitt]` Try writing iris to feather and parquet with Species as a character column and reading it back. My guess is that it will stay a character/string column and also will ignore `stringsAsFactors`. \r\n\r\nLeaving aside the merits of the `stringsAsFactors` feature itself and its historical origins, I think it only really makes sense when you're reading a text file like a CSV and you don't have type information available. For binary formats with metadata, it makes sense to preserve what was saved. When you `readRDS` it doesn't convert your character vectors to factors, for example:\r\n\r\n```Java\n\r\n> options(stringsAsFactors=FALSE)\r\n> tf <- tempfile()\r\n> saveRDS(iris, tf)\r\n> str(readRDS(tf))\r\n'data.frame':\t150 obs. of  5 variables:\r\n $ Sepal.Length: num  5.1 4.9 4.7 4.6 5 5.4 4.6 5 4.4 4.9 ...\r\n $ Sepal.Width : num  3.5 3 3.2 3.1 3.6 3.9 3.4 3.4 2.9 3.1 ...\r\n $ Petal.Length: num  1.4 1.4 1.3 1.5 1.4 1.7 1.4 1.5 1.4 1.5 ...\r\n $ Petal.Width : num  0.2 0.2 0.2 0.2 0.2 0.4 0.3 0.2 0.2 0.1 ...\r\n $ Species     : Factor w/ 3 levels \"setosa\",\"versicolor\",..: 1 1 1 1 1 1 1 1 1 1 ...\r\n\r\n> iris$Species <- as.character(iris$Species)\r\n> str(iris)\r\n'data.frame':\t150 obs. of  5 variables:\r\n $ Sepal.Length: num  5.1 4.9 4.7 4.6 5 5.4 4.6 5 4.4 4.9 ...\r\n $ Sepal.Width : num  3.5 3 3.2 3.1 3.6 3.9 3.4 3.4 2.9 3.1 ...\r\n $ Petal.Length: num  1.4 1.4 1.3 1.5 1.4 1.7 1.4 1.5 1.4 1.5 ...\r\n $ Petal.Width : num  0.2 0.2 0.2 0.2 0.2 0.4 0.3 0.2 0.2 0.1 ...\r\n $ Species     : chr  \"setosa\" \"setosa\" \"setosa\" \"setosa\" ...\r\n> saveRDS(iris, tf)\r\n> str(readRDS(tf))\r\n'data.frame':\t150 obs. of  5 variables:\r\n $ Sepal.Length: num  5.1 4.9 4.7 4.6 5 5.4 4.6 5 4.4 4.9 ...\r\n $ Sepal.Width : num  3.5 3 3.2 3.1 3.6 3.9 3.4 3.4 2.9 3.1 ...\r\n $ Petal.Length: num  1.4 1.4 1.3 1.5 1.4 1.7 1.4 1.5 1.4 1.5 ...\r\n $ Petal.Width : num  0.2 0.2 0.2 0.2 0.2 0.4 0.3 0.2 0.2 0.1 ...\r\n $ Species     : chr  \"setosa\" \"setosa\" \"setosa\" \"setosa\" ...\r\n```"
+        },
+        {
+            "created_at": "2020-02-10T19:54:22.766Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7825?focusedCommentId=17033904) by Keith Hughitt (khughitt):*\n`[~npr]` Indeed read_feather and read_parquet both ignore `stringsAsFactors` when loading character columns, always preserving the proper character type.\r\n\r\n\u00a0\r\n\r\nI agree that this is the expected and desired behavior. I can close both this and the related \"read_feather()\" issue I reported.\r\n\r\n\u00a0\r\n\r\nDo you think it's worth including a note in the docs for the methods to caution users who aren't familiar with parquet/feather's handling of column types?\r\n\r\n\u00a0\r\n\r\nIt's true that most users should already have some experience with this with `readRDS`, however, I still suspect that other users will see the similarity of `read_feather`, `read_parquet`, `read_tsv`, etc., and not appreciate the differences between the methods.\r\n\r\n\u00a0\r\n\r\nYour call though. Either way, I appreciate you taking the time to respond and clarify the important differences between the methods."
+        },
+        {
+            "created_at": "2020-02-10T20:03:33.333Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7825?focusedCommentId=17033910) by Neal Richardson (npr):*\nSure, if you want to add a note to the docs for these functions that `stringsAsFactors` is ignored/irrelevant (as-if `FALSE`, which of course it should always be anyway ;) because you're saving a rich binary file format, I'll approve such a PR. If it was surprising to you, it may be surprising to others."
+        },
+        {
+            "created_at": "2020-05-15T21:34:41.549Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7825?focusedCommentId=17108679) by Neal Richardson (npr):*\nNow that wisdom has prevailed and `stringsAsFactors=FALSE` by default in R 4.0, I don't think we need to add anything to the arrow docs. Feel free to reopen and submit a PR if you feel strongly otherwise."
+        }
+    ]
+}

@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] open_csv throws ArrowInvalid if csv does not end with a new line and is above 16384 lines",
+        "body": "***Note**: This issue was originally created as [ARROW-16872](https://issues.apache.org/jira/browse/ARROW-16872). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n`pyarrow.csv.open_csv` throws ArrowInvalid if csv does not end with a new line and is above 16384 lines. Tested with both pyarrow 7.0.0 and 8.0.0. Error seen both in production app and on developer laptop.\r\n\r\n\u00a0\r\n\r\nHere's a minimal case for reproducing the issue:\r\n\r\n```python\r\n\r\nimport pyarrow as pa\r\n\r\nimport pyarrow.csv\r\n\r\nfrom io import BytesIO\r\n\r\nfor _ in pa.csv.open_csv(BytesIO('\\n'.join(['review_id,filter_outcome'] + ['62593aaec7628b203bad4c6e,fabrication']\\*16385).encode())): pass\r\n\r\n```\r\n\r\n\u00a0\r\n\r\nError is thrown:\u00a0\r\n\r\nArrowInvalid: CSV parse error: Expected 2 columns, got 1:\u00a0",
+        "created_at": "2022-06-21T19:25:57.000Z",
+        "updated_at": "2022-06-30T16:31:26.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-06-30T16:31:26.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-21T19:28:31.033Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16872?focusedCommentId=17557075) by Frederik Fabritius (frederikfab):*\nDecreasing the lines to 16384, and the csv works:\r\n\r\n```python\r\n\r\nfor _ in pa.csv.open_csv(BytesIO('\\n'.join(['review_id,filter_outcome'] + ['62593aaec7628b203bad4c6e,fabrication']\\*16384).encode())): pass\r\n\r\n```\r\n\r\nraises no errors\r\n\r\n\u00a0\r\n\r\nAnd appending a newline at the end (this is not done by BigQuery in its csv exports, that caused this issue), makes it work just fine:\r\n\r\n```python\r\n\r\nfor _ in pa.csv.open_csv(BytesIO('\\n'.join(['review_id,filter_outcome'] + ['62593aaec7628b203bad4c6e,fabrication']\\*16385+['\\n']).encode())):\u00a0pass\r\n\r\n```"
+        },
+        {
+            "created_at": "2022-06-22T05:26:22.517Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16872?focusedCommentId=17557247) by Yibo Cai (yibocai):*\nStrange, I cannot reproduce the error on a Linux x86_64 machine.\r\nWhat's your test environment?"
+        },
+        {
+            "created_at": "2022-06-22T06:37:11.899Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16872?focusedCommentId=17557267) by Frederik Fabritius (frederikfab):*\nhm, it happened both in production on a google cloud compute vm debian-instance, and when I made that minimal reproduction test locally on my x86 mac.\r\n\r\nWhen trying to run this in my dev environment, it worked this morning? But i found that it doesn't work with a fresh environment installed via `mamba` (a faster conda).\r\n\r\n\u00a0\r\n\r\nHere are steps to fully reproduce it:\r\n\r\n```\r\n\r\nmamba create --name test pyarrow=8 python=3.9\u00a0\r\n\r\nconda activate test\r\n\r\npython\r\n\r\n```\r\n\r\n\u00a0\r\n\r\nAnd then in the python console, use the same reproduction test as before:\r\n\r\n```\r\n\r\nimport pyarrow as pa\r\n\r\nimport pyarrow.csv\r\n\r\nfrom io import BytesIO\r\n\r\nfor _ in pa.csv.open_csv(BytesIO('\\n'.join(['review_id,filter_outcome']\u00a0+\u00a0['62593aaec7628b203bad4c6e,fabrication']\\*16385).encode())): pass\r\n\r\n```\r\n\r\nSo it seems to only happen in a fresh environment, where the pa.csv.open_csv has not run successfully before. Could be a mamba issue, a conda issue, a packaging issue or a compilation/abi issue. Have not dug deeper into what is going on.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-06-22T06:50:58.417Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16872?focusedCommentId=17557278) by Yibo Cai (yibocai):*\nReproduced the issue with your \"fresh install\" trick!"
+        },
+        {
+            "created_at": "2022-06-24T11:01:01.689Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16872?focusedCommentId=17558433) by Yibo Cai (yibocai):*\nThis is a bug in CSV parser for a rare edge case. Will upload a PR to fix it soon.\r\nThanks `[~frederikfab]` to catch it!"
+        },
+        {
+            "created_at": "2022-06-30T16:31:26.423Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16872?focusedCommentId=17561108) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 13437\n<https://github.com/apache/arrow/pull/13437>"
+        }
+    ]
+}

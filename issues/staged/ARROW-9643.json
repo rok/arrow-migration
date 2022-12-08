@@ -1,0 +1,77 @@
+{
+    "issue": {
+        "title": "[C++] Illegal instruction on haswell cpu",
+        "body": "***Note**: This issue was originally created as [ARROW-9643](https://issues.apache.org/jira/browse/ARROW-9643). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSome unit tests failed with **\"Illegal instruction\"** on Intel E5-2650 (haswell).\r\n```\n\r\n$ cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DARROW_BUILD_TESTS=ON -DARROW_COMPUTE=ON ..\r\n\r\n$ ninja unittest\r\n......\r\nThe following tests FAILED:\r\n\t 11 - arrow-stl-test (Failed)\r\n\t 14 - arrow-diff-test (Failed)\r\n\t 22 - arrow-compute-internals-test (Failed)\r\n\t 23 - arrow-compute-scalar-test (Failed)\r\n\t 24 - arrow-compute-vector-test (Failed)\r\n\t 25 - arrow-compute-aggregate-test (Failed)\r\n\r\n$ release/arrow-stl-test\r\n......\r\nIllegal instruction\r\n\r\n$ lscpu\r\n......\r\nModel name:          Intel(R) Xeon(R) CPU E5-2650 v3 @ 2.30GHz\r\n```\r\n\r\nUsing git bitsect I find the PR causes this error, <https://github.com/apache/arrow/pull/7700>\r\n\r\n`[~frankdu]`, would you double check it? thanks.",
+        "created_at": "2020-08-04T07:27:41.000Z",
+        "updated_at": "2020-08-13T01:25:55.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-08-07T16:44:33.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-08-04T07:40:34.225Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9643?focusedCommentId=17170617) by Yibo Cai (yibocai):*\nFull lscpu output\r\n\r\n```\n\r\nArchitecture:        x86_64\r\nCPU op-mode(s):      32-bit, 64-bit\r\nByte Order:          Little Endian\r\nCPU(s):              20\r\nOn-line CPU(s) list: 0-19\r\nThread(s) per core:  2\r\nCore(s) per socket:  10\r\nSocket(s):           1\r\nNUMA node(s):        1\r\nVendor ID:           GenuineIntel\r\nCPU family:          6\r\nModel:               63\r\nModel name:          Intel(R) Xeon(R) CPU E5-2650 v3 @ 2.30GHz\r\nStepping:            2\r\nCPU MHz:             2596.965\r\nCPU max MHz:         3000.0000\r\nCPU min MHz:         1200.0000\r\nBogoMIPS:            4594.63\r\nVirtualization:      VT-x\r\nL1d cache:           32K\r\nL1i cache:           32K\r\nL2 cache:            256K\r\nL3 cache:            25600K\r\nNUMA node0 CPU(s):   0-19\r\nFlags:               fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc cpuid aperfmperf pni pclmulqdq dtes64 monitor ds_cpl vmx smx est tm2 ssse3 sdbg fma cx16 xtpr pdcm pcid dca sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand lahf_lm abm cpuid_fault epb invpcid_single pti intel_ppin ssbd ibrs ibpb stibp tpr_shadow vnmi flexpriority ept vpid fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid cqm xsaveopt cqm_llc cqm_occup_llc dtherm ida arat pln pts md_clear flush_l1d\r\n\r\n```\r\n"
+        },
+        {
+            "created_at": "2020-08-04T07:50:17.996Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9643?focusedCommentId=17170630) by Yibo Cai (yibocai):*\nTested on Ubuntu-18.04 with gcc-7.5."
+        },
+        {
+            "created_at": "2020-08-04T13:50:43.741Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9643?focusedCommentId=17170808) by Wes McKinney (wesm):*\nCould you show what CXXFLAGS are being passed when compiling (it's shown in the CMake output)? "
+        },
+        {
+            "created_at": "2020-08-05T03:20:27.478Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9643?focusedCommentId=17171246) by Yibo Cai (yibocai):*\nNo special cxxflags passed, no info seen in cmake output.\r\n \"ninja -v\" shows gcc command line options _\"-DARROW_HAVE_RUNTIME_AVX2 -DARROW_HAVE_RUNTIME_AVX512 -DARROW_HAVE_RUNTIME_SSE4_2 -DARROW_HAVE_SSE4_2 -msse4.2\"_, looks good.\r\n\r\nWith gdb, I see avx512 code is called. Looks something wrong with runtime dispatch.\r\n```\n\r\n$ gdb release/arrow-stl-test -ex run\r\n......\r\nThread 1 \"arrow-stl-test\" received signal SIGILL, Illegal instruction.\r\n0x00007ffff7452e67 in arrow::compute::aggregate::AddSumAvx512AggKernels(arrow::compute::ScalarAggregateFunction*) () from ./libarrow.so.200\r\n```"
+        },
+        {
+            "created_at": "2020-08-05T03:25:24.841Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9643?focusedCommentId=17171248) by Yibo Cai (yibocai):*\n[CMakeCache.txt](CMakeCache.txt) attached"
+        },
+        {
+            "created_at": "2020-08-05T06:06:13.252Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9643?focusedCommentId=17171273) by Yibo Cai (yibocai):*\nSome interesting findings (tested with gcc-7.5, clang-8):\r\n- this bug only happens for release build with gcc.\n- debug and relwithdebinfo builds with gcc are both okay.\n- clang are always okay.\n  \n  Below comment explains why. It's simply because gcc is more aggressive in adopting architecture depended optimizations."
+        },
+        {
+            "created_at": "2020-08-05T06:56:55.295Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9643?focusedCommentId=17171298) by Yibo Cai (yibocai):*\nFound where the bug comes.\r\n\r\nSource file [aggregate_sum_avx512.cc](https://github.com/apache/arrow/blob/master/cpp/src/arrow/compute/kernels/aggregate_sum_avx512.cc) is built with [compiler avx512 flags](https://github.com/apache/arrow/blob/0e3e140e98c1b674d258b74aa776192d2ae8510d/cpp/src/arrow/CMakeLists.txt#L385). So all functions in this source file may contain avx512 instructions, and are supposed to run only on avx512 capable machines.\r\nThe problem is this source file exports function [AddSumAvx512AggKernels](https://github.com/apache/arrow/blob/0e3e140e98c1b674d258b74aa776192d2ae8510d/cpp/src/arrow/compute/kernels/aggregate_sum_avx512.cc#L71), which is called by code running on all architectures.\r\nA workaround is attached to verify the issue:  [avx512-workaround.diff](avx512-workaround.diff) \r\n\r\nI think we need to refine current code to catch similar bugs early."
+        },
+        {
+            "created_at": "2020-08-05T07:05:49.234Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9643?focusedCommentId=17171303) by Yibo Cai (yibocai):*\n[~frank.du]"
+        },
+        {
+            "created_at": "2020-08-05T07:31:46.861Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9643?focusedCommentId=17171313) by Frank Du (frank.du):*\nThanks for the quick findings. Sorry for that, I has a AVX2 device but pass unittest smoothly, and seems like most CI machines are AVX2 capable.\r\n\r\nThe patch looks good to me, and we need move AVX2 register function outside of the AVX2 file also. Currently we only has this only one SIMD kernel.\r\n\r\nAre you working on a PR?"
+        },
+        {
+            "created_at": "2020-08-05T07:34:58.634Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9643?focusedCommentId=17171315) by Yibo Cai (yibocai):*\nThanks Frank, I'm not working it. You may find a better approach and submit a PR to fix it."
+        },
+        {
+            "created_at": "2020-08-05T07:59:41.162Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9643?focusedCommentId=17171326) by Frank Du (frank.du):*\nJust upload a PR which call the SIMD func register if it's capable, it should fix the issue. Can you help to have a check also?"
+        },
+        {
+            "created_at": "2020-08-05T08:51:53.792Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9643?focusedCommentId=17171353) by Frank Du (frank.du):*\nI can reproduce the issue on gcc-7.5 + ubuntu18.04 with a AVX2 device,\u00a0<https://github.com/apache/arrow/pull/7903> can fix it. BTW, this issue not exist on gcc-8.4 also."
+        },
+        {
+            "created_at": "2020-08-07T16:44:33.495Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9643?focusedCommentId=17173287) by Wes McKinney (wesm):*\nIssue resolved by pull request 7903\n<https://github.com/apache/arrow/pull/7903>"
+        },
+        {
+            "created_at": "2020-08-12T10:58:55.486Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9643?focusedCommentId=17176259) by Krisztian Szucs (kszucs):*\nShould not be included in 1.0.1 since https://issues.apache.org/jira/browse/ARROW-9398 was not part of the 1.0.0 release."
+        },
+        {
+            "created_at": "2020-08-13T01:25:55.247Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9643?focusedCommentId=17176692) by Frank Du (frank.du):*\nYes, this is a bug introduced from\u00a0https://issues.apache.org/jira/browse/ARROW-9398\u00a0which not include in 1.0.0"
+        }
+    ]
+}

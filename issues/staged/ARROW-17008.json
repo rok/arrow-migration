@@ -1,0 +1,81 @@
+{
+    "issue": {
+        "title": "[R] Parquet Snappy Compression Fails for Integer Type Data",
+        "body": "***Note**: This issue was originally created as [ARROW-17008](https://issues.apache.org/jira/browse/ARROW-17008). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nSnappy compression is not working when writing to parquet for integer type data.\r\n\r\nE.g. compare file sizes for:\r\n\r\n```r\n\r\nwrite_parquet(data.frame(x = 1:1e6), \"snappy.parquet\", compression = \"snappy\")\r\nwrite_parquet(data.frame(x = 1:1e6), \"uncomp.parquet\", compression = \"uncompressed\")\r\n```\r\nwhereas for double:\r\n```r\n\r\nwrite_parquet(data.frame(x = as.double(1:1e6)), \"snappyd.parquet\", compression = \"snappy\")\r\nwrite_parquet(data.frame(x = as.double(1:1e6)), \"uncompd.parquet\", compression = \"uncompressed\")\r\n```\r\nI have inspected the integer files using parquet-tools and compression level shows as 0%. Needless to say, I can achieve compression using Spark (sparklyr) etc.\r\n\r\nThanks.",
+        "created_at": "2022-07-07T19:53:35.000Z",
+        "updated_at": "2022-07-08T08:08:21.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Documentation",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-07-07T19:57:04.452Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17008?focusedCommentId=17563936) by Antoine Pitrou (apitrou):*\nWhat are the actual file sizes in each case?"
+        },
+        {
+            "created_at": "2022-07-07T20:00:06.451Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17008?focusedCommentId=17563940) by Charlie Gao (charliegao):*\n<font color=\"#172b4d\">Int data:</font>\r\n\r\nsnappy.parquet 4.6MB\r\n\r\nuncomp.parquet 4.6MB\r\n\r\n<font color=\"#172b4d\">Double data:</font>\r\n\r\nsnappyd.parquet 4.3MB\r\n\r\nuncompd.parquet 8.3MB"
+        },
+        {
+            "created_at": "2022-07-07T20:06:42.547Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17008?focusedCommentId=17563945) by Antoine Pitrou (apitrou):*\nHmm, that's interesting. Can you show the parquet-tools output in full? (can use an external pastebin site if you want)"
+        },
+        {
+            "created_at": "2022-07-07T20:13:52.202Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17008?focusedCommentId=17563947) by Charlie Gao (charliegao):*\nHope the below helps. Btw. format version 1.0 or 2.0 produces the same results.\r\n\r\n```\n\r\n############ file meta data ############\r\ncreated_by: parquet-cpp-arrow version 8.0.0\r\nnum_columns: 1\r\nnum_rows: 1000000\r\nnum_row_groups: 1\r\nformat_version: 1.0\r\nserialized_size: 929\r\n\r\n\r\n############ Columns ############\r\nx\r\n\r\n############ Column(x) ############\r\nname: x\r\npath: x\r\nmax_definition_level: 1\r\nmax_repetition_level: 0\r\nphysical_type: INT32\r\nlogical_type: None\r\nconverted_type (legacy): NONE\r\ncompression: SNAPPY (space_saved: -0%)\r\n```\r\n\r\n```\n\r\n\r\n############ file meta data ############\r\ncreated_by: parquet-cpp-arrow version 8.0.0\r\nnum_columns: 1\r\nnum_rows: 1000000\r\nnum_row_groups: 1\r\nformat_version: 1.0\r\nserialized_size: 936\r\n\r\n\r\n############ Columns ############\r\nx\r\n\r\n############ Column(x) ############\r\nname: x\r\npath: x\r\nmax_definition_level: 1\r\nmax_repetition_level: 0\r\nphysical_type: DOUBLE\r\nlogical_type: None\r\nconverted_type (legacy): NONE\r\ncompression: SNAPPY (space_saved: 49%)\r\n```"
+        },
+        {
+            "created_at": "2022-07-07T20:17:49.333Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17008?focusedCommentId=17563948) by Antoine Pitrou (apitrou):*\nHmm, I see. I think Snappy is too simplistic of a compression algorithm to really make a difference here. I get similar results with lz4 but much better ones with zstd (which is also slower)."
+        },
+        {
+            "created_at": "2022-07-07T20:21:36.669Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17008?focusedCommentId=17563950) by Charlie Gao (charliegao):*\nBut could it be the case that it just isn't activating for integer data? The above is just a reprex, on my actual (integer type) data I am getting ~15% compression using sparklyr vs. 0% using Arrow."
+        },
+        {
+            "created_at": "2022-07-07T20:25:15.740Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17008?focusedCommentId=17563956) by Antoine Pitrou (apitrou):*\nCould you post the Spark-generated file somewhere?"
+        },
+        {
+            "created_at": "2022-07-07T20:25:36.038Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17008?focusedCommentId=17563957) by Antoine Pitrou (apitrou):*\nOr, rather, a Spark generated file for the dummy integer data you're using in the snippets above?"
+        },
+        {
+            "created_at": "2022-07-07T20:41:53.123Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17008?focusedCommentId=17563959) by Charlie Gao (charliegao):*\nSure - the same file generated using Spark (sparklyr 1.7.7, spark 3.2.1): <https://github.com/shikokuchuo/wip/raw/main/spark.parquet>\r\n\r\nOutput of parquet-tools - strangely enough it is showing 0% in this case as well, but the file size is 4.0MB vs 4.6MB for the Arrow version.\r\n```\n\r\n############ file meta data ############\r\ncreated_by: parquet-mr version 1.12.2 (build 77e30c8093386ec52c3cfa6c34b7ef3321322c94)\r\nnum_columns: 1\r\nnum_rows: 1000000\r\nnum_row_groups: 1\r\nformat_version: 1.0\r\nserialized_size: 395\r\n\r\n\r\n############ Columns ############\r\nx\r\n\r\n############ Column(x) ############\r\nname: x\r\npath: x\r\nmax_definition_level: 1\r\nmax_repetition_level: 0\r\nphysical_type: INT32\r\nlogical_type: None\r\nconverted_type (legacy): NONE\r\ncompression: SNAPPY (space_saved: -0%)\r\n\r\n```"
+        },
+        {
+            "created_at": "2022-07-07T20:52:24.726Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17008?focusedCommentId=17563968) by Antoine Pitrou (apitrou):*\nHmm, it appears the Arrow-generated file should be 4MB if you pass something like `{}use_dictionary = FALSE{`}."
+        },
+        {
+            "created_at": "2022-07-07T20:56:05.248Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17008?focusedCommentId=17563973) by Antoine Pitrou (apitrou):*\nAlso, I filed ARROW-17009 for exposing `dictionary_pagesize_limit` which would be a more fine-grained parameter to tune."
+        },
+        {
+            "created_at": "2022-07-07T21:21:54.163Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17008?focusedCommentId=17563985) by Charlie Gao (charliegao):*\nThanks for the quick response. I can replicate using `use_dictionary = FALSE`\r\n\r\nI am running tests on my actual data and will let you know the results.\r\n\r\n<https://arrow.apache.org/blog/2019/09/05/faster-strings-cpp-parquet/>\r\n\r\nFrom the above blog post, it seems to suggest that snappy compression works on the part that is plain and not dictionary-encoded. This would explain why it doesn't work on the reprex as all the numbers are unique so dictionary encoding would be the same as uncompressed.\r\n\r\nI assume then that if the data is double type, then dictionary encoding is turned off by default?"
+        },
+        {
+            "created_at": "2022-07-07T21:36:40.375Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17008?focusedCommentId=17563989) by Antoine Pitrou (apitrou):*\nI don't think that's the explanation, no. Again, the explanation is simply that Snappy is bad at compressing this particular data.\r\n\r\nAlso note the integer-vs-double compression is a bit biased, because you are comparing int32 against float64. If you were comparing int64 against float64 instead, you would seel that int64 compresses as well as float64.\r\n(you get int32 in R because R doesn't have any native 64-bit integers, AFAIU)"
+        },
+        {
+            "created_at": "2022-07-07T22:05:30.390Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17008?focusedCommentId=17563995) by Charlie Gao (charliegao):*\nOk sure. R simply wraps C ints (4bytes) and C doubles (8 bytes). Just a bit puzzling how the double version managed to compress to 4.3MB vs 4.6MB for int on default settings.\r\n\r\nI am actually seeing some compression savings now using parquet-tools with use-dictionary = FALSE. I guess this is equivalent to Spark now and it is probably the optimal setting for my particular data.\r\n\r\nThanks for your help."
+        },
+        {
+            "created_at": "2022-07-07T22:28:51.044Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17008?focusedCommentId=17564001) by Charlie Gao (charliegao):*\nOf course, you will have a much better idea if this generalizes to all integer data, in which case it would probably make sense to change the defaults for 'use_dictionary'.\r\n\r\nBut otherwise, I suggest something could be added to the documentation that 'use_dictionary' could adversely affect the compression rate under certain circumstances. That would help others with the same issue I had as it was not obvious that this was a relevant variable."
+        },
+        {
+            "created_at": "2022-07-08T08:08:21.429Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17008?focusedCommentId=17564151) by Antoine Pitrou (apitrou):*\n`[~willjones127]` Perhaps you or someone else wants to look at how to improve the documentation here?"
+        }
+    ]
+}

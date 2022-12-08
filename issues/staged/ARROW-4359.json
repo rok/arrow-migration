@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Python] Column metadata is not saved or loaded in parquet",
+        "body": "***Note**: This issue was originally created as [ARROW-4359](https://issues.apache.org/jira/browse/ARROW-4359). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi all,\r\n\r\na while ago I posted this issue: ARROW-3866\r\n\r\nWhile working with Pyarrow I encountered another potential bug related to column metadata: If I create a table containing columns with metadata everything is fine. But after I save the table to parquet and load it back as a table using pq.read_table, the column metadata is gone.\r\n\r\n\u00a0\r\nAs of now I can not say yet whether the metadata is not saved correctly or not loaded correctly, as I have no idea how to verify it. Unfortunately I also don't have the time try a lot, but I wanted to let you know anyway. \r\n\r\n\u00a0\r\n```Java\n\r\nfield0 = pa.field('field1', pa.int64(), metadata=dict(a=\"A\", b=\"B\"))\r\nfield1 = pa.field('field2', pa.int64(), nullable=False)\r\ncolumns = [\r\n    pa.column(field0, pa.array([1, 2])),\r\n    pa.column(field1, pa.array([3, 4]))\r\n]\r\ntable = pa.Table.from_arrays(columns)\r\n\r\npq.write_table(tab, path)\r\n\r\ntab2 = pq.read_table(path)\r\ntab2.column(0).field.metadata\r\n```\r\n\u00a0",
+        "created_at": "2019-01-24T12:33:14.000Z",
+        "updated_at": "2021-02-17T18:19:35.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-02-17T18:19:35.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-05-06T08:18:05.429Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4359?focusedCommentId=16833585) by Joris Van den Bossche (jorisvandenbossche):*\nThe arrow field metadata could in principle map to parquet's `ColumnChunkMetaData->key_value_metadata`, but I don't think this is implemented.\r\n\r\nThe `key_value_metadata` on the full schema _is_ implemented, and this roundtrips to parquet."
+        },
+        {
+            "created_at": "2019-08-21T23:17:55.104Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4359?focusedCommentId=16912778) by Wes McKinney (wesm):*\nThis looks kinda buggy, maybe it's fixed now. I added to 0.15.0 so we can see"
+        },
+        {
+            "created_at": "2019-08-22T12:14:44.834Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4359?focusedCommentId=16913270) by Joris Van den Bossche (jorisvandenbossche):*\nI converted the example to be compatible with the latest pyarrow:\r\n\r\n```Java\n\r\nfield1 = pa.field('field1', pa.int64(), metadata=dict(a=\"A\", b=\"B\")) \r\nfield2 = pa.field('field2', pa.int64(), nullable=False)\r\ntable = pa.Table.from_arrays([pa.array([1, 2]), pa.array([3, 4])], schema=pa.schema([field1, field2]))\r\n\r\npq.write_table(table, path)\r\ntable2 = pq.read_table(path)\r\n\r\ntable2.schema.field_by_name('field1').metadata\r\n```\r\n\r\nIt's not yet fixed."
+        },
+        {
+            "created_at": "2019-08-22T15:13:10.832Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4359?focusedCommentId=16913413) by Wes McKinney (wesm):*\nThanks"
+        },
+        {
+            "created_at": "2019-08-24T00:23:18.958Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4359?focusedCommentId=16914733) by Wes McKinney (wesm):*\nThis is tricky since there is field metadata found in each row group. "
+        },
+        {
+            "created_at": "2019-09-19T13:40:16.791Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4359?focusedCommentId=16933389) by Joris Van den Bossche (jorisvandenbossche):*\nIt could also be an option to use the serialized arrow schema for this. That would be sufficient for an arrow <-> parquet roundtrip, but is of course not a general parquet mechanism (so the metadata is not in the proper format to be reusable from other parquet readers)"
+        },
+        {
+            "created_at": "2021-02-17T18:16:40.781Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4359?focusedCommentId=17286049) by Antoine Pitrou (apitrou):*\nIf I try `[~jorisvandenbossche]`'s reproducer, it seems to work now:\r\n```python\n\r\n>>> path = \"xxx.pq\"\r\n>>> field1 = pa.field('field1', pa.int64(), metadata=dict(a=\"A\", b=\"B\"))\r\n>>> field2 = pa.field('field2', pa.int64(), nullable=False)\r\n>>> table = pa.Table.from_arrays([pa.array([1, 2]), pa.array([3, 4])], schema=pa.schema([field1, field2]))\r\n>>> \r\n>>> pq.write_table(table, path)\r\n>>> table2 = pq.read_table(path)\r\n>>> \r\n>>> table2.schema.field('field1')\r\npyarrow.Field<field1: int64>\r\n>>> table2.schema.field('field2')\r\npyarrow.Field<field2: int64 not null>\r\n>>> table2.schema.field('field1').metadata\r\n{b'PARQUET:field_id': b'1', b'a': b'A', b'b': b'B'}\r\n>>> table2.schema.field('field2').metadata\r\n{b'PARQUET:field_id': b'2'}\r\n```\r\n"
+        }
+    ]
+}

@@ -1,0 +1,28 @@
+{
+    "issue": {
+        "title": "[Python] Writing partitions with NaNs silently drops data",
+        "body": "***Note**: This issue was originally created as [ARROW-7345](https://issues.apache.org/jira/browse/ARROW-7345). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen writing a partitioned table, if the partitioning column has NA values, they're silently dropped. I think it would be helpful if there was a warning. Even better, from my perspective, would be writing out those partitions with a directory name like `partition_col=NaN`. \r\n\r\nHere's a small example where only the `b = 2` group is written out and the `b = NaN` group is dropped.\r\n\r\n```python\n\r\nimport os\r\nimport tempfile\r\nimport pyarrow.json\r\nimport pyarrow.parquet\r\nfrom pathlib import Path\r\n\r\n# Create a dataset with NaN:\r\njson_str = \"\"\"\r\n{\"a\": 1, \"b\": 2}\r\n{\"a\": 2, \"b\": null}\r\n\"\"\"\r\nwith tempfile.NamedTemporaryFile() as tf:\r\n    tf = Path(tf.name)\r\n    tf.write_text(json_str)\r\n    table = pyarrow.json.read_json(tf)\r\n\r\n# Write out a partitioned dataset, using the NaN-containing column\r\nwith tempfile.TemporaryDirectory() as out_dir:\r\n    pyarrow.parquet.write_to_dataset(table, out_dir, partition_cols=[\"b\"])\r\n    print(os.listdir(out_dir))\r\n    read_table = pyarrow.parquet.read_table(out_dir)\r\nprint(f\"Wrote out {table.shape[0]} rows, read back {read_table.shape[0]} row\")\r\n\r\n# Output:\r\n#> ['b=2.0']\r\n#> Wrote out 2 rows, read back 1 row\r\n```\r\n\u00a0\r\nIt looks like this caused by pandas dropping NaNs when doing [the `groupby` here](https://github.com/apache/arrow/blob/b16a3b53092ccfbc67e5a4e5c90be5913a67c8a5/python/pyarrow/parquet.py#L1434).",
+        "created_at": "2019-12-07T00:02:09.000Z",
+        "updated_at": "2021-08-05T16:14:45.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2019-12-09T14:05:12.818Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7345?focusedCommentId=16991615) by Joris Van den Bossche (jorisvandenbossche):*\n`[~karldw]` you are correct that it is currently the use of pandas' groupby that results in this behaviour.\r\n\r\nThere are vague plans to implement this groupby step natively in Arrow. See eg ARROW-2628, ARROW-5002"
+        },
+        {
+            "created_at": "2020-09-15T21:17:16.285Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7345?focusedCommentId=17196556) by Karl Dunkle Werner (karldw):*\nI noticed pandas version 1.1.0 added the `dropna` argument to `DataFrame.group_by()`. One way for pyarrow to avoid the issue I highlighted might be to pass `dropna=True`."
+        },
+        {
+            "created_at": "2021-08-05T16:14:45.492Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7345?focusedCommentId=17394155) by Antoine Pitrou (apitrou):*\nJust checked this still applies with PyArrow 5.0.0+."
+        }
+    ]
+}

@@ -1,0 +1,40 @@
+{
+    "issue": {
+        "title": "[C++] Do not toggle memory mapping globally in LocalFileSystem",
+        "body": "***Note**: This issue was originally created as [ARROW-9633](https://issues.apache.org/jira/browse/ARROW-9633). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn the context of the Datasets API, some file formats benefit greatly from memory mapping (like Arrow IPC files) while other less so. Additionally, in some scenarios, memory mapping could fail when used on network-attached storage devices. Since a filesystem may be used to read different kinds of files and use both memory mapping and non-memory mapping, and additionally the Datasets API should be able to fall back on non-memory mapping if the attempt to memory map fails, it would make sense to have a non-global option for this:\r\n\r\nhttps://github.com/apache/arrow/blob/master/cpp/src/arrow/filesystem/localfs.h\r\n\r\nI would suggest adding a new filesystem API with something like `OpenMappedInputFile` with some options to control the behavior when memory mapping is not possible. These options may be among:\r\n\r\n- Falling back on a normal RandomAccessFile\n- Reading the entire file into memory (or even tmpfs?) and then wrapping it in a BufferReader\n- Failing",
+        "created_at": "2020-08-03T16:23:54.000Z",
+        "updated_at": "2021-06-22T00:17:48.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2020-08-03T16:26:17.247Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9633?focusedCommentId=17170159) by Wes McKinney (wesm):*\nNote that a similar filesystems API in TensorFlow has the `NewReadOnlyMemoryRegionFromFile` API, I'm not sure what its semantics are with remote filesystems"
+        },
+        {
+            "created_at": "2020-08-07T15:32:57.937Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9633?focusedCommentId=17173213) by Joris Van den Bossche (jorisvandenbossche):*\ncc `[~apitrou]`"
+        },
+        {
+            "created_at": "2020-08-07T17:12:00.825Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9633?focusedCommentId=17173328) by Antoine Pitrou (apitrou):*\nI'm not sure I understand the concern. I think the simplest we can do is fall back on non-memory mapped access if memory mapping fails. The other options sound like over-engineering."
+        },
+        {
+            "created_at": "2020-08-15T21:14:30.381Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9633?focusedCommentId=17178380) by Wes McKinney (wesm):*\nMy objection comes down to having a Filesystem instance that is unable to create non-memory-mapped files. I think that the Filesystem API should allow you to do both without having to create a new filesystem instance. \r\n\r\nAnother solution would be to introduce an options struct that is passed to the OpenInputFile API to indicate that memory mapping should be used if possible."
+        },
+        {
+            "created_at": "2020-08-17T09:48:59.182Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9633?focusedCommentId=17178875) by Antoine Pitrou (apitrou):*\nMy concern is that memory-mapping is an optimization specific to local filesystem files, and it would burden the generic API with those optimization details.\r\n\r\nDid you enconter a use case where the current API produces detrimental results? Or where the proposed change (attempt to memory-map and then fall back to regular reading) would?"
+        },
+        {
+            "created_at": "2020-08-17T13:37:00.237Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9633?focusedCommentId=17178980) by Wes McKinney (wesm):*\nI mostly want to be sure that file formats that are sensitive to a file handle's performance characteristics (for example, Parquet files are highly sensitive to the latency of reads) are able to understand what they are getting so that they can choose to set other options to improve performance. For example:\r\n\r\n- Will read buffering (or pre-buffering) improve performance?\n- Is it OK to make blocking IO calls or should an IO call allow a CPU core to be made available to other threads for execution? \n- Do Read calls allocate memory? \n  \n  I'm all for abstraction/encapsulation where it makes sense but these issues can result in meaningful changes to the wall clock time of accessing data.\n  \n  I'm fine to take no action right now but if we want Arrow to be the gold standard for data access and the platform that people choose to build on we should be vigilant. "
+        }
+    ]
+}

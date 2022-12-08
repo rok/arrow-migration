@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[R] More special handling for known errors in arrow_eval",
+        "body": "***Note**: This issue was originally created as [ARROW-13370](https://issues.apache.org/jira/browse/ARROW-13370). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n**Proposed approach**:\r\n- Investigate the use of `rlang::abort()` with the class arg\n- Investigate if an expansion of the `arrow` error classes is required\n- Surface error messages that do not contain the \"not supported in Arrow\" keywords\n- Update unit tests\n- Document updates in error-handling\n  \n**Original description**:\r\nWe have special handling in arrow_eval that looks for the \"not supported in Arrow\" error, and when that's found it shows the error message rather than swallowing it in an \"Expression not supported\" message. But we have other error messages we raise in nse_funcs that are worth showing--bad input etc. Use a sentinel error message that we can also detect and subclass as \"arrow-try-error\" like the others, or (better) raise a classed exception (if that's supported in all versions of R we support). ",
+        "created_at": "2021-07-17T21:23:33.000Z",
+        "updated_at": "2022-10-02T17:51:24.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-12-09T16:18:50.080Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13370?focusedCommentId=17456541) by Jonathan Keane (jonkeane):*\nThis might be better as a separate issue, but we also could improve our not implemented messages that helps narrow down what has gone wrong. \r\n\r\nFor example `mutate(col = ifelse(col %in% unique(table$var), ...)` will fail not because of `ifelse` but because of unique, but we reference the whole expression:\r\n\r\n```Java\n\r\n Error: Expression ifelse(col %in% unique(df$other_col), ... not supported in Arrow\r\nCall collect() first to pull data into R. \r\n```\r\n\r\nWhich can lead folks to think that `ifelse` doesn't work, when really it's the `unique()` bit (which for this isn't even needed)"
+        },
+        {
+            "created_at": "2021-12-17T18:51:14.824Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13370?focusedCommentId=17461612) by Dewey Dunnington (paleolimbot):*\nI've run into this too, but I don't have a list handy of where this matters so that we can test it on something realistic (the example that Jon posted works now instead of erroring!).\r\n\r\nThere's a comment in the source about using a classed error...a potential implementation might look like this:\r\n\r\n```R\n\r\narrow_not_supported <- function(what) {\r\n  lab <- format(sys.call(-1))\r\n  rlang::abort(\r\n    glue::glue(\"`{lab}`: { what } not supported in Arrow\"),\r\n    class = \"arrow_not_supported\"\r\n  )\r\n}\r\n\r\narrow_eval <- function(expr) {\r\n  withCallingHandlers({\r\n    force(expr)\r\n  }, error = function(e) {\r\n    if (inherits(e, \"arrow_not_supported\")) {\r\n      rlang::abort(conditionMessage(e), parent = e)\r\n    } else {\r\n      rlang::abort(\"You tried something that isn't supported\", parent = e)\r\n    }\r\n  })\r\n}\r\n\r\narrow_eval(\"ok\")\r\n#> [1] \"ok\"\r\narrow_eval(stop(\"uninformative message\"))\r\n#> Error: You tried something that isn't supported\r\narrow_eval(identity(arrow_not_supported(\"this specific thing\")))\r\n#> Error: `identity(arrow_not_supported(\"this specific thing\"))`: this specific thing not supported in Arrow\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-12-17T18:55:23.150Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13370?focusedCommentId=17461616) by Dewey Dunnington (paleolimbot):*\nWhere we're handling this: https://github.com/apache/arrow/blob/670af338bc740888bffea65b28ee2bcc065b555a/r/R/dplyr-eval.R#L18-L60\r\n\r\nThe rlang condition signaling docs: https://rlang.r-lib.org/reference/abort.html"
+        },
+        {
+            "created_at": "2022-10-02T17:51:24.347Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13370?focusedCommentId=17612141) by Apache Arrow JIRA Bot (arrowjira):*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned per [project policy](https://arrow.apache.org/docs/dev/developers/bug_reports.html#issue-assignment). Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

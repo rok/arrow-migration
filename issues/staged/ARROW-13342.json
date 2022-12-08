@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] Categorical boolean column saved as regular boolean in parquet",
+        "body": "***Note**: This issue was originally created as [ARROW-13342](https://issues.apache.org/jira/browse/ARROW-13342). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen saving a pandas dataframe to parquet, if there is a categorical column where the categories are boolean, the column is saved as regular boolean.\r\n\r\nThis causes an issue because, when reading back the parquet file, I expect the column to still be categorical.\r\n\r\n\u00a0\r\nReproducible example:\r\n```python\n\r\nimport pandas as pd\r\nimport pyarrow\r\n\r\n# Create dataframe with boolean column that is then converted to categorical\r\ndf = pd.DataFrame({'a': [True, True, False, True, False]})\r\ndf['a'] = df['a'].astype('category')\r\n\r\n# Convert to arrow Table and save to disk\r\ntable = pyarrow.Table.from_pandas(df)\r\npyarrow.parquet.write_table(table, 'test.parquet')\r\n\r\n# Reload data and convert back to pandas\r\ntable_rel = pyarrow.parquet.read_table('test.parquet')\r\ndf_rel = table_rel.to_pandas()\r\n```\r\n\r\nThe arrow `table` variable correctly converts the column to an arrow `DICTIONARY` type:\r\n```\n\r\n>>> df['a']\r\n0     True\r\n1     True\r\n2    False\r\n3     True\r\n4    False\r\nName: a, dtype: category\r\nCategories (2, object): [False, True]\r\n>>>\r\n>>> table\r\npyarrow.Table\r\na: dictionary<values=bool, indices=int8, ordered=0>\r\n```\r\n\r\nHowever, the reloaded column is now a regular boolean:\r\n```\n\r\n>>> table_rel\r\npyarrow.Table\r\na: bool\r\n>>>\r\n>>> df_rel['a']\r\n0     True\r\n1     True\r\n2    False\r\n3     True\r\n4    False\r\nName: a, dtype: bool\r\n```\r\n\r\nI would have expected the column to be read back as categorical.\r\n",
+        "created_at": "2021-07-14T18:32:17.000Z",
+        "updated_at": "2021-07-19T12:58:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Parquet",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-07-16T13:43:14.924Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13342?focusedCommentId=17382081) by Alessandro Molina (amol-):*\nFYI, this seems to happen for numeric types. The same is true for `int` and `double`\r\n\r\n```Java\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet\r\n\r\n# Convert to arrow Table and save to disk\r\ntable = pa.Table.from_arrays([\r\n    pa.DictionaryArray.from_arrays(indices=pa.array([0, 1, 1, 0, 1, 1, 0], type=pa.int8()), \r\n                                   dictionary=[10000000000000000, 20000000000000000])\r\n], names=[\"data\"])\r\nprint(table)\r\npa.parquet.write_table(table, 'test.parquet')\r\n\r\n# Reload data and convert back to pandas\r\ntable_rel = pa.parquet.read_table('test.parquet')\r\nprint(table_rel)\r\n```\r\n\r\nThe exception seem to be `unicode` which preserves the dictionary form.  \r\n\r\nIn general, from my understanding, it seems arrow currently writes in dictionary form only the binary types ( https://github.com/apache/arrow/blob/14b75ee71d770ba86999e0e7a0e0b94629b91968/cpp/src/parquet/column_writer.cc#L1008 )\r\n\r\nThis in general seems a fairly reasonable behaviour to me, because in general binary data/text is where you get most saving due to the delta in size between the data and the indices.\r\n\r\nOn the other side, I don't think that \"preserving same exact type\" that was provided to a writer is an expectation that can be always satisfied or that it makes sense to enforce. In some cases enforcing dictionary encoding because the input was dictionary encoded might lead to bigger parquet files, or for some types for example that might not even be possible, think of CSV or JSON, not all types can be represented in those formats and thus the data you read back might have a different type\r\n"
+        },
+        {
+            "created_at": "2021-07-16T18:34:19.627Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13342?focusedCommentId=17382271) by Weston Pace (westonpace):*\nJudging by ARROW-3246 I believe the original intent was to support more types than just the binary types.\u00a0 Also, Arrow is supposed to be storing custom metadata (arrow:SCHEMA) in the parquet file with details on the original Arrow schema.\u00a0 This way, if we need to store the data more efficiently then we can do so while still restoring the original types upon deserialization.\u00a0 I checked and store_schema is set to true and it does properly decode and restore the original schema which does report the column \"a\" as dictionary<values=bool, indices=int8, ordered=0>.\u00a0 I'm not sure if some linkage is broken or if it only tries to restore the metadata on binary types.\r\n\r\n\u00a0\r\n\r\nHowever, I think the resolution for this issue is (although maybe not easy), the existing mechanism should be extended to handle more types."
+        },
+        {
+            "created_at": "2021-07-17T07:51:05.673Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13342?focusedCommentId=17382497) by Joris Van den Bossche (jorisvandenbossche):*\nDirectly reading dictionary encoded data in Parquet as dictionary typed arrays in Arrow is currently indeed only supported for BYTE_ARRAY storage (i.e. string, binary). The issue tracking the follow-up to expand this support to other data types is ARROW-6140.\r\n\r\nThe documentation of `pq.read_table` also somewhat mentions this:\r\n\r\n```Java\n\r\nread_dictionary : list, default None\r\n    List of names or column paths (for nested types) to read directly\r\n    as DictionaryArray. Only supported for BYTE_ARRAY storage. \r\n    ...\r\n```\r\n\r\nThis parameter allows to explicitly specify which columns to read as dictionary arrays. But it doesn't mention the default behaviour, which is to infer those columns from the stored arrow:SCHEMA."
+        },
+        {
+            "created_at": "2021-07-17T08:01:33.708Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13342?focusedCommentId=17382504) by Joris Van den Bossche (jorisvandenbossche):*\n> But it doesn't mention the default behaviour, which is to infer those columns from the stored arrow:SCHEMA.\r\n\r\nThis is handled in `ApplyOriginalStorageMetadata` at https://github.com/apache/arrow/blob/14b75ee71d770ba86999e0e7a0e0b94629b91968/cpp/src/parquet/arrow/schema.cc#L879-L889\r\n\r\nAnd it is coded in `https://github.com/apache/arrow/blob/14b75ee71d770ba86999e0e7a0e0b94629b91968/cpp/src/parquet/arrow/schema.cc#L410-L413` for which types this is currently supported to read as dictionary type: https://github.com/apache/arrow/blob/14b75ee71d770ba86999e0e7a0e0b94629b91968/cpp/src/parquet/arrow/schema.cc#L410-L413\r\n\r\n\u2014\r\n\r\nIn summary, I think the long term fix is ARROW-6140, and short term for this issue there are two options:\r\n\r\n- better document the current behaviour\n- cast afterwards to dictionary type, based on the ARROW:schema or pandas metadata (but this can be costly, after first materializing the full column, and not necessarily always wanted)"
+        },
+        {
+            "created_at": "2021-07-17T08:03:55.427Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13342?focusedCommentId=17382505) by Joris Van den Bossche (jorisvandenbossche):*\nSome more explanation of the situation also in ARROW-11157"
+        },
+        {
+            "created_at": "2021-07-19T12:56:38.090Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13342?focusedCommentId=17383325) by Alessandro Molina (amol-):*\nI'm interested in taking a shot at ARROW-6140 unless it becomes urgent and someone more experience than me with the C++/Parquet side of things wants to take over. I'll take the ticket for the moment, anyone should feel free to take it over if there is extra urgency."
+        }
+    ]
+}

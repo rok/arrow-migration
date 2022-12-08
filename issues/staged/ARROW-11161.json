@@ -1,0 +1,70 @@
+{
+    "issue": {
+        "title": "[Python][C++] S3Filesystem: file Content-Type not set correctly?",
+        "body": "***Note**: This issue was originally created as [ARROW-11161](https://issues.apache.org/jira/browse/ARROW-11161). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI am using the Fileystem abstraction to write out html / text files to the local filesystem as well as s3.\r\n\r\nI noticed that when using s3_fs.open_output_stream in combination with file.write(bytes), the object that gets created has a Content-Type of 'application/xml' even tough it's plain text, which is problematic for me.\r\n\r\nHere is a minimal example:\r\n```java\n\r\nimport boto3\r\nBUCKET = \"my-bucket\"\r\npath = f\"s3://{BUCKET}/pyarrow_encoding.txt\"\r\ns3_fs, output_path = FileSystem.from_uri(path)\r\nwith s3_fs.open_output_stream(path=output_path, compression=None) as f:\r\n    f.write('hello'.encode('UTF-8'))\r\n\r\ns3 = boto3.client('s3')\r\nresponse = s3.get_object(Bucket=BUCKET, Key='pyarrow_encoding.txt')\r\nprint(response['ContentType']) # Output: application/xml\r\nprint(response['Body'].read().decode('UTF-8')) # Output: hello\r\n\r\ns3.put_object(Bucket=BUCKET,\r\n              Key='boto3_encoding.txt',\r\n              Body='hello'.encode('UTF-8'))\r\nresponse = s3.get_object(Bucket=BUCKET, Key='boto3_encoding.txt')\r\nprint(response['ContentType']) # Output: binary/octet-stream\r\nprint(response['Body'].read().decode('UTF-8')) # Output: hello\r\n```\r\nI know, that the S3Filesystem implementation of pyarrow might no have mime type inference implemented, but I am wondering, why always 'application/xml' is the resulting Content-Type? Maybe this is hardcoded somewhere?\r\n\r\nOriginally, I tried this with '.html' files and also there, the objects on s3 always got the\u00a0'application/xml' Content-Type. (Please also see attachment from the s3 console)\r\n\r\n\u00a0\r\n\r\nAny help or pointer is appreciated.\u00a0\r\n\r\nThank you,\r\n\r\nNicolas",
+        "created_at": "2021-01-07T14:25:28.000Z",
+        "updated_at": "2021-06-01T08:10:05.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-06-01T08:09:46.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-01-07T15:00:37.626Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11161?focusedCommentId=17260566) by Antoine Pitrou (apitrou):*\nI had no idea S3 stored a content-type metadata about files. Can you also post a screenshot of the metadata for the boto3-created file?"
+        },
+        {
+            "created_at": "2021-01-07T15:24:44.557Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11161?focusedCommentId=17260574) by Nicolas Renkamp (nicornk):*\n`[~apitrou]` \u00a0Uploaded.\r\n\r\nYes, it was also surprising for me. My current assumption is that the c++ aws sdk that pyarrow uses has different content-type inference logic than boto3?"
+        },
+        {
+            "created_at": "2021-01-07T15:38:29.011Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11161?focusedCommentId=17260579) by Antoine Pitrou (apitrou):*\nI don't think the C++ AWS SDK uses any inference. \"application/xml\" seems to be a default value."
+        },
+        {
+            "created_at": "2021-01-07T15:45:12.471Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11161?focusedCommentId=17260585) by Nicolas Renkamp (nicornk):*\nI am struggling to find this default value anywhere (in code as well as documentation of AWS).\r\n\r\nIs pyarrow always using multipartUpload inside S3Filesystem or does it also use PutObject for small files?"
+        },
+        {
+            "created_at": "2021-01-07T15:48:42.211Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11161?focusedCommentId=17260589) by Antoine Pitrou (apitrou):*\nIf you grep for AMZN_XML_CONTENT_TYPE in the C++ AWS SDK you'll see that it's use as a default content-type value for S3 requests. I presume that's the reason for what you're observing, though it's only a guess."
+        },
+        {
+            "created_at": "2021-01-07T15:49:35.048Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11161?focusedCommentId=17260590) by Antoine Pitrou (apitrou):*\nThat said, \"binary/octet-stream\" isn't correct for a text file either..."
+        },
+        {
+            "created_at": "2021-01-07T15:52:32.841Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11161?focusedCommentId=17260591) by Antoine Pitrou (apitrou):*\nAnd to answer your other question, we always use multipart upload."
+        },
+        {
+            "created_at": "2021-01-07T16:01:24.263Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11161?focusedCommentId=17260599) by Nicolas Renkamp (nicornk):*\nYou are right, found it. Thanks for the hint with\u00a0AMZN_XML_CONTENT_TYPE.\r\n\r\nNow I am curious what it would set as content-type for parquet files and verified that it's also application/xml:\r\n\r\n\u00a0\r\n```java\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\ntable = pa.table({'a': [1, 2], 'b': [.1, .2]})\r\npq.write_table(table, f\"s3://{BUCKET}/test.parquet\")\r\n\r\nresponse = s3.get_object(Bucket=BUCKET, Key='test.parquet')\r\nprint(response['ContentType']) # application/xml\r\nprint(response['Body'].read())\r\n```"
+        },
+        {
+            "created_at": "2021-01-07T16:09:46.667Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11161?focusedCommentId=17260608) by Antoine Pitrou (apitrou):*\n`[~npr]` Do you have opinions on this?"
+        },
+        {
+            "created_at": "2021-01-07T16:55:50.252Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11161?focusedCommentId=17260647) by Neal Richardson (npr):*\nIf the aws-sdk-cpp has an API for setting content type, I guess we can expose it. Though as you say, it's not clear that boto is doing the right thing either, for what that's worth."
+        },
+        {
+            "created_at": "2021-01-08T08:53:47.734Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11161?focusedCommentId=17261137) by Nicolas Renkamp (nicornk):*\nI was mainly surprised about this, I don't think that there is an immediate need to expose the content-type, at least for me. I can also switch to plain boto3 and create my own local / s3 filesystem abstraction.\r\n\r\nWould it make sense to upstream this question to AWS and ask why the different sdk's behave differently in terms of content type inference?\u00a0"
+        },
+        {
+            "created_at": "2021-01-08T08:59:56.674Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11161?focusedCommentId=17261142) by Nicolas Renkamp (nicornk):*\nJust looked at pyfilesystem. They solved this by introducing extra_args when creating the filesystem\r\n```java\n\r\nimport fs, fs.mirror\r\ns3fs = S3FS('example', upload_args={\"CacheControl\": \"max-age=2592000\", \"ACL\": \"public-read\"})\r\nfs.mirror.mirror('/path/to/mirror', s3fs)\r\n```\r\nhttps://github.com/PyFilesystem/s3fs#extraargs\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-06-01T08:09:46.633Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11161?focusedCommentId=17354922) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 10295\n<https://github.com/apache/arrow/pull/10295>"
+        }
+    ]
+}

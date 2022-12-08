@@ -1,0 +1,45 @@
+{
+    "issue": {
+        "title": "[Python] pyarrow.serialize does not support dask dataframe",
+        "body": "***Note**: This issue was originally created as [ARROW-7885](https://issues.apache.org/jira/browse/ARROW-7885). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently pyarrow knows how to serialize pandas dataframes but not dask dataframes.\r\n```java\n\r\nSerializationCallbackError: pyarrow does not know how to serialize objects of type <class 'dask.dataframe.core.DataFrame'>. \n```\r\nPickling the dask dataframe foregoes the benefits of using pyarrow for the sub dataframes.\r\n\r\nPyarrow support for serializing dask dataframes would allow storing dataframes efficiently in a database instead of a file system (e.g. parquet).\u00a0",
+        "created_at": "2020-02-19T13:21:53.000Z",
+        "updated_at": "2021-02-17T16:01:35.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2021-02-17T16:01:35.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-02-19T13:55:33.027Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7885?focusedCommentId=17040065) by Antoine Pitrou (apitrou):*\nCan you elaborate what you mean by \"efficiently\" exactly?"
+        },
+        {
+            "created_at": "2020-02-19T15:30:31.607Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7885?focusedCommentId=17040166) by Chris Morgan (cjmorgan):*\nWhat does supporting Dask DataFrames have to do with databases? Thanks"
+        },
+        {
+            "created_at": "2020-02-19T16:33:08.050Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7885?focusedCommentId=17040215) by Benjamin (Jonen):*\nFrom this (<https://arrow.apache.org/docs/python/ipc.html#arbitrary-object-serialization)>\u00a0my understanding is that arrow has some built-in optimization when serializing pandas DataFrames. By \"efficient\" I mean that it should be smaller and/or serialize faster.\u00a0\r\n\r\nWhen serializing dask DataFrames I now use pickle but cannot make use of these optimizations.\u00a0\r\n\r\nWith df.to_parquet('arrow') it is possible to use arrow serialization but that requires data to be written to the file system which I would like to avoid (thus I am bringing up databases).\u00a0\r\n\r\nMy use case is to serialize dask dataframes (preferably with pyarrow) and then store them in MongoDB (similar to this library <https://github.com/man-group/arctic>)."
+        },
+        {
+            "created_at": "2020-02-19T16:47:29.545Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7885?focusedCommentId=17040228) by Chris Morgan (cjmorgan):*\nHave a look at\u00a0<https://arrow.apache.org/docs/python/plasma.html>\u00a0and\u00a0[https://arrow.apache.org/docs/format/Flight.html](https://arrow.apache.org/docs/format/Flight.html?highlight=flight)\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-02-19T19:53:42.194Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7885?focusedCommentId=17040383) by Antoine Pitrou (apitrou):*\nPerhaps we should update the PyArrow documentation. Nowadays you can do efficient zero-copy serialization using pickle protocol 5 and out-of-band buffers: https://docs.python.org/3/library/pickle.html#out-of-band-buffers\r\n\r\nEven without using out-of-band buffers, pickle should make fewer copies than it used to. In any case, before believing PyArrow serialization is \"more efficient\", I would suggest you run benchmarks on your own data (for example a Pandas dataframe).\r\n\r\nAs for Parquet, you should be able to write it in memory if you call `pyarrow.parquet.write_table` with a `pyarrow.BufferOutputStream`. For example:\r\n```python\n\r\n>>> tab = pa.Table.from_pydict({'a': list(range(10000))})                                                                                                               \r\n>>> stream = pa.BufferOutputStream()                                                                                                                                    \r\n>>> pq.write_table(tab, stream)                                                                                                                                         \r\n>>> buf = stream.getvalue()                                                                                                                                             \r\n>>> buf.size                                                                                                                                                            \r\n58126\r\n```\r\n"
+        },
+        {
+            "created_at": "2020-02-20T10:43:02.533Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7885?focusedCommentId=17040835) by Benjamin (Jonen):*\nThanks for the feedback. The Flight project indeed looks very interesting! Maybe this is something we can migrate to in the future.\u00a0\r\n\r\nRegarding parquet: I would like to be able to do something like this (similar to\u00a0<https://arrow.apache.org/docs/python/ipc.html#arbitrary-object-serialization>):\u00a0\r\n\r\nimport dask\r\ndf = dask.datasets.timeseries()\r\nbuf = pa.serialize(df).to_buffer()\r\n\r\n\r\nWriting out individual tables (using parquet) would mean that I have to do the handling of the meta data on the dask dataframe myself.\u00a0\r\n\r\n\r\nSince pickle for dask dataframe serialization is working fine (and apparently has improved performance which I didn't know), I see that extending the arbitrary object serialization to dask is not a priority.\u00a0"
+        },
+        {
+            "created_at": "2021-02-17T16:01:35.301Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7885?focusedCommentId=17285917) by Antoine Pitrou (apitrou):*\nPyArrow serialization is deprecated, closing as won't fix."
+        }
+    ]
+}

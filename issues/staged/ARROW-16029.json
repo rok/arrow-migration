@@ -1,0 +1,36 @@
+{
+    "issue": {
+        "title": "[Python] Runaway process with generator in \"write_dataset()\"",
+        "body": "***Note**: This issue was originally created as [ARROW-16029](https://issues.apache.org/jira/browse/ARROW-16029). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe have a complex containerized data pipeline that keeps running, even if the main process fails, so we have to stop the containers manually. The issue boils down to the following:\r\n\r\nThe method `pyarrow.dataset.write_dataset()` accepts an [iterable of RecordBatch](https://arrow.apache.org/docs/python/generated/pyarrow.dataset.write_dataset.html).\r\nThis means that generators should also work, since [a generator is an iterator, which is an iterable.](https://stackoverflow.com/questions/2776829/difference-between-pythons-generators-and-iterators)\r\n\r\nThe following mininal example can't be stopped with Ctrl-C/KeyboardInterupt (SIGINT signal 2). We need to run at minimum `killall -3 python` (SIGQUIT) to close the process.\r\n```python\n\r\nfrom time import sleep\r\nimport pyarrow as pa\r\nimport pyarrow.dataset as ds\r\n\r\n\r\ndef mygenerator():\r\n    i = 0\r\n    while True:\r\n        sleep(0.1)\r\n        i = i + 1\r\n        print(i)\r\n        yield pa.RecordBatch.from_pylist([{\"mycol\": \"myval\"}] * 10)\r\n\r\n\r\nschema = pa.schema([(\"mycol\", pa.string())])\r\n\r\n# Does NOT respect KeyboardInterrupt:\r\nds.write_dataset(data=mygenerator(),\r\n                 schema=schema,\r\n                 base_dir=\"mydir\",\r\n                 format=\"parquet\",\r\n                 existing_data_behavior=\"overwrite_or_ignore\",\r\n                 )\r\n```\r\nIn practice the generator is not infinite, but represents a series of API calls that can't be held in memory.\r\n\r\nThe following examples shows that generators work well with e.g. `{}pa.Table.from_batches(){`}. So the issue could be limited to the Dataset API?\r\n```python\n\r\n# Respects KeyboardInterrupt:\r\nfor i in mygenerator():\r\n    pass\r\n```\r\n```python\n\r\n# Respects KeyboardInterrupt:\r\ntable = pa.Table.from_batches(mygenerator(), schema)\r\n```\r\nOS: Ubuntu 20.04.3 LTS\r\npython: 3.8\r\npyarrow: 7.0.0",
+        "created_at": "2022-03-25T10:42:27.000Z",
+        "updated_at": "2022-10-24T18:21:27.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-04-21T15:47:23.968Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16029?focusedCommentId=17525794) by Joris Van den Bossche (jorisvandenbossche):*\ncc `[~westonpace]`"
+        },
+        {
+            "created_at": "2022-10-24T08:06:27.660Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16029?focusedCommentId=17623028) by Martin Th\u00f8gersen (th0ger):*\nAnyone can reproduce this?"
+        },
+        {
+            "created_at": "2022-10-24T08:39:13.099Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16029?focusedCommentId=17623050) by Joris Van den Bossche (jorisvandenbossche):*\nYes, I can reproduce this, this is certainly a valid bug report (and thanks for reporting it!)\r\n\r\nOne note about `pa.Table.from_batches`: this actually first iterates through all batches (so getting them all in memory), before combining them into a Table (which is OK here since Table is an in-memory structure anyway). So this works a bit differently. \r\nThe Dataset API is using `RecordBatcheReader.from_batches` under the hood instead. But, when using this directly, interrupting it with ctrl-c also seems to work:\r\n\r\n```Java\n \r\nreader = pa.ipc.RecordBatchReader.from_batches(schema, mygenerator())\r\nreader.read_all()\r\n```\r\n\r\n\r\nBut when this is used in the Datasets API for writing, this RecordBatchReader is wrapped in a `OneShotFragment`, which is consumed by an async BackgroundGenerator, which iterates on a background thread. `[~westonpace]` that might be related to the fact that interupting doesn't work here?"
+        },
+        {
+            "created_at": "2022-10-24T09:16:37.464Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16029?focusedCommentId=17623072) by Martin Th\u00f8gersen (th0ger):*\n`[~jorisvandenbossche]` thanks for confirming this bug!"
+        },
+        {
+            "created_at": "2022-10-24T18:21:27.567Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16029?focusedCommentId=17623330) by Weston Pace (westonpace):*\n> Weston Pace that might be related to the fact that interupting doesn't work here?\r\n\r\nYes, that seems very likely.  We don't have cancellation support in Acero today (though it shouldn't be too hard to add).  Just to be clear though, there are still two problems right?\r\n\r\n1. You cannot cancel the write dataset operation\r\n2. The generator should wrap up and finish but the write dataset operation is hanging indefinitely\r\n\r\nAlso, it seems this was filed some time ago.  Very sorry for missing the first ping."
+        }
+    ]
+}

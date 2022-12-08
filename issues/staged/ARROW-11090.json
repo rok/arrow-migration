@@ -1,0 +1,76 @@
+{
+    "issue": {
+        "title": "[C++] Support temporal arithmetic ({time,date}{32,64}, timestamp, interval)",
+        "body": "***Note**: This issue was originally created as [ARROW-11090](https://issues.apache.org/jira/browse/ARROW-11090). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n[It appears that only subtract on two timestamps is currently supported](https://github.com/apache/arrow/commit/dd94a5809b56b32fe2fb538f688bf568d9642e3b) when there is more supported, we should include support for that in R.\r\n\r\n\u00a0\r\n\r\nThis should also cover the ability to do with and without rollback (so have the ability to do e.g. 2021-03-30 minus 1 month and either get a null back, or 2021-02-28), plus the ability to specify whether to rollback to the first or last, and whether to preserve or rest the time.)",
+        "created_at": "2020-12-31T15:29:56.000Z",
+        "updated_at": "2022-04-08T13:13:27.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-01-05T22:03:02.228Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11090?focusedCommentId=17259242) by Ben Kietzman (bkietz):*\nIt'd be helpful to have a matrix of expected support/behavior here. For example, will we support datetimes in parallel to timestamps or require that they be cast to timestamps first? Working in timestamps only is cleaner but doesn't easily allow adding whole days to (for example) a date64.\r\n\r\nWe may want to require that addends to timestamps be durations of the same unit; timestamp[ms] + duration[s] requires that one be cast to the other's unit. Alternatively we could accept any integer addend and defer unit safety to users. Additionally, do we need timestamp-duration as well as timestamp+duration?\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-04-02T20:30:28.282Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11090?focusedCommentId=17314071) by Neal Richardson (npr):*\nhttps://github.com/HowardHinnant/date looks like something we could/should wrap. C++11, and since https://clock.r-lib.org/ wraps it and is on CRAN, we shouldn't have to worry about Solaris \ud83e\udd1e"
+        },
+        {
+            "created_at": "2021-09-23T11:33:40.102Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11090?focusedCommentId=17419145) by Phillip Cloud (cpcloud):*\nBroadly speaking, I think we should adopt the behavior of PostgreSQL here with respect to the operations that are at first glance ambiguous, such as\r\n\r\n```sql\n\r\nSELECT DATE '2021-05-31' + INTERVAL '1' MONTH\r\n```\r\n\r\nThis behavior appears to be described at least partially in https://www.postgresql.org/docs/current/functions-datetime.html after the section on the `OVERLAPS` operator.\r\n\r\nThe implementation for timestamp operations ls here https://github.com/postgres/postgres/blob/master/src/backend/utils/adt/timestamp.c. A relevant example would be the `timestamp_pl_interval` (timestamp-plus-interval) implementation here https://github.com/postgres/postgres/blob/master/src/backend/utils/adt/timestamp.c#L2841."
+        },
+        {
+            "created_at": "2021-09-23T11:50:53.167Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11090?focusedCommentId=17419152) by Phillip Cloud (cpcloud):*\nPerhaps another important implementation detail is that many date arithmetic operations are implemented by first converting a date to a timestamp and then calling the corresponding implementation for timestamp, e.g.:\u00a0https://github.com/postgres/postgres/blob/master/src/backend/utils/adt/date.c#L1243-L1261."
+        },
+        {
+            "created_at": "2021-09-23T12:48:31.337Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11090?focusedCommentId=17419179) by David Li (lidavidm):*\nPostgres's behavior matches what [Java](https://docs.oracle.com/javase/8/docs/api/java/time/LocalDateTime.html#plusMonths-long-) and [dateutil](https://dateutil.readthedocs.io/en/stable/relativedelta.html#examples) do, so that makes sense."
+        },
+        {
+            "created_at": "2021-09-23T13:00:15.143Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11090?focusedCommentId=17419183) by Joris Van den Bossche (jorisvandenbossche):*\nNote that the example you show is for timestamp / interval arithmetic, while for now this issue (and all the child tasks you created) are for timestamp / timestamp or timestamp / duration, which are generally much simpler operations than once intervals are involved (which don't have a fixed length). \r\n\r\n> Perhaps another important implementation detail is that many date arithmetic operations are implemented by first converting a date to a timestamp and then calling the corresponding implementation for timestamp\r\n\r\nThe date64 is basically already the same memory layout as timestamp[ms]. For date32 (days since epoch) that would be a bit more costly conversion."
+        },
+        {
+            "created_at": "2021-09-23T13:04:28.259Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11090?focusedCommentId=17419184) by Joris Van den Bossche (jorisvandenbossche):*\nFor the date arithmetic in general, some questions:\r\n\r\n- `subtract(date, date)` is listed as returning `duration`, but in theory could also give a interval? (number of days)\n- For kernels involving `date` input and result in `timestamp`, do we generally consider those date/timestamps as naive or as UTC? \n  \n  (another option could be to require the user to first convert the date to timestamp themselves, before adding a duration, in which case you can be explicit about the timezone)"
+        },
+        {
+            "created_at": "2021-09-23T13:25:43.680Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11090?focusedCommentId=17419207) by Phillip Cloud (cpcloud):*\n`[~jorisvandenbossche]`\r\n> Note that the example you show is for timestamp / interval arithmetic, while for now this issue (and all the child tasks you created) are for timestamp / timestamp or timestamp / duration, which are generally much simpler operations than once intervals are involved (which don't have a fixed length).\r\n\r\nSorry, I should've made it clear that interval and duration are synonymous in postgres as far as I understand.\r\n\r\nAfter re-reading Schema.fbs I think what I mean is interval."
+        },
+        {
+            "created_at": "2021-09-23T13:28:10.643Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11090?focusedCommentId=17419208) by Phillip Cloud (cpcloud):*\n> The date64 is basically already the same memory layout as timestamp[ms]. For date32 (days since epoch) that would be a bit more costly conversion.\r\n\r\nI think we should first focus on getting the desired semantics (postgres) and then worry about performance."
+        },
+        {
+            "created_at": "2021-09-23T14:03:53.432Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11090?focusedCommentId=17419237) by Rok Mihevc (rokm):*\nAdd/subtract and multiply/divide would probably share most of the logic so maybe it'd make sense to merge those tickets."
+        },
+        {
+            "created_at": "2022-03-09T11:02:22.345Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11090?focusedCommentId=17503497) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nApologies if this has been discussed, but I didn't see any mention of `rollback`. I don't think we currently support rolling a date backward (`rollback`) or forward. Is my understanding correct?"
+        },
+        {
+            "created_at": "2022-03-09T14:58:06.024Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11090?focusedCommentId=17503633) by Rok Mihevc (rokm):*\nIt was not discussed yet as far as I know. I propose you open a ticket and describe what's needed. "
+        },
+        {
+            "created_at": "2022-03-09T21:13:30.127Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11090?focusedCommentId=17503853) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\n`[~rokm]` \u00a0 `[~jonkeane]` described it in the description for this very ticket:\r\n\r\n\"This should also cover the ability to do with and without rollback (so have the ability to do e.g. 2021-03-30 minus 1 month and either get a null back, or 2021-02-28), plus the ability to specify whether to rollback to the first or last, and whether to preserve or rest the time.)\"\r\n\r\nAre more details needed or do you think this is clear enough?"
+        },
+        {
+            "created_at": "2022-03-10T00:29:54.214Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11090?focusedCommentId=17503922) by Rok Mihevc (rokm):*\nOh sorry, I missed that.\r\n\r\nI'm unfamiliar with rollback. Would you say [this](https://github.com/tidyverse/lubridate/blob/main/tests/testthat/test-rollback.R) is a complete test of the feature? Could it be accomplished with subtract and floor/ceil (where floor/ceil would be adjusted to have change_on_boundary option)?\r\n\r\nI would still propose opening a new ticket to discuss and track the work there and to give it visibility."
+        },
+        {
+            "created_at": "2022-03-10T14:57:18.429Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11090?focusedCommentId=17504329) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nThanks. I opened ARROW-15904.\r\n\r\nAnd yes, I think we could achieve this with subtract and floor/ ceil + change on boundary option. Another useful option might be the preservation of hours, minute and seconds when adding or subtracting with rollback / roll forward. I think the tests you linked to cover the rollback / roll forward functionality."
+        }
+    ]
+}

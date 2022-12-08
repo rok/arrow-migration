@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[R] Use WriteNode to write queries",
+        "body": "***Note**: This issue was originally created as [ARROW-14266](https://issues.apache.org/jira/browse/ARROW-14266). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nFollowing ARROW-13542. Any query that has a join or an aggregation currently has to first evaluate the query and hold it in memory before creating a Scanner to write it. We could improve that by using a WriteNode inside write_dataset() (and maybe that improves the other cases too, or at least allows us to delete some code). ",
+        "created_at": "2021-10-08T20:51:59.000Z",
+        "updated_at": "2022-04-20T00:16:52.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-04-20T00:16:52.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-12-17T15:59:48.139Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14266?focusedCommentId=17461530) by Dewey Dunnington (paleolimbot):*\nI'd be happy to take a look at this but need a bit more background on what changes you envision in (approximately) which parts of the code.\r\n\r\nSome example code with a simple join and aggregation + write_dataset:\r\n\r\n```R\n\r\nlibrary(arrow, warn.conflicts = FALSE)\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\n\r\ndf1 <- data.frame(a = letters, b = 1:26)\r\ndf2 <- data.frame(b = 1:5, c = LETTERS[1:5])\r\n\r\ntf1 <- tempfile()\r\ntf2 <- tempfile()\r\n\r\nrecord_batch(df2) %>% \r\n  left_join(df1) %>% \r\n  write_dataset(tf1)\r\n\r\nopen_dataset(tf1) %>% \r\n  collect()\r\n#>   b c a\r\n#> 1 1 A a\r\n#> 2 2 B b\r\n#> 3 3 C c\r\n#> 4 4 D d\r\n#> 5 5 E e\r\n\r\n\r\nrecord_batch(df1) %>% \r\n  summarise(col = mean(b)) %>% \r\n  write_dataset(tf2)\r\n\r\nopen_dataset(tf2) %>% \r\n  collect()\r\n#> # A tibble: 1 \u00d7 1\r\n#>     col\r\n#>   <dbl>\r\n#> 1  13.5\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-12-17T16:36:41.247Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14266?focusedCommentId=17461548) by Jonathan Keane (jonkeane):*\nI'm sure it'll end up being more complicated than this, but the first step would seem to be replacing the scanner bits inside of `write_dataset` (https://github.com/apache/arrow/blob/master/r/R/dataset-write.R#L126-L134, and then also in `dataset___Dataset_write` adding something like `MakeWriteNode` https://github.com/apache/arrow/pull/11017/files#diff-2caf4e9bd3f139e05e55dca80725d8a9c436f5ccf65c76a37cebfa6ee9b36a6aR411-R422 )\r\n\r\nhttps://github.com/apache/arrow/blob/master/r/R/query-engine.R has a lot of the other ExecNode implementation for creating the exec plans and running them and https://github.com/apache/arrow/blob/master/r/src/compute-exec.cpp has the C++ that links to libarrow"
+        },
+        {
+            "created_at": "2021-12-17T20:09:58.522Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14266?focusedCommentId=17461650) by Weston Pace (westonpace):*\nI think `write_dataset`'s first argument changes from `dataset` to `dataset_or_whatever_we_call_a_dplyr_query`  and then if it is a dataset keep the existing logic but if it is the other thing then slap a write node on the end and call something like `do_exec_plan`"
+        }
+    ]
+}

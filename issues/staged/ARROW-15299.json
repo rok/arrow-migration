@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[R] investigate {remotes} dependencies \"soft\" vs TRUE ",
+        "body": "***Note**: This issue was originally created as [ARROW-15299](https://issues.apache.org/jira/browse/ARROW-15299). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAlthough the `remotes::install_deps()` docs state\u00a0`dependencies == TRUE` is equivalent to `{}dependencies == \"soft\"{`}, I suspect `\"soft\"` is a bit more recursive than `{}TRUE{`}, resulting in the installation of many more packages.\r\n> TRUE is shorthand for \"Depends\", \"Imports\", \"LinkingTo\" and \"Suggests\". NA is shorthand for \"Depends\", \"Imports\" and \"LinkingTo\" and is the default. FALSE is shorthand for no dependencies (i.e. just check this package, not its dependencies).\n> \n> The value \"soft\" means the same as TRUE, \"hard\" means the same as NA.\r\n\r\nI noticed, when using `dependencies = \"soft\"` that my session was being clogged up by package installations lasting well over 40 minutes.\r\n\r\nI would be good to time box this to a couple of hours. \r\n\r\nThe direction in which I would go would be to understand if there is any difference in the size of the dependency trees + come up with a minimal reproducible example. \r\n\r\nEdit (12 January, 2021): the output could be a table comparing  \r\n```r\n\r\nremotes::install_deps(dependencies = TRUE)\r\nremotes::install_deps(dependencies = \"hard\")\r\nremotes::install_deps(dependencies = c(\"hard\", \"Config...\"))\r\nremotes::install_deps(dependencies = \"soft\")\r\nremotes::install_deps(dependencies = c(\"soft\", \"Config...\"))\r\n```",
+        "created_at": "2022-01-11T11:11:24.000Z",
+        "updated_at": "2022-02-23T13:29:01.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-02-23T13:29:01.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-01-12T14:25:26.371Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15299?focusedCommentId=17474574) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nPossible directions:\r\n- alter `.libPaths()` to start from a clean slate\n- use Docker"
+        },
+        {
+            "created_at": "2022-02-09T11:10:02.563Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15299?focusedCommentId=17489471) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nWhat we would need is a combination between `dependencies = TRUE` and `{}dependencies = \"Config/Needs/website\"{`}.\r\nI ran the experiment and the results are below:\r\n\n|test|description|total_pkgs_installed|\r|\n|-|-|-|-|\n|1|dependencies = TRUE|64|\r|\n|2|dependencies = 'hard'|12|\r|\n|3|dependencies = c('hard', 'Config/Needs/website')|61|\r|\n|4|dependencies = 'soft'|1819|\r|\n|5|dependencies = c('soft', 'Config/Needs/website')|1819|\r|\n|6|dependencies = c('Config/Needs/website')|1|\r<br>\r<br>I excluded `dependencies = 'soft'` & combinations of `'soft'` since that is too recursive and ends up installing an excessive number of packages. \r<br>`dependencies = 'hard'` & `dependencies = 'Config/Needs/website'` are too narrow.\r<br>\r<br>I compared `dependencies = TRUE` to `{}dependencies = c('hard', 'Config/Needs/website'){`}. While the overall number of installed packages looks promising (64 vs 61), there isn't complete overlap.\r|\n|indicator|value|\r|\n|packages exclusive to test 1|21|\r|\n|packages exclusive to test 3|18|\r|\n|packages in common|43|\r<br>\r<br>We can safely conclude that `dependencies = c('hard', 'Config/Needs/website')` is **not** equal to `dependencies = TRUE` + `{}dependencies = c('Config/Needs/website'){`}. \r<br>\r<br>We definitely need `'Config/Needs/website'` - in our case `pkgdown` and its dependencies, but in combination with `dependencies =\u00a0'hard'` it is too narrow in scope, while with `dependencies = 'soft'` it is much too wide.|\n"
+        },
+        {
+            "created_at": "2022-02-09T11:22:22.759Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15299?focusedCommentId=17489479) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nA bit on how I did the experiment: \r\n- I removed all installed packages from the system library\n- I installed `remotes` and `rstudioapi` in the system library\n- each test installed packages to its own folder (configured via the `R_LIBS_USER` environment variable) with the R session being restarted for each run\n- I then compared the contents of the 6 libraries"
+        },
+        {
+            "created_at": "2022-02-10T21:56:33.323Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15299?focusedCommentId=17490533) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nInvestigation done, conclusion is in the comments."
+        },
+        {
+            "created_at": "2022-02-10T23:49:06.585Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15299?focusedCommentId=17490581) by Jonathan Keane (jonkeane):*\nHave we upstreamed these conclusions to the issue on {remotes}?"
+        },
+        {
+            "created_at": "2022-02-11T09:59:36.418Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15299?focusedCommentId=17490805) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nNo, not yet. Let's agree on the content."
+        },
+        {
+            "created_at": "2022-02-11T12:44:24.368Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15299?focusedCommentId=17490895) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nLeave open until upstreamed"
+        },
+        {
+            "created_at": "2022-02-11T15:32:08.606Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15299?focusedCommentId=17490985) by Jonathan Keane (jonkeane):*\nWhat you've got here is great. It's a clear explanation of how `c('soft', 'Config/Needs/website')` doesn't do what we need, `c('hard', 'Config/Needs/website')`, and how `dependencies = TRUE` is not the same as `dependencies = hard` (which could have a clearer message in the docs.\r\n\r\n"
+        },
+        {
+            "created_at": "2022-02-17T15:33:54.785Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15299?focusedCommentId=17494015) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nThe results of this investigation have now been [upstreamed](https://github.com/r-lib/remotes/issues/642#issuecomment-1043035544) to `remotes`. "
+        }
+    ]
+}

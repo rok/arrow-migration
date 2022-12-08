@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Java][FlightRPC] FlightSQL error: 'Parameter ordinal out of range' executing a prepared stmt with params",
+        "body": "***Note**: This issue was originally created as [ARROW-18300](https://issues.apache.org/jira/browse/ARROW-18300). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHey again :) \r\n\r\nI'm getting a 'parameter ordinal 1 out of range' error trying to set a parameter on the returned AvaticaPreparedStatement. Repro:\r\n\r\n- Open a FlightSQL JDBC connection\n- `conn.prepareStatement` with a SQL query containing params (e.g. `INSERT INTO users (id, name) VALUES (?, ?)`)\n- `ps.setString(1, \"foo\")` -> above error, thrown from `AvaticaPreparedStatement.getParameter(int)`\n  \n  I had a bit of a dig to try to identify a potential cause:\n- the `Meta.Signature` passed to the `AvaticaPreparedStatement` on creation has an empty parameter list - this is what causes the out-of-bounds error.\n-  in `ArrowFlightMetaImpl.prepare`, it calls `newSignature`, but this only takes the SQL query, and so `newSignature` creates the signature with the empty list. The call to `ArrowFlightSqlClientHandler.prepare` happens on the line after - could we pass the param Schema from this result to `newSignature`?\n  \n  Let me know if I can help narrow this down further or help with the fix :)\n  \n  James",
+        "created_at": "2022-11-10T10:16:02.000Z",
+        "updated_at": "2022-11-13T15:48:44.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: FlightRPC",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-11-10T16:47:55.918Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18300?focusedCommentId=17631777) by David Li (lidavidm):*\nThanks for the detailed reproduction.\r\n\r\nThis is going to take me a bit to fix, because it looks like parameters are straight up not implemented (`ArrowFlightMetaImpl#execute` ignores `typedValues`). So it'll take me a bit to put this together and ensure it's thoroughly tested."
+        },
+        {
+            "created_at": "2022-11-10T17:42:10.619Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18300?focusedCommentId=17631810) by James Henderson (jarohen):*\nThanks - yep, no worries, of course.\r\n\r\nFWIW we can't return accurate parameter types at the point of creating a prepared statement - partly because XT is a dynamic database, but also partly because we're not sure it's possible in the general case:\r\n\r\n- For us, we can't accurately type the params in `INSERT INTO users (id, name) VALUES (?, ?)` because a user is allowed to put any value in those columns - aware we might be the exception to the rule on this one. We currently say that the param Schema has two columns, both of which are 0-leg dense unions, and then refine it when the user binds some parameters, but I'm not sure how viable that workaround might be long-term.\n- More generally, even in statically typed databases, (admittedly quite contrived) queries like `SELECT ? FROM foo` have untypable params - Postgres, for example, throws an error if you try to get the parameter metadata through JDBC for this one."
+        },
+        {
+            "created_at": "2022-11-10T17:48:21.922Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18300?focusedCommentId=17631815) by David Li (lidavidm):*\nYeah, and I think that's not been well-defined in the standard. ADBC, for what it's worth, uses NullType/NA to indicate that the parameter type is not known (though this is somewhat abusing the type system), and the SQLite example implementation of Flight SQL returns a dense union type (that's not really feasible if your type system is extensible like Postgres's, though).\r\n\r\n`[~jduong]` any thoughts here? We should clarify this in the protocol specification."
+        },
+        {
+            "created_at": "2022-11-13T15:48:44.668Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-18300?focusedCommentId=17633363) by David Li (lidavidm):*\nI put up a draft PR: https://github.com/apache/arrow/pull/14627\r\n\r\nIt doesn't yet handle the NullType/NA convention proposed above or any types besides String."
+        }
+    ]
+}

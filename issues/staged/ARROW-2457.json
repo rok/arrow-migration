@@ -1,0 +1,34 @@
+{
+    "issue": {
+        "title": "garrow_array_builder_append_values() won't work for large arrays",
+        "body": "***Note**: This issue was originally created as [ARROW-2457](https://issues.apache.org/jira/browse/ARROW-2457). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI am using\u00a0garrow_array_builder_append_values() to transform a native C array to an Arrow array, without calling arrow_array_builder_append multiple times. When calling\u00a0garrow_array_builder_append_values() in array-builder.cpp with following signature:\r\n```java\n\r\ngarrow_array_builder_append_values(GArrowArrayBuilder *builder,\r\nconst VALUE *values,\r\ngint64 values_length,\r\nconst gboolean *is_valids,\r\ngint64 is_valids_length,\r\nGError **error,\r\nconst gchar *context)\r\n```\r\nit will fail for large arrays. This is probably happening because the is_valids array is copied to the valid_bytes array (of different type), for which the memory is allocated on the stack, and not on the heap, like shown on the snippet below:\r\n```java\n\r\nuint8_t valid_bytes[is_valids_length];\r\nfor (gint64 i = 0; i < is_valids_length; ++i){ \r\n  valid_bytes[i] = is_valids[i]; \r\n}\r\n```\r\n\u00a0A way to avoid this problem would be to allocate memory for the valid_bytes array using malloc() or\u00a0something similar. Is this behavior intended, maybe because no large arrays should be handed over to that function, or it is rather a bug?",
+        "created_at": "2018-04-13T15:24:27.000Z",
+        "updated_at": "2018-06-29T22:34:09.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: GLib",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-04-21T13:51:03.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-04-15T00:43:13.841Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2457?focusedCommentId=16438555) by Kouhei Sutou (kou):*\nDo you have a program that reproduces this case?"
+        },
+        {
+            "created_at": "2018-04-20T07:25:25.804Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2457?focusedCommentId=16445426) by Haralampos Gavriilidis (harry_g):*\n```java\n\r\nint main() {\r\n\r\n\r\n  gint64 cnt = 100000000;\r\n  gint64 *n;\r\n  gboolean *valids;\r\n  n = malloc(sizeof(gint64) * cnt);\r\n  valids = malloc(sizeof(gint64) * cnt);\r\n  gint64 i;\r\n\r\n  for (i = 0; i < cnt; i++) {\r\n    n[i] = 5;\r\n    valids[i] = TRUE;\r\n  }\r\n\r\n  GArrowArray *array;\r\n\r\n  GArrowInt64ArrayBuilder *builder;\r\n  gboolean success = TRUE;\r\n  GError *error = NULL;\r\n  builder = garrow_int64_array_builder_new();\r\n  if (success) {\r\n    success = garrow_int64_array_builder_append_values(builder, n, cnt, valids, cnt, &error);\r\n  }\r\n\r\n  if (!success) {\r\n    g_print(\"failed to append: %s\\n\", error->message);\r\n    g_error_free(error);\r\n    g_object_unref(builder);\r\n    return EXIT_FAILURE;\r\n  }\r\n  array = garrow_array_builder_finish(GARROW_ARRAY_BUILDER(builder), &error);\r\n  if (!array) {\r\n    g_print(\"failed to finish: %s\\n\", error->message);\r\n    g_error_free(error);\r\n    g_object_unref(builder);\r\n    return EXIT_FAILURE;\r\n  }\r\n  g_object_unref(builder);\r\n\r\n  g_object_unref(array);\r\n\r\n\r\n}\r\n```"
+        },
+        {
+            "created_at": "2018-04-20T21:01:50.859Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2457?focusedCommentId=16446362) by Kouhei Sutou (kou):*\nThanks.\r\nI could reproduce this case with your program."
+        },
+        {
+            "created_at": "2018-04-21T13:51:03.598Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2457?focusedCommentId=16446809) by Uwe Korn (uwe):*\nIssue resolved by pull request 1921\n<https://github.com/apache/arrow/pull/1921>"
+        }
+    ]
+}

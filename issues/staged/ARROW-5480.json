@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[Python] Pandas categorical type doesn't survive a round-trip through parquet",
+        "body": "***Note**: This issue was originally created as [ARROW-5480](https://issues.apache.org/jira/browse/ARROW-5480). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWriting a string categorical variable to from pandas parquet is read back as string (object dtype). I expected it to be read as category.\r\nThe same thing happens if the category is numeric \u2013 a numeric category is read back as int64.\r\n\r\nIn the code below, I tried out an in-memory arrow Table, which successfully translates categories back to pandas. However, when I write to a parquet file, it's not.\r\n\r\nIn the scheme of things, this isn't a big deal, but it's a small surprise.\r\n\r\n\r\n```python\n\r\nimport pandas as pd\r\nimport pyarrow as pa\r\n\r\n\r\ndf = pd.DataFrame({'x': pd.Categorical(['a', 'a', 'b', 'b'])})\r\ndf.dtypes  # category\r\n\r\n# This works:\r\npa.Table.from_pandas(df).to_pandas().dtypes  # category\r\n\r\ndf.to_parquet(\"categories.parquet\")\r\n# This reads back object, but I expected category\r\npd.read_parquet(\"categories.parquet\").dtypes  # object\r\n\r\n\r\n# Numeric categories have the same issue:\r\ndf_num = pd.DataFrame({'x': pd.Categorical([1, 1, 2, 2])})\r\ndf_num.dtypes # category\r\n\r\npa.Table.from_pandas(df_num).to_pandas().dtypes  # category\r\n\r\ndf_num.to_parquet(\"categories_num.parquet\")\r\n# This reads back int64, but I expected category\r\npd.read_parquet(\"categories_num.parquet\").dtypes  # int64\r\n```\r\n\r\n\r\n\r\n",
+        "created_at": "2019-06-02T16:58:54.000Z",
+        "updated_at": "2022-04-15T15:32:02.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-19T18:13:50.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-06-03T02:17:29.848Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5480?focusedCommentId=16854163) by Wes McKinney (wesm):*\nParquet has dictionary-encoding as a compression strategy but does not have Categorical per se. As part of ARROW-3246 we should eventually be able to preserve Categorical through Parquet round trips, but there's some tricky issues to sort out"
+        },
+        {
+            "created_at": "2019-06-05T19:15:05.014Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5480?focusedCommentId=16856967) by Joris Van den Bossche (jorisvandenbossche):*\n`[~wesmckinn]` I think this can be closed as duplicate of the other issue?"
+        },
+        {
+            "created_at": "2019-06-05T19:22:53.247Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5480?focusedCommentId=16856970) by Wes McKinney (wesm):*\nI'm not sure \u2013 I think the scope of work in ARROW-3246 may be slightly different. I'd like to look at the Parquet-Categorical stuff sometime this month so I can look at both issues more closely then"
+        },
+        {
+            "created_at": "2019-08-02T02:04:38.315Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5480?focusedCommentId=16898482) by Wes McKinney (wesm):*\nOne slightly higher level issue is the extent to which we store Arrow schema information in the Parquet metadata. I have been thinking that we should actually store the whole serialized schema in the Parquet footer as an IPC message, so that we can refer to it when reading the file to set various read options"
+        },
+        {
+            "created_at": "2019-08-02T09:21:59.274Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5480?focusedCommentId=16898725) by Joris Van den Bossche (jorisvandenbossche):*\n> One slightly higher level issue is the extent to which we store Arrow schema information in the Parquet metadata.\r\n\r\nPossibly related to ARROW-5888, where we also need to store arrow-specific metadata for faithful roundtrip (in that case the timezone). \r\n\r\nSpark stores the all column types (and optional column metadata) in the key_value_metadata of the FileMetadata:\r\n\r\nFor example for a file with a single int column\r\n\r\n```Java\n\r\n>>> meta = pq.read_metadata('test_pyspark_dataset/_metadata')\r\n>>> meta.metadata\r\n{b'org.apache.spark.sql.parquet.row.metadata': b'{\"type\":\"struct\",\"fields\":[{\"name\":\"a\",\"type\":\"integer\",\"nullable\":true,\"metadata\":{}}]}'}\r\n```\r\n\r\n\r\n"
+        },
+        {
+            "created_at": "2019-08-16T14:22:13.740Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5480?focusedCommentId=16909085) by Wes McKinney (wesm):*\nI think this should be working now. I'll add some unit tests to close out this issue"
+        },
+        {
+            "created_at": "2019-08-19T18:13:50.536Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5480?focusedCommentId=16910628) by Wes McKinney (wesm):*\nResolved in https://github.com/apache/arrow/commit/c4b8cb66aadb46312f4e55cad2fee38ca3e002cc"
+        },
+        {
+            "created_at": "2022-04-14T10:42:11.056Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5480?focusedCommentId=17522230) by Anton Kukushkin (kukughking):*\nThe second example with numerical categoricals still doesn't work (7.0.0). Can you reopen, please?"
+        },
+        {
+            "created_at": "2022-04-15T15:32:02.059Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5480?focusedCommentId=17522871) by Joris Van den Bossche (jorisvandenbossche):*\n`[~kukughking]` there are already several other issues about this. The underlying issue is that we need to support reading other types than BYTE_ARRAY into dictionary type for Parquet, which is covered in ARROW-6140. As a result, for now the categorical dtype is only preserved for string data and not boolean or numeric data types, see eg ARROW-13342 and ARROW-11157 as other reports on this topic with some additional explanation/discussion."
+        }
+    ]
+}

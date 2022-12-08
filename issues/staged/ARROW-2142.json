@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] Conversion from Numpy struct array unimplemented",
+        "body": "***Note**: This issue was originally created as [ARROW-2142](https://issues.apache.org/jira/browse/ARROW-2142). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n```python\n\r\n>>> arr = np.array([(1.5,)], dtype=np.dtype([('x', np.float32)]))\r\n>>> arr\r\narray([(1.5,)], dtype=[('x', '<f4')])\r\n>>> arr[0]\r\n(1.5,)\r\n>>> arr['x']\r\narray([1.5], dtype=float32)\r\n>>> arr['x'][0]\r\n1.5\r\n>>> pa.array(arr, type=pa.struct([pa.field('x', pa.float32())]))\r\nTraceback (most recent call last):\r\n\u00a0 File \"<ipython-input-18-27a52820b7d8>\", line 1, in <module>\r\n\u00a0\u00a0\u00a0 pa.array(arr, type=pa.struct([pa.field('x', pa.float32())]))\r\n\u00a0 File \"array.pxi\", line 177, in pyarrow.lib.array\r\n\u00a0 File \"error.pxi\", line 77, in pyarrow.lib.check_status\r\n\u00a0 File \"error.pxi\", line 85, in pyarrow.lib.check_status\r\nArrowNotImplementedError: /home/antoine/arrow/cpp/src/arrow/python/numpy_to_arrow.cc:1585 code: converter.Convert()\r\nNumPyConverter doesn't implement <struct<x: float>> conversion.\r\n```",
+        "created_at": "2018-02-12T18:34:14.000Z",
+        "updated_at": "2018-03-13T02:38:16.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2018-03-13T02:38:13.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-02-19T10:22:52.368Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2142?focusedCommentId=16368958) by Antoine Pitrou (apitrou):*\nAfter looking at this, it seems there's a roadblock in the current `NumPyConverter` design: as it produces a `ChunkedArray` output and not a single array, it cannot be used recursively (i.e. you can not create child `NumPyConverters` for each of the struct fields and combine their results into a struct array). This also reflects in how `NumPyConverter::ConvertTypedLists` is implemented: it is itself specialized for each list item type..."
+        },
+        {
+            "created_at": "2018-02-19T15:10:12.014Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2142?focusedCommentId=16369222) by Antoine Pitrou (apitrou):*\n`[~wesmckinn]` `[~xhochy]` what is your opinion about this?"
+        },
+        {
+            "created_at": "2018-02-20T00:01:57.461Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2142?focusedCommentId=16369605) by Wes McKinney (wesm):*\nIt sounds like we will need to write a function that combines a sequence of chunked arrays into a struct, where each of the arrays possibly has a different chunked layout. So something like\r\n\r\n`NestChunkedArrays(fields, chunked_arrays, &result)` \r\n\r\n(or some other such name, actually kind of hard to name this operation). The result would be another `ChunkedArray`. The implementation will be like https://github.com/apache/arrow/blob/master/cpp/src/arrow/table.h#L223, where we convert possibly chunked columns into a sequence of record batches, each of whose fields is non-chunked"
+        },
+        {
+            "created_at": "2018-02-21T17:38:13.591Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2142?focusedCommentId=16371726) by Antoine Pitrou (apitrou):*\nI ended up applied your suggestion on array vectors rather than chunked array (see attached PR)."
+        },
+        {
+            "created_at": "2018-03-13T02:38:13.695Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2142?focusedCommentId=16396432) by Wes McKinney (wesm):*\nIssue resolved by pull request 1635\n<https://github.com/apache/arrow/pull/1635>"
+        }
+    ]
+}

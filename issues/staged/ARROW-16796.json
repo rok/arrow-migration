@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "[C++] Fix bad defaulting of ExecContext argument",
+        "body": "***Note**: This issue was originally created as [ARROW-16796](https://issues.apache.org/jira/browse/ARROW-16796). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn several places in Arrow code, invocations of Expression::Bind() default the ExecContext argument. This leads to the default function registry being used in expression manipulations, and this becomes a problem when the user wishes to use a non-default function registry, e.g., when passing one to the ExecContext of an ExecPlan, which is how I discovered this issue. The problematic places I found for such Expression::Bind() invocation are:\r\n \\* cpp/src/arrow/dataset/file_parquet.cc\r\n \\* cpp/src/arrow/dataset/scanner.cc\r\n \\* cpp/src/arrow/compute/exec/project_node.cc\r\n \\* cpp/src/arrow/compute/exec/hash_join_node.cc\r\n \\* cpp/src/arrow/compute/exec/filter_node.cc\r\n\r\nThere are also other places in test and benchmark code (grep for 'Bind()').\r\n\r\nAnother case of bad defaulting of an ExecContext argument is in Inequality::simplifies_to in cpp/src/compute/exec/expression.cc where a fresh ExecContext is created, instead of being received from the caller, and passed to BindNonRecursive.\r\n\r\nI'd argue that an ExecContext variable should not be allowed to default, except perhaps in the highest-level/user-facing APIs.",
+        "created_at": "2022-06-09T15:44:20.000Z",
+        "updated_at": "2022-06-10T20:41:02.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-06-10T20:41:02.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-10T06:02:00.099Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16796?focusedCommentId=17552568) by Yaron Gvili (rtpsw):*\nCopying [Weston Pace's post](https://github.com/apache/arrow/pull/13355#issuecomment-1151679039):\r\n\r\nGood catch. I wonder if we should remove the default argument to bind entirely (it would look something like [westonpace@`{}c9ae1dd{`}](https://github.com/westonpace/arrow/commit/c9ae1dd6a0857af69e48a95ec76480f4c466791e) ). Looks like there are only a few other non-test spots we call bind.\r\n \\* In the parquet reader we convert statistics into expressions and bind them to the schema. These expressions will only use min/max and it's only really for simplification and not execution so we're probably ok.\r\n \\* The scanner has a number of methods that create exec plans (this is the \"lightweight producer\" half of the scanner). We could arguably add an ExecContext to scan options but I think it would better to start phasing out this half of the scanner in favor of direct use of exec plans instead."
+        },
+        {
+            "created_at": "2022-06-10T06:04:26.973Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16796?focusedCommentId=17552569) by Yaron Gvili (rtpsw):*\nIf coding safety is a major concern here (IMHO it is), I'd suggest that in the longer-term Arrow code should distinguish between simplification of expressions with and without functions/execution, where only the former requires an ExecContext whereas only the latter will fail if a function exists in the expression. Perhaps the simplest, though likely not ideal, code-change for this is by defaulting ExecContext to an implementation that fails.\r\n\r\nThe purpose of the PR is just to fix in the short-term. Follow-up issues can be created for what remains."
+        },
+        {
+            "created_at": "2022-06-10T20:41:02.401Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16796?focusedCommentId=17552962) by Weston Pace (westonpace):*\nIssue resolved by pull request 13355\n<https://github.com/apache/arrow/pull/13355>"
+        }
+    ]
+}

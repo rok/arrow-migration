@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[C++] Date and datetime types should autocast from strings",
+        "body": "***Note**: This issue was originally created as [ARROW-13938](https://issues.apache.org/jira/browse/ARROW-13938). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen comparing dates and datetimes, people frequently expect that a string (formatted as ISO8601) will auto-cast and compare to dates and times.\r\n\r\nExamples in R:\r\n\r\n```r\n\r\nlibrary(arrow)\r\n#> \r\n#> Attaching package: 'arrow'\r\n#> The following object is masked from 'package:utils':\r\n#> \r\n#>     timestamp\r\n\r\narr <- Array$create(as.Date(c(\"1974-04-06\", \"1988-05-09\")))\r\narr > \"1980-01-01\"\r\n#> Error: NotImplemented: Function greater has no kernel matching input types (array[date32[day]], scalar[string])\r\n\r\n# creating the scalar as a date works, of course\r\narr > Scalar$create(as.Date(\"1980-01-01\"))\r\n#> Array\r\n#> <bool>\r\n#> [\r\n#>   false,\r\n#>   true\r\n#> ]\r\n\r\n# datatimes also do not auto-cast\r\narr <- Array$create(Sys.time())\r\narr > \"1980-01-01 00:00:00\"\r\n#> Error: NotImplemented: Function greater has no kernel matching input types (array[timestamp[us]], scalar[string])\r\n\r\n\r\n# or a more real-world example\r\nlibrary(dplyr)\r\n#> \r\n#> Attaching package: 'dplyr'\r\n#> The following objects are masked from 'package:stats':\r\n#> \r\n#>     filter, lag\r\n#> The following objects are masked from 'package:base':\r\n#> \r\n#>     intersect, setdiff, setequal, union\r\nmtcars$date <- as.Date(c(\"1974-04-06\", \"1988-05-09\"))\r\n\r\nds <- InMemoryDataset$create(mtcars)\r\n\r\nds %>%\r\n  filter(date > \"1980-01-01\") %>%\r\n  collect()\r\n#> Error: NotImplemented: Function greater has no kernel matching input types (array[date32[day]], scalar[string])\r\n```",
+        "created_at": "2021-09-08T19:19:16.000Z",
+        "updated_at": "2022-11-04T11:53:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-11-04T11:53:40.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-09-08T19:49:19.479Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13938?focusedCommentId=17412160) by Antoine Pitrou (apitrou):*\nInteresting. For comparisons, that sounds reasonable, but I wonder if that may lead to undesirable behaviour for other kernels."
+        },
+        {
+            "created_at": "2021-09-08T19:50:25.635Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13938?focusedCommentId=17412161) by Antoine Pitrou (apitrou):*\nIn general, I think we should be wary of non-trivial autocasts. Silently interpreting strings as other things (ints etc.) is a common source of bugs in language that have this, such as PHP and Javascript."
+        },
+        {
+            "created_at": "2021-09-08T20:08:25.422Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13938?focusedCommentId=17412165) by Jonathan Keane (jonkeane):*\nIn general I agree that lots of string autocasts might be a source of more trouble than it's worth,  Though dates/datetimes are special enough that we should consider autocasting them. R is not the only case where that works, many flavors of SQL do this, and pandas does too. Not that we should follow past decisions if we think they are wrong, but IMO doing this for dates/datetimes is beneficial. \r\n\r\n```Java\n\r\n>>> import pandas as pd\r\n>>> df = pd.DataFrame({'date' : ['2020-08-09', '2020-08-25', '2020-09-05', \r\n...                              '2020-09-12', '2020-09-29', '2020-10-15', \r\n...                              '2020-11-21', '2020-12-02', '2020-12-10', \r\n...                              '2020-12-18']})\r\n>>> \r\n>>> df['date'] = pd.to_datetime(df['date'])\r\n>>> df[\"date\"] > \"2020-10-01\"\r\n0    False\r\n1    False\r\n2    False\r\n3    False\r\n4    False\r\n5     True\r\n6     True\r\n7     True\r\n8     True\r\n9     True\r\nName: date, dtype: bool\r\n```"
+        },
+        {
+            "created_at": "2021-09-08T20:09:47.921Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13938?focusedCommentId=17412166) by Antoine Pitrou (apitrou):*\n`[~jorisvandenbossche]` What do you think?"
+        },
+        {
+            "created_at": "2021-09-08T22:24:49.643Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13938?focusedCommentId=17412210) by Rok Mihevc (rokm):*\nI've done this with SQL and Pandas in the past and it's a nice shorthand. Would be nice to have even in just in R/Python/.. wrapper.\r\n\r\n\u00a0\r\n\r\nAlso semi-related - ARROW-13625 ([C++][CSV] Timestamp parsing should accept any valid ISO 8601 without requiring custom parse strings)."
+        },
+        {
+            "created_at": "2021-09-15T18:43:59.354Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13938?focusedCommentId=17415686) by Joris Van den Bossche (jorisvandenbossche):*\nFrom my experience with pandas, fully agreed that autocasting strings as timestamps in operations is a very nice convenience. \r\nAnd I think there are arguments for having timestamp be an exception here (as we indeed should not autocast to integers or floats), since you don't have a \"native\" scalar object like you have for ints, floats and strings, i.e. you need to create an object (eg calling `datetime.datetime()`, `datetime.datetime.strptime()` or `pd.Timestamp()` in Python). (although now writing this, the same could maybe be said for decimals ..)\r\n\r\nI am only wondering a bit at what level this casting should be implemented. It might also be possible to let this be a responsibility of \"user API\" level (i.e. part of the R / Python bindings)? Or would that be difficult to implement at that level?"
+        },
+        {
+            "created_at": "2021-09-16T14:45:39.533Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13938?focusedCommentId=17416154) by Jonathan Keane (jonkeane):*\nIt's (probably) possible to implement these types of casts in the R/Python bindings, though doing so gets quite hairy. Specifically, it would require tracking (evaluated) types when constructing expressions. Though this type tracking in R is usually possible, but takes a lot of relatively error-prone book keeping."
+        },
+        {
+            "created_at": "2021-09-16T15:57:54.715Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13938?focusedCommentId=17416205) by Antoine Pitrou (apitrou):*\nIndeed, this is probably better done at the C++ level. cc `[~lidavidm]`"
+        },
+        {
+            "created_at": "2022-07-12T14:04:16.060Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13938?focusedCommentId=17565493) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

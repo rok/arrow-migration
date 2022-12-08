@@ -1,0 +1,65 @@
+{
+    "issue": {
+        "title": "[Rust] Implement DictionaryArray",
+        "body": "***Note**: This issue was originally created as [ARROW-5949](https://issues.apache.org/jira/browse/ARROW-5949). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI am pretty new to the codebase, but I have seen that DictionaryArray is not implemented in the Rust implementation.\r\n\r\nI went through the list of issues and I could not see any work on this. Is there any blocker?\r\n\r\n\u00a0\r\n\r\nThe specification is a bit [short](https://arrow.apache.org/docs/format/Layout.html#dictionary-encoding) or even [non-existant](https://arrow.apache.org/docs/format/Metadata.html#dictionary-encoding), so I am not sure how to implement it myself.",
+        "created_at": "2019-07-14T20:41:04.000Z",
+        "updated_at": "2020-04-24T15:02:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-02-28T07:11:47.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-07-15T13:08:35.859Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5949?focusedCommentId=16885214) by Andy Grove (andygrove):*\nI'm not aware of any blockers. I expect this is just a case of nobody needing the feature yet."
+        },
+        {
+            "created_at": "2019-07-15T13:28:36.333Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5949?focusedCommentId=16885228) by Wes McKinney (wesm):*\nI'd recommend looking at what we've done in C++, the implementation and usage is fairly mature there"
+        },
+        {
+            "created_at": "2019-11-28T17:41:49.146Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5949?focusedCommentId=16984568) by Andy Thomason (andy-thomason):*\nI've implemented this in two of our internal I/O libraries at work and should be able to help out if I get\r\n\r\nthe time. I've sent a test generator to Andy which should help. We have a huge repository of Arrow files to test it on.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2019-11-29T09:16:51.436Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5949?focusedCommentId=16984836) by Andy Thomason (andy-thomason):*\nWe should discuss the design for a dictionary type and the necessary serialisation.\r\n\r\nFor example, start by adding\r\n \u00a0\r\n```java\n\r\n     Dictionary((Box<DataType>, Box<DataType>)),\n```\r\n\r\nTo DataType (key and value types)\r\n \u00a0\r\n We may not need the extra Schema dictionary field as this is integral in the DataType.\r\n \u00a0\r\n```java\n\r\npub struct DictionaryArray\r\n{\r\n \u00a0 \u00a0 keys: ArrayRef,\r\n     values: Vec<ArrayDataRef>,\r\n} \n```\r\n\u00a0\r\n Note that to support multiple dictionary batches, we need a vector of values, although\r\n in the majority of our use cases, we have only used a single dictionary. An option\r\n to concatenate dictionaries might be useful.\r\n \u00a0\r\n Access is similar to ListArray except that the index is a variable type. For example,\r\n we often have a \"chromosome\" column which is \"1\", .. \"X\" and reduces to a byte.\r\n \u00a0\r\n Fast access to dictionary components is essential - returning slices for key and\r\n value per recordbatch. It would be very useful for all types to have a rb.get_slice<T>(\"name\") function\r\n to get a named, typed slice for an array.\r\n \u00a0\r\n Andy.\r\n \u00a0\r\n \u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-02-28T07:11:47.290Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5949?focusedCommentId=17047268) by Neville Dipale (nevi_me):*\nIssue resolved by pull request 6095\n<https://github.com/apache/arrow/pull/6095>"
+        },
+        {
+            "created_at": "2020-02-28T07:13:30.352Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5949?focusedCommentId=17047269) by Neville Dipale (nevi_me):*\nI'm unable to assign this to andy-thomason, I don't have permission."
+        },
+        {
+            "created_at": "2020-04-24T12:20:03.915Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5949?focusedCommentId=17091512) by Mahmut Bulut (vertexclique):*\nHi, I've just seen this. Is there any reason why we provide custom iterator over keys? (Which is basically resolving into Option) Can we use 0 as a null identifier?\r\n\r\n\u00a0\r\n\r\nReason 1: Iteration over Iterator<Option<T>> will take time, rebuilding from that for lookup also takes double time.\r\n\r\nReason 2: We can't use SIMD for parallel comparison."
+        },
+        {
+            "created_at": "2020-04-24T13:00:39.545Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5949?focusedCommentId=17091547) by Neville Dipale (nevi_me):*\nHi `[~vertexclique]`, there was some discussion around using sentinel values over bitmask (<https://github.com/apache/arrow/pull/6095#discussion_r367760573),>\u00a0and I believe it was a matter of sentinel values not being spec-compliant.\r\n\r\nWe never resolved the following point, but I was of the opinion that it'd be better to provide methods/functions that allow converting a dictionary array into a primitive array. \r\n My opinion was mainly informed by my concern that we don't have a way of using dictionary arrays in compute kernels, so at the time I preferred something to convert\u00a0\r\n```java\n\r\ndict(i32)[<k:[0, 0, null, 1, 2]><v:[1, 2, null]>\r\nto \r\ni32<1, 1, null, 2, null>\n```\r\nThe contributor of the PR provided a valid use-case, which led them in the route of providing iterator access, so we eventually merged the PR under the premise that more work could be done in future to provide other access methods.\r\n\r\nRegarding the 2 reasons:\r\n\r\nR1: what do you mean by \"rebuilding from that lookup\"? Do you mean rebuilding a primitive array from the dictionary's iterator? If so, would a method that converts a dict(i32) into a primitive(i32) suffice for your needs?\r\n\r\nR2: may you please provide an example of what you mean by parallel comparison? My knowledge of SIMD and auto-vec is a bit limited, but what we noticed in the Rust implementation is that we can often forgo explicit SIMD on some computation kernels if we relegate null handling to bitmask manipulation, and operate on arrays without branching to check nulls (<https://github.com/apache/arrow/pull/6086>)."
+        },
+        {
+            "created_at": "2020-04-24T13:09:35.487Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5949?focusedCommentId=17091555) by Mahmut Bulut (vertexclique):*\nFor the reference implementation that I am talking about, please take a look at the `TestStringDictionaryAppendIndices` in cxx implementation for how nulls are handled in arrow cxx implementation."
+        },
+        {
+            "created_at": "2020-04-24T13:20:19.346Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5949?focusedCommentId=17091569) by Neville Dipale (nevi_me):*\nThanks, having looked at the implementation; I think they're handled the same way in Rust (if we exclude the iterator interface).\r\n \u00a0\r\n```java\n\r\n\u00a0 std::vector<AppendCType>\u00a0raw_indices\u00a0=\u00a0{0,\u00a01,\u00a02,\u00a0-1,\u00a03};\r\n  std::vector<uint8_t>\u00a0is_valid\u00a0=\u00a0{1,\u00a01,\u00a01,\u00a00,\u00a01};\n```\r\n\u00a0Are you referring to the -1 on the indices? It gets masked by the is_valid mask, so I think even if any other value was used, the result would still be the same. Perhaps I'm not understanding."
+        },
+        {
+            "created_at": "2020-04-24T14:03:29.217Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5949?focusedCommentId=17091600) by Mahmut Bulut (vertexclique):*\nSorry, yes, that's exactly like that, it is ok and valid. Gave that example to show that we can leave the indices as how -1 is masked on (unfortunately it won't work with unsigned values, I think that's why the bit masking approach is better). Thanks for the links they were fruitful.\r\n\r\n\u00a0\r\n\r\nI think I am more inclined to not build the primitive array, neither user should collect the result from the iterator nor one by one look for the Some(_), that said I tend to have slice given back from the array, which is most probably enable users who are using SIMD later. Thou, it is also nice to have a PrimitiveArray API given to users. Current stable SIMD instructions (also packed_simd that rust impl uses) fill free so I need to use contiguous scalars for dict encoded operations, which are crucial for my use case (repacking the arrow array is an overhead for me). So I have started to make a vectorized slice implementation over current dictionary array, is it ok to include slice kind of approach to Arrow? with chunked offsets, we can even use Rust arrays too. Wdyt?\r\n\r\n\u00a0\r\n\r\nedit:\u00a0contiguous not continuous"
+        },
+        {
+            "created_at": "2020-04-24T15:02:54.889Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-5949?focusedCommentId=17091640) by Neville Dipale (nevi_me):*\nI think not providing more convenient ways of using DictionaryArray potentially defeats the purpose of having it. I've already mentioned the need for compute kernel support on dictionaries, some of which would require access to the array's keys as a primitive array (e.g. sort, take), and others which would need both keys and values (filter).\r\n\r\nI would rather have the DictionaryArray<T: PrimitiveType>::keys() return ArrayRef instead of NullableIter, then support iterating on arrays in general.\r\n\r\nYes, building the primitive array is a bit expensive, and more importantly, it's opaque to a casual Arrow user; so I'd support providing that option.\r\n\r\nLook at the below, for example:\r\n```java\n\r\nimpl<'a,\u00a0K:\u00a0ArrowPrimitiveType>\u00a0DictionaryArray<K>\u00a0{\r\n\u00a0\u00a0\u00a0  pub\u00a0fn\u00a0decode_dictionary(&self)\u00a0->\u00a0Result<ArrayRef>\u00a0{\r\n \u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0//\u00a0convert\u00a0the\u00a0keys\u00a0into\u00a0an\u00a0array\r\n \u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0let\u00a0keys\u00a0=\u00a0Arc::new(PrimitiveArray::<K>::from(self.data.clone()))\u00a0as\u00a0ArrayRef;\r\n \u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0//\u00a0cast\u00a0keys\u00a0to\u00a0an\u00a0uint32\u00a0array\r\n \u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0let\u00a0keys\u00a0=\u00a0crate::compute::cast(&keys,\u00a0&DataType::UInt32)?;\r\n \u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0let\u00a0keys\u00a0=\u00a0UInt32Array::from(keys.data());\r\n         // index into the values of the dictionary, with keys\r\n \u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0crate::compute::take(&self.values,\u00a0&keys,\u00a0None)\r\n \u00a0\u00a0\u00a0 }\r\n }\n```\r\nThis is how I'd convert a dictionary to a 'normal' array of an unknown type.\r\n\r\nPerhaps this could be a discussion for the mailing list? I'm interested in simplifying the dictionary API, and widening dictionary support; this could be a good starting point to do this. CC `[~paddyhoran]` `[~andygrove]`"
+        }
+    ]
+}

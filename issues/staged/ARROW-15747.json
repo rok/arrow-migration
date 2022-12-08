@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[Python] Support C stream interface of single arrays",
+        "body": "***Note**: This issue was originally created as [ARROW-15747](https://issues.apache.org/jira/browse/ARROW-15747). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIt seems that the C stream interface in pyarrow currently requires the array to be a StructArray.\r\n\r\nI do not see this constraint in the spec (https://arrow.apache.org/docs/format/CStreamInterface.html).\r\n\r\nThe error I get when I pass an Int32Array to it (declared on the schema):\r\n\r\n```java\n\r\nInvalid: Cannot import schema: ArrowSchema describes non-struct type int32\r\n```\r\n\r\nIt would be nice to support everything, like the C data interface.",
+        "created_at": "2022-02-21T19:45:56.000Z",
+        "updated_at": "2022-06-09T08:40:07.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-21T19:48:25.196Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15747?focusedCommentId=17495734) by Antoine Pitrou (apitrou):*\nWhich API function are you invoking?"
+        },
+        {
+            "created_at": "2022-02-21T20:12:12.217Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15747?focusedCommentId=17495740) by Jorge Leit\u00e3o (jorgecarleitao):*\n`arrow.ipc.RecordBatchReader._import_from_c` (this may be the issue); I also tried RecordBatchStreamReader.\r\n\r\nFor reference the code is I am using is here: https://github.com/jorgecarleitao/arrow2/pull/857, this line: https://github.com/jorgecarleitao/arrow2/pull/857/files#diff-721d8214320dcf310ab55f0de12a4ed43e910df50f959b8c0660ef1a73aa7950R51\r\n\r\nI am getting this by passing an empty iterator (i.e. one where the returned array has always been released."
+        },
+        {
+            "created_at": "2022-02-21T20:16:02.961Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15747?focusedCommentId=17495742) by Antoine Pitrou (apitrou):*\nRecordBatchReader reads record batches at the name implies. Only struct arrays can be converted to record batches."
+        },
+        {
+            "created_at": "2022-02-21T20:42:42.136Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15747?focusedCommentId=17495754) by Jorge Leit\u00e3o (jorgecarleitao):*\nI see. Thanks. \r\n\r\nIs there an API for anything else in Python? I could only find this one in the docs? https://arrow.apache.org/docs/python/api/ipc.html\r\n\r\nRegardless, I am struggling to make this compatible - when I export it to the C stream interface an empty iterator, the sequence of events I get:\r\n\r\n- get_next called\n- empty ArrowArray (i.e. released, no buffers, no children)  created on the stack\n- core dump (on the call to write the empty ArrowArray to the pointer passed to get_next)\n  \n  I.e. we are being unable to write to the pointer passed to get_next (allocated by C++).\n  \n  If I do nothing to the pointer when the iterator is empty (i.e. not write a released array), the same happens when trying to write to the ArrowSchema pointer passed to get_schema - core dump on the call to write.\n  \n  Note that this is different from anything else so far, in the C data interface we have been allocating from Rust, pass the (ArrowArray,ArrowSchema) pointers to C++ via the `_import_from_c`."
+        },
+        {
+            "created_at": "2022-02-21T21:10:43.526Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15747?focusedCommentId=17495773) by Jorge Leit\u00e3o (jorgecarleitao):*\nOk, I made it work! There is no guarantee that the pointer from C is aligned with Rust's representation, so a different call is needed.\r\n\r\nOther than that, the only thing I was unable to find was an API in Python to write arrays other than StructArray / RecordBatch"
+        },
+        {
+            "created_at": "2022-02-22T13:50:43.817Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15747?focusedCommentId=17496098) by Antoine Pitrou (apitrou):*\n> Other than that, the only thing I was unable to find was an API in Python to write arrays other than StructArray / RecordBatch\r\n\r\nYes, because basically this wraps the C++ APIs which only know about RecordBatchReader. Is it important for you to write/read any kind of array?\r\n"
+        },
+        {
+            "created_at": "2022-06-08T19:31:47.175Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15747?focusedCommentId=17551758) by Dewey Dunnington (paleolimbot):*\nI noticed that there was no support for importing a non-struct array in C++ when writing stream support in the geoarrow/narrow R package prototypes; however, I never found a use for them and couldn't see how they would be useful in the R, Python, or C++ implementations. I assumed that as soon as a practical use-case (i.e., other than for the sake of completeness) was found, that they would be implemented at that point."
+        },
+        {
+            "created_at": "2022-06-09T04:00:40.344Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15747?focusedCommentId=17551943) by Jorge Leit\u00e3o (jorgecarleitao):*\nAny array can be wrapped on a StructArray, so technically we just have to remember to wrap it on the struct :)\r\n\r\nI see three main reasons to support the simple array:\r\n\r\n1. an implementation may not support StructArray over the c data interface but still support simpler types.\r\n2. when we want to stream a \"Table\" where the chunks are not row-aligned, e.g. \r\n\r\nc1: [10 rows][20 rows][20 rows]\r\nc2: [20 rows][30 rows]\r\n\r\nit is cleaner to have an iterator of chunks of those types, instead of wrapping and unwrapping each of them on StructArray.\r\n\r\n3. StructArrays with sliced children over the c data interface are tricky. If we wrap a sliced array over struct, and pass it over the c stream interface, some implementations may not support it."
+        },
+        {
+            "created_at": "2022-06-09T08:40:07.233Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15747?focusedCommentId=17552043) by Antoine Pitrou (apitrou):*\nUse case 2 (heterogenous chunking) is easily addressed by redoing the chunking. That's what Arrow C++ does when you want to get a RecordBatchReader out of a Table. I agree with use cases 1 and 3.\r\n\r\nThere are two ways this could be added to Arrow C++ (and PyArrow):\r\n\r\n1. return a `RecordBatchReader` that would read batches of a single column\n1. add a facility like `RecordBatchReader` but on Arrays\n   \n   The first approach is easier and perhaps less elegant. Also, the second approach would allow to implement an export function, which would be a bit clunky under the first approach.\n"
+        }
+    ]
+}

@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[R] Writing many batches causes a crash",
+        "body": "***Note**: This issue was originally created as [ARROW-7520](https://issues.apache.org/jira/browse/ARROW-7520). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHi,\r\n\r\nWhen creating north of 200-300 batches, the writing to the arrow file crashes R - it doesn't even show an error message. Rstudio just aborts.\r\n\r\nI have the feeling that maybe each batch becomes a stream and R has issues with the connections, but that's a total guess.\r\n\r\nAny help would be appreciated.\r\n\r\n\u00a0\r\n\r\n##\r\n\r\n\u00a0\r\n\r\nHere is the function. When running it with 3000 it crashes immediately.\r\n\r\nBefore that I ran it with 100, and then increased it slowly, and then it randomly crashed again.\r\n\r\n\u00a0\r\n\r\n##\r\n\r\nNow I received this error message after writing 30 batches.\r\n\r\nError in ipc___RecordBatchWriter__WriteRecordBatch(self, batch) : \r\n Invalid: Invalid operation on closed file\r\n Error in ipc___RecordBatchWriter__WriteRecordBatch(self, batch) : \r\n Invalid: Invalid operation on closed file\r\n\r\n##\r\n\r\nwrite_arrow_custom(data.frame(A=c(1:100000),B=c(1:100000)),'C:/Temp/test.arrow',3000)\r\n\r\n\u00a0\r\n\r\nwrite_arrow_custom <- function(df,targetarrow,nrbatches) {\r\n\r\n\u00a0 ct <- nrbatches\r\n\r\n\u00a0 idxs <- c(0:ct)/ct\\*nrow(df)\r\n\r\n\u00a0 idxs <- round(idxs,0) %>% as.integer()\r\n\r\n\u00a0 idxs[length(idxs)] <- nrow(df)\r\n\r\n\u00a0 df_nav <- idxs %>% as.data.frame() %>% rename(colfrom=1) %>% mutate(colto=lead(colfrom)) %>% mutate(colfrom=colfrom+1) %>% filter(!is.na(colto)) %>% mutate(R=row_number())\r\n\r\n\u00a0 stopifnot(df_nav %>% mutate(chk=colto-colfrom+1) %>% '$'('chk') %>% sum()==nrow(df))\r\n\r\n\u00a0 table_df <- Table$create(name=rownames(df[1,]),df[1,])\r\n\r\n\u00a0 writer <- RecordBatchFileWriter$create(targetarrow,table_df$schema)\r\n\r\n\u00a0 df_nav %>% dlply(c('R'),function(df_nav)\r\n\r\n{ \u00a0\u00a0\u00a0 catl(glue('\n{df_nav$colfrom[1]}\r\n\r\n:{df_nav$colto[1]} / {df_nav$R[1]}...'))\r\n\r\n\u00a0\u00a0\u00a0 tmp <- df[df_nav$colfrom[1]:df_nav$colto[1],]\r\n\r\n\u00a0\u00a0\u00a0 writer$write_batch(record_batch(name = rownames(tmp), tmp))\r\n\r\n\u00a0\u00a0\u00a0 NULL\r\n\r\n\u00a0 }) -> batch_lst\r\n\r\n\u00a0 writer$close()\r\n\r\n\u00a0 rm(batch_lst)\r\n\r\n\u00a0 gc()\r\n\r\n}\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0",
+        "created_at": "2020-01-08T19:06:00.000Z",
+        "updated_at": "2020-04-02T18:52:42.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-04-02T18:52:42.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-01-09T17:17:17.598Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7520?focusedCommentId=17012057) by Christian (Klar):*\nTurns out that you need to open a FileOutputStream for it to be stable. The below function worked.\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\nwrite_arrow_custom <- function(df,targetarrow,nrbatches) {\r\n\r\nct <- nrbatches\r\n\r\nidxs <- c(0:ct)/ct\\*nrow(df)\r\n idxs <- round(idxs,0) %>% as.integer()\r\n idxs[length(idxs)] <- nrow(df)\r\n df_nav <- idxs %>% as.data.frame() %>% rename(colfrom=1) %>% mutate(colto=lead(colfrom)) %>% mutate(colfrom=colfrom+1) %>% filter(!is.na(colto)) %>% mutate(R=row_number())\r\n stopifnot(df_nav %>% mutate(chk=colto-colfrom+1) %>% '$'('chk') %>% sum()==nrow(df))\r\n\r\nfile_writer <- RecordBatchFileWriter$create(file_stream,table_df$schema) # This should NOT be writing the anything yet.\r\n chck_ct <- 0\r\n\r\ndf_nav %>% dlply(c('R'),function(df_nav)\r\n\r\n{ catl(glue('\n{df_nav$colfrom[1]}\r\n\r\n:{df_nav$colto[1]} / {df_nav$R[1]}...'))\r\n tmp <- df[df_nav$colfrom[1]:df_nav$colto[1],]\r\n chck_ct <<- chck_ct + nrow(tmp)\r\n\r\nfile_writer$write_batch(record_batch(name = rownames(tmp), tmp))\r\n\r\nNULL\r\n }) -> batch_lst\r\n stopifnot(chck_ct==nrow(df))\r\n\r\n}\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-01-09T18:06:58.782Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7520?focusedCommentId=17012089) by Neal Richardson (npr):*\nIf you give the record batch writer a string, it opens a FileOutputStream: https://github.com/apache/arrow/blob/master/r/R/record-batch-writer.R#L96-L99\r\n\r\nThough if you're calling your function multiple times to write to the same file, it would make sense to initialize the FileOutputStream outside of your loop so that you control when the connection is opened and closed."
+        },
+        {
+            "created_at": "2020-01-09T18:17:53.579Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7520?focusedCommentId=17012105) by Christian (Klar):*\nThanks.\r\n\r\nThe weird part that when I don't open the\u00a0FileOutputStream it crashes after a random amount of batches. Every time. Seems to be independent of R version or Windows vs Linux."
+        },
+        {
+            "created_at": "2020-04-02T18:52:42.353Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7520?focusedCommentId=17073997) by Neal Richardson (npr):*\nThis has been addressed in ARROW-5501; RecordBatch\\*Writer now requires that you pass an `OutputStream` so that you can manage the file connection. The previously supported behavior would let you open connections you couldn't close."
+        }
+    ]
+}

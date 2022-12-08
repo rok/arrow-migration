@@ -1,0 +1,34 @@
+{
+    "issue": {
+        "title": "[C++][Python] Segfault in test_exec_plan.py / test_joins",
+        "body": "***Note**: This issue was originally created as [ARROW-16417](https://issues.apache.org/jira/browse/ARROW-16417). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nOccurs during wheel verification. It also happens to master. The failure is sporadic but fairly reliable. test_joins is parameterized; it's not consistent in the parameters it occurs on, but it consistently occurs on that test.\r\n\r\nThe backtrace reaches into malloc_consolidate. MALLOC_CHECK doesn't help. However:\r\n```\n\r\n(gdb) b main\r\nBreakpoint 1 at 0x11ea20: file /home/conda/feedstock_root/build_artifacts/python-split_1625973859697/work/Programs/python.c, line 15.\r\n(gdb) command 1\r\nType commands for breakpoint(s) 1, one per line.\r\nEnd with a line saying just \"end\".\r\n>call mcheck(0)\r\n>continue\r\n>end \n```\r\nThis fairly consistently fails with \"memory clobbered before allocated block\" but the location varies. \r\n\r\nThis may be a red herring though. I also tried LD_PRELOADING a secure build of mimalloc to see if it would catch any sort of heap corruption but instead the tests pass consistently with mimalloc.\r\n\r\n\u00a0",
+        "created_at": "2022-04-29T15:00:47.000Z",
+        "updated_at": "2022-05-06T11:11:23.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-05-02T12:44:59.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-04-29T15:30:23.698Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16417?focusedCommentId=17530059) by David Li (lidavidm):*\nThis reproduces it reasonably consistently for me:\r\n\r\n```python\n\r\ndef test_joins():\r\n    expected = pa.table({\r\n        \"colB\": [1, 2],\r\n        \"col3\": [\"A\", \"B\"]\r\n    })\r\n\r\n    t1 = pa.Table.from_pydict({\r\n        \"colA\": [1, 2, 6],\r\n        \"col2\": [\"a\", \"b\", \"f\"]\r\n    })\r\n\r\n    t2 = pa.Table.from_pydict({\r\n        \"colB\": [99, 2, 1],\r\n        \"col3\": [\"Z\", \"B\", \"A\"]\r\n    })\r\n\r\n    for _ in range(1000):\r\n        r = ep._perform_join(\"right semi\", t1, \"colA\", t2, \"colB\",\r\n                             use_threads=True, coalesce_keys=True)\r\n        r = r.combine_chunks()\r\n        r = r.sort_by(\"colB\")\r\n```\r\n\u00a0Both `combine_chunks` and `sort_by` are necessary."
+        },
+        {
+            "created_at": "2022-04-29T16:10:24.633Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16417?focusedCommentId=17530081) by David Li (lidavidm):*\nTried porting to C++ for testing but this doesn't fail:\r\n\r\n```cpp\n\r\nTEST(HashJoin, Arrow16417) {\r\n  auto t1 = TableFromJSON(schema({field(\"colA\", int64()), field(\"col2\", utf8())}), {\r\n      R\"([[1, \"a\"], [2, \"b\"], [6, \"f\"]])\",\r\n    });\r\n  auto t2 = TableFromJSON(schema({field(\"colB\", int64()), field(\"col3\", utf8())}), {\r\n      R\"([[99, \"Z\"], [2, \"B\"], [1, \"A\"]])\",\r\n    });\r\n\r\n  HashJoinNodeOptions join_opts(\r\n      JoinType::RIGHT_SEMI,\r\n      /*left_keys=*/{\"colA\"},\r\n      /*right_keys=*/{\"colB\"},\r\n      /*left_output=*/{},\r\n      /*right_output=*/{FieldRef(\"colB\"), FieldRef(\"col3\")},\r\n      /*filter=*/literal(true),\r\n      /*left_suffix=*/\"\",\r\n      /*right_suffix=*/\"\");\r\n  auto exp_schema = schema({field(\"colB\", int64()), field(\"col3\", utf8())});\r\n\r\n  auto exec_ctx = arrow::internal::make_unique<ExecContext>(\r\n      default_memory_pool(), arrow::internal::GetCpuThreadPool());\r\n  for (int i = 0; i < 10000; i++) {\r\n    std::shared_ptr<Table> exp_table;\r\n    {\r\n      ASSERT_OK_AND_ASSIGN(auto plan, ExecPlan::Make(exec_ctx.get()));\r\n\r\n      ASSERT_OK_AND_ASSIGN(auto left_options, SourceNodeOptions::FromTable(*t1, exec_ctx->executor()));\r\n      ASSERT_OK_AND_ASSIGN(auto right_options, SourceNodeOptions::FromTable(*t2, exec_ctx->executor()));\r\n\r\n      Declaration join{\"hashjoin\", join_opts};\r\n      join.inputs.emplace_back(Declaration{\"source\", *left_options});\r\n      join.inputs.emplace_back(Declaration{\"source\", *right_options});\r\n\r\n      AsyncGenerator<util::optional<ExecBatch>> sink_gen;\r\n      ASSERT_OK(Declaration::Sequence({join, {\"sink\", SinkNodeOptions{&sink_gen}}})\r\n                .AddToPlan(plan.get()));\r\n\r\n      auto reader = MakeGeneratorReader(exp_schema, sink_gen, default_memory_pool());\r\n\r\n      ASSERT_OK(plan->Validate());\r\n      ASSERT_OK(plan->StartProducing());\r\n\r\n      ASSERT_OK_AND_ASSIGN(exp_table, Table::FromRecordBatchReader(reader.get()));\r\n\r\n      plan->StopProducing();\r\n    }\r\n\r\n    ASSERT_OK_AND_ASSIGN(auto combined, exp_table->CombineChunks());\r\n    ASSERT_OK_AND_ASSIGN(auto indices, SortIndices(Datum(combined), SortOptions{{SortKey{\"colB\"}}}));\r\n    ASSERT_OK_AND_ASSIGN(auto sorted, Take(Datum(combined), indices));\r\n  }\r\n}\r\n```"
+        },
+        {
+            "created_at": "2022-04-29T17:34:02.452Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16417?focusedCommentId=17530165) by David Li (lidavidm):*\nhmm, `combine_chunks` and `sort_by` don't seem necessary after all."
+        },
+        {
+            "created_at": "2022-05-02T12:44:59.205Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16417?focusedCommentId=17530720) by David Li (lidavidm):*\nIssue resolved by pull request 13036\n<https://github.com/apache/arrow/pull/13036>"
+        }
+    ]
+}

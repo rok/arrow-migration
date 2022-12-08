@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[C++][Python] Parquet float column of NaN writing performance regression from 0.13.0 to 0.14.1",
+        "body": "***Note**: This issue was originally created as [ARROW-6051](https://issues.apache.org/jira/browse/ARROW-6051). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI'm not sure the origin of the regression but I have with\r\n\r\npyarrow 0.13.0 from conda-forge\r\n\r\n```Java\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nimport numpy as np\r\nimport pandas as pd\r\narr = pa.array([np.nan] * 10000000)\r\nt = pa.Table.from_arrays([arr], names=['f0'])\r\n\r\n%timeit pq.write_table(t, '/home/wesm/tmp/nans.parquet')\r\n28.7 ms \u00b1 570 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 10 loops each)\r\n```\r\n\r\nbut in pyarrow 0.14.1 from conda-forge\r\n\r\n```Java\n\r\n%timeit pq.write_table(t, '/home/wesm/tmp/nans.parquet')\r\n88.1 ms \u00b1 1.68 ms per loop (mean \u00b1 std. dev. of 7 runs, 10 loops each)\r\n```\r\n\r\nI'm sorry to say, but this is what happens when benchmark data is not tracked and monitored",
+        "created_at": "2019-07-26T21:57:22.000Z",
+        "updated_at": "2019-08-20T17:19:31.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-08-20T17:19:31.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-07-26T22:17:01.293Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6051?focusedCommentId=16894167) by Wes McKinney (wesm):*\nI made before and after flamegraphs using\r\n\r\n```Java\n\r\nexport FLAMEGRAPH_PATH=/home/wesm/code/FlameGraph\r\n\r\nfunction flamegraph {\r\n    perf record -F 999 -g --call-graph=dwarf -- $@\r\n    perf script | c++filt | $FLAMEGRAPH_PATH/stackcollapse-perf.pl > out.perf-folded\r\n    $FLAMEGRAPH_PATH/flamegraph.pl out.perf-folded > perf.svg\r\n}\r\n```\r\n\r\nand \r\n\r\n```Java\n\r\nflamegraph python bench.py\r\n```\r\n\r\nwith bench.py as \r\n\r\n```Java\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nimport numpy as np\r\n\r\narr = pa.array([np.nan] * 10000000)\r\nt = pa.Table.from_arrays([arr], names=['f0'])\r\n\r\nfor i in range(50):\r\n    pq.write_table(t, '/home/wesm/tmp/nans.parquet')\r\n```\r\n\r\nThe evidence suggests that dictionary encoding is accounting for the performance difference \u2013 it doesn't seem to be running at all before, or maybe it was bailing out very quickly. Either way it would be interesting to understand what changed"
+        },
+        {
+            "created_at": "2019-08-20T17:19:31.393Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6051?focusedCommentId=16911567) by Wes McKinney (wesm):*\nSo the plot thickens here a little bit\r\n\r\nArrow 0.13.0\r\n\r\n```Java\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nimport numpy as np\r\nimport pandas as pd\r\narr = pa.array([np.nan] * 10000000)\r\nt = pa.Table.from_arrays([arr], names=['f0'])\r\n\r\nIn [7]: arr                                                                                                                                                                            \r\nOut[7]: \r\n<pyarrow.lib.NullArray object at 0x7f4dd5b23138>\r\n10000000 nulls\r\n```\r\n\r\nbut in 0.14.1/master\r\n\r\n```Java\n\r\nIn [2]: paste                                                                                                                                                                          \r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nimport numpy as np\r\nimport pandas as pd\r\narr = pa.array([np.nan] * 10000000)\r\n\r\n## -- End pasted text --\r\n\r\nIn [3]: arr                                                                                                                                                                            \r\nOut[3]: \r\n<pyarrow.lib.DoubleArray object at 0x7f2312461e08>\r\n[\r\n  nan,\r\n  nan,\r\n  nan,\r\n  nan,\r\n  nan,\r\n  nan,\r\n  nan,\r\n  nan,\r\n  nan,\r\n  nan,\r\n  ...\r\n  nan,\r\n  nan,\r\n  nan,\r\n  nan,\r\n  nan,\r\n  nan,\r\n  nan,\r\n  nan,\r\n  nan,\r\n  nan\r\n]\r\n```\r\n\r\nSo that explains the perf difference I saw. I used this code instead to make the table and didn't see a meaningful perf difference\r\n\r\n```Java\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\nimport numpy as np\r\nimport pandas as pd\r\n\r\nsize = 10_000_000\r\nvalues = np.random.randn(size)\r\nvalues[::] = np.nan\r\narr = pa.array(values)\r\nt = pa.Table.from_arrays([arr], names=['f0'])\r\n```\r\n\r\nPerhaps some slightly worse performance with NaN values in the hash table:\r\n\r\nhttps://gist.github.com/wesm/436e37e398e61ca29031e43674084957"
+        }
+    ]
+}

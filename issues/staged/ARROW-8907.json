@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Rust] implement scalar comparison operations",
+        "body": "***Note**: This issue was originally created as [ARROW-8907](https://issues.apache.org/jira/browse/ARROW-8907). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently comparing an array to a scalar / literal value using the comparison operations defined in the comparison kernel here:\r\nhttps://github.com/apache/arrow/blob/master/rust/arrow/src/compute/kernels/comparison.rs\r\nis very inefficient because:\r\n(1) an array with the scalar value repeated has to be created, taking time and wasting memory\r\n(2) time is spent during comparison to load the same literal values over and over\r\n\r\nInitial benchmarking of a specialized scalar comparison function indicates good performance gains:\r\n\r\neq Float32 time: [938.54 us 950.28 us 962.65 us]\r\neq scalar Float32 time: [836.47 us 838.47 us 840.78 us]\r\neq Float32 simd time: [75.836 us 76.389 us 77.185 us]\r\neq scalar Float32 simd time: [61.551 us 61.605 us 61.671 us]\r\n\r\nThe benchmark results above show that the scalar comparison function is about 12% faster for non-SIMD and about 20% faster for SIMD comparison operations.\r\nAnd this is before accounting for creating the literal array. \r\nIn a more complex benchmark, the scalar comparison version is about 40% faster overall when we account for not having to create arrays of scalar / literal values.\r\nHere are the benchmark results:\r\n\r\nfilter/filter with arrow SIMD (array) time: [647.77 us 675.12 us 706.69 us]\r\nfilter/filter with arrow SIMD (scalar) time: [402.19 us 404.23 us 407.22 us]\r\n\r\nAnd here is the code for the benchmark:\r\nhttps://github.com/yordan-pavlov/arrow-benchmark/blob/master/rust/arrow_benchmark/src/main.rs#L230\r\n\r\nMy only concern is that I can't see an easy way to use scalar comparison operations in Data Fusion as it is currently designed to only work on arrays.\r\n\r\n`[~paddyhoran]` `[~andygrove]` \u00a0let me know what you think, would there be value in implementing scalar comparison operations?",
+        "created_at": "2020-05-23T10:58:34.000Z",
+        "updated_at": "2020-10-24T09:53:52.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Rust",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-06-03T12:34:04.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-05-23T12:43:24.908Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8907?focusedCommentId=17114741) by Andy Grove (andygrove):*\nThanks `[~yordan-pavlov]` . What I would really like is for DataFusion to use a specialized version of RecordBatch that can contain both Arrays and Scalar values, something like this:\r\n\r\n\u00a0\r\n```java\n\r\nenum ColumnarValue {\r\n\u00a0 Array(ArrayRef),\r\n\u00a0 Scalar(ScalarValue)\r\n}\r\n\u00a0\r\n\u00a0\r\nstruct ColumnarBatch {\r\n  columns: Vec<ColumnarValue>\r\n}\r\n\u00a0 \n```\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-05-23T17:00:55.972Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8907?focusedCommentId=17114893) by Yordan Pavlov (yordan-pavlov):*\nSounds good `[~andygrove]`, I think it makes sense to have efficient comparison to scalar values as they are often used in real world queries; I already have some work in progress for adding scalar comparison functions to the comparison kernel of arrow and hope to submit a pull request within the next few days. Hopefully this can later be used to increase Data Fusion performance with scalar values."
+        },
+        {
+            "created_at": "2020-06-03T12:34:04.628Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8907?focusedCommentId=17124920) by Neville Dipale (nevi_me):*\nIssue resolved by pull request 7261\n<https://github.com/apache/arrow/pull/7261>"
+        },
+        {
+            "created_at": "2020-06-03T12:35:13.341Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8907?focusedCommentId=17124921) by Neville Dipale (nevi_me):*\nI don't have permission on Jira to assign this to `[~yordan-pavlov]`"
+        }
+    ]
+}

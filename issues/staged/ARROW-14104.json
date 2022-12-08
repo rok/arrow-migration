@@ -1,0 +1,47 @@
+{
+    "issue": {
+        "title": "Reading Lists of Timestamps from parquet files in Arrow 5.0.0 fails to preserve the TimeZone - unlike in Arrow 4.0.0",
+        "body": "***Note**: This issue was originally created as [ARROW-14104](https://issues.apache.org/jira/browse/ARROW-14104). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn Arrow 4.0.0 it is possible to round-trip the TimeZone property of List<Timestamp> columns to and from parquet files:\u00a0\r\n```java\n\r\n>>> import pyarrow as pa\r\n>>> import pyarrow.parquet as pq\r\n>>> import datetime \r\n\r\n>>> column = pa.array([[datetime.datetime(2023, 9, 23, 11)]], pa.list_(pa.timestamp('us', 'America/New_York')));\r\n\r\n>>> t = pa.Table.from_arrays([column], names=['TimestampColumn']);\r\n>>> pq.write_table(t, \"example.parq\");\r\n\r\n>>> t2 = pq.read_table(\"example.parq\");\r\n>>> t2\r\npyarrow.Table\r\nDates: list<item: timestamp[us, tz=America/New_York]>\r\n\u00a0 child 0, item: timestamp[us, tz=America/New_York]\r\n```\r\nHowever, if you read the same parquet file in pyarrow 5.0.0, the TimeZone is set to UTC:\r\n```java\n\r\n>>> t3 = pq.read_table(\"example.parq\");\r\n>>> t3\r\npyarrow.Table\r\nDates: list<item: timestamp[us, tz=UTC]>\r\n\u00a0 child 0, item: timestamp[us, tz=UTC]\r\n \n```\r\n\u00a0\r\n\r\nI noticed that the TimeZone is preserved in Arrow 5.0 when reading non-nested timestamp columns.\u00a0",
+        "created_at": "2021-09-23T15:24:55.000Z",
+        "updated_at": "2021-10-28T10:41:36.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Parquet",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-10-26T13:41:48.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-09-23T18:01:27.250Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14104?focusedCommentId=17419375) by Weston Pace (westonpace):*\nI wasn't able to reproduce this using the example script.  Could you possibly provide a few more details around how you are creating and then reading the files?  Could you upload a sample file that should have the America/Denver timezone but does not seem to read that way?  That way we can isolate if the issue is reading or writing the file.\r\n\r\nI tested both writing with 5.0 and reading with 5.0 and also writing with 4.0 and reading with 5.0.\r\n\r\nI did have to modify your script slightly to get it to run which may have affected things.  Here is what I used:\r\n\r\n```python\n\r\nimport datetime\r\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\ncolumn = pa.array([[datetime.datetime(2023, 9, 23, 11)]], pa.list_(pa.timestamp('us', 'America/New_York')))\r\n\r\nt = pa.Table.from_arrays([column], names=['TimestampColumn'])\r\npq.write_table(t, \"example.parq\")\r\n\r\nt2 = pq.read_table(\"example.parq\")\r\nprint(t2)\r\n```"
+        },
+        {
+            "created_at": "2021-10-15T16:22:42.333Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14104?focusedCommentId=17429360) by Joris Van den Bossche (jorisvandenbossche):*\n`[~sgilmore]` gentle ping. I personally also can't reproduce it."
+        },
+        {
+            "created_at": "2021-10-19T12:57:28.155Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14104?focusedCommentId=17430530) by Sarah Gilmore (sgilmore):*\nSo sorry about the delay.\u00a0 `[~jorisvandenbossche]` \u00a0and `[~westonpace]`.\r\n\r\nI've attached two files ([exampleArrow4.parq](exampleArrow4.parq) and [exampleArrow5.parq](exampleArrow5.parq)) that were both created with the following code:\r\n```java\n\r\n// code placeholder\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\nimport datetime\r\ncolumn = pa.array([[datetime.datetime(2023, 9, 23, 11)]], pa.list_(pa.timestamp('us', 'America/New_York')));\r\nt = pa.Table.from_arrays([column], names=['TimestampColumn']);\r\npq.write_table(t, \"example.parq\"); \r\n\r\n```\r\n\u00a0\u00a0\r\n\r\nI ran the code snippet above in pyarrow 4.0.0 and pyarrow 5.0.0 to create exampleArrow4.parq and exampleArrow5.parq, respectively.\u00a0\r\n\r\n\u00a0\r\n\r\nHere's the output of reading both files in pyarrow 4.0.0:\u00a0\r\n```java\n\r\n// code placeholder\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\n>>> t1 = pq.read_table(\"exampleArrow4.parq\")\r\n>>> t1\r\npyarrow.Table\r\nTimestampColumn: list<item: timestamp[us, tz=America/New_York]>\r\n\u00a0 child 0, item: timestamp[us, tz=America/New_York]\r\n\r\n>>> t2 = pq.read_table(\"exampleArrow5.parq\")\r\n>>> t2\r\npyarrow.Table\r\nTimestampColumn: list<item: timestamp[us, tz=America/New_York]>\r\n\u00a0 child 0, item: timestamp[us, tz=America/New_York]\n```\r\n\u00a0The TimeZone is read in properly for both files.\r\n\r\n\u00a0\r\n\r\nHere's the output of reading both files in pyarrow 5.0.0:\r\n```java\n\r\n// code placeholder\r\nimport pyarrow as pa import pyarrow.parquet as pq\r\n\r\n>>> t1 = pq.read_table(\"exampleArrow4.parq\")\r\n>>> t1\r\npyarrow.Table\r\nTimestampColumn: list<item: timestamp[us, tz=UTC]>\r\n\u00a0 child 0, item: timestamp[us, tz=UTC]\r\n\r\n>>> t2 = pq.read_table(\"exampleArrow5.parq\")\r\n>>> t2\r\npyarrow.Table\r\nTimestampColumn: list<item: timestamp[us, tz=UTC]>\r\n\u00a0 child 0, item: timestamp[us, tz=UTC]\r\n```\r\n\u00a0\r\n\r\nIt looks like pyarrow 5.0.0 writes out the TimeZone information, but doesn't read it in properly.\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-10-21T11:01:29.170Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14104?focusedCommentId=17432393) by Joris Van den Bossche (jorisvandenbossche):*\n`[~sgilmore]` can you check the pyarrow version used in the pyarrow-5.0 environment to be sure you are actually using pyarrow 5.0?  (`pa.\\_\\_version\\_\\_`, or eg `conda list`)\r\n\r\nI get the following output after downloading the files you provided:\r\n\r\n```python\n\r\nIn [1]: import pyarrow as pa\r\n\r\nIn [2]: import pyarrow.parquet as pq\r\n\r\nIn [3]: t1 = pq.read_table(\"../Downloads/exampleArrow4.parq\")\r\n\r\nIn [4]: t1\r\nOut[4]: \r\npyarrow.Table\r\nTimestampColumn: list<item: timestamp[us, tz=America/New_York]>\r\n  child 0, item: timestamp[us, tz=America/New_York]\r\n\r\nIn [6]: t2 = pq.read_table(\"../Downloads/exampleArrow5.parq\")\r\n\r\nIn [8]: t2\r\nOut[8]: \r\npyarrow.Table\r\nTimestampColumn: list<item: timestamp[us, tz=America/New_York]>\r\n  child 0, item: timestamp[us, tz=America/New_York]\r\n\r\nIn [9]: pa.__version__\r\nOut[9]: '5.0.0'\r\n```\r\n\r\nIf you are actually using pyarrow 5.0, can you give some more details about the environment? (other installed packages, eg conda/pip list, which operating system, python version, etc)"
+        },
+        {
+            "created_at": "2021-10-26T13:41:15.882Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14104?focusedCommentId=17434368) by Sarah Gilmore (sgilmore):*\nHi `[~jorisvandenbossche]`,\r\n\r\nIt actually looks like I was running an older version of pyarrow based on the output of `pa.__version__`. According to pip, I have pyarrow 5.0.0:\r\n\r\n\u00a0\r\n```java\n\r\n// code placeholder\r\nName: pyarrow\r\nVersion: 5.0.0\r\nSummary: Python library for Apache Arrow\r\nHome-page: https://arrow.apache.org/\r\nAuthor:\u00a0\r\nAuthor-email:\u00a0\r\nLicense: Apache License, Version 2.0\r\nLocation: /usr/local/lib/python3.9/site-packages\r\nRequires: numpy\r\nRequired-by: parquet-tools\r\n```\r\n\u00a0\r\n\r\nBut `pa.__version__` returns `'0.17.1'`. It looks like my system configuration got messed up, though I'm not sure how. I was able to confirm that the TimeZone is round-tripped in pyarrow 5.0.0 by creating a virtual environment with python's venv module and installing pyarrow 5.0.0 there.\r\n\r\nI'm sorry for any confusion I caused. I'll close this issue.\r\n\r\nBest,\r\nSarah\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-10-26T13:41:48.673Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14104?focusedCommentId=17434370) by Sarah Gilmore (sgilmore):*\nThis issue was a result of a configuration problem in my environment.\u00a0"
+        },
+        {
+            "created_at": "2021-10-28T10:41:36.489Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14104?focusedCommentId=17435331) by Joris Van den Bossche (jorisvandenbossche):*\n`[~sgilmore]` no problem, good to hear you found the cause"
+        }
+    ]
+}

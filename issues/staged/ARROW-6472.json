@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[Java] ValueVector#accept may has potential cast exception",
+        "body": "***Note**: This issue was originally created as [ARROW-6472](https://issues.apache.org/jira/browse/ARROW-6472). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nPer discussion <https://github.com/apache/arrow/pull/5195#issuecomment-528425302>\r\n\r\nWe may use API this way:\r\n```java\n\r\nRangeEqualsVisitor visitor = new RangeEqualsVisitor(vector1, vector2);\r\nvector3.accept(visitor, range)\n```\r\nif vector1/vector2 are say, `StructVector`s and vector3 is an `IntVector`\u00a0- things can go bad. we'll use the `compareBaseFixedWidthVectors()`\u00a0and do wrong type-casts for vector1/vector2.",
+        "created_at": "2019-09-05T23:42:39.000Z",
+        "updated_at": "2019-09-25T17:06:07.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2019-09-25T17:05:38.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-09-06T07:54:35.396Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6472?focusedCommentId=16924014) by Ji Liu (tianchen92):*\ncc `[~pravindra]` [~fan_li_ya] for comments on this issue, do you have any points how to resolve this problem in your mind?\r\n\r\nHere are some my initial thoughts:\r\n\r\nI am against that visitors keep both leftVector and rightVector for some reasons:\r\n\r\ni. make visitor and accept API inconsistent as we mentioned before\r\n\r\nii. I think visitor should be reused for multiple leftVectors (with one visitor, vector1.accept(visitor, IN), vector2.accept(visitor, IN) \u2026), and this way, the left and right vectors are fixed.\r\n\r\n\u00a0\r\n\r\nIf we remove leftVector and pass it in via accept API, the main problem we should solve is repeated type checks in ListVector, we could do something to avoid this:\r\n\r\ni. Keep Range param since it makes it possible for compare different ranges without creating extra visitor instance.\r\n\r\nii. Move typeCheck flag into Range(default is true), in cases compare ListVector data vector, change the flag after first compare and we could skip type checks in follow-up compares according to this flag.\r\n\r\n\u00a0\r\n\r\nThis is only an initial thoughts and would be better if you have other points.\r\n\r\nIf we could not find a proper solution or reach a consistent in this JIRA, it\u2018s ok for me to start a discuss in ML.\r\n\r\nThanks!"
+        },
+        {
+            "created_at": "2019-09-06T12:17:57.090Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6472?focusedCommentId=16924198) by Liya Fan (fan_li_ya):*\nMy suggestions:\r\n\r\n1. We need to use both left and right vectors in the constructors. The reason is for performance: this is a short-cut and avoids repeated type check.\r\n\r\n2. For each visit invocation, we first check if the parameter is the same as the left vector (which is usually true). If it is true, we go ahead to call the compare methods. If it is false, we 1) override the left vector; 2) do the type check; 3) call the compare methods.\r\n\r\npublic void visit(Vector left, Range range) {\r\n  if (left != this.left) {\r\n    this.left = left;\r\n    typeCheck();\r\n  }\r\n  compareXXX();\r\n}\r\nThis method keeps the good performance, while avoiding the problem indicated by [~Pindikura Ravindra]. \r\n\r\nWhat do you think?\r\n"
+        },
+        {
+            "created_at": "2019-09-10T04:26:12.252Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6472?focusedCommentId=16926320) by Ji Liu (tianchen92):*\ncc `[~pravindra]` \u00a0What do you think Liya's suggestion? If you have\u00a0no objections, I would fix that way."
+        },
+        {
+            "created_at": "2019-09-25T17:05:38.726Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-6472?focusedCommentId=16937909) by Pindikura Ravindra (pravindra):*\nIssue resolved by pull request 5483\n<https://github.com/apache/arrow/pull/5483>"
+        }
+    ]
+}

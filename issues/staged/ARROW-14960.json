@@ -1,0 +1,49 @@
+{
+    "issue": {
+        "title": "[C++] Add exception to Arrow style guide based on changes in Google style guide that we are not adopting",
+        "body": "***Note**: This issue was originally created as [ARROW-14960](https://issues.apache.org/jira/browse/ARROW-14960). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nAs of https://github.com/google/styleguide/commit/7a7a2f510efe7d7fc5ea8fbed549ddb31fac8f3e the Google Style Guide no longer forbids use of mutable references for output arguments, and actually encourages using them when the output argument is not optional.\r\n\r\nThis puts arrow c++ style out of sync since we've continued to police toward usage of pointers for output arguments. We could:\r\n\r\n- keep the ban and note this as a deviation from google style in [development.rst](https://github.com/bkietz/arrow/blob/392af8aa999f940ab8fd61684820b2c6d89f7871/docs/source/developers/cpp/development.rst#L74-L75)\n- open JIRA(s) for deprecating/replacing pointer-output APIs where applicable",
+        "created_at": "2021-12-01T20:36:20.000Z",
+        "updated_at": "2022-03-23T02:22:22.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-03-22T03:40:57.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-12-01T20:37:22.018Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14960?focusedCommentId=17452019) by Ben Kietzman (bkietz):*\ncc `[~lidavidm]` `[~wesm]` `[~apitrou]`"
+        },
+        {
+            "created_at": "2021-12-01T20:45:02.258Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14960?focusedCommentId=17452023) by David Li (lidavidm):*\nI'm rather torn since I wouldn't want us to accumulate a lot of deviations from the guide over time, but this would be a lot of churn for IMO little benefit.\r\n\r\nIn addition to noting it as a deviation, we could also host a copy of the guide \"as of\" when we originally started using it and link to that as well, just to avoid future doubt/surprises."
+        },
+        {
+            "created_at": "2021-12-01T20:52:29.512Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14960?focusedCommentId=17452026) by Antoine Pitrou (apitrou):*\nThis is a surprising U-turn in a styleguide.\r\n\r\nI'm against applying the change for two reasons:\r\n1) we would need to change our entire codebase to avoid mixing two different conventions\r\n2) I find code to be more readable at call sites when every out argument is passed by pointer\r\n\r\n"
+        },
+        {
+            "created_at": "2021-12-01T21:22:28.373Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14960?focusedCommentId=17452033) by Wes McKinney (wesm):*\nInteresting evolution. In general, we should be preferring `Result<T>` to out-values in general, I would think, except for functions where we pass a mutable object.\r\n\r\nI'm not sure what Google's motivation in changing the SG after such a long time on this matter is, but I would guess it is to have a readability convention to distinguish optional vs. non-optional output arguments:\r\n\r\n- Required input/output arg: use non-const reference\n- Optional output arg: use non-const pointer\n  \n  This would hit us anywhere we pass `InputStream* / RandomAccessFile*` or `OutputStream*` \u2014 admittedly starting to see `FooMethod(InputStream& file, ...)` in the codebase makes the skin crawl. "
+        },
+        {
+            "created_at": "2021-12-01T21:24:55.923Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14960?focusedCommentId=17452036) by Weston Pace (westonpace):*\nIt's even more confusing:\r\n\r\n```\n\r\nParameters are either input to the function, output from the\r\nfunction, or both. Input parameters should usually be values\r\nor <code>const</code> references,\r\nwhile required (non-nullable) output and input/output parameters should\r\nusually be references. Generally, use <code>absl::optional</code> to represent\r\noptional inputs, and non-<code>const</code> pointers to represent\r\noptional outputs.\r\n```\r\n\r\nSo output parameters should be pointers if nullptr is a possible output and mutable references if the output is guaranteed non-null.  I also agree with Antoine that the pointer requirement makes it clearer at the call site.\r\n\r\nThe justification (there is a good summary here: https://github.com/dmlc/treelite/issues/205) appears to be that pointer output parameters require the caller to ensure the output is not set to null so a non-null assertion is required at the call-site.  Given that pretty much all of our calls are either accompanied by a Status or use nullptr to indicate failure (in which case a pointer is needed anyways) I don't think this rationale makes much sense in the context of Arrow.\r\n\r\nSo I'm 1 for leaving Arrow as-is and just noting it as a deviation in the C+ style guide (we already have a few)\r\n"
+        },
+        {
+            "created_at": "2021-12-06T18:34:19.434Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14960?focusedCommentId=17454179) by Ben Kietzman (bkietz):*\n`[~emkornfield]` I would love to hear your take too"
+        },
+        {
+            "created_at": "2021-12-07T05:46:29.337Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14960?focusedCommentId=17454381) by Micah Kornfield (emkornfield):*\nI think the size of Google's code base meant that there were \"a lot\" of optional parameters that got passed by pointer and this caused real production bugs.\u00a0 I think the incidence in Arrow has been a lot lower (as I think most of the output parameters are not optional?).\r\n\r\n\u00a0\r\n\r\nThe change inside of Google was made a little while ago (many months, maybe even 1+ years), and I'm still not fully accustomed to it.\u00a0 I'm happy to document this as a deviation from the Google style guide.\u00a0 I don't think this particular change is a good use of people's time to try to change/update existing code.\u00a0 As others have noted I think the old rule based on readability at call-sites still has value.\r\n\r\n\u00a0\r\n\r\nI'd be fine adopting it as a standard for new APIs but don't have a strong preference to do so."
+        },
+        {
+            "created_at": "2022-03-22T03:40:57.295Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14960?focusedCommentId=17510202) by Weston Pace (westonpace):*\nIssue resolved by pull request 12661\n<https://github.com/apache/arrow/pull/12661>"
+        }
+    ]
+}

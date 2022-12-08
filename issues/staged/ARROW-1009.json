@@ -1,0 +1,48 @@
+{
+    "issue": {
+        "title": "[C++] Create asynchronous version of StreamReader",
+        "body": "***Note**: This issue was originally created as [ARROW-1009](https://issues.apache.org/jira/browse/ARROW-1009). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nthe `AsyncStreamReader` would buffer the next record batch in a background thread, while emulating the current synchronous / blocking API",
+        "created_at": "2017-05-11T17:13:51.000Z",
+        "updated_at": "2021-06-21T22:40:54.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2019-02-06T03:46:32.338Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1009?focusedCommentId=16761428) by Wes McKinney (wesm):*\nIt might be nice to solve this in the context of gRPC / Flight, to define a general async stream reader API\r\n\r\ncc `[~pitrou]`"
+        },
+        {
+            "created_at": "2020-09-23T15:10:13.200Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1009?focusedCommentId=17200883) by Antoine Pitrou (apitrou):*\nWe have `StreamDecoder` now, which is an event-driven IPC reader."
+        },
+        {
+            "created_at": "2021-02-19T20:32:39.393Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1009?focusedCommentId=17287351) by Wes McKinney (wesm):*\nWhat do you think about async APIs in RecordBatchReader? cc `[~lidavidm]` `[~westonpace]`"
+        },
+        {
+            "created_at": "2021-02-19T22:20:43.479Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1009?focusedCommentId=17287399) by David Li (lidavidm):*\nI think the main question is a use case for them. Right now for instance Flight uses only blocking gRPC APIs so say if we wanted to do compression asynchronously, even if there were an asynchronous reader available, we'd still have to explicitly manage background threads and queues at some place. (And I'm not sure if the asynchronous gRPC APIs adapt easily to what we're doing/it would be a decent amount of work to wire the async gRPC APIs to our async API.)"
+        },
+        {
+            "created_at": "2021-02-22T18:51:53.325Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1009?focusedCommentId=17288568) by Weston Pace (westonpace):*\nI'm a little confused by the ticket I'm afraid.\u00a0 The only `StreamReader` I see is `parquet/stream_reader.h` and that is focused on C++ `>>` streams.\u00a0 It allows the user to read elements out of a parquet file one at a time (presumably into some non-arrow format?)\r\n\r\nThere is also the `RecordBatchStreamReader` which allows for reading a source one record batch at a time (instead of an entire table at a time).\u00a0 An asynchronous mirror version of this API would make sense in the same way it would make sense to have such an API for any I/O operation.\u00a0 The implementation would probably come after an asynchronous table reader for the given format (e.g. once an asynchronous table reader is done for parquet then one can tackle an asynchronous stream reader).\r\n\r\nThere is StreamDecoder which allows processing buffers through observation.\u00a0 It would have similar memory pressure to RecordBatchStreamReader if I understand because the stream decoder will buffer up to a record batch and then deliver it.\u00a0 It's also synchronous and there could be an asynchronous version (i.e. `ipc::StreamDecoder::ConsumeAsync`).\r\n\r\nThen there is flight mentioned in the comments.\u00a0 Flight uses `MetadataRecordBatchReader`.\u00a0 It could be made asynchronous.\r\n\r\nFor the flight client/server I agree that there might not be a strong motivation right now.\u00a0 Since it isn't yet used internally by Arrow (in the same way the query/dataset APIs use the various readers internally) it isn't as needed.\u00a0 I think it could still be a low priority improvement to keep I/O on the IOContext and CPU on the CPU thread pool.\u00a0 Any consumers can do this themselves but it would be a \"nice to have\" if Arrow took care of the queuing for them.\r\n\r\nDo we think a flight server might serve up hundreds/thousands of concurrent downloads?\u00a0 For example, you might have this in video hosting (e.g. YouTube) but there is a natural throttling in place there (no need to send data faster than it is being displayed) that might not apply for data analytics.\r\n\r\n`[~wesm]` Can you provide a few more details what the intent is for this issue?\u00a0 I think the highest priority of all the things I mentioned is getting an asynchronous record batch reader from parquet (will be needed for dataset nested parallelism) and I think we are close given the prebuffering is already pushing I/O to the IOContext."
+        },
+        {
+            "created_at": "2021-06-03T23:33:51.130Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1009?focusedCommentId=17356978) by Wes McKinney (wesm):*\nThe intent was to provide an asynchronous API for `RecordBatchReader`. So this might be better written as `AsyncRecordBatchReader`"
+        },
+        {
+            "created_at": "2021-06-07T20:37:04.108Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1009?focusedCommentId=17358853) by Weston Pace (westonpace):*\nI think this is completed at this point.\u00a0\u00a0 There are asynchronous versions of the various record batch readers.\u00a0 There is not an AsyncRecordBatchReader though.\u00a0 RecordBatchReader is basically Iterator<RecordBatch> + GetMetadata().\u00a0 There has not been the need for a similar interface on the async side.\u00a0 Generally the schema is either passed along with the reader or it is grabbed from the FileReader.\u00a0 I'm not sure we need to do anything here any more.\u00a0 `[~lidavidm]` thoughts?"
+        },
+        {
+            "created_at": "2021-06-07T20:39:30.076Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1009?focusedCommentId=17358855) by David Li (lidavidm):*\nI think we can add the interface when warranted. For instance, if/when we ever integrate async APIs into Flight, which has various reader classes for which a common interface would at least ensure consistency."
+        }
+    ]
+}

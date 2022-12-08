@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[Python] Loading pyarrow.compute isn't thread safe",
+        "body": "***Note**: This issue was originally created as [ARROW-10784](https://issues.apache.org/jira/browse/ARROW-10784). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen using Arrow in a multithreaded environment it is possible to trigger an initialization race on the pyarrow.compute module when calling Array.flatten.\r\n\r\n\u00a0\r\n\r\nFlatten calls _pc() which imports pyarrow compute but if two threads call flatten at the same time is possible that the global initialization of functions from the registry will be incomplete and therefore cause an AttributeError.",
+        "created_at": "2020-12-01T17:29:04.000Z",
+        "updated_at": "2022-10-15T22:43:44.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-10-15T22:43:44.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-12-02T08:53:49.550Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10784?focusedCommentId=17242178) by Antoine Pitrou (apitrou):*\nI don't understand how this can happen, and I'm not unable to reproduce. Do you saw this in the wild? Do you have more precise symptoms? (a traceback perhaps?)"
+        },
+        {
+            "created_at": "2020-12-02T14:52:09.977Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10784?focusedCommentId=17242407) by Wes McKinney (wesm):*\nI wonder if this is compiler-specific. I would think that the following is thread-safe but perhaps not\r\n\r\n```cpp\n\r\nFunctionRegistry* GetFunctionRegistry() {\r\n  static auto g_registry = internal::CreateBuiltInRegistry();\r\n  return g_registry.get();\r\n}\r\n```"
+        },
+        {
+            "created_at": "2020-12-02T16:29:39.525Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10784?focusedCommentId=17242491) by Micah Kornfield (emkornfield):*\nI think the bug is actually in python/cython someplace.\u00a0 \u00a0 The current theory is that with two threads running:\r\n\r\n\u00a0\r\n\r\n1.\u00a0 Thread\u00a0 1 starts loading pyarrow.compute (which will start executing make_global_functions_ (https://github.com/apache/arrow/blob/master/python/pyarrow/compute.py#L218)).\u00a0 The GIL is yielded (it looks like there is a \"with nogil:\" inside get_function call).\r\n\r\n2.\u00a0 Thread 2 imports pyarrow.compute (no initialization happens here).\u00a0 Thread 2 then calls. pyarrow.compute.flatten which hasn't been installed in globals yet because\u00a0thread 1 hasn't finished running\u00a0_make___global__functions_.\u00a0 This raises an error.\r\n\r\n\u00a0\r\n\r\nI'm trying to make a minimal repro test case but the codepath in question is from lazy loading compute within an Array (i.e. a call to pc_() defined in lib.pyx)\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-12-02T16:42:00.684Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10784?focusedCommentId=17242503) by Antoine Pitrou (apitrou):*\nWhat you're describing shouldn't happen. Python has per-module import locks besides the GIL.\r\nAs documented though, an exception is made for circular imports: https://docs.python.org/3.3/library/imp.html?highlight=imp#imp.lock_held"
+        },
+        {
+            "created_at": "2020-12-02T19:51:47.805Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10784?focusedCommentId=17242674) by Micah Kornfield (emkornfield):*\nHmm, OK.\u00a0 For more context, I'm having trouble creating a repro.\u00a0 The code in question that is running into this is C++ code that executes python through the C-API.\r\n\r\n\u00a0\r\n\r\nI wonder if this could also be related to this\u00a0https://bugs.python.org/issue38884"
+        },
+        {
+            "created_at": "2021-01-11T19:36:39.361Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10784?focusedCommentId=17262898) by Joris Van den Bossche (jorisvandenbossche):*\n`[~emkornfield]` were you able to reproduce it again? \r\n(if not let's move it to the next milestone)"
+        },
+        {
+            "created_at": "2021-02-17T18:23:24.137Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10784?focusedCommentId=17286053) by Antoine Pitrou (apitrou):*\n`[~emkornfield]` DId you manage to get useful diagnosis information on this? Otherwise, I think we might as well close the issue."
+        },
+        {
+            "created_at": "2021-02-18T04:34:04.645Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10784?focusedCommentId=17286262) by Micah Kornfield (emkornfield):*\nIt is still on my backlog, i've removed the fix version.\u00a0 The issue is we have a pretty reliable repro for a relatively complex internal framework, but finding a minimal repro has been challenging.\r\n\r\n\u00a0\r\n\r\nI've removed the fix version and we can close this if I don't get to it by the next release I think."
+        },
+        {
+            "created_at": "2021-02-18T09:21:11.971Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10784?focusedCommentId=17286377) by Antoine Pitrou (apitrou):*\nEven without a minimal repro, can you get a stacktrace for the various threads?"
+        },
+        {
+            "created_at": "2022-10-03T14:14:40.279Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10784?focusedCommentId=17612310) by Antoine Pitrou (apitrou):*\n`[~emkornfield]` Should we close this?"
+        },
+        {
+            "created_at": "2022-10-15T22:43:23.296Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-10784?focusedCommentId=17618185) by Micah Kornfield (emkornfield):*\nyes, haven't had any luck with a repro"
+        }
+    ]
+}

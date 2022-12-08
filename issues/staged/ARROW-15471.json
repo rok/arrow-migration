@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[R] ExtensionType support in R",
+        "body": "***Note**: This issue was originally created as [ARROW-15471](https://issues.apache.org/jira/browse/ARROW-15471). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn Python there is support for extension types that consists of a registration step that defines functions to handle metadata serialization and deserialization. In R, any extension name or metadata at the top level is currently obliterated on import. To implement geometry reading and writing to Parquet, IPC, and/or Feather, we will need to at the very least have the extension name and metadata preserved (in R), and at best provide a registration step to customize the behaviour of the resulting Array/DataType.\r\n\r\nReprex for R:\r\n\r\n```R\n\r\n# remotes::install_github(\"paleolimbot/narrow\")\r\nlibrary(narrow)\r\n\r\ncarray <- as_narrow_array(1:5)\r\n\r\ncarray$schema$metadata[[\"ARROW:extension:name\"]] <- \"extension name!\"\r\ncarray$schema$metadata[[\"ARROW:extension:metadata\"]] <- \"bananas\"\r\ncarray$schema$metadata[[\"something else\"]] <- \"more bananas\"\r\n\r\narray <- from_narrow_array(carray, arrow::Array)\r\ncarray2 <- as_narrow_array(array)\r\n\r\ncarray2$schema$metadata[[\"ARROW:extension:name\"]]\r\n#> NULL\r\ncarray2$schema$metadata[[\"ARROW:extension:metadata\"]]\r\n#> NULL\r\ncarray2$schema$metadata[[\"something else\"]]\r\n#> NULL\r\n```\r\n\r\n\r\nThere is some discussion of that as a solution to ARROW-14378, including an example of how pandas implements the 'interval' extension type (example contributed by `[~jorisvandenbossche]`).\r\n\r\nFor the Interval example, there are some different parts living in different places:\r\n\r\n- The Arrow Extension Type definition for pandas' interval type: https://github.com/pandas-dev/pandas/blob/fc6b441ba527ca32b460ae4f4f5a6802335497f9/pandas/core/arrays/_arrow_utils.py#L88-L136\n- The __from_arrow__ implementation (doing the conversion to arrow): https://github.com/pandas-dev/pandas/blob/fc6b441ba527ca32b460ae4f4f5a6802335497f9/pandas/core/arrays/interval.py#L1405-L1455\n- The __from_arrow__ implementation (conversion arrow -> pandas): https://github.com/pandas-dev/pandas/blob/fc6b441ba527ca32b460ae4f4f5a6802335497f9/pandas/core/dtypes/dtypes.py#L1227-L1255",
+        "created_at": "2022-01-26T18:56:24.000Z",
+        "updated_at": "2022-04-09T10:31:00.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-04-08T15:52:20.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-03T19:42:11.907Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15471?focusedCommentId=17486679) by Dewey Dunnington (paleolimbot):*\nA related issue that came up in geoarrow is that it isn't possible to restore field-level metadata (which we can use to make sure things like the coordinate reference system stay with the column when it goes through the compute engine). It looks like this is specifically ignored here:\r\n\r\nhttps://github.com/apache/arrow/blob/master/r/R/field.R#L60"
+        },
+        {
+            "created_at": "2022-02-04T02:15:30.780Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15471?focusedCommentId=17486785) by Weston Pace (westonpace):*\nIs the field level metadata being lost at the moment?  Extension type metadata should persist through the compute engine (some what tangential discussion here: https://issues.apache.org/jira/browse/ARROW-15297)"
+        },
+        {
+            "created_at": "2022-02-04T14:32:51.878Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15471?focusedCommentId=17487102) by Dewey Dunnington (paleolimbot):*\nThe compute engine end is all good! I was trying to put field-level metadata through the C API where Arrow didn't expect it (apparently metadata only persists if you wrap an Array in in a RecordBatch). This might be different if trying to import an ExtenionArray (which we haven't implemented yet)."
+        },
+        {
+            "created_at": "2022-02-04T16:21:36.223Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15471?focusedCommentId=17487156) by Joris Van den Bossche (jorisvandenbossche):*\nI don't know if it is exactly relevant here, but a few notes:\r\n\r\n- In the C++ implementation, the field-level metadata (where the extension name and metadata is stored in serialized (IPC / C Data Interface schema) form) lives in the `Field` class. So an Array object itself cannot hold this metadata in C++. Thus, if you recreate an array from importing it from the C Data Interface, it is \"expected\" that the metadata is gone. And that's also the reason that if the array is part of a RecordBatch (which has a schema, with fields, potentially with metadata), that this metadata is preserved (in the schema of the RecordBatch)\n- The \"registration\" of extension types enables that, eg while deserializing an IPC schema message, if we encounter extension type metadata,  we (meaning the C++ implementation) create an ExtensionArray with ExtensionType (and dropping the field metadata). If the name of the extension type is _not_ registered, we keep the actual storage array/type and preserve the metadata in the field.  \n- As far as I know, ExtensionArray / ExtensionType is not yet exposed in the R bindings? I suppose that means you basically always get the storage array/type (I don't know what would happen if you actually have an extension type in a C++ RecordBatch and then accessing that from R, but I suppose this is quite difficult to achieve right now, since there are no extension types registered by default)\n- The fact that R doesn't preserve field-level metadata in the schema seems like a separate issue? (I mean not needing full extension types support in R to fix it, but of course relevant here because of the fact that extension types are not yet supported in R and thus falls back to keeping this information in field metadata)"
+        },
+        {
+            "created_at": "2022-02-04T18:56:43.485Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15471?focusedCommentId=17487247) by Dewey Dunnington (paleolimbot):*\nThanks...super relevant! I'm definitely not familiar with the details here.\r\n\r\nIn the process of playing with this, I found that R does preserve the field-level metadata when handled as part of a RecordBatch just as you noted. The comment I made above was a line where I noticed that a user can't specify metadata for a field (but importing via the C API works fine).\r\n\r\nImplementing the ExtensionArray/ExtensionType and the registration mechanism is what I hope to do with this ticket!"
+        },
+        {
+            "created_at": "2022-04-08T15:52:20.715Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15471?focusedCommentId=17519666) by Jonathan Keane (jonkeane):*\nIssue resolved by pull request 12467\n<https://github.com/apache/arrow/pull/12467>"
+        }
+    ]
+}

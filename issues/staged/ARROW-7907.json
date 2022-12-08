@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[Python] Conversion to pandas of empty table with timestamp type aborts",
+        "body": "***Note**: This issue was originally created as [ARROW-7907](https://issues.apache.org/jira/browse/ARROW-7907). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCreating an empty table:\r\n\r\n```Java\n\r\nIn [1]: table = pa.table({'a': pa.array([], type=pa.timestamp('us'))})                                                                                                                                             \r\n\r\nIn [2]: table['a']                                                                                                                                                                                                 \r\nOut[2]: \r\n<pyarrow.lib.ChunkedArray object at 0x7fbb783e8098>\r\n[\r\n  []\r\n]\r\n\r\nIn [3]: table.to_pandas()                                                                                                                                                                                          \r\nOut[3]: \r\nEmpty DataFrame\r\nColumns: [a]\r\nIndex: []\r\n```\r\n\r\nthe above works. But the ChunkedArray still has 1 empty chunk. When filtering data, you can actually get no chunks, and this fails:\r\n\r\n\r\n```Java\n\r\nIn [4]: table2 = table.slice(0, 0)                                                                                                                                                                                 \r\n\r\nIn [5]: table2['a']                                                                                                                                                                                                \r\nOut[5]: \r\n<pyarrow.lib.ChunkedArray object at 0x7fbb783aa4a8>\r\n[\r\n\r\n]\r\n\r\nIn [6]: table2.to_pandas()                                                                                                                                                                                         \r\n../src/arrow/table.cc:48:  Check failed: (chunks.size()) > (0) cannot construct ChunkedArray from empty vector and omitted type\r\n...\r\nAborted (core dumped)\r\n```\r\n\r\nand this seems to happen specifically for timestamp type, and specifically with non-ns unit (eg with us as above, which is the default in arrow).\r\n\r\nI noticed this when reading a parquet file of the taxi dataset, where the filter I used resulted in an empty batch.",
+        "created_at": "2020-02-21T15:49:33.000Z",
+        "updated_at": "2020-03-30T06:39:23.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2020-03-30T06:39:23.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-03-11T01:35:22.481Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7907?focusedCommentId=17056573) by Wes McKinney (wesm):*\nThis looks like it was fixed in https://github.com/apache/arrow/commit/6ff156972ac426ef88b1e6674b975a6c61ef852d. I'll add a unit test to exercise the 0-length slice path"
+        },
+        {
+            "created_at": "2020-03-11T14:04:13.587Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7907?focusedCommentId=17057029) by Wes McKinney (wesm):*\nIssue resolved by pull request 6576\n<https://github.com/apache/arrow/pull/6576>"
+        },
+        {
+            "created_at": "2020-03-18T10:55:55.272Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7907?focusedCommentId=17061617) by Joris Van den Bossche (jorisvandenbossche):*\nActually, it seems that the linked commit only \"fixed\" `slice` to no longer return a ChunkedArray with 0 chunks, but you can still create an empty table with such chunked arrays in other ways, which will still give this issue."
+        },
+        {
+            "created_at": "2020-03-18T11:03:46.762Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7907?focusedCommentId=17061623) by Joris Van den Bossche (jorisvandenbossche):*\nSo a small reproducer that creates the table with 0-chunk ChunkedArray as column directly (instead of getting it from slicing the table) still aborts:\r\n\r\n```Java\n\r\ntable = pa.table({'a': pa.chunked_array([], type=pa.timestamp('us'))})  \r\nassert table.column('a').num_chunks == 0\r\n\r\ntable.to_pandas()   \r\n```"
+        },
+        {
+            "created_at": "2020-03-30T06:39:23.618Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7907?focusedCommentId=17070721) by Joris Van den Bossche (jorisvandenbossche):*\nThis is fixed now by ARROW-8142 (and in the PR a test was also added for the reproducer in this issue)"
+        }
+    ]
+}

@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[C++] Make status codes pluggable",
+        "body": "***Note**: This issue was originally created as [ARROW-4036](https://issues.apache.org/jira/browse/ARROW-4036). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nCurrently we're defining all Status codes in the Arrow base library, even those pertaining to sub-libraries such as arrow_python, plasma, gandiva, etc. We should try to devise some kind of simple registry system to avoid centralizing those.\r\n",
+        "created_at": "2018-12-15T10:56:12.000Z",
+        "updated_at": "2019-08-01T22:39:29.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2019-07-03T10:14:50.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-12-15T13:52:32.099Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4036?focusedCommentId=16722168) by Ben Kietzman (bkietz):*\nA few ways I can think of to accomplish that without collisions\r\n \\* Extend Status with something like std::error_category for each sub library (could be as simple as adding a byte to Status::State identifying sub library)\r\n \\* Replace StatusCode with the hardcoded timestamp of each code's definition (== weaksauce uuid)\r\n \\* RegisterStatusCode(&kSomeStatusCode) will not yield consistent codes; if we add a new one in arrow then all the sub library codes will increment. Is that a problem? It would break if, for example, different versions of arrow were communicating Statuses\r\n \\* RegisterStatusCode(timestamp, &kSomeStatusCode) will fix that if we have guaranteed load order for sub libraries\r\n\r\nEither of the latter two mean being a little careful about StatusCodes since their values will not be defined until loading is complete. For example, `constexpr StatusCode my_code = kSomeStatusCode;` would be undefined behavior "
+        },
+        {
+            "created_at": "2018-12-15T22:07:08.101Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4036?focusedCommentId=16722307) by Wes McKinney (wesm):*\nOne way would be to make `Status::State` a public type with virtual methods. Since `Status::state_` is null in almost all cases, I wouldn't think this would have performance implications (though `delete state_` now would require invoking a virtual ctor) but this should be examined more closely (in godbolt) to be sure.\r\n\r\nSo we could define something like\r\n\r\n```Java\n\r\nclass GandivaErrorState : public Status::ErrorState {\r\n public:\r\n  std::string error_type() const override { return \"gandiva\"; }\r\n  ...\r\n};\r\n```"
+        },
+        {
+            "created_at": "2018-12-17T13:38:17.086Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4036?focusedCommentId=16722983) by Ben Kietzman (bkietz):*\nI like that. In that case would it still be useful to define StatusCodes? We could define subclasses for each error condition\r\n\r\nTo avoid copy construction/virtual destructor calls when a status is copied, we could by make ErrorState ref counted"
+        },
+        {
+            "created_at": "2018-12-17T13:40:14.225Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4036?focusedCommentId=16722986) by Antoine Pitrou (apitrou):*\nWe already had Status appear in performance profiles for some benchmarks (most notably Python-to-Arrow conversions), so I'm wary of introducing polymorphism here."
+        },
+        {
+            "created_at": "2018-12-17T14:05:41.624Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4036?focusedCommentId=16723008) by Antoine Pitrou (apitrou):*\nI posted an example of another approach here:\r\nhttps://github.com/apache/arrow/pull/3199\r\n\r\nPerhaps we want to compare several approaches together."
+        },
+        {
+            "created_at": "2018-12-17T14:44:26.900Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4036?focusedCommentId=16723026) by Antoine Pitrou (apitrou):*\nI'll note that there are two main pain points if we want to make the API usable enough:\r\n1. The convenience factory functions (e.g. `Status::Invalid()`)\n1. The convenience query functions (e.g. `Status::IsInvalid()`)\n   \n   C++ does not seem to provide us with an easy solution for those."
+        },
+        {
+            "created_at": "2018-12-17T15:53:08.808Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4036?focusedCommentId=16723102) by Ben Kietzman (bkietz):*\nWe could use the status range and the error code within it to get something similar:\r\n```java\n\r\nenum GandivaErrorCode : int32_t {\r\n  CodeGenError,\r\n  //...\r\n};\r\n\r\nstatic StatusRange GandivaError(\"gandiva\", {\r\n  \"CodeGenError\",\r\n  //...\r\n});\r\n\r\nStatus MakeCodeGenError() {\r\n  return GandivaError(CodeGenError, \"msg\"); // overload call operator to act as a factory\r\n}\r\n\r\nvoid QueryUsage(Status s) {\r\n  s.Is<GandivaError>();               // query category\r\n  s.Is<GandivaError, CodeGenError>(); // query code within category\r\n  // or equivalently\r\n  s.Is(GandivaError);               // query category\r\n  s.Is(GandivaError, CodeGenError); // query code within category\r\n}\n```"
+        },
+        {
+            "created_at": "2019-06-19T02:28:56.944Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4036?focusedCommentId=16867171) by Wes McKinney (wesm):*\nMoved this to 1.0.0 so we aren't rushing this change, though if we merge for 0.14.0 then that's fine with me"
+        },
+        {
+            "created_at": "2019-07-03T10:14:50.356Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-4036?focusedCommentId=16877711) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 4484\n<https://github.com/apache/arrow/pull/4484>"
+        }
+    ]
+}

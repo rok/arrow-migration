@@ -1,0 +1,54 @@
+{
+    "issue": {
+        "title": "[Python][C++] Pyarrow Parquet reader overflows INT96 timestamps when converting to Arrow Array (timestamp[ns])",
+        "body": "***Note**: This issue was originally created as [ARROW-12096](https://issues.apache.org/jira/browse/ARROW-12096). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen reading Parquet data with timestamps stored as INT96 pyarrow will assume that the timestamp type should be\u00a0nanoseconds\u00a0and when converted into an arrow table will cause overflow if the parquet col has stored values that are out of bounds for nanoseconds.\u00a0\r\n\r\n\r\n```python\n\r\n# Round Trip Example\r\nimport datetime\r\nimport pandas as pd\r\nimport pyarrow as pa\r\nfrom pyarrow import parquet as pq\r\n\r\ndf = pd.DataFrame({\"a\": [datetime.datetime(1000,1,1), datetime.datetime(2000,1,1), datetime.datetime(3000,1,1)]})\r\na_df = pa.Table.from_pandas(df)\r\na_df.schema # a: timestamp[us] \r\n\r\npq.write_table(a_df, \"test_round_trip.parquet\", use_deprecated_int96_timestamps=True, version=\"1.0\")\r\npfile = pq.ParquetFile(\"test_round_trip.parquet\")\r\npfile.schema_arrow # a: timestamp[ns]\r\npq.read_table(\"test_round_trip.parquet\").to_pandas()\r\n# # Results in values:\r\n# 2169-02-08 23:09:07.419103232\r\n# 2000-01-01 00:00:00\r\n# 1830-11-23 00:50:52.580896768\r\n```\r\n\r\n\r\nThe above example is just trying to demonstrate this bug by getting pyarrow to write out the parquet format to a similar state of original file (where this bug was discovered). This bug was originally found when trying to read in Parquet outputs from Amazon Athena with pyarrow (where we can't control the output format of the parquet file format) [Context](https://github.com/awslabs/aws-data-wrangler/issues/592).\r\n\r\nI found some existing issues that might also be related:\r\n\r\n- [ARROW-10444](https://issues.apache.org/jira/browse/ARROW-10444) \n- [ARROW-6779](https://issues.apache.org/jira/browse/ARROW-6779) (This shows a similar response although testing this on pyarrow v3 will raise an out of bounds error)\n",
+        "created_at": "2021-03-26T10:54:59.000Z",
+        "updated_at": "2021-06-15T16:28:21.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-06-15T16:25:19.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-04-27T14:37:23.906Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12096?focusedCommentId=17333300) by Antoine Pitrou (apitrou):*\nHmm... ideally Athena would stop emitting the deprecated INT96 type.\r\nIn the meantime, solving this would require adding a new option to choose the mapped timestamp type.\r\ncc `[~emkornfield]`"
+        },
+        {
+            "created_at": "2021-04-27T15:39:02.797Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12096?focusedCommentId=17333338) by Karik Isichei (isichei):*\n`[~apitrou]` \u00a0yeah definitely agree. But I am not sure when they are going to do that (I haven't seen or heard anything that suggests it would be soon unfortunately).\u00a0\r\n\r\nHappy to give it a go myself, is there a prescribed process that I would go about tackling this? Would a good start for me be to look through a similar PR (like this one: [https://github.com/apache/arrow/pull/4597/files)](https://github.com/apache/arrow/pull/4597/files)\u00a0to get an idea of how exposing a new option for the parquet reader in pyarrow would be done?"
+        },
+        {
+            "created_at": "2021-04-27T16:29:25.729Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12096?focusedCommentId=17333367) by Antoine Pitrou (apitrou):*\n`[~isichei]` You first need to solve the issue on the C++ side. There are probably several places to look into:\r\n\r\n- `ArrowReaderProperties` in `cpp/src/parquet/properties.h`: you'll need to add the new option here\n- `GetArrowType` in `cpp/src/parquet/arrow/schema_internal.cc`: you'll need to take the option into account here\n- `TransferInt96` in `cpp/src/parquet/arrow/reader_internal.cc`: ditto\n  \n  You'll also need to expand the existing tests in `cpp/src/parquet/arrow/arrow_reader_writer_test.cc`.\n  \n  Once that is done you'll be able to expose the option in Python."
+        },
+        {
+            "created_at": "2021-04-30T19:54:04.271Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12096?focusedCommentId=17337599) by Karik Isichei (isichei):*\nThanks `[~apitrou]` \u00a0for pointing me in the right direction, appreciate it!"
+        },
+        {
+            "created_at": "2021-05-02T04:54:14.306Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12096?focusedCommentId=17337953) by Micah Kornfield (emkornfield):*\nAgree, IIUC int96 should be a deprecated type at this point."
+        },
+        {
+            "created_at": "2021-05-04T22:49:44.495Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12096?focusedCommentId=17339339) by Karik Isichei (isichei):*\nHi all,\r\n\r\nHave had some time to look at this / get my head around the CPP codebase. What makes sense to me following `[~apitrou]`'s advice (exposing the `ArrowReaderProperties` options and taking them into account in `GetArrowType`,\u00a0`TransferInt96`) would be to do the following:\r\n\r\n1. Add the option like `int96_timestamp_type_as` = <any arrow timestamp defaults to NS for backwards compatibility>\r\n\r\n2. Change\u00a0`Int96GetNanoSeconds`(in `cpp/src/parquet/types.h)\u00a0`to something like\u00a0`Int96GetSeconds` where it has an aditional parameter which is the interval size (again defaults to NS). Then if the interval was defined as anything other than NS the users may get truncated TS / data loss when converting the nanosecond component of the INT96 timestamp to the specified interval.\r\n\r\n**Some Questions on the above:**\r\n \\* Does this sound like an O.K. approach to take? Not sure if renaming functions in your codebase is against any contribution styles (etc) as far as I can tell that function isn't really used too much so a rename wouldn't be too much effort. Otherwise would a preferred approach be to create a function for each INT96 -> Timestamp Interval?\r\n\r\n \\* Do I need to raise any warning stuff if timestamps are being truncated in the C++ code or is it something that would just be expressed in the docs? I.e. if you specify your own timestamp for INT96 that is at your own risk.\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-06-07T07:58:25.338Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12096?focusedCommentId=17358424) by Karik Isichei (isichei):*\nHave created a PR for the fix (only on the C++ functionality).\r\n\r\n<https://github.com/apache/arrow/pull/10461>\r\n\r\n\u00a0\r\n\r\nLet me know if there are any problems or improvements. I was thinking of doing C++ and Python but thought better to solve the C++ functionality first and then do a secondary PR for exposing the functionality in Python.\u00a0"
+        },
+        {
+            "created_at": "2021-06-07T15:51:08.710Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12096?focusedCommentId=17358678) by Antoine Pitrou (apitrou):*\nThanks for the PR `[~isichei]`. I've answered there."
+        },
+        {
+            "created_at": "2021-06-15T16:25:19.078Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12096?focusedCommentId=17363752) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 10461\n<https://github.com/apache/arrow/pull/10461>"
+        }
+    ]
+}

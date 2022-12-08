@@ -1,0 +1,61 @@
+{
+    "issue": {
+        "title": "[C++] AsofJoinBasicParams has no gtest printer defined, leading to valgrind errors",
+        "body": "***Note**: This issue was originally created as [ARROW-17686](https://issues.apache.org/jira/browse/ARROW-17686). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nValgrind is currently failing on arrow-compute-asof-join-node-test: https://dev.azure.com/ursacomputing/crossbow/_build/results?buildId=34147&view=logs&j=0da5d1d9-276d-5173-c4c4-9d4d4ed14fdb&t=d9b15392-e4ce-5e4c-0c8c-b69645229181&l=4118\r\n\r\nThe issue appears to be that AsofJoinBasicParams has no gtest printer and so gtest is using the default universal-printer which doesn't really play well with valgrind.  We should add a custom PrintTo method for AsofJoinBasicParams per: https://github.com/google/googletest/blob/main/googletest/include/gtest/gtest-printers.h",
+        "created_at": "2022-09-12T16:44:49.000Z",
+        "updated_at": "2022-09-21T15:32:37.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-09-21T08:18:49.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-09-14T06:59:13.960Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17686?focusedCommentId=17603913) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nAny ideas about how I can reproduce this issue?\r\n\r\nI tried to run this unit test using valgrind in a docker amd64 container and also on a PC x86_64 machine (both linux ubuntu latest) but the results are fine:\r\n```java\n\r\n==61156== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)\n```\r\nbut in the linked report from the ticket's description we get errors:\r\n```java\n\r\n2022-09-12T02:07:26.4886794Z ==19253== ERROR SUMMARY: 2112 errors from 4 contexts (suppressed: 0 from 0) \n```\r\nNote: Also I tried to run this on macOS (arm64 arch) and also didn't get any errors."
+        },
+        {
+            "created_at": "2022-09-14T20:48:23.608Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17686?focusedCommentId=17604967) by Weston Pace (westonpace):*\nOn Linux I make sure to build (with tests on) with `ARROW_LARGE_MEMORY_TESTS` set to OFF.  Then I build a debug build `CMAKE_BUILD_TYPE=Debug`.  Then, from the cmake build directory I run...\r\n\r\n```\n\r\nvalgrind --suppressions=../valgrind.supp --tool=memcheck --gen-suppressions=all --num-callers=500 --leak-check=full --leak-check-heuristics=stdstring --error-exitcode=1 ./debug/arrow-compute-asof-join-node-test\r\n```"
+        },
+        {
+            "created_at": "2022-09-14T20:49:58.226Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17686?focusedCommentId=17604968) by Weston Pace (westonpace):*\nAlso, my machine is Ubuntu, x86_64 and I get the failure 100% of the time."
+        },
+        {
+            "created_at": "2022-09-14T21:00:52.614Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17686?focusedCommentId=17604973) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nThanks Weston, will try using ARROW_LARGE_MEMORY_TESTS=OFF."
+        },
+        {
+            "created_at": "2022-09-15T02:45:47.141Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17686?focusedCommentId=17605075) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nStill getting this report:\r\n```java\n\r\n\u00a0 \u00a0obj:/usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1\r\n}\r\n==14627== LEAK SUMMARY:\r\n==14627== \u00a0 \u00a0definitely lost: 0 bytes in 0 blocks\r\n==14627== \u00a0 \u00a0indirectly lost: 0 bytes in 0 blocks\r\n==14627== \u00a0 \u00a0 \u00a0possibly lost: 0 bytes in 0 blocks\r\n==14627== \u00a0 \u00a0still reachable: 12,063 bytes in 194 blocks\r\n==14627== \u00a0 \u00a0 \u00a0 \u00a0 suppressed: 672 bytes in 2 blocks\r\n==14627==\r\n==14627== For lists of detected and suppressed errors, rerun with: -s\r\n==14627== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 2 from 2)\n```\r\nand bunch of warnings from google8protobuf25EncodedDescriptorDatabase3AddEPKvi.\u00a0 I ran:\r\n```java\n\r\nvalgrind --suppressions=/somedir/arrow/cpp/valgrind.supp --tool=memcheck --gen-suppressions=all --num-callers=500 --leak-check=full --leak-check-heuristics=stdstring --error-exitcode=1 --show-leak-kinds=all debug/arrow-compute-asof-join-node-test\n```\r\nWhat is the output you are getting? (I'm using dockerized linux container arm64v8 ubuntu 22.04 with gcc toolchain), this was the set of the cmake args:\r\n-DCMAKE_INSTALL_LIBDIR=lib\r\n-DARROW_BUILD_EXAMPLES=ON\r\n-DARROW_BUILD_TESTS=ON\r\n-DARROW_ENABLE_TIMING_TESTS=ON\r\n-DARROW_BUILD_INTEGRATION=ON\r\n-DARROW_BUILD_BENCHMARKS=OFF\r\n-DARROW_BUILD_BENCHMARKS_REFERENCE=OFF\r\n-DARROW_BUILD_OPENMP_BENCHMARKS=OFF\r\n-DARROW_BUILD_DETAILED_BENCHMARKS=OFF\r\n-DARROW_TEST_LINKAGE=shared\r\n-DARROW_FUZZING=OFF\r\n-DARROW_LARGE_MEMORY_TESTS=OFF\r\n-DARROW_WITH_OPENTELEMETRY=ON\r\n-DARROW_WITH_BZ2=ON\r\n-DARROW_WITH_ZLIB=ON\r\n-DARROW_WITH_ZSTD=ON\r\n-DARROW_WITH_LZ4=ON\r\n-DARROW_WITH_THRIFT=ON\r\n-DARROW_WITH_SNAPPY=ON\r\n-DARROW_WITH_BROTLI=ON\r\n-DARROW_WITH_ZLIB=ON\r\n-DARROW_PARQUET=ON\r\n-DARROW_ORC=ON\r\n-DARROW_PYTHON=ON\r\n-DARROW_COMPUTE=ON\r\n-DARROW_CSV=ON\r\n-DARROW_DATASET=ON\r\n-DARROW_EXTRA_ERROR_CONTEXT=ON\r\n-DARROW_FILESYSTEM=ON\r\n-DARROW_INSTALL_NAME_RPATH=OFF\r\n-DARROW_JEMALLOC=ON\r\n-DARROW_JSON=ON\r\n-DARROW_CUDA=OFF\r\n-DARROW_BUILD_STATIC=OFF\r\n-DARROW_S3=OFF\r\n-DARROW_HDFS=OFF\r\n-DARROW_GCS=OFF\r\n-DARROW_FLIGHT=ON\r\n-DARROW_BUILD_UTILITIES=ON\r\n-DARROW_EXTRA_ERROR_CONTEXT=ON\r\n-DARROW_USE_CCACHE=ON\r\n-DCMAKE_UNITY_BUILD=OFF\r\n-DARROW_USE_PRECOMPILED_HEADERS=OFF\r\n-DBUILD_WARNING_LEVEL=CHECKIN\r\n-DCMAKE_BUILD_TYPE=Debug"
+        },
+        {
+            "created_at": "2022-09-15T03:12:16.022Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17686?focusedCommentId=17605080) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nSame results without errors:\r\n```java\n\r\n\u00a0 \u00a0obj:/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2\r\n}\r\n==3833515== LEAK SUMMARY:\r\n==3833515== \u00a0 \u00a0definitely lost: 0 bytes in 0 blocks\r\n==3833515== \u00a0 \u00a0indirectly lost: 0 bytes in 0 blocks\r\n==3833515== \u00a0 \u00a0 \u00a0possibly lost: 0 bytes in 0 blocks\r\n==3833515== \u00a0 \u00a0still reachable: 12,047 bytes in 194 blocks\r\n==3833515== \u00a0 \u00a0 \u00a0 \u00a0 suppressed: 672 bytes in 2 blocks\r\n==3833515==\r\n==3833515== For lists of detected and suppressed errors, rerun with: -s\r\n==3833515== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 2 from 2)\n```\r\nthis time using an amd64 box (no docker: x86_64 ubuntu 22.04 with gcc toolchain)"
+        },
+        {
+            "created_at": "2022-09-15T04:38:28.046Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17686?focusedCommentId=17605104) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nI think I managed to reproduce this, but not with valgrind.\r\nIt seems Xcode Instruments (the memory sanitizer) breaks too (pointing to the same AsofJoinBasicParams issue)."
+        },
+        {
+            "created_at": "2022-09-15T04:52:15.980Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17686?focusedCommentId=17605107) by Weston Pace (westonpace):*\nCan you try running the valgrind nightly test with archery?\r\n\r\n```\n\r\narchery docker run conda-cpp-valgrind\r\n```\r\n\r\nI'm attaching a copy of the output I get [valgrind.txt](valgrind.txt) "
+        },
+        {
+            "created_at": "2022-09-15T09:05:40.599Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17686?focusedCommentId=17605215) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nThanks Weston, I was able to reproduce the issue using the archery command.\r\n\r\nNo idea why it is not posible to reproduce this on the other boxes, perhaps there are more valgrind arguments that we are using somewhere in the archery version.\r\n```java\n\r\n[ \u00a0 \u00a0 \u00a0 OK ] AsofJoinNodeTest/AsofJoinBasicTest.TestEmpty5/5 (2017 ms)\r\n[----------] 66 tests from AsofJoinNodeTest/AsofJoinBasicTest (133709 ms total)\r\n[----------] Global test environment tear-down\r\n[==========] 80 tests from 2 test suites ran. (139701 ms total)\r\n[ \u00a0PASSED \u00a0] 80 tests.\r\n==19252==\r\n==19252== HEAP SUMMARY:\r\n==19252== \u00a0 \u00a0 in use at exit: 9,874 bytes in 157 blocks\r\n==19252== \u00a0 total heap usage: 9,472,888 allocs, 9,472,731 frees, 2,709,550,609 bytes allocated\r\n==19252==\r\n==19252== LEAK SUMMARY:\r\n==19252== \u00a0 \u00a0definitely lost: 0 bytes in 0 blocks\r\n==19252== \u00a0 \u00a0indirectly lost: 0 bytes in 0 blocks\r\n==19252== \u00a0 \u00a0 \u00a0possibly lost: 0 bytes in 0 blocks\r\n==19252== \u00a0 \u00a0still reachable: 9,874 bytes in 157 blocks\r\n==19252== \u00a0 \u00a0 \u00a0 \u00a0 suppressed: 0 bytes in 0 blocks\r\n==19252== Reachable blocks (those to which a pointer was found) are not shown.\r\n==19252== To see them, rerun with: --leak-check=full --show-leak-kinds=all\r\n==19252==\r\n==19252== Use --track-origins=yes to see where uninitialised values come from\r\n==19252== For lists of detected and suppressed errors, rerun with: -s\r\n==19252== ERROR SUMMARY: 2112 errors from 4 contexts (suppressed: 0 from 0)\r\n```\r\n\u00a0"
+        },
+        {
+            "created_at": "2022-09-18T04:51:05.103Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17686?focusedCommentId=17606237) by Percy Camilo Trive\u00f1o Aucahuasi (aucahuasi):*\nSomething worth to mention: I found why I was not able to reproduce this before, it seems this error is more visible for older valgrind versions (e.g. valgrind-3.13.0 on ubuntu 18.04), but if we use modern valgrind distribution we don't get errors (e.g.\r\nvalgrind-3.18.1 on ubuntu 22.04).\r\nHere below, we can see the errors (this is using a docker container with arm64-ubuntu 18.04/valgrind 3.13.0)\r\nThe good thing about this is that is not necessary to use (and wait) archery docker run; now is possible to isolate this issue by using a specific container for the arm64 platform.\u00a0 It seems archery docker cannot build arm64 containers (the default platform is amd64) and running amd64 containers on Darwin arm64 is slow (is faster to run containers with the same platform: arm64)\r\n```java\n\r\n==26724==\r\n==26724== HEAP SUMMARY:\r\n==26724== \u00a0 \u00a0 in use at exit: 640 bytes in 2 blocks\r\n==26724== \u00a0 total heap usage: 7,462,346 allocs, 7,462,344 frees, 2,061,859,187 bytes allocated\r\n==26724==\r\n==26724== 640 bytes in 2 blocks are possibly lost in loss record 1 of 1\r\n==26724== \u00a0 \u00a0at 0x4847B0C: calloc (in /usr/lib/valgrind/vgpreload_memcheck-arm64-linux.so)\r\n==26724==\r\n{\r\n\u00a0 \u00a0<insert_a_suppression_name_here>\r\n\u00a0 \u00a0Memcheck:Leak\r\n\u00a0 \u00a0match-leak-kinds: possible\r\n\u00a0 \u00a0fun:calloc\r\n}\r\n==26724== LEAK SUMMARY:\r\n==26724== \u00a0 \u00a0definitely lost: 0 bytes in 0 blocks\r\n==26724== \u00a0 \u00a0indirectly lost: 0 bytes in 0 blocks\r\n==26724== \u00a0 \u00a0 \u00a0possibly lost: 640 bytes in 2 blocks\r\n==26724== \u00a0 \u00a0still reachable: 0 bytes in 0 blocks\r\n==26724== \u00a0 \u00a0 \u00a0 \u00a0 suppressed: 0 bytes in 0 blocks\r\n==26724==\r\n==26724== For counts of detected and suppressed errors, rerun with: -v\r\n==26724== Use --track-origins=yes to see where uninitialised values come from\r\n==26724== ERROR SUMMARY: 2113 errors from 5 contexts (suppressed: 0 from 0)\n```"
+        },
+        {
+            "created_at": "2022-09-21T08:18:49.922Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-17686?focusedCommentId=17607599) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 14172\n<https://github.com/apache/arrow/pull/14172>"
+        }
+    ]
+}

@@ -1,0 +1,37 @@
+{
+    "issue": {
+        "title": "[R] write_parquet alters <dttm> value",
+        "body": "***Note**: This issue was originally created as [ARROW-16010](https://issues.apache.org/jira/browse/ARROW-16010). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen we write a dataframe column of type `<dttm>` to parquet using the arrow package, subsequent reading in of the parquet file to dataframe returns a slightly different value.\r\n\r\nThis behaviour does not replicate with columns of type `<double>`\r\n\r\n\u00a0\r\n\r\nReprex:\r\n\r\n\u00a0\r\n```java\n\r\n \r\n\r\n#Create sample dataframe\r\nn <- \u00a01631494810.376999855041503906250000000000000000000000000000000000\r\ndf <- data.frame(x = \"a\",\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0n = n,\r\n\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0t = as.POSIXct(n, origin = \"1970-01-01\"))\r\n#Write to disk\r\ndf %>% write_parquet(\"/tmp/tmp.parquet\")\r\n\r\n\r\n#Extract time-based cols\r\ndft <- df %>%\u00a0\r\n\u00a0 filter(x == \"a\") %>%\u00a0\r\n\u00a0 pull(t) %>%\u00a0\r\n\u00a0 as.numeric\u00a0\r\n\r\npqt <- read_parquet(\"/tmp/tmp.parquet\") %>%\u00a0\r\n\u00a0 filter(x == \"a\") %>%\u00a0\r\n\u00a0 pull(t) %>%\u00a0\r\n\u00a0 as.numeric\u00a0\r\ndft == pqt\r\nsprintf(\"%.54f\",dft)\r\nsprintf(\"%.54f\",pqt)\r\n\r\n#Extract numeric cols\r\ndfn <- df %>%\u00a0\r\n\u00a0 filter(x == \"a\") %>%\u00a0\r\n\u00a0 pull(n) %>%\u00a0\r\n\u00a0 as.numeric\u00a0\r\n\r\npqn <- read_parquet(\"/tmp/tmp.parquet\") %>%\u00a0\r\n\u00a0 filter(x == \"a\") %>%\u00a0\r\n\u00a0 pull(n) %>%\u00a0\r\n\u00a0 as.numeric\u00a0\r\ndfn == pqn\r\nsprintf(\"%.54f\",dfn)\r\nsprintf(\"%.54f\",pqn) \n```\r\n\u00a0\r\n\r\nThe critical issue is that `dft == pqt` returns `FALSE` while `dfn == pqn` returns TRUE.\r\n\r\n\u00a0\r\n\r\nWhy is this a problem? We use `arrow` to store dataframes to disk. When we want to update these parquet files, we first check whether any data has actually changed and put in place tripwires to ensure that if a significant proportion of the data has changed the pipeline fails and is flagged for manual review.\r\n\r\n\u00a0\r\n\r\nWith the current behaviour, above, all of the dataframes that contain `<dttm>` type columns are failing.",
+        "created_at": "2022-03-23T13:23:09.000Z",
+        "updated_at": "2022-07-02T14:11:15.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-07-02T14:11:15.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-03-23T14:20:57.082Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16010?focusedCommentId=17511275) by Nicola Crane (thisisnic):*\nCC `[~dragosmg]`"
+        },
+        {
+            "created_at": "2022-03-23T16:36:38.537Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16010?focusedCommentId=17511352) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nTL/DR: I think the datetime _resolution_ required by your example is a bit too high for Arrow. Arrow currently supports up to _nanoseconds_ (10^-9 seconds), but not higher / lower than that. Using the default POSIXct -> timestamp conversion your data is actually rounded to the closest microsecond (the default for the Arrow timestamp).\r\n\r\nThe first thing that happens when you call `write_parquet()` is the R data frame gets transformed into an Arrow table:\r\n```r\n\r\na <- Table$create(df)\r\na\r\nTable\r\n1 rows x 3 columns\r\n$x <string>\r\n$n <double>\r\n$t <timestamp[us]>\r\n\r\nSee $metadata for additional Schema metadata\r\n```\r\nThe `t` column got translated to a timestamp with microseconds (us) as unit.\r\n\r\nGoing back to R, we can see that is where the difference comes from:\r\n```r\n\r\nb <- a$to_data_frame()\r\nsprintf(\"%.54f\", b$t)\r\n[1] \"1631494810.376998901367187500000000000000000000000000000000000000\"\r\nb$t == pqt\r\n[1] TRUE\r\n```\r\n\r\nArrow can handle doubles/floats with higher precision. Hence there is no issue with column `n` in your data frame."
+        },
+        {
+            "created_at": "2022-03-24T07:02:20.480Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16010?focusedCommentId=17511627) by Riaz Arbi (riazarbi):*\nThank you for looking in to this `[~dragosmg]` .\r\n\r\nThat's a nice trick with the coercion into an arrow Table - I'll use it to coerce my new data to get around my failing tests.\r\n\r\nIf I can use this as an opportunity to deepen my understanding - below I've printed each value. I would expect a truncation to be a value that is identical until a certain decimal point, with zeros thereafter. The first five decimal points are identical between the two values (IIRC 6 decimal points is microseconds). But why are there non-zero decimal values after that, and why are they different between the two values?\r\n\r\nI appreciate that this might be out of the issue; in which case you can feel free to close the issue.\r\n```java\n\r\nR value : [1]    \"1631494810.376999855041503906250000000000000000000000000000000000\" \r\nArrow Value:[1]  \"1631494810.376998901367187500000000000000000000000000000000000000\"  \n```"
+        },
+        {
+            "created_at": "2022-03-24T11:31:31.547Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16010?focusedCommentId=17511802) by Joris Van den Bossche (jorisvandenbossche):*\nThe reason for this difference is that for the timestamp column in Arrow, there is a roundtrip from the double value to an int64, which looses some of the precision. \r\n\r\nIllustrating this manually (using Python, but the same idea applies to R):\r\n\r\n```python\n\r\n# the original value\r\n>>> n =  1631494810.376999855041503906250000000000000000000000000000000000\r\n\r\n# how it is stored as microseconds in Arrow\r\n>>> int(n * 1e6)\r\n1631494810376999\r\n\r\n# converting back to a double of seconds (which I think happens in the conversion back to R?)\r\n>>> int(n * 1e6) / 1e6\r\n1631494810.376999\r\n\r\n# and printing the original and roundtripped with more decimals\r\n>>> \"{:.25f}\".format(n)\r\n'1631494810.3769998550415039062500000'\r\n>>> \"{:.25f}\".format(int(n * 1e6) / 1e6)\r\n'1631494810.3769989013671875000000000'\r\n```"
+        },
+        {
+            "created_at": "2022-03-24T11:59:57.312Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16010?focusedCommentId=17511821) by Drago\u0219 Moldovan-Gr\u00fcnfeld (dragosmg):*\nThanks `[~jorisvandenbossche]`. I think something similar is happening in R (I have not dug into the code to see how it's actually done, but that seems to be the case):\r\n```r\n\r\nlibrary(bit64, warn.conflicts = FALSE)\r\n\r\nn <-  1631494810.376999855041503906250000000000000000000000000000000000\r\n\r\nsprintf(\"%.25f\", as.integer64(n * 1e6) / 1e6)\r\n#> [1] \"1631494810.3769989013671875000000000\"\r\n```"
+        }
+    ]
+}

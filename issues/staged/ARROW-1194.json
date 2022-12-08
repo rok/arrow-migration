@@ -1,0 +1,29 @@
+{
+    "issue": {
+        "title": "Getting record batch size with pa.get_record_batch_size returns a size that is too small for pandas DataFrame.",
+        "body": "***Note**: This issue was originally created as [ARROW-1194](https://issues.apache.org/jira/browse/ARROW-1194). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI'm running into the following problem.\n\nSuppose I create a dataframe and turn it into a record batch.\n\n```Java\nimport pyarrow as pa\nimport pandas as pd\n\ndf = pd.DataFrame({\"a\": [1, 2, 3]})\nrecord_batch = pa.RecordBatch.from_pandas(df)\n```\n\nIt's size is 352 according to\n\n```Java\npa.get_record_batch_size(record_batch)  # This is 352.\n```\n\nHowever, if I write it using a stream_writer and then attempt to read it, the resulting buffer has size 928.\n\n```Java\nsink = pa.BufferOutputStream()\nstream_writer = pa.RecordBatchStreamWriter(sink, record_batch.schema)\nstream_writer.write_batch(record_batch)\nnew_buf = sink.get_result()\nnew_buf.size  # This is 928.\n```\n\nI'm running into this problem because I'm attempting to write the pandas DataFrame to the Plasma object store as follows (after Plasma has been started and a client has been created), so I need to know the size ahead of time.\n\n```Java\ndata_size = pa.get_record_batch_size(record_batch)\nobject_id = plasma.ObjectID(np.random.bytes(20))\n\nbuf = client.create(object_id, data_size)  # Note that if I replace \"data_size\" by \"data_size + 1000\" then it works.\nstream = plasma.FixedSizeBufferOutputStream(buf)\nstream_writer = pa.RecordBatchStreamWriter(stream, record_batch.schema)\nstream_writer.write_batch(record_batch)\n```\n\nThe above fails because the buffer allocated in Plasma only has size 352, but 928 bytes are needed.\n\nSo my question is, am I determining the size of the record batch incorrectly? Or could there be a bug in `pa.get_record_batch_size`?",
+        "created_at": "2017-07-07T19:39:47.000Z",
+        "updated_at": "2017-07-13T12:26:26.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2017-07-13T12:26:26.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2017-07-07T19:43:27.454Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1194?focusedCommentId=16078578) by Robert Nishihara (robertnishihara):*\nAlso, does 928 seem too big? Or does that sound about right?"
+        },
+        {
+            "created_at": "2017-07-07T20:04:55.904Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1194?focusedCommentId=16078605) by Wes McKinney (wesm):*\nThat does seem a little odd. The size would be larger than 352 to account for the schema, but 928 seems too large. So there might be a bug in the record batch size calculation, but separately we should add some size calculation functions that account for the total size of the stream payload including the schema."
+        },
+        {
+            "created_at": "2017-07-13T12:26:26.871Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-1194?focusedCommentId=16085633) by Wes McKinney (wesm):*\nIssue resolved by pull request 830\n<https://github.com/apache/arrow/pull/830>"
+        }
+    ]
+}

@@ -1,0 +1,57 @@
+{
+    "issue": {
+        "title": "[C++] Refactor AddKernel to support other operations and types",
+        "body": "***Note**: This issue was originally created as [ARROW-7017](https://issues.apache.org/jira/browse/ARROW-7017). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\n- Should avoid using builders (and/or NULLs) since the output shape is known a compute time.\n   \\* Should be refatored to support other operations, e.g. Substraction, Multiplication.\n   \\* Should have a overflow, underflow detection mode.",
+        "created_at": "2019-10-28T23:10:18.000Z",
+        "updated_at": "2022-08-29T14:15:13.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-08-29T14:13:59.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2019-10-29T00:01:13.517Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7017?focusedCommentId=16961565) by Jacques Nadeau (jnadeau):*\nWhat's the thinking of building these a second time here as opposed to just adding utility methods over Gandiva for specific patterns? My experience is that it is very rare that people only need to do a single expression."
+        },
+        {
+            "created_at": "2019-10-29T01:51:44.415Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7017?focusedCommentId=16961597) by Wes McKinney (wesm):*\nI think the jury is out (for example, I'm not totally convinced) on having LLVM compilation as a hard requirement for running simple expressions. I'm not sure what will end up being most desirable long term"
+        },
+        {
+            "created_at": "2019-10-30T05:23:18.591Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7017?focusedCommentId=16962715) by Micah Kornfield (emkornfield@gmail.com):*\nI'd in particular like to be careful that if we do introduce a requirement on LLVM is isolated to compute code and doesn't leak into other modules.\u00a0 For instance the Cast kernel is depended on by other modules."
+        },
+        {
+            "created_at": "2019-10-30T17:53:50.854Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7017?focusedCommentId=16963271) by Jacques Nadeau (jnadeau):*\nIsn't it possible to use the LLVM paths to generate objects at compile time for people who don't want runtime compilation (and want to avoid the LLVM dependency)? My thought is we have people working on a bunch of expressions in Gandiva already so why not make that useful elsewhere rather than having two implementations of things like add, cast, etc.\r\n\r\nIn other words, can we have a single development push even though there are two targets (compile time and runtime compilation)?"
+        },
+        {
+            "created_at": "2019-10-31T22:18:35.960Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7017?focusedCommentId=16964416) by Wes McKinney (wesm):*\nWe should see what is possible as far as generating a shared library from a bundle of LLVM IR. If Gandiva developed the functionality to \r\n\r\n- pre-compile IR for all of its built-in functions (on a single-function basis) \n- generate a shared library from this\n- have a way to construct a callable kernel given input types using the generated shared library\n  \n  then that seems like a pretty good way forward. I see having multiple implementations of the same thing long term as being undesirable. In fairness I think in several places we may have extra logic in casting that is not present in Gandiva, but it would be worth investing the effort to try to have single implementations of things with suitable options to opt in to optional behaviors. "
+        },
+        {
+            "created_at": "2019-11-07T07:18:31.006Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7017?focusedCommentId=16968992) by Micah Kornfield (emkornfield@gmail.com):*\nThis seems plausible, but it still sounds like LLVM becomes a build-time dependency?\u00a0 Is that ok for different platforms/toolchain\u00a0 (e.g. windows)?"
+        },
+        {
+            "created_at": "2019-11-07T07:21:39.608Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7017?focusedCommentId=16968993) by Micah Kornfield (emkornfield@gmail.com):*\nI created\u00a0<https://jira.apache.org/jira/browse/ARROW-7083>\u00a0to track this instead of having the conversation on this JIRA."
+        },
+        {
+            "created_at": "2019-11-07T16:29:28.062Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7017?focusedCommentId=16969394) by Wes McKinney (wesm):*\nThanks, yes let's discuss more there. It seems like some investigation is indeed required. \r\n\r\nI think having LLVM as a build-time dependency is more palatable than as a runtime dependency in some applications. "
+        },
+        {
+            "created_at": "2020-04-27T01:54:24.785Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7017?focusedCommentId=17092916) by Wes McKinney (wesm):*\nI'm working on this"
+        },
+        {
+            "created_at": "2020-05-25T19:55:47.946Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7017?focusedCommentId=17116221) by Wes McKinney (wesm):*\nI think the path forward here is to refactor to utilize common implementations of inline single-value functions for both the LLVM IR and pre-compiled kernels. In other words, what is currently in the gandiva/precompiled directory would be moved to some place where we can arrange so that these implementations are translated to LLVM IR for use in Gandiva, while available as inline C/C++ functions for use in creating pre-compiled vectorized kernels. Having multiple implementations of the scalar \"unit of work\" does not seem desirable\r\n\r\nNote that Gandiva-generated kernels should be able (with some glue) to be registered in the new general function registry in arrow/compute/registry.h"
+        }
+    ]
+}

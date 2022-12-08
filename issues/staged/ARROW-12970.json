@@ -1,0 +1,72 @@
+{
+    "issue": {
+        "title": "[Python] Efficient \"row accessor\" for a pyarrow RecordBatch / Table",
+        "body": "***Note**: This issue was originally created as [ARROW-12970](https://issues.apache.org/jira/browse/ARROW-12970). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIt would be nice to have a nice row accessor for a Table akin to pandas.DataFrame.itertuples.\r\n\r\nI have a lot of code where I am converting a parquet file to pandas just to have access to the rows through iterating with itertuples.  Having this ability in pyarrow natively would be a nice feature and would avoid memory copy in the pandas conversion.\r\n",
+        "created_at": "2021-06-04T15:13:24.000Z",
+        "updated_at": "2022-10-06T09:09:31.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-04T15:20:32.610Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12970?focusedCommentId=17357421) by Antoine Pitrou (apitrou):*\nIronically, an efficient solution might be simply to convert Table slices and iterate each slice. Something like (untested):\r\n```python\n\r\ndef itertuples(table):\r\n    chunk_size = 1024\r\n    for i in range(0, table.num_rows, chunk_size):\r\n        rows = table[i:i + chunk_size].to_pydict().values()\r\n        yield from map(tuple, rows)\r\n```\r\n\r\ncc `[~jorisvandenbossche]`\r\n"
+        },
+        {
+            "created_at": "2021-06-04T15:21:12.914Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12970?focusedCommentId=17357423) by Antoine Pitrou (apitrou):*\nAlso, it seems it would be a nice addition to be allow to restrict `to_pydict` to certain columns."
+        },
+        {
+            "created_at": "2021-06-04T15:25:15.600Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12970?focusedCommentId=17357429) by Joris Van den Bossche (jorisvandenbossche):*\n~~In your snippet, what's the `.values()`? (that's not a Table method I think. Did you mean to_numpy or so?)~~\r\n\r\nSorry, ignore my comment, I missed the `to_pydict()` before it ;)"
+        },
+        {
+            "created_at": "2021-06-04T15:27:54.399Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12970?focusedCommentId=17357432) by Joris Van den Bossche (jorisvandenbossche):*\nFor restricting to certain columns, you can also quite easily do `table.select([...])` before the `to_pydict` call (I think in general selecting columns is a quite cheap operation?)"
+        },
+        {
+            "created_at": "2021-06-04T15:28:30.756Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12970?focusedCommentId=17357433) by Antoine Pitrou (apitrou):*\nAh, right. It should be quite cheap indeed."
+        },
+        {
+            "created_at": "2021-06-04T16:54:28.965Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12970?focusedCommentId=17357481) by Luke Higgins (virtualluke):*\nthat snippet is yielding columns of the table and not rows though right?"
+        },
+        {
+            "created_at": "2021-06-04T17:03:01.262Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12970?focusedCommentId=17357487) by Antoine Pitrou (apitrou):*\nAh, right. Here is a corrected version:\r\n```python\n\r\ndef itertuples(table):\r\n    chunk_size = 1024\r\n    for i in range(0, table.num_rows, chunk_size):\r\n        rows = table[i:i + chunk_size].to_pydict().values()\r\n        yield from zip(*rows)\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-06-04T17:07:50.102Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12970?focusedCommentId=17357490) by Antoine Pitrou (apitrou):*\nRelated: ARROW-12976"
+        },
+        {
+            "created_at": "2021-07-06T13:26:34.790Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12970?focusedCommentId=17375719) by Wes McKinney (wesm):*\nIt would probably be worth the effort to implement the \"tuplization\" of RecordBatch in the libarrow_python C++ library to make it reasonably efficient. This would also be a good opportunity to move the implementation of the `*Scalar.as_py` methods into libarrow_python since you would only want to have one canonical implementation of boxing Arrow array values as Python objects. This relates to ARROW-12976 also. I can't find the Jira issue about moving the as_py implementations into C++, but I recall there was one in the past that `[~kszucs]` may have been working on at some point. "
+        },
+        {
+            "created_at": "2021-07-06T13:36:48.261Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12970?focusedCommentId=17375727) by Krisztian Szucs (kszucs):*\nWhen we refactored/cleaned up the scalar handling it has occurred to me that libarrow_python should be responsible for arrow=>python conversions as well but we deferred that work. This is something we should definitely work on."
+        },
+        {
+            "created_at": "2021-07-06T13:49:02.332Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12970?focusedCommentId=17375732) by Joris Van den Bossche (jorisvandenbossche):*\nI think we can discuss those performance related aspects of the arrow->python object conversion (implementing it in C++ vs in python/cython) in ARROW-12976. For bulk conversion like here, we probably want to avoid creating a Scalar at all (so also not going through Scalar.as_py, even when impemented in C++, based on the experiments described in ARROW-12976).\r\n\r\n(of course,  ARROW-12976 uses \"to_pylist\" as example, and for this issue it might also be interesting to look into directly creating tuples instead of lists for each columns which gets zipped) "
+        },
+        {
+            "created_at": "2021-07-07T19:12:17.088Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12970?focusedCommentId=17376799) by Grant Williams (grantmwillimas):*\nI think natively returning tuples (or at least having the option to do so) makes a lot of sense from a user perspective. I would guess the use case for a row iterator is going to be most similar to a database cursor or a Result/Row Proxy in sqlalchemy. Having the data returned in a tuple (or tuple-like) format would make integration really nice in mixed data source code bases.\r\n\r\nPersonally, I think the row accessor makes a lot of sense on Record Batches since it's already pretty straightforward to slice rows from Tables as tuples and a conversion like:\r\n```java\n\r\nyield from chain.from_iterable(zip(*map(lambda col: col.to_pylist(), batch.columns)) for batch in record_batches)\n```\r\nfeels clunky (and inefficient).\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-07-07T19:15:42.438Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12970?focusedCommentId=17376802) by Antoine Pitrou (apitrou):*\nWhile it's clunky, the jury is out on whether it's inefficient or not. The overhead might not be as high as it would seem."
+        },
+        {
+            "created_at": "2022-10-05T17:51:25.010Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-12970?focusedCommentId=17613092) by Apache Arrow JIRA Bot (arrowjira):*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned per [project policy](https://arrow.apache.org/docs/dev/developers/bug_reports.html#issue-assignment). Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

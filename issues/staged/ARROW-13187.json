@@ -1,0 +1,54 @@
+{
+    "issue": {
+        "title": "[c++][python] Possibly memory not deallocated when reading in CSV",
+        "body": "***Note**: This issue was originally created as [ARROW-13187](https://issues.apache.org/jira/browse/ARROW-13187). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen one reads in a table from CSV in pyarrow version 4.0.1, it appears that the read-in table variable is not freed (or not fast enough). I'm unsure if this is because of pyarrow or because of the way pyarrow memory allocation interacts with Python memory allocation. I encountered it when processing many large CSVs sequentially.\r\n\r\nWhen I run the following piece of code, the RAM memory usage increases quite rapidly until it runs out of memory.\r\n\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.csv\r\n\r\n# Generate some CSV file to read in\r\nprint(\"Generating CSV\")\r\nwith open(\"example.csv\", \"w+\") as f_out:\r\n    for i in range(0, 10000000):\r\n        f_out.write(\"123456789,abc def ghi jkl\\n\")\r\n\r\n\r\ndef read_in_the_csv():\r\n    table = pa.csv.read_csv(\"example.csv\")\r\n    print(table)  # Not strictly necessary to replicate bug, table can also be an unused variable\r\n# This will free up the memory, as a workaround:\r\n# table = table.slice(0, 0)\r\n\r\n\r\n# Read in the CSV many times\r\nprint(\"Reading in a CSV many times\")\r\nfor j in range(100000):\r\n    read_in_the_csv()\r\n```\r\n",
+        "created_at": "2021-06-25T16:52:59.000Z",
+        "updated_at": "2021-06-29T15:08:27.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-06-29T15:08:14.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-06-25T20:33:19.232Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13187?focusedCommentId=17369702) by Weston Pace (westonpace):*\nGreat reproduction, thank you.\u00a0 I can reproduce this on 4.0.0 but not on 3.0.0.\u00a0 A few observations so far:\r\n\r\npa.total_allocated_bytes is increasing so it is not a dynamic allocator blowup issue.\r\n\r\n\"del table\" prevents the out-of-ram (same as the table.slice above).\r\n\r\n\"gc.collect\" prevents the out-of-ram\r\n\r\n\u00a0\r\n\r\nThose workarounds shouldn't be necessary however.\u00a0 When read_in_the_csv exits the table is no longer needed, it's refcount should decrease by 1, and it should be eligible for garbage collection.\u00a0 Combined with the fact that this doesn't occur on 3.0.0 (both environments are using python 3.8 although 3.8.6 vs 3.8.8 but I doubt it's a python change) I think this means that a circular reference was introduced in the Arrow->Python code between 3.0.0 and 4.0.0."
+        },
+        {
+            "created_at": "2021-06-25T20:51:25.879Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13187?focusedCommentId=17369707) by Weston Pace (westonpace):*\nAlso, it seems this does not happen when repeatedly reading in a parquet file.\u00a0 So maybe it isn't in the Arrow->Python code or maybe it's particular to the way the CSV reader is creating the table."
+        },
+        {
+            "created_at": "2021-06-26T02:41:56.106Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13187?focusedCommentId=17369785) by Weston Pace (westonpace):*\nI have tracked down the cause further but I'm not entirely sure what the correct fix should be but I think it is a problem in cython.\u00a0 The issue first occurs after commit 79ae4f6db3dfe06ba2e1b5c285a6695cfa58cf3d (ARROW-8732: [C++] Add basic cancellation API)\r\n\r\n\u00a0\r\n\r\nThe method \"read_csv\" calls \"SignalStopHandler()\" which calls \"signal.getsignal\" which calls \"signal.py::_int_to_enum\" which intentionally triggers a ValueError (as is normal in python).\r\n\r\n\u00a0\r\n\r\nThat ValueError has an associated traceback which is not disposed of correctly.\u00a0 That traceback has a reference to each of the frames of the stack and one of those frames has a reference to \"table\".\u00a0 Since a new traceback is generated for each loop of the iteration none of the CSVs are properly disposed of.\u00a0 The slice method in the original PR or \"del table\" is a workable workaround.\u00a0 As long as the frames aren't too big the garbage collector will eventually run and clean them up long before memory is lost.\r\n\r\n\u00a0\r\n\r\nI have no idea why the ValueError/traceback are not being disposed of.\u00a0 I know cython has to do some games to manage tracebacks so it's possible there is an issue there.\u00a0 I think I created a reproduction in pure python calling getsignal and it seems to manage memory correctly so I believe python is clear.\r\n\r\n\u00a0\r\n\r\nI've created a script to reproduce that also uses objgraph to generate reference graphs.\u00a0 It also only runs one iteration so it is quicker and doesn't exceed RAM on the system.\u00a0 It should print 0 as the last line.\u00a0 If there is a leak it prints out ~270M.\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n```java\n\r\nimport gc\r\nimport sys\r\nimport pyarrow.parquet\r\nimport pyarrow as pa\r\nimport pyarrow.csv\r\nimport objgraph\r\n\r\n# Generate some CSV file to read in                                                                                                                                                                                \r\nprint(\"Generating CSV\")\r\nwith open(\"example.csv\", \"w+\") as f_out:\r\n    for i in range(0, 10000000):\r\n        unused = f_out.write(\"123456789,abc def ghi jkl\\n\")\r\n\r\ndef read_in_the_csv():\r\n    table = pa.csv.read_csv(\"example.csv\")\r\n    print(pa.total_allocated_bytes())\r\n\r\ngc.disable()\r\ngc.collect()\r\nobjs = gc.get_objects()\r\nread_in_the_csv()\r\nobjs2 = gc.get_objects()\r\noffensive_ids = set([id(obj) for obj in objs2]) - set([id(obj) for obj in objs])\r\nbadobjs = [obj for obj in objs2 if id(obj) in offensive_ids]\r\nprint(len(badobjs))\r\nsmallbadobjs = [obj for obj in badobjs if 'frame' in str(type(obj)) and 'read_in_the_csv' in str(obj)]\r\nobjgraph.show_refs(smallbadobjs, refcounts=True)\r\nobjgraph.show_backrefs(smallbadobjs, refcounts=True)\r\nprint(pa.total_allocated_bytes())\r\n\r\n```\r\n\u00a0\r\n\r\nSo at this point I surrender and ask `[~apitrou]` `[~jorisvandenbossche]` or `[~amol-]` for help :)\r\n\r\n\u00a0\r\n\r\n**Forward refs show a frame in the traceback still reference Table**![forward-refs.png](https://issues.apache.org/jira/secure/attachment/13027309/forward-refs.png)\r\n\r\n**Backward refs show the frame is referenced as part of a traceback (note, this graph is truncated, and does not show the source ValueError.\u00a0 Also, the dict and two lists are from my debugging code and not related to the issue)**\r\n\r\n**![backward-refs.png](https://issues.apache.org/jira/secure/attachment/13027310/backward-refs.png)**\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-06-26T09:48:30.013Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13187?focusedCommentId=17369842) by Antoine Pitrou (apitrou):*\nThis seems to be, well, a classical cyclic reference issue due to a traceback. It's trivially reproducible on a Python prompt:\r\n```python\n\r\n>>> import signal, gc, weakref\r\n>>> gc.disable()   # disable automatic cyclic reference collection\r\n>>> class C: pass\r\n... \r\n>>> def h(*args): pass\r\n... \r\n>>> signal.signal(signal.SIGINT, h)\r\n<built-in function default_int_handler>\r\n>>> \r\n>>> def f():\r\n...   global wr\r\n...   c = C()\r\n...   wr = weakref.ref(c)\r\n...   signal.getsignal(signal.SIGINT)\r\n... \r\n>>> f()\r\n>>> wr() is None\r\nFalse    # object `c` is still alive\r\n>>> gc.collect()    # collect cyclic references\r\n17\r\n>>> wr() is None\r\nTrue     # object `c` has been collected\r\n```\r\n"
+        },
+        {
+            "created_at": "2021-06-26T15:08:24.150Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13187?focusedCommentId=17369896) by Antoine Pitrou (apitrou):*\nThis was fixed upstream in <https://bugs.python.org/issue42248> . You'll get the fix in Python 3.8.10 and 3.9.5.\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-06-28T10:33:39.679Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13187?focusedCommentId=17370513) by Simon (snkas):*\nThank you for the prompt help. I'll for now then stick with the workaround.\r\n\r\nAs a sidenote, it seems it might take quite time before Python 3.8.10 is in use by the major distributions (with e.g., Ubuntu currently at 3.8.5).\r\nGiven that pyarrow is used for \"large objects\" as referred to in https://bugs.python.org/issue42248 by Gerald Dalley, it might be worthwhile to have it noted somewhere in pyarrow documentation till Python is upgraded more broadly? As reading in many large CSVs in sequence could be considered a common task."
+        },
+        {
+            "created_at": "2021-06-28T16:51:31.949Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13187?focusedCommentId=17370726) by Weston Pace (westonpace):*\nI agree it would be nice to avoid this given the amount of RAM that could be getting held onto.\u00a0 Some crude potential workarounds off the top of my head:\r\n\r\n\u00a0\\* Create a new thread to run the getsignal check\r\n\r\n\u00a0\\* manually run gc.collect after the getsignal check\r\n\r\n\u00a0\\* implement the getsignal check ourselves in C++\r\n\r\n\u00a0\r\n\r\n`[~apitrou]` if any of those workarounds sound acceptable (or if you have a better idea) I'm happy to implement it."
+        },
+        {
+            "created_at": "2021-06-28T16:58:25.891Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13187?focusedCommentId=17370729) by Antoine Pitrou (apitrou):*\nI can try to cook a workaround."
+        },
+        {
+            "created_at": "2021-06-29T15:08:14.434Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13187?focusedCommentId=17371469) by Antoine Pitrou (apitrou):*\nIssue resolved by pull request 10609\n<https://github.com/apache/arrow/pull/10609>"
+        }
+    ]
+}

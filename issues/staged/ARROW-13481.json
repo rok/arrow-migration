@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[JAVA][VECTOR]: stream write/read when writing batches of different row count",
+        "body": "***Note**: This issue was originally created as [ARROW-13481](https://issues.apache.org/jira/browse/ARROW-13481). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nI am assuming ArrowStreamWriter/ArrowStreamReader support writing batches with different record count. \r\nWhen reading from VectorSchemaRoot readBatch = reader.getVectorSchemaRoot(), readBatch.getRowCount() returns the max of all batch row count.\r\nThis limit the ability to loop on the vectors contained in the batch.\r\n\r\nA sample code:\r\n\r\n```java\n\r\npackage io.scribe.blckch.core.io;\r\n\r\nimport org.apache.arrow.memory.RootAllocator;\r\nimport org.apache.arrow.vector.BitVector;\r\nimport org.apache.arrow.vector.FieldVector;\r\nimport org.apache.arrow.vector.VarCharVector;\r\nimport org.apache.arrow.vector.VectorSchemaRoot;\r\nimport org.apache.arrow.vector.ipc.ArrowStreamReader;\r\nimport org.apache.arrow.vector.ipc.ArrowStreamWriter;\r\nimport org.apache.arrow.vector.types.pojo.Field;\r\n\r\nimport java.io.ByteArrayInputStream;\r\nimport java.io.ByteArrayOutputStream;\r\nimport java.nio.channels.Channels;\r\nimport java.nio.charset.StandardCharsets;\r\nimport java.util.Arrays;\r\nimport java.util.List;\r\n\r\npublic class Arrow {\r\n\r\n    public static void main(String[] args) throws Exception {\r\n        RootAllocator allocator = new RootAllocator(Long.MAX_VALUE);\r\n\r\n        BitVector bitVector = new BitVector(\"boolean\", allocator);\r\n        VarCharVector varCharVector = new VarCharVector(\"varchar\", allocator);\r\n        bitVector.allocateNew();\r\n        varCharVector.allocateNew();\r\n\r\n        int l0 = Double.valueOf(Math.floor(Math.random() * 10)).intValue() + 1;\r\n        System.out.println(\"Write Batch \" + l0 + \" length \" + l0);\r\n\r\n        for (int j = 0; j < l0; ++j) {\r\n            bitVector.setSafe(j, j);\r\n            varCharVector.setSafe(j, String.format(\"char-%s-%s\", 0, j).getBytes(StandardCharsets.UTF_8));\r\n        }\r\n        bitVector.setValueCount(l0);\r\n        varCharVector.setValueCount(l0);\r\n\r\n        List<Field> fields = Arrays.asList(bitVector.getField(), varCharVector.getField());\r\n        List<FieldVector> vectors = Arrays.asList(bitVector, varCharVector);\r\n\r\n        VectorSchemaRoot root = new VectorSchemaRoot(fields, vectors);\r\n\r\n        ByteArrayOutputStream out = new ByteArrayOutputStream();\r\n        try (ArrowStreamWriter writer = new ArrowStreamWriter(root, /*DictionaryProvider=*/null, Channels.newChannel(out))) {\r\n            writer.start();\r\n            writer.writeBatch();\r\n            for (int i = 1; i < 5; ++i) {\r\n                final BitVector bits = (BitVector) root.getVector(0);\r\n                final VarCharVector chars = (VarCharVector) root.getVector(1);\r\n                bits.reset();\r\n                chars.reset();\r\n\r\n                int l = Double.valueOf(Math.floor(Math.random() * 10)).intValue() + 1;\r\n                System.out.println(\"Write Batch \" + i + \" length \" + l);\r\n\r\n                for (int j = 0; j < l; ++j) {\r\n                    bits.setSafe(j, j);\r\n                    chars.setSafe(j, String.format(\"char-%s-%s\", i, j).getBytes(StandardCharsets.UTF_8));\r\n                }\r\n                bits.setValueCount(l);\r\n                chars.setValueCount(l);\r\n\r\n                writer.writeBatch();\r\n            }\r\n            writer.end();\r\n        }\r\n\r\n        try (ArrowStreamReader reader = new ArrowStreamReader(new ByteArrayInputStream(out.toByteArray()), allocator)) {\r\n\r\n            for (int i = 0; i < 5; i++) {\r\n                // This will be loaded with new values on every call to loadNextBatch\r\n                reader.loadNextBatch();\r\n                VectorSchemaRoot readBatch = reader.getVectorSchemaRoot();\r\n\r\n                final BitVector bits = (BitVector) readBatch.getVector(0);\r\n                final VarCharVector chars = (VarCharVector) readBatch.getVector(1);\r\n                int l = readBatch.getRowCount();\r\n                // int l = bits.getValueCount();\r\n                System.out.println(\"Batch \" + i + \" length \" + l);\r\n\r\n                for (int j = 0; j < l; ++j) {\r\n                    System.out.println(bits.get(j) + \" \" + new String(chars.get(j)));\r\n                }\r\n            }\r\n        }\r\n\r\n        out.close();\r\n        root.clear();\r\n        root.close();\r\n    }\r\n}\r\n\r\n```\r\n\r\n",
+        "created_at": "2021-07-28T19:49:20.000Z",
+        "updated_at": "2022-08-27T14:41:50.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Java",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-08-19T02:03:08.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-07-28T21:21:27.259Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13481?focusedCommentId=17389079) by abeel walga (awalga):*\nsetting row count on batch resolves the issue\r\n```java\n\r\n root.setRowCount(l);\n```"
+        },
+        {
+            "created_at": "2021-07-30T09:15:53.095Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13481?focusedCommentId=17390437) by Liya Fan (fan_li_ya):*\n`[~awalga]` Do you want to provide a patch?"
+        },
+        {
+            "created_at": "2021-08-19T02:02:14.108Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13481?focusedCommentId=17401424) by Liya Fan (fan_li_ya):*\nAs indicated by `[~awalga]`, the row count of the batch must be set explicitly, instead of setting individual vector value counts. This is by design. "
+        },
+        {
+            "created_at": "2022-08-27T14:41:50.955Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-13481?focusedCommentId=17585882) by @toddfarmer:*\nTransitioning issue from Resolved to Closed to based on resolution field value."
+        }
+    ]
+}

@@ -1,0 +1,64 @@
+{
+    "issue": {
+        "title": "[C++] Improve MakeArrayOfNull to support creation of multiple arrays",
+        "body": "***Note**: This issue was originally created as [ARROW-7051](https://issues.apache.org/jira/browse/ARROW-7051). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nMakeArrayOfNull reuses a single buffer of `0` for all buffers in the array it creates. It could be extended to reuse that same buffer for all buffers in multiple arrays. This optimization will make RecordBatchProjector and ConcatenateTablesWithPromotion more memory efficient",
+        "created_at": "2019-11-02T18:05:06.000Z",
+        "updated_at": "2022-07-18T09:26:17.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-08-05T15:53:32.285Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7051?focusedCommentId=17394141) by Antoine Pitrou (apitrou):*\nAnother approach would be to define a separate function that caches power-of-two-sized buffers of zeros:\r\n```c++\n\r\n/// Make read-only buffer of zeros\r\nResult<std::shared_ptr<Buffer>> MakeBufferOfZeros(int64_t length);\r\n```\r\n\r\nThe two approaches might be combined for maximum efficiency..."
+        },
+        {
+            "created_at": "2021-08-11T16:10:16.524Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7051?focusedCommentId=17397450) by Alexander Ocsa (aocsa):*\nMore context:\r\n\r\n<https://github.com/apache/arrow/pull/10802#discussion_r684345342>\u00a0\r\n\r\n\u00a0\r\n\r\n>\u00a0\r\nThis seems like a very useful utility function. I wonder if we want to put it somewhere more visible. There could be a CreateEmptyRecordBatch and CreateEmptyTable too. Can be done in a follow-up PR.\r\n![https://github.githubassets.com/images/icons/emoji/unicode/1f440.png](https://github.githubassets.com/images/icons/emoji/unicode/1f440.png) \u00a01\r\n\u00a0"
+        },
+        {
+            "created_at": "2021-11-23T18:07:46.409Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7051?focusedCommentId=17448170) by Antoine Pitrou (apitrou):*\n`[~aocsa]` Do you still want to do this? Otherwise please unassign to let others know that they can take it."
+        },
+        {
+            "created_at": "2021-11-23T19:17:51.128Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7051?focusedCommentId=17448232) by Alexander Ocsa (aocsa):*\nSure,\u00a0 this is a\u00a0[good-first-issue](https://issues.apache.org/jira/issues/?jql=labels+%3D+good-first-issue) and I will recommend to do this to one of the new interns\u00a0"
+        },
+        {
+            "created_at": "2022-01-07T10:23:39.105Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7051?focusedCommentId=17470504) by Jeroen van Straten (jvanstraten):*\nI'll look at this for one of my first issues.\r\n\r\nIdea: can we use mmap for this? On my machine anyway, mmap'ing a read-only, anonymous, and private region will give fully zeroed virtual memory where (I guess) all pages are mapped to the same physical page, or maybe some x86 MMU tricks are done to avoid even that. In any case, the following code results in no physical memory being allocated at all (not even a single 4kiB page, apparently):\r\n```java\n\r\n#include <sys/mman.h>\r\n#include <stdio.h>\r\n\r\nint main() {\r\n    char *addr;\r\n    const size_t length = 1024ull*1024*1024*64; // 64 GiB, more memory than my machine has\r\n    addr = (char*)mmap(0, length, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);\r\n    if (!addr) {\r\n        perror(\"mmap\");\r\n        return 1;\r\n    }\r\n\r\n    // Just to force the kernel to populate the page table by having the CPU read from every page in the mapping:\r\n    size_t pos = 0;\r\n    char total = 0;\r\n    while (pos < length) {\r\n        total += addr[pos];\r\n        pos += 4096; // page size\r\n    }\r\n    printf(\"total: %d (should be 0)\\n\", (int)total);\r\n\r\n    // Wait for input so resource usage can be inspected.\r\n    getchar();\r\n\r\n    munmap(addr, length);\r\n}\r\n```\r\n\r\nAlso:\r\n\r\n - CPU cache layers using physical addressing will not be filled with useless zeros.\r\n - If anything tries to write to the zeroed region, the application will immediately crash, rather than continuing with broken invariants.\r\n\r\nThe only problem I see is that I don't know how portable this is, if at all. But of course a fallback to some form of malloc + memset can always be done at compile time."
+        },
+        {
+            "created_at": "2022-01-07T10:33:39.727Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7051?focusedCommentId=17470513) by Antoine Pitrou (apitrou):*\nWell... we could do system-specific optimizations, but I'm not sure it's useful to go to that level of optimization.\r\n\r\nAlso, as a counter-argument, note that `mmap` and `munmap` are system calls, so they have a non-trivial overhead: calling them on each buffer allocation would be counter-productive. `calloc` may give better results (or not).\r\n\r\nIf we do implement your idea, then it should be hidden behind an abstraction, for example on `MemoryPool`."
+        },
+        {
+            "created_at": "2022-01-07T11:14:21.715Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7051?focusedCommentId=17470543) by Jeroen van Straten (jvanstraten):*\nI wouldn't call this for every buffer; I would do it in conjunction with the power-of-two size buffer size caching that you suggested in the first comment. But whether it's worth doing (and worth the additional maintenance), I don't know."
+        },
+        {
+            "created_at": "2022-01-10T19:26:20.529Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7051?focusedCommentId=17472251) by Jeroen van Straten (jvanstraten):*\n`[~apitrou]`: I made a draft implementation based on what I have in mind, see associated (draft) PR. Could you maybe have a look? I'm wondering what you think of/whether you'd agree to this approach, or if it's just too overkill for what it's doing."
+        },
+        {
+            "created_at": "2022-01-18T14:18:33.688Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7051?focusedCommentId=17477904) by Jeroen van Straten (jvanstraten):*\nAs it turns out, at least some of the functions using `MakeArrayOfNull()` are mutating the resulting array (it should go without saying that this is a good way to create garbage when different kinds of buffers share the same bit of memory), as evidenced by the tests failing now that the new implementation just so happens to actually return `Buffers` that are marked as immutable. There was no documentation in the header about the result of `MakeArrayOfNull()` being immutable, so this is not really surprising. The same is probably true for `MakeArrayFromScalar()`, which calls `MakeArrayOfNull()` in some special cases.\r\n\r\nI've now made separate versions of `MakeArrayOfNull()` and `MakeArrayFromScalar()` for mutable and immutable use cases, and am slowly trying to figure out which of the invocations need the array to be mutable and which don't. I'm also replacing `MakeArrayOfNull(type, /\\*length=\\*/0)` invocations with `MakeEmptyArray(type)`, which seems more suitable in those cases. I'm getting rather worried about poking around changing semantics all over Arrow without fully understanding Arrow first, though..."
+        },
+        {
+            "created_at": "2022-01-18T17:12:27.398Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7051?focusedCommentId=17478055) by Antoine Pitrou (apitrou):*\nHmm, which functions mutate the result array?"
+        },
+        {
+            "created_at": "2022-01-19T14:52:45.321Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7051?focusedCommentId=17478736) by Jeroen van Straten (jvanstraten):*\nOkay, this took far longer than it should have. I thought I had more test failures, but I guess those must have been unrelated, or I'm misremembering. In the end, the only problem seems to be that `TrivialScalarUnaryAsArraysExec()` [allocates an output buffer with `MakeArrayFromScalar()`](https://github.com/apache/arrow/blob/fd580db7573f56ef57bfa8ba97caa67e69a79ef6/cpp/src/arrow/compute/kernels/util_internal.cc#L73), and `MakeArrayFromScalar()` [uses `MakeArrayOfNull()` for a special case](https://github.com/apache/arrow/blob/fd580db7573f56ef57bfa8ba97caa67e69a79ef6/cpp/src/arrow/array/util.cc#L790). At least, the test suite now passes for me locally."
+        },
+        {
+            "created_at": "2022-07-12T14:04:24.641Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-7051?focusedCommentId=17565591) by @toddfarmer:*\nThis issue was last updated over 90 days ago, which may be an indication it is no longer being actively worked. To better reflect the current state, the issue is being unassigned. Please feel free to re-take assignment of the issue if it is being actively worked, or if you plan to start that work soon."
+        }
+    ]
+}

@@ -1,0 +1,121 @@
+{
+    "issue": {
+        "title": "[Python][R] Prove out plumbing to pass data between Python and R using rpy2",
+        "body": "***Note**: This issue was originally created as [ARROW-11120](https://issues.apache.org/jira/browse/ARROW-11120). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nPer discussion on the mailing list, we should see what is required (if anything) to be able to pass data structures using the C interface between Python and R from the perspective of the Python user using rpy2. rpy2 is sort of the Python version of reticulate. Unit tests will then validate that it's working",
+        "created_at": "2021-01-03T18:23:47.000Z",
+        "updated_at": "2021-01-25T10:21:15.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Component: R",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2021-01-03T19:36:30.451Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17257843) by Laurent (lgautier):*\nI looked at it. It seems that all all that is needed it is to:\r\n1. get the `shared_ptr` from a Arrow object (e.g., `pyarrow_unwrap_array` available with `pyarrow`'s Cython interface)\n1. wrap this `shared_ptr` into an R C-level \"External Pointer\".\n1. load the R package \"arrow\" in the embedded R\n1. create an new instance of the matching class using the \"External Pointer\" (e.g., `Array$new(external_ptr)`)\n   \n   The only possible difficulty is to either:\n    \\* resolve how to get Cython and `cffi` to cooperate (rpy2 is using `cffi`)\n    \\* figure out how to get functions like `pyarrow_unwrap_array` easy to call from a C-extension"
+        },
+        {
+            "created_at": "2021-01-03T20:04:24.509Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17257853) by Laurent (lgautier):*\nIf the Cython-to-cffi bit can be figured out, it could look like this as code: https://github.com/rpy2/rpy2-arrow"
+        },
+        {
+            "created_at": "2021-01-04T09:46:20.911Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17258106) by Joris Van den Bossche (jorisvandenbossche):*\n`[~lgautier]` Your summary workflow (and linked repo) doesn't seem to be using the C interface, but trying to directly pass a pointer to an actual Arrow C++ array?  \r\n\r\nJust to be sure, did you see the `_export_to_c` (eg at https://github.com/apache/arrow/blob/master/python/pyarrow/array.pxi#L1236-L1289), which gives you the raw pointer from the C interface. The R arrow package should be able to create a R object from this AFAIK. \r\nThere are also some tests using CFFI in python to interact with the C interface: https://github.com/apache/arrow/blob/master/python/pyarrow/tests/test_cffi.py\r\n\r\n(note I don't know the internals of rpy2, so not sure of any of those pointers is relevant here)"
+        },
+        {
+            "created_at": "2021-01-04T14:00:11.037Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17258221) by Laurent (lgautier):*\n`[~jorisvandenbossche]` Thanks. I did confuse a few things, and came in with the (wrong) assumption that an R \"External Pointer\", traditionnaly the way to have pointers to external C or C++ structures, would be used.\r\nIn fact this _export_to_c` is used as you point it out (here in the R package: https://github.com/apache/arrow/blob/master/r/R/python.R#L26).\r\n\r\nIn the end the workflow is more like:\r\n- load the R package \"arrow\" in the embedded R\n- in R get pointers (`uintptr_t` cast to `double)` with `arrow::allocate_arrow_schema()` and `arrow::allocate_arrow_array()`\n- in Python call the method `_export_to_c` using the two pointers above (casting back from `double` to `uintptr_t`) \n- in R call `arrow::ImportArray(array_ptr, schema_ptr)`\n  \n  If correct this time, this is great news as it removes the cffi - C-extension/Cython issue."
+        },
+        {
+            "created_at": "2021-01-04T14:55:48.706Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17258261) by Joris Van den Bossche (jorisvandenbossche):*\nI am not that familiar with the inner details, but from a high-level, that indeed sounds correct\r\n\r\n(cc `[~apitrou]`)"
+        },
+        {
+            "created_at": "2021-01-04T15:04:05.382Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17258268) by Antoine Pitrou (apitrou):*\n`[~lgautier]` Yes, this looks correct. Also don't forget the\u00a0`delete_arrow_schema` and `delete_arrow_array` if you don't want to create a memory leak."
+        },
+        {
+            "created_at": "2021-01-06T02:48:29.313Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17259365) by Laurent (lgautier):*\nThanks to all. I think that I got it working. I still have to test, add unit tests, and convenience wrappers to make the objects easier to use (e.g., add rules for rpy2's conversion system) but I have updated the repos: https://github.com/rpy2/rpy2-arrow\r\n\r\nI guess the issue can be closed."
+        },
+        {
+            "created_at": "2021-01-06T09:24:17.732Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17259533) by Antoine Pitrou (apitrou):*\nIs this something you plan to contribute back?"
+        },
+        {
+            "created_at": "2021-01-06T09:36:12.036Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17259536) by Joris Van den Bossche (jorisvandenbossche):*\nI assume it is something that belongs in rpy2 itself (or an extension of it), and not pyarrow? \r\n(as long as we consider `_export_to_c` public, the POC (https://github.com/rpy2/rpy2-arrow/blob/main/rpy2_arrow/sexpextptr.py) is only using public APIs, and it seems no additional APIs are needed on the pyarrow side to make this possible)"
+        },
+        {
+            "created_at": "2021-01-06T09:37:45.422Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17259538) by Antoine Pitrou (apitrou):*\nHmm... perhaps? But then why do we have the other side in our R bindings?"
+        },
+        {
+            "created_at": "2021-01-07T19:44:53.294Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17260759) by Wes McKinney (wesm):*\nIt seems like it would be more maintainable to have it in pyarrow"
+        },
+        {
+            "created_at": "2021-01-08T03:30:43.935Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17260962) by Laurent (lgautier):*\n`[~apitrou]`: I am happy to contribute it back if you think it will be a good home for it.\r\n\r\n`[~jorisvandenbossche]` :This is definitely going to require `rpy2`, but from I am seeing the current APIs for `pyarrow` and the R package `arrow` are sufficient.\r\n\r\n`[~wesm]` :The current module `sexpextptr.py` is a building block for this. What I have in mind and started experimenting with will offer high-level utilities to share seamlessly Arrow objects between Python and R. On the R side the objects are \"R6\" objects (one of the too many OOP in R), for which I already have an extension to rpy2 (https://github.com/rpy2/rpy2-R6). All this still very much work-in-progress though. I probably need up to few weeks to get that completed; once it stabilizes I am happy to see with you if there is a part that should live under the arrow project."
+        },
+        {
+            "created_at": "2021-01-08T16:19:06.074Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17261399) by Neal Richardson (npr):*\nI don't think you need rpy2-R6 for this--the Python code doesn't need any special tooling to do what it needs with the R6 objects."
+        },
+        {
+            "created_at": "2021-01-08T21:27:59.423Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17261595) by Laurent (lgautier):*\n`[~npr]` Disclaimer: I am the author of a large part `rpy2` (and about half of rpy2-R6, the rest being kindly contributed).\r\n\r\nWhere to place the line between \"need\" vs \"nice to have\" can be debated, but the idea here is to make the sharing of data without copy between Python and R (and in the same process) as natural as possible. For the record, rpy2-R6 started as a contribution with the proposition to include it to rpy2. I chose to keep it out of base rpy2 because of its dependency on an R package not in R's standard library (R6). This minimizes the maintenance burden (no need for a new rpy2 release at each API-breaking change in R6). Otherwise it would have been in `rpy2`.\r\n\r\nOtherwise `rpy2` has convenience structures and functions for the so-called S4 system (https://rpy2.github.io/doc/v3.4.x/html/robjects_oop.html#working-with-r-s-oops), but the R package to manage a lot of it is in R's standard library.\r\n\r\nWhen it comes to \"need\" vs \"nice to have\" a similar argument can be made for the current code in `sexpextptr.py`. It is not absolutely not needed either and the few lines of codes there could just be an example in a documentation.\r\n\r\nMy experience has been that R can be surprising, and that boilerplate code that helps create code or objects with a more typical behavior in Python (to the extent R allows it) is quite helpful. I think that the bulk of the rpy2 user-base is from the Data Science world. May be the audience for `pyarrow` comes more from Software Engineering and minds less about those little annoyances. \r\n"
+        },
+        {
+            "created_at": "2021-01-08T21:43:39.676Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17261604) by Neal Richardson (npr):*\nAll I'm saying is that in your code, the only place you use rpy2_R6 is here: https://github.com/rpy2/rpy2-arrow/blob/main/rpy2_arrow/sexpextptr.py#L29, and you don't need to because you aren't doing anything specifically with R6. Indeed, you do the same operation on L35 without using rpy2_R6.utils.\r\n\r\nI have no opinion about what libraries users of this API in pyarrow should use, I'm just saying that this adapter code doesn't need it."
+        },
+        {
+            "created_at": "2021-01-08T21:57:26.084Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17261613) by Laurent (lgautier):*\nOh, then I did not stress enough that this repos is early work in progress. This is not everywhere rpy2_R6 will be used.\r\n\r\nAlso, the L35 you are pointing out is a mistake: there is no function `dollar` defined, and it should be calling the same one as in L29. I hacked this together quickly to assess whether it could work. Unit tests for that part are coming next. "
+        },
+        {
+            "created_at": "2021-01-08T22:08:06.528Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17261619) by Neal Richardson (npr):*\nIn any case, you can get at that function with base R methods:\r\n\r\n```Java\n\r\n> library(arrow)\r\n\r\nAttaching package: \u2018arrow\u2019\r\n\r\nThe following object is masked from \u2018package:utils\u2019:\r\n\r\n    timestamp\r\n\r\n> get(\"create\", ChunkedArray)\r\nfunction (..., type = NULL) \r\n{\r\n    if (!is.null(type)) {\r\n        type <- as_type(type)\r\n    }\r\n    ChunkedArray__from_list(list2(...), type)\r\n}\r\n<environment: namespace:arrow>\r\n```"
+        },
+        {
+            "created_at": "2021-01-08T22:28:03.659Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17261629) by Laurent (lgautier):*\nYes, I know that R6 classes inherit from R environments. Did I mention the point about making it easy (easier) from a Python user perspective?"
+        },
+        {
+            "created_at": "2021-01-10T02:49:50.261Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17261997) by Laurent (lgautier):*\n`[~npr]` I think I understand where I did not understand you, and I think we agree. (btw, the exchange about \"get\" / \"environment\" made me realize that the R `$` operator/function was not needed since R6 classes inherit from environment, and that \"get\" for environments is mapped to the method `__getitem__` in rpy2 - so thanks!). \r\n\r\nWhile I intend to use rpy2-R6 for what I have in mind, for example conversion rules for rpy2 or wrapping classes to allow the use of dplyr from Python (like here https://rpy2.github.io/doc/latest/html/lib_dplyr.html), this does not mean that everything in the code must be tied to rpy2-R6. My comment about checking again within few weeks whether there is a part of that code that could live within the Arrow project was in that sense.\r\n\r\nI have cleaned things a bit with the split use rpy2-R6 vs doesn't use rpy2-R6 in mind.\r\nmodule here:\r\nhttps://github.com/rpy2/rpy2-arrow/blob/main/rpy2_arrow/pyarrow_rarrow.py\r\nexample:\r\nhttps://github.com/rpy2/rpy2-arrow/blob/main/README.md\r\n"
+        },
+        {
+            "created_at": "2021-01-24T16:48:23.792Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17270923) by Laurent (lgautier):*\nI now have unit tests (coverage 90+%) for that first vanilla conversion (uses standard rpy2, no R6) and it seems to be working well.\r\n\r\nHowever, the performance for in-memory table or arrays does not appear too great, or at least I would have expected that it would be quasi-instantaneous as no copy would be made.\r\n\r\nIt takes 24 seconds to share a pyarrow  table with 270K rows and 18 columns to R.\r\n\r\nThe time benchmark is in cells #7 and #8 here:\r\nhttps://github.com/rpy2/rpy2-arrow/blob/main/doc/notebooks/demo.ipynb\r\n\r\n"
+        },
+        {
+            "created_at": "2021-01-24T17:22:14.176Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17270940) by Laurent (lgautier):*\nI looked briefly into it and the issue might be caused by a combination of what the API in the R arrow package and R's performance when creating many R6 objects objects.\r\n\r\nThe R constructor for ChunkedArray expects a list of Array objects.  In my example a ChunkedArray has ~2200 chunks. Getting R to build that many dummy Array objects (`arrow::Array$create(1)`) takes over half a second. If I multiply this by 18 (number of columns in my tables) have slightly over 10 seconds (almost half of the 24 seconds observed).\r\n\r\nIt feels like a pair of functions `pyarrow.ChunkedArray._export_to_c() ` and `arrow:::ImportChunkedArray()` would be needed."
+        },
+        {
+            "created_at": "2021-01-24T17:53:05.919Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17270946) by Antoine Pitrou (apitrou):*\n2200 chunks sounds really too much for 270K rows. I would expect at most 27 chunks...\r\n\r\nThat said, 18 seconds to create 2200 objects is also completely unexpected."
+        },
+        {
+            "created_at": "2021-01-24T19:53:34.590Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17270975) by Laurent (lgautier):*\n> 2200 chunks sounds really too much for 270K rows. I would expect at most 27 chunks...\r\n\r\nThe data is split across several parquet files (time series, partitioned on months). I just fetch a dataset in a example on the Ursa Labs website: https://ursalabs.org/arrow-r-nightly/articles/dataset.html\r\n\r\nAssuming that the default number of chunks is set per parquet file, this would still be 10 times more chunk per file that you would expect.\r\n\r\n> That said, 18 seconds to create 2200 objects is also completely unexpected.\r\n\r\nThat's 10 seconds, not 18. Otherwise I believe that we agree that this is not terribly fast."
+        },
+        {
+            "created_at": "2021-01-24T21:14:23.115Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17270988) by Wes McKinney (wesm):*\nWe have a C iterator protocol for communicating chunked arrays and chunked tables, is it possible to use that here? "
+        },
+        {
+            "created_at": "2021-01-24T21:57:01.308Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17270998) by Laurent (lgautier):*\nFor what is worth, calling the pyarrow table's `combine_chunks()` to cancel chunking results in significant performance improvements. Conversion takes 75ms instead of 24s after that.\r\n\r\nFew comments about the API in relation with this:\r\n\r\n- `pyarrow.lib.Table` has a method `combine_chunks()` but there does not seem to be a way to \"re-chunk\" (say go from 2,200 chunks to 10 chunks)\n-  There is no apparent way to specify the number of chunk when creating the table from a dataset using `to_table()`: \n  ```python\n  \n  tbl = dataset.to_table(filter=ds.field('tip_amount') > 10)\n  ```\n  The named argument `batch_size` does not appear to have any effect on the number of chunks.\n"
+        },
+        {
+            "created_at": "2021-01-25T10:21:15.387Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-11120?focusedCommentId=17271224) by Joris Van den Bossche (jorisvandenbossche):*\nA few notes to clarify why you got a table with such many small record batches:\r\n\r\n- By default, the dataset scanner reads each parquet RowGroup into one RecordBatch\n- The `batch_size` keyword is a _maximum_ number of rows, so it will split row groups into multiple record batches when above that max, but will (AFAIK) never combine different smaller row groups to obtain record batches closer to the `batch_size`\n- Because you are applying a filter, which is done per row group/record batch, you end up with small row groups and thus many small record batches (which are currently not rechunked, and varying `batch_size` has no effect in this case)\n  \n  Additionally, I think that our files in the ursa S3 bucket have been written with row groups of 65k rows, which is already relatively small, certainly when heavily filtering them.\n  \n  Now, the resulting table with chunks of on average 120 rows is certainly not ideal (even if the conversion to R performance issue is fixed). A method to \"re-chunk\" a Table or ChunkedArray seems generally useful indeed, so I opened ARROW-11370 for this. We might also want to think if we can integrate something directly into the dataset API as well.\n  \n  \n  \n  \n"
+        }
+    ]
+}

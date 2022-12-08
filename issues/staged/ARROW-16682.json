@@ -1,0 +1,32 @@
+{
+    "issue": {
+        "title": "[Python] CSV reader: allow parsing without encoding errors",
+        "body": "***Note**: This issue was originally created as [ARROW-16682](https://issues.apache.org/jira/browse/ARROW-16682). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen trying to read arbitrary CSV files, it is not possible to infer/guess the correct encoding 100% of the time. The Arrow CSV reader will currently fail if any byte cannot be decoded given the specified encoding (see example below).\r\n\r\nWith pandas.read_csv(), I can often get a result that is 99.9% correct by passing it a text stream decoded in Python with [errors=\"replace\"](https://docs.python.org/3/library/codecs.html#error-handlers) (or \"ignore\" etc.).\r\n\r\nPyarrow's csv.read_csv() on the other hand neither accepts an already decoded text stream (TypeError: binary file expected, got text file), nor a parameter to configure what to do with decoding errors. As a result the parser simply fails.\r\n\r\nThe simplest solution would probably be to expose Python's error handling in pyarrow.csv.ReadOptions (e.g. encoding_errors: \"strict\" | \"ignore\" | \"replace\" ...).\r\n\r\nIt would also be useful to document the behaviour of the CSV reader. E.g. that it only accepts binary streams, and how encoding errors are handled. In particular it is unclear what \"Columns that cannot decode using this encoding can still be read as Binary\" means, since the parser will currently fail if any bytes cannot be decoded.\r\n\r\nToy example:\r\n\r\n\u00a0\r\n```java\n\r\ntxt = \"\"\"\r\ncol_\ud83d\ude00_1, col2\r\n0,a\r\n1,b\r\n\"\"\"\r\nbuffer = io.BytesIO(txt.encode(\"utf-8\"))\r\npa.csv.read_csv(buffer, pa.csv.ReadOptions(encoding=\"ascii\"))\n```\r\n```\n\r\nUnicodeDecodeError: 'ascii' codec can't decode byte 0xf0 in position 5: ordinal not in range(128)\n```\r\nwhereas \"with pandas\":\r\n```java\n\r\nbuffer = io.BytesIO(txt.encode(\"utf-8\"))\r\ntext = io.TextIOWrapper(buffer, encoding=\"ascii\", errors=\"replace\")\r\npd.read_csv(text)\n```\r\n```\n\r\n   col_\ufffd\ufffd\ufffd\ufffd_1  col2\r\n0           0     a\r\n1           1     b\r\n```\r\n\u00a0",
+        "created_at": "2022-05-29T14:28:39.000Z",
+        "updated_at": "2022-05-31T12:15:56.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: enhancement"
+        ],
+        "closed": false
+    },
+    "comments": [
+        {
+            "created_at": "2022-05-30T12:14:36.982Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16682?focusedCommentId=17543917) by Antoine Pitrou (apitrou):*\n> In particular it is unclear what \"Columns that cannot decode using this encoding can still be read as Binary\" means, since the parser will currently fail if any bytes cannot be decoded.\r\n\r\nThat sentence is valid for CSV _data_. However, in your case the column names are invalid utf8."
+        },
+        {
+            "created_at": "2022-05-30T12:23:46.041Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16682?focusedCommentId=17543921) by Antoine Pitrou (apitrou):*\nHere is an example with invalid utf8 in the data:\r\n```python\n\r\n>>> csv_bytes = b\"\"\"col1,col2\\na,b\\nc\\xff,d\"\"\"\r\n>>> pa.csv.read_csv(pa.BufferReader(csv_bytes))\r\npyarrow.Table\r\ncol1: binary\r\ncol2: string\r\n----\r\ncol1: [[61,63FF]]\r\ncol2: [[\"b\",\"d\"]]\r\n```"
+        },
+        {
+            "created_at": "2022-05-30T13:16:47.509Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16682?focusedCommentId=17543941) by Thomas Buhrmann (buhrmann):*\nAh, that makes sense as an explanation for the docs, thanks.\r\n\r\nBut the following still fails, and having a decoding error option would be useful in general, no?\r\n```java\n\r\ncsv = \"\"\"\r\ncol_1,col2\r\n0,\ud83d\ude00\r\n1,b\r\n\"\"\".encode(\"utf-8\")\r\n\r\npa.csv.read_csv(io.BytesIO(csv), pa.csv.ReadOptions(encoding=\"ascii\"))\n```\r\n```\n\r\n>>> UnicodeDecodeError: 'ascii' codec can't decode byte 0xf0 in position 14: ordinal not in range(128)\r\n```"
+        },
+        {
+            "created_at": "2022-05-31T12:15:56.114Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16682?focusedCommentId=17544354) by Antoine Pitrou (apitrou):*\nYes, that would be possible, and probably reasonably easy to add."
+        }
+    ]
+}

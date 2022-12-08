@@ -1,0 +1,33 @@
+{
+    "issue": {
+        "title": "[C++] count_distinct aggregates incorrectly across row groups",
+        "body": "***Note**: This issue was originally created as [ARROW-16807](https://issues.apache.org/jira/browse/ARROW-16807). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWhen reading from parquet files with multiple row groups, `count_distinct` (wrapped by `n_distinct` in R) returns inaccurate and inconsistent results:\r\n```r\n\r\nlibrary(dplyr, warn.conflicts = FALSE)\r\n\r\npath <- tempfile(fileext = '.parquet')\r\narrow::write_parquet(dplyr::starwars, path, chunk_size = 20L)\r\n\r\nds <- arrow::open_dataset(path)\r\n\r\nds %>% count(sex) %>% collect()\r\n#> # A tibble: 5 \u00d7 2\r\n#> \u00a0 sex \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0n\r\n#> \u00a0 <chr> \u00a0 \u00a0 \u00a0 \u00a0 \u00a0<int>\r\n#> 1 male \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a060\r\n#> 2 none \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 6\r\n#> 3 female \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a016\r\n#> 4 hermaphroditic \u00a0 \u00a0 1\r\n#> 5 <NA> \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 4\r\n\r\nds %>% summarise(n = n_distinct(sex)) %>% collect()\r\n#> # A tibble: 1 \u00d7 1\r\n#> \u00a0 \u00a0 \u00a0 n\r\n#> \u00a0 <int>\r\n#> 1 \u00a0 \u00a019\r\nds %>% summarise(n = n_distinct(sex)) %>% collect()\r\n#> # A tibble: 1 \u00d7 1\r\n#> \u00a0 \u00a0 \u00a0 n\r\n#> \u00a0 <int>\r\n#> 1 \u00a0 \u00a017\r\nds %>% summarise(n = n_distinct(sex)) %>% collect()\r\n#> # A tibble: 1 \u00d7 1\r\n#> \u00a0 \u00a0 \u00a0 n\r\n#> \u00a0 <int>\r\n#> 1 \u00a0 \u00a017\r\nds %>% summarise(n = n_distinct(sex)) %>% collect()\r\n#> # A tibble: 1 \u00d7 1\r\n#> \u00a0 \u00a0 \u00a0 n\r\n#> \u00a0 <int>\r\n#> 1 \u00a0 \u00a016\r\nds %>% summarise(n = n_distinct(sex)) %>% collect()\r\n#> # A tibble: 1 \u00d7 1\r\n#> \u00a0 \u00a0 \u00a0 n\r\n#> \u00a0 <int>\r\n#> 1 \u00a0 \u00a016\r\nds %>% summarise(n = n_distinct(sex)) %>% collect()\r\n#> # A tibble: 1 \u00d7 1\r\n#> \u00a0 \u00a0 \u00a0 n\r\n#> \u00a0 <int>\r\n#> 1 \u00a0 \u00a017\r\nds %>% summarise(n = n_distinct(sex)) %>% collect()\r\n#> # A tibble: 1 \u00d7 1\r\n#> \u00a0 \u00a0 \u00a0 n\r\n#> \u00a0 <int>\r\n#> 1 \u00a0 \u00a017\r\n\r\n# correct\r\nds %>% collect() %>% summarise(n = n_distinct(sex))\r\n#> # A tibble: 1 \u00d7 1\r\n#> \u00a0 \u00a0 \u00a0 n\r\n#> \u00a0 <int>\r\n#> 1 \u00a0 \u00a0 5\r\n```\r\n\r\nIf the file is stored as a single row group, results are correct. When grouped, results are correct.\r\n\r\nI can reproduce this in Python as well using the same file and `pyarrow.compute.count_distinct`:\r\n\r\n```python\n\r\nimport pyarrow as pa\r\nimport pyarrow.parquet as pq\r\n\r\npa.__version__\r\n#> 8.0.0\r\n\r\nstarwars = pq.read_table('/var/folders/0j/zz6p_mjx2_b727p6xdpm5chc0000gn/T//Rtmp2wnWl5/file1744f6cc6cea8.parquet')\r\n\r\npa.compute.count_distinct(starwars.column('sex')).as_py()\r\n#> 15\r\npa.compute.unique(starwars.column('sex'))\r\n#> [\r\n#>   \"male\",\r\n#>   \"none\",\r\n#>   \"female\",\r\n#>   \"hermaphroditic\",\r\n#>    null\r\n#> ]\r\n```\r\n\r\nThis seems likely to be the same problem in this StackOverflow question: https://stackoverflow.com/questions/72561901/how-do-i-compute-the-number-of-unique-values-in-a-pyarrow-array which is working from orc files.",
+        "created_at": "2022-06-10T17:00:44.000Z",
+        "updated_at": "2022-10-03T15:32:53.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2022-07-16T21:45:53.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-06-27T02:37:37.548Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16807?focusedCommentId=17558955) by Yibo Cai (yibocai):*\nLooks current `count_distinct` doesn't handle chunked array. It simply accumulates the distinct counts of each chunk.\r\nhttps://github.com/apache/arrow/blob/master/cpp/src/arrow/compute/kernels/aggregate_basic.cc#L159\r\nIt's wrong if there are duplicated values among chunks.\r\nE.g., for two chunks \"1,2,3\", \"1,2,3\", current count_distinct kernel outpus 3+3=6.\r\n"
+        },
+        {
+            "created_at": "2022-06-28T19:47:56.336Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16807?focusedCommentId=17559938) by Aldrin Montana (octalene):*\n`[~westonpace]` found a bug ([47dd2ec](https://github.com/westonpace/arrow/commit/47dd2ec483a00ec313add8ddf1dc1993ad932ed0)). I will pick this up tomorrow and will try to add some extra unit tests and check for other bugs in the area."
+        },
+        {
+            "created_at": "2022-06-30T15:56:04.229Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16807?focusedCommentId=17561101) by Aldrin Montana (octalene):*\nclarification: the above commit (47dd2ec) is actually for ARROW-16904."
+        },
+        {
+            "created_at": "2022-07-16T21:45:53.974Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-16807?focusedCommentId=17567547) by Wes McKinney (wesm):*\nIssue resolved by pull request 13583\n<https://github.com/apache/arrow/pull/13583>"
+        }
+    ]
+}

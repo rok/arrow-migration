@@ -1,0 +1,53 @@
+{
+    "issue": {
+        "title": "[Python] Statically-linking boost_regex in both libarrow and libparquet results in segfault",
+        "body": "***Note**: This issue was originally created as [ARROW-2247](https://issues.apache.org/jira/browse/ARROW-2247). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThis is a backtrace loading `libparquet.so` on Ubuntu 14.04 using boost 1.66.1 from conda-forge. Both libarrow and libparquet contain `boost_regex` statically linked. \r\n\r\n```Java\n\r\nIn [1]: import ctypes\r\n\r\nIn [2]: ctypes.CDLL('libparquet.so')\r\n\r\nProgram received signal SIGSEGV, Segmentation fault.\r\n0x00007fffed4ad3fb in std::basic_string<char, std::char_traits<char>, std::allocator<char> >::basic_string(std::string const&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6\r\n(gdb) bt\r\n#0  0x00007fffed4ad3fb in std::basic_string<char, std::char_traits<char>, std::allocator<char> >::basic_string(std::string const&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6\r\n#1  0x00007fffed74c1fc in boost::re_detail_106600::cpp_regex_traits_char_layer<char>::init() ()\r\n   from /home/wesm/cpp-toolchain/lib/libboost_regex.so.1.66.0\r\n#2  0x00007fffed794803 in boost::object_cache<boost::re_detail_106600::cpp_regex_traits_base<char>, boost::re_detail_106600::cpp_regex_traits_implementation<char> >::do_get(boost::re_detail_106600::cpp_regex_traits_base<char> const&, unsigned long) () from /home/wesm/cpp-toolchain/lib/libboost_regex.so.1.66.0\r\n#3  0x00007fffed79e62b in boost::basic_regex<char, boost::regex_traits<char, boost::cpp_regex_traits<char> > >::do_assign(char const*, char const*, unsigned int) () from /home/wesm/cpp-toolchain/lib/libboost_regex.so.1.66.0\r\n#4  0x00007fffee58561b in boost::basic_regex<char, boost::regex_traits<char, boost::cpp_regex_traits<char> > >::assign (this=0x7fffffff3780, \r\n    p1=0x7fffee600602 \"(.*?)\\\\s*(?:(version\\\\s*(?:([^(]*?)\\\\s*(?:\\\\(\\\\s*build\\\\s*([^)]*?)\\\\s*\\\\))?)?)?)\", \r\n    p2=0x7fffee60064a \"\", f=0) at /home/wesm/cpp-toolchain/include/boost/regex/v4/basic_regex.hpp:381\r\n#5  0x00007fffee5855a7 in boost::basic_regex<char, boost::regex_traits<char, boost::cpp_regex_traits<char> > >::assign (this=0x7fffffff3780, \r\n    p=0x7fffee600602 \"(.*?)\\\\s*(?:(version\\\\s*(?:([^(]*?)\\\\s*(?:\\\\(\\\\s*build\\\\s*([^)]*?)\\\\s*\\\\))?)?)?)\", f=0)\r\n    at /home/wesm/cpp-toolchain/include/boost/regex/v4/basic_regex.hpp:366\r\n#6  0x00007fffee5683f3 in boost::basic_regex<char, boost::regex_traits<char, boost::cpp_regex_traits<char> > >::basic_regex (this=0x7fffffff3780, \r\n    p=0x7fffee600602 \"(.*?)\\\\s*(?:(version\\\\s*(?:([^(]*?)\\\\s*(?:\\\\(\\\\s*build\\\\s*([^)]*?)\\\\s*\\\\))?)?)?)\", f=0)\r\n    at /home/wesm/cpp-toolchain/include/boost/regex/v4/basic_regex.hpp:335\r\n#7  0x00007fffee5656d0 in parquet::ApplicationVersion::ApplicationVersion (\r\nPython Exception <class 'gdb.error'> There is no member named _M_dataplus.: \r\n    this=0x7fffee8f1fb8 <parquet::ApplicationVersion::PARQUET_251_FIXED_VERSION>, created_by=)\r\n    at ../src/parquet/metadata.cc:452\r\n#8  0x00007fffee41c271 in __cxx_global_var_init.1(void) () at ../src/parquet/metadata.cc:35\r\n#9  0x00007fffee41c44e in _GLOBAL__sub_I_metadata.tmp.wesm_desktop.4838.ii ()\r\n   from /home/wesm/local/lib/libparquet.so\r\n#10 0x00007ffff7dea1da in call_init (l=<optimized out>, argc=argc@entry=2, argv=argv@entry=0x7fffffff5d88, \r\n    env=env@entry=0x7fffffff5da0) at dl-init.c:78\r\n#11 0x00007ffff7dea2c3 in call_init (env=<optimized out>, argv=<optimized out>, argc=<optimized out>, \r\n    l=<optimized out>) at dl-init.c:36\r\n#12 _dl_init (main_map=main_map@entry=0x13fb220, argc=2, argv=0x7fffffff5d88, env=0x7fffffff5da0)\r\n    at dl-init.c:126\r\n```\r\n\r\nThis seems to be caused by static initializations in libparquet:\r\n\r\nhttps://github.com/apache/parquet-cpp/blob/master/src/parquet/metadata.cc#L34\r\n\r\nWe should see if removing these static initializations makes the problem go away. If not, then statically-linking boost_regex in both libraries is not advisable.\r\n\r\nFor this reason and more, I really wish that Arrow and Parquet shared a common build system and monorepo structure \u2013 it would make handling these toolchain and build-related issues much simpler. ",
+        "created_at": "2018-03-02T20:25:47.000Z",
+        "updated_at": "2018-07-27T15:28:40.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-04-11T15:56:19.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-03-02T20:26:04.902Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2247?focusedCommentId=16384115) by Wes McKinney (wesm):*\ncc `[~mdeepak]`"
+        },
+        {
+            "created_at": "2018-03-02T20:26:46.045Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2247?focusedCommentId=16384117) by Wes McKinney (wesm):*\nAs one would hope the problem goes away if I switch to dynamic linking for Boost"
+        },
+        {
+            "created_at": "2018-03-03T22:24:48.499Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2247?focusedCommentId=16384877) by Deepak Majeti (mdeepak):*\nInteresting that the same boost version is causing an issue. Could it be an issue with the CDLL\u00a0 python call?\r\n\r\nHaving a mono repo for Arrow and Parquet definitely simplifies the build toolchain. But, this particular problem can only be solved if we have a single library consisting of both Arrow and Parquet correct?"
+        },
+        {
+            "created_at": "2018-03-03T22:29:53.364Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2247?focusedCommentId=16384879) by Wes McKinney (wesm):*\nOne possibility is that we could refactor the parquet-cpp build system to utilize the Arrow build system via a git submodule, so that the `libparquet` target can be used within a single unified build system. So we would go from two loosely-connected build systems to one. "
+        },
+        {
+            "created_at": "2018-03-05T15:21:59.359Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2247?focusedCommentId=16386198) by Deepak Majeti (mdeepak):*\nIf the proposed soultion solves linking issues such as this, we should go forward with it."
+        },
+        {
+            "created_at": "2018-03-05T16:07:57.055Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2247?focusedCommentId=16386277) by Wes McKinney (wesm):*\nAt a glance, it looks like a great deal of work. We should collectively assess what's the best way to build a more cohesive / productive build system for the projects. We also have the matter of the ASF release process"
+        },
+        {
+            "created_at": "2018-04-06T16:19:45.247Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2247?focusedCommentId=16428528) by Deepak Majeti (mdeepak):*\nhttps://issues.apache.org/jira/browse/PARQUET-1265 probably is a fix for this issue."
+        },
+        {
+            "created_at": "2018-04-09T06:02:35.833Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2247?focusedCommentId=16430117) by Xianjin YE (advancedxy):*\n`[~mdeepak]` `[~wesmckinn]` Yes, I believe the proposed change in PARQUET-1265 fixes this issue.\r\n\r\nThe problem is called static initialization order fiasco. You can get a solution from <https://isocpp.org/wiki/faq/ctors#static-init-order-on-first-use> , which basically the same with the proposed solution in PARQUET-1265.\r\n\r\nOur internal CPP project also suffers this problem...."
+        },
+        {
+            "created_at": "2018-04-11T15:56:03.450Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-2247?focusedCommentId=16434107) by Antoine Pitrou (apitrou):*\nARROW-2224 removed boost-regex usage from libarrow."
+        }
+    ]
+}

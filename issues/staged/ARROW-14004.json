@@ -1,0 +1,54 @@
+{
+    "issue": {
+        "title": "[Python] to_pandas() converts to float instead of using pandas nullable types",
+        "body": "***Note**: This issue was originally created as [ARROW-14004](https://issues.apache.org/jira/browse/ARROW-14004). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWe've noticed that when converting an Arrow Table to pandas using `.to_pandas()` integer columns with null values get converted to float instead of using pandas nullable types.\r\n\r\nIf the column was created with pandas first it is correctly preserved (I guess it's using stored metadata for this).\r\n\r\nI've attached a screenshot showing this behavior.\r\n\r\nAs currently there is support for nullable types in pandas, just as in Arrow, it would be great to use these types when dealing with columns with null values.\r\n\r\nIf you are reticent to change this behavior, a param would be nice too (e.g. `to_pandas(use_nullable_types: True)`).\r\n\r\n\u00a0",
+        "created_at": "2021-09-15T14:45:59.000Z",
+        "updated_at": "2021-10-20T20:08:30.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Documentation",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2021-10-20T12:39:58.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2021-09-15T15:34:11.738Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14004?focusedCommentId=17415597) by Joris Van den Bossche (jorisvandenbossche):*\n> If the column was created with pandas first it is correctly preserved (I guess it's using stored metadata for this).\r\n\r\nThat's correct.\r\n\r\n> As currently there is support for nullable types in pandas, just as in Arrow, it would be great to use these types when dealing with columns with null values.\r\n\r\nSince pandas does not yet use those nullable dtypes as the default in pandas (and there are still quite some parts of pandas that don't yet support them fully), I think pyarrow should also not yet use them by default.\r\n\r\n> If you are reticent to change this behavior, a param would be nice too (e.g. `to_pandas(use_nullable_types: True)`).\r\n\r\nThere is actually already a keyword to customize the dtype used in the conversion to pandas, to support extension dtypes in general: `types_mapper`.\r\n\r\nAnd this can be used to get the effect you want (only for int64):\r\n\r\n```python\n\r\ntable.to_pandas(types_mapper={pa.int64(): pd.Int64Dtype()}.get)\r\n```\r\n\r\nNow, if you want this for all integer dtypes (unsigned/signed and all bitwidths) this of course gets a bit unwieldy (but you can define this dictionary once somewhere in your code and then re-use that). \r\n\r\nFor such a case, adding a `use_nullable_dtypes` keyword would be a nice short-cut (eg pandas' `read_parquet` already has this, and uses the `type_mapper` under the hood). However, I am a bit hesitant to add such a keyword as people might expect different behaviour from this (for example, pandas also has nullable float and string dtypes, and depending on your use case you might want to use nullable ints but not nullable floats (as for floats there is less benefit in using it). But a general keyword should probably enable all of them)."
+        },
+        {
+            "created_at": "2021-09-15T15:35:53.347Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14004?focusedCommentId=17415600) by Joris Van den Bossche (jorisvandenbossche):*\n(in any case, we should add this to the documentation)"
+        },
+        {
+            "created_at": "2021-09-15T15:55:16.270Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14004?focusedCommentId=17415614) by Miguel Cant\u00f3n Cort\u00e9s (miwelc):*\nThanks for your response!\r\n\r\nThe issue I find with your recommended solution is that it would convert all int64 columns to nullable pandas columns, regardless if they actually have nulls or not.\r\n\r\nThe flag I proposed would take into account if they have nulls and only then would use a nullable type in pandas."
+        },
+        {
+            "created_at": "2021-09-15T18:30:12.980Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14004?focusedCommentId=17415680) by Joris Van den Bossche (jorisvandenbossche):*\nThat's another reason that I am not fully in favor of such a flag. Personally, _I_ would expect that it reliably results in certain dtypes given the schema of the Arrow table, regardless of the actual values (whether nulls are present or not). \r\n(of course that currently also not the case, since you get int or float depending on it, but that's due to a limitation of numpy). \r\n\r\nReasons for this: 1) type predictability/stability (the result dtype only depending on dtypes of the input, not on actual values) can be very useful, and 2) the numpy int64 vs nullable Int64 dtypes in pandas _do_ behave differently for certain operations (eg propagation of NA in comparisons), so I think it should be a conscious choice (eg missing values could be introduced in a next step in the pipeline after the arrow->pandas conversion (eg due to a join), and then having the nullable Int64, even though not having missing values initially, will give a different result).\r\n\r\nSo I think it is difficult to have a single flag that tailors to the different expectations (on the other hand, it's certainly true that, if not done under the hood, it's difficult/impossible to get the \"nullable dtype only if there are nulls\" behaviour without converting the floats back to ints. Although after the fact converting the nullable int columns to normal int columns should be a easy/cheap conversion).\r\n"
+        },
+        {
+            "created_at": "2021-09-15T21:00:40.982Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14004?focusedCommentId=17415757) by Miguel Cant\u00f3n Cort\u00e9s (miwelc):*\nI see, fair enough. If we want to achieve this result by manually setting the 'pandas' metadata mimicking yours, is this something we can rely on or it will be subject to change in future releases?"
+        },
+        {
+            "created_at": "2021-10-13T20:59:50.726Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14004?focusedCommentId=17428489) by Krisztian Szucs (kszucs):*\n`[~jorisvandenbossche]` postponing it to 7.0, feel free if it can be fixed until the first release candidate of 6.0"
+        },
+        {
+            "created_at": "2021-10-15T15:50:22.674Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14004?focusedCommentId=17429349) by Joris Van den Bossche (jorisvandenbossche):*\n`[~miwelc]` late answer, but yes if you would construct the exact metadata as you currently get from a pandas (with nullable dtypes) -> arrow conversion, that should be a relatively robust solution. The exact metadata might change in the future, but even then we have to provide compatibility with the current format (since there are eg parquet files written that have the current metadata format). \r\n\r\nI opened a PR that start to document this better. Feedback certainly welcome!"
+        },
+        {
+            "created_at": "2021-10-16T10:43:24.425Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14004?focusedCommentId=17429545) by Miguel Cant\u00f3n Cort\u00e9s (miwelc):*\nThanks, that solution works for us."
+        },
+        {
+            "created_at": "2021-10-20T12:39:58.632Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-14004?focusedCommentId=17431189) by Joris Van den Bossche (jorisvandenbossche):*\nIssue resolved by pull request 11434\n<https://github.com/apache/arrow/pull/11434>"
+        }
+    ]
+}

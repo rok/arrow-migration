@@ -1,0 +1,62 @@
+{
+    "issue": {
+        "title": "[Python][R][Parquet] Possible time zone handling inconsistencies ",
+        "body": "***Note**: This issue was originally created as [ARROW-8482](https://issues.apache.org/jira/browse/ARROW-8482). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nHello there!\r\n\r\n\u00a0\r\n\r\nFirst of all, thanks for making parquet files a reality in **R** and **Python**. This is really great.\r\n\r\nI found a very nasty bug when exchanging parquet files between the two platforms. Consider this.\r\n\r\n\u00a0\r\n\r\n\u00a0\r\n```java\n\r\nimport pandas as pd\r\nimport pyarrow.parquet as pq\r\nimport numpy as np\r\n\r\ndf = pd.DataFrame({'string_time_utc' : [pd.to_datetime('2018-02-01 14:00:00.531'), \r\n pd.to_datetime('2018-02-01 14:01:00.456'),\r\n pd.to_datetime('2018-03-05 14:01:02.200')]})\r\ndf['timestamp_est'] = pd.to_datetime(df.string_time_utc).dt.tz_localize('UTC').dt.tz_convert('US/Eastern').dt.tz_localize(None)\r\ndf\r\nOut[5]: \r\n string_time_utc timestamp_est\r\n0 2018-02-01 14:00:00.531 2018-02-01 09:00:00.531\r\n1 2018-02-01 14:01:00.456 2018-02-01 09:01:00.456\r\n2 2018-03-05 14:01:02.200 2018-03-05 09:01:02.200\r\n```\r\n\u00a0\r\n\r\nNow I simply write to disk\r\n\r\n\u00a0\r\n```java\n\r\ndf.to_parquet('myparquet.pq')\r\n```\r\n\u00a0\r\n\r\nAnd the use **R**\u00a0to load it.\r\n\r\n\u00a0\r\n```java\n\r\n\r\ntest <- read_parquet('myparquet.pq')\r\n> test\r\n# A tibble: 3 x 2\r\n string_time_utc timestamp_est \r\n <dttm> <dttm> \r\n1 2018-02-01 09:00:00.530999 2018-02-01 04:00:00.530999\r\n2 2018-02-01 09:01:00.456000 2018-02-01 04:01:00.456000\r\n3 2018-03-05 09:01:02.200000 2018-03-05 04:01:02.200000\r\n```\r\n\u00a0\r\n\r\n\u00a0\r\n\r\nAs you can see, the timestamps have been converted in the process. I first referenced this bug in feather but I still it is still there. This is a very dangerous, silent bug.\r\n\r\n\u00a0\r\n\r\nWhat do you think?\r\n\r\nThanks",
+        "created_at": "2020-04-16T13:06:28.000Z",
+        "updated_at": "2020-04-16T17:37:47.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Component: R",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-04-16T17:29:44.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-04-16T13:16:31.624Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8482?focusedCommentId=17084862) by Olaf (Olafsson):*\ninterestingly, converting the columns as strings in python does not solve the problem. read_parquet in R will convert to datetime and shift the timezones... Any ideas what should be done here?\r\n\r\nThanks!"
+        },
+        {
+            "created_at": "2020-04-16T14:39:34.922Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8482?focusedCommentId=17084924) by Wes McKinney (wesm):*\nAll the data is normalized to UTC basis so I don't believe the timestamp values themselves are being altered. Note that you are storing tz-naive data, so readers have no way of knowing you mean UTC\r\n\r\nIn Python I have\r\n\r\n```Java\n\r\nIn [6]: t                                                                                                                                                                                      \r\nOut[6]: \r\npyarrow.Table\r\nstring_time_utc: timestamp[us]\r\ntimestamp_est: timestamp[us]\r\n\r\nIn [7]: t[0]                                                                                                                                                                                   \r\nOut[7]: \r\n<pyarrow.lib.ChunkedArray object at 0x7f9cefbe3590>\r\n[\r\n  [\r\n    2018-02-01 14:00:00.531000,\r\n    2018-02-01 14:01:00.456000,\r\n    2018-03-05 14:01:02.200000\r\n  ]\r\n]\r\n\r\nIn [8]: t[1]                                                                                                                                                                                   \r\nOut[8]: \r\n<pyarrow.lib.ChunkedArray object at 0x7f9cef8e80b0>\r\n[\r\n  [\r\n    2018-02-01 09:00:00.531000,\r\n    2018-02-01 09:01:00.456000,\r\n    2018-03-05 09:01:02.200000\r\n  ]\r\n]\r\n```\r\n\r\nIn R now I have:\r\n\r\n```Java\n\r\n> t <- arrow::read_parquet('test.parquet', as_data_frame=FALSE)\r\n> t\r\nTable\r\n3 rows x 2 columns\r\n$string_time_utc <timestamp[us]>\r\n$timestamp_est <timestamp[us]>\r\n\r\nSee $metadata for additional Schema metadata\r\n> t$\r\nt$string_time_utc  t$timestamp_est    \r\n> t$column(0)\r\nChunkedArray\r\n<timestamp[us]>\r\n[\r\n  2018-02-01 14:00:00.531000,\r\n  2018-02-01 14:01:00.456000,\r\n  2018-03-05 14:01:02.200000\r\n]\r\n> t$column(1)\r\nChunkedArray\r\n<timestamp[us]>\r\n[\r\n  2018-02-01 09:00:00.531000,\r\n  2018-02-01 09:01:00.456000,\r\n  2018-03-05 09:01:02.200000\r\n]\r\n> t$column(0)$as_vector()\r\n[1] \"2018-02-01 08:00:00 CST\" \"2018-02-01 08:01:00 CST\"\r\n[3] \"2018-03-05 08:01:02 CST\"\r\n> t$column(1)$as_vector()\r\n[1] \"2018-02-01 03:00:00 CST\" \"2018-02-01 03:01:00 CST\"\r\n[3] \"2018-03-05 03:01:02 CST\"\r\n```\r\n\r\nThis is a locale issue. R apparently treats naive timestamps as localtime. If you want UTC interpretation in R you need to store tz-aware UTC timestamps\r\n\r\n```Java\n\r\n> t$column(1)$cast(arrow::timestamp(\"ms\", \"UTC\"))$as_vector()\r\n[1] \"2018-02-01 09:00:00 UTC\" \"2018-02-01 09:01:00 UTC\"\r\n[3] \"2018-03-05 09:01:02 UTC\"\r\n> t$column(0)$cast(arrow::timestamp(\"ms\", \"UTC\"))$as_vector()\r\n[1] \"2018-02-01 14:00:00 UTC\" \"2018-02-01 14:01:00 UTC\"\r\n[3] \"2018-03-05 14:01:02 UTC\"\r\n```\r\n\r\n`[~npr]` is my interpretation correct?"
+        },
+        {
+            "created_at": "2020-04-16T15:00:03.225Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8482?focusedCommentId=17084948) by Neal Richardson (npr):*\n`[~Olafsson]` are you using the nightly development versions of the packages? I fixed the identical-sounding issue you reported before (ARROW-3543) and it will be included in the 0.17 release, out soon. If you're using the 0.16 release, you'll still see the bug."
+        },
+        {
+            "created_at": "2020-04-16T15:12:51.411Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8482?focusedCommentId=17084971) by Wes McKinney (wesm):*\nThe code examples I pasted are based on master, the behavior is different in 0.16.0 then?"
+        },
+        {
+            "created_at": "2020-04-16T15:39:47.945Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8482?focusedCommentId=17085002) by Neal Richardson (npr):*\n> R apparently treats naive timestamps as localtime\r\n\r\nYes, in the print method, but as you say, it doesn't alter the data itself. See https://issues.apache.org/jira/browse/ARROW-3543?focusedCommentId=16929592&page=com.atlassian.jira.plugin.system.issuetabpanels%3Acomment-tabpanel#comment-16929592"
+        },
+        {
+            "created_at": "2020-04-16T15:42:52.213Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8482?focusedCommentId=17085008) by Neal Richardson (npr):*\nThis shows the fix wrt 0.16 https://github.com/apache/arrow/commit/507762fa51d17e61f08d36d3626ab8b8df716198\r\n\r\nBut that doesn't affect how R prints datetime data with no timezone specified."
+        },
+        {
+            "created_at": "2020-04-16T16:29:49.321Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8482?focusedCommentId=17085075) by Olaf (Olafsson):*\nThank you for your comments. This is very useful. I guess the key question is: can we force\r\n```\n\r\nread_parquet()\n```\r\nin R to treat some particular columns **as characters**? That will allow the user to later convert to whatever timezone and date format. `[~wesm]`, yes I find timezone naive timestamps easier to use across platforms.\r\n\r\nThanks!"
+        },
+        {
+            "created_at": "2020-04-16T16:31:20.966Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8482?focusedCommentId=17085076) by Olaf (Olafsson):*\nas I said before, I tried to circumvent the issue by running (in Python)\r\n```\n\r\ndf = df.astype(str)\n```\r\nbefore writing to parquet but\r\n```\n\r\narrow::read_parquet()\n```\r\nforced the conversion to datetime (with the wrong timezones thus)."
+        },
+        {
+            "created_at": "2020-04-16T17:29:44.403Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8482?focusedCommentId=17085113) by Wes McKinney (wesm):*\nClosing since AFAICT the behavior of tz-naive data is working as intended. It seems you have some usage questions so I think it would be better to handle these on the mailing list either user@arrow.apache.org or dev@arrow.apache.org"
+        },
+        {
+            "created_at": "2020-04-16T17:34:44.107Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8482?focusedCommentId=17085118) by Olaf (Olafsson):*\ngot it Wes. thanks. but in a nutshell can you just tell me if we can control the column type in arrow::read_parquet()?\r\n\r\n\u00a0\r\n\r\n\u00a0"
+        },
+        {
+            "created_at": "2020-04-16T17:37:47.370Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-8482?focusedCommentId=17085119) by Neal Richardson (npr):*\nread_parquet() doesn't alter types. It reads what is in the file."
+        }
+    ]
+}

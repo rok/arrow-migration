@@ -1,0 +1,25 @@
+{
+    "issue": {
+        "title": "[C++] The Substrait consumer could potentially use a massive amount of RAM if the producer uses large anchors",
+        "body": "***Note**: This issue was originally created as [ARROW-15583](https://issues.apache.org/jira/browse/ARROW-15583). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nIn Substrait a function is referred to by a \"fully qualified name\" which consists of a URI and a function name.  For example, the \"add\" function is something like `https://github.com/substrait-io/substrait/blob/main/extensions/functions_arithmetic.yaml`.  To avoid serializing these long names multiple times in the plan the producer should pick an anchor value (an int32 in protobuf) and use that everywhere (with a single lookup table at the top level of the plan).\r\n\r\nTo avoid map lookups the Arrow C++ consumer currently assumes that this lookup table will be small enough it can be stored in a vector...\r\n\r\n```\n\r\n{\r\n  \"https://github.com/substrait-io/substrait/blob/main/extensions/functions_arithmetic.yaml#add\",\r\n  \"https://github.com/substrait-io/substrait/blob/main/extensions/functions_arithmetic.yaml#subtract\"\r\n}\r\n```\r\n\r\nHowever, this sort of assumes that a plan is going to use numbers like 0, 1, 2, ... N to create N anchors.  There is nothing that prevents a consumer from using whatever numbers it wants (e.g. a pointer value).  If the producer uses a really large anchor value then the  C++ Substrait consumer will create a lookup table with a lot of blank values.  This could lead to a lot of wasted memory.\r\n\r\nWe could try and request the Substrait spec enfoce small anchors or we could change the extension set handling in the C++ consumer to use an unordered_map.",
+        "created_at": "2022-02-05T01:15:31.000Z",
+        "updated_at": "2022-05-25T11:31:27.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: enhancement"
+        ],
+        "closed": true,
+        "closed_at": "2022-05-25T08:54:53.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2022-02-09T10:55:38.239Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15583?focusedCommentId=17489465) by Jeroen van Straten (jvanstraten):*\nIn the same vein, the Arrow C++ consumer assumes that the custom type anchor and type variation anchor sets are disjoint, because it uses the same vector for those. That is, if anchor 42 is used for a type, it can no longer be used for a type variation, and vice versa. AFAICT this is also not guaranteed by the Substrait specification. This is technically a different issue, but it might be easier to solve both at once.\r\n\r\nETA: less important because outside of testing we're not a producer, but when allocating new anchors the counter starts at 0. I'm fairly certain however that, at least for type variations, anchor 0 is reserved for \"undefined.\" The spec is currently unclear about this, but it's probably better to be safe than sorry and avoid using 0 for anchors altogether."
+        },
+        {
+            "created_at": "2022-05-25T08:54:53.606Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-15583?focusedCommentId=17541906) by Weston Pace (westonpace):*\nIssue resolved by pull request 12852\n<https://github.com/apache/arrow/pull/12852>"
+        }
+    ]
+}

@@ -1,0 +1,65 @@
+{
+    "issue": {
+        "title": "[C++] Do not wipe the filesystem when path is empty",
+        "body": "***Note**: This issue was originally created as [ARROW-9121](https://issues.apache.org/jira/browse/ARROW-9121). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nThe `DeleteDirContents` method in the filesystems api has a default behavior or **wiping** the whole filesystem if we give it an empty path.\r\n\r\n\u00a0\r\n\r\nIt's documented as:\r\n > Like DeleteDir, but doesn\u2019t delete the directory itself. Passing an empty path (\u201c\u201d) will wipe the entire filesystem tree.\u00a0\r\n\r\n\u00a0\r\n\r\nAnd the corresponding code confirms that:\r\n```java\n\r\n  auto parts = SplitAbstractPath(path);\r\n  RETURN_NOT_OK(ValidateAbstractPathParts(parts));  \r\n  \r\n  if (parts.empty()) {\r\n    // Wipe filesystem\r\n    impl_->RootDir().entries.clear();\r\n    return Status::OK();\r\n  }\r\n```\r\n\u00a0\r\n\r\nThis is a weird default that does not make sense. If the user wanted really to wipe his filesystem, he'd pass a `/`.\r\n\r\n\u00a0",
+        "created_at": "2020-06-13T19:56:45.000Z",
+        "updated_at": "2020-07-07T14:48:49.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: C++",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2020-07-07T14:48:38.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2020-06-19T16:12:01.406Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9121?focusedCommentId=17140663) by Krisztian Szucs (kszucs):*\n`[~apitrou]` What would your suggestion here? Have another method for wiping the entire fs and raise from DeleteDirContents if empty path was passed?"
+        },
+        {
+            "created_at": "2020-06-22T09:29:59.364Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9121?focusedCommentId=17141856) by Antoine Pitrou (apitrou):*\nI'm not sure why that's weird. The leading \"/\" is optional in our filesystem paths. So \"\" is the root directory.\r\n\r\nWhat are you trying to do?"
+        },
+        {
+            "created_at": "2020-06-22T09:35:59.307Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9121?focusedCommentId=17141862) by Krisztian Szucs (kszucs):*\nWe could have a more explicit way to erase the root directory or just document the current behavior. I'm not sure that our API should defend against this use case."
+        },
+        {
+            "created_at": "2020-06-22T09:40:54.575Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9121?focusedCommentId=17141866) by Antoine Pitrou (apitrou):*\nWell, it **is** documented, as mentioned in the bug report ;-)"
+        },
+        {
+            "created_at": "2020-06-22T10:04:16.651Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9121?focusedCommentId=17141880) by Krisztian Szucs (kszucs):*\nLet's wait for `[~zeapo]`'s feedback then."
+        },
+        {
+            "created_at": "2020-06-22T10:09:00.069Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9121?focusedCommentId=17141883) by Mohamed Zenadi (zeapo):*\nFor me, the weird behavior is the default to wipe. Not the fact that empty\n-> wipe.\n\nI would not trust the user's code to be exempt of defaults that would lead\nto empty strings. Which in some situations would lead to filesystem wipe.\n\nOn Mon, Jun 22, 2020 at 12:06 PM Krisztian Szucs (Jira) <jira@apache.org>\n\n"
+        },
+        {
+            "created_at": "2020-06-22T15:20:18.969Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9121?focusedCommentId=17142176) by Neal Richardson (npr):*\nIs it expected that people will use Arrow for the purpose of deleting the contents of their file system? Or is it more likely that this would be a (terrible) accident?\r\n\r\nI tend to agree that \"delete everything\" is dangerous as a default.\r\n\r\nWould a compromise solution be to leave the C++ library as is and put up (more) guardrails in pyarrow, the R package, etc., where we might expect a user to type something they don't mean?"
+        },
+        {
+            "created_at": "2020-06-22T15:29:14.405Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9121?focusedCommentId=17142183) by Antoine Pitrou (apitrou):*\nWe may certainly change this on the C++ side. Someone has to submit a PR, though."
+        },
+        {
+            "created_at": "2020-07-06T15:08:40.954Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9121?focusedCommentId=17152083) by Antoine Pitrou (apitrou):*\nComing back to this. The existing behaviour _can_ be useful at times. So it should be possible to enable it anyway.\r\nWhat would you suggest? A dedicated option flag? A separate API?"
+        },
+        {
+            "created_at": "2020-07-06T15:41:21.223Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9121?focusedCommentId=17152104) by Krisztian Szucs (kszucs):*\nI assume we could have the following raising an error where we advise the user to use `fs->DeleteRootDirContents()` if that's the real intention:\r\n\r\n```cpp\n\r\nfs->DeleteDirContents(\"\")\r\nfs->DeleteDirContents(\"/\")\r\nfs->DeleteDirContents(\"//\")\r\n```\r\n\r\nIn order to do that we would need a way to check that the normalized path points to the filesystem root (the prefix in case of subtree filesystem)."
+        },
+        {
+            "created_at": "2020-07-06T15:52:43.046Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9121?focusedCommentId=17152120) by Antoine Pitrou (apitrou):*\nI don't think \"normalized paths\" even matter. If we want to protect against those mistakes, then it makes sense to protect always."
+        },
+        {
+            "created_at": "2020-07-07T14:48:38.298Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-9121?focusedCommentId=17152799) by Krisztian Szucs (kszucs):*\nIssue resolved by pull request 7655\n<https://github.com/apache/arrow/pull/7655>"
+        }
+    ]
+}

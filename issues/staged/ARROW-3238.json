@@ -1,0 +1,41 @@
+{
+    "issue": {
+        "title": "[Python] Can't read pyarrow string columns in fastparquet",
+        "body": "***Note**: This issue was originally created as [ARROW-3238](https://issues.apache.org/jira/browse/ARROW-3238). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*\n\n### Original Issue Description:\nWriting really long strings from pyarrow causes exception in fastparquet read.\r\n```java\n\r\nTraceback (most recent call last):\r\nFile \"/Users/twalker/repos/cloud-atlas/diag/right.py\", line 47, in <module>\r\nread_fastparquet()\r\nFile \"/Users/twalker/repos/cloud-atlas/diag/right.py\", line 41, in read_fastparquet\r\ndff = pf.to_pandas(['A'])\r\nFile \"/Users/twalker/anaconda/lib/python2.7/site-packages/fastparquet/api.py\", line 426, in to_pandas\r\nindex=index, assign=parts)\r\nFile \"/Users/twalker/anaconda/lib/python2.7/site-packages/fastparquet/api.py\", line 258, in read_row_group\r\nscheme=self.file_scheme)\r\nFile \"/Users/twalker/anaconda/lib/python2.7/site-packages/fastparquet/core.py\", line 344, in read_row_group\r\ncats, selfmade, assign=assign)\r\nFile \"/Users/twalker/anaconda/lib/python2.7/site-packages/fastparquet/core.py\", line 321, in read_row_group_arrays\r\ncatdef=out.get(name+'-catdef', None))\r\nFile \"/Users/twalker/anaconda/lib/python2.7/site-packages/fastparquet/core.py\", line 235, in read_col\r\nskip_nulls, selfmade=selfmade)\r\nFile \"/Users/twalker/anaconda/lib/python2.7/site-packages/fastparquet/core.py\", line 99, in read_data_page\r\nraw_bytes = _read_page(f, header, metadata)\r\nFile \"/Users/twalker/anaconda/lib/python2.7/site-packages/fastparquet/core.py\", line 31, in _read_page\r\npage_header.uncompressed_page_size)\r\nAssertionError: found 175532 raw bytes (expected 200026)\n```\r\n\r\n\r\n\r\n\r\nIf written with compression, it reports compression errors instead:\r\n```java\n\r\nSNAPPY: snappy.UncompressError: Error while decompressing: invalid input\r\n\r\nGZIP: zlib.error: Error -3 while decompressing data: incorrect header check\n```\r\n\u00a0\r\n\r\n\u00a0\r\n\r\nMinimal code to reproduce:\r\n```java\n\r\nimport os\r\nimport pandas as pd\r\nimport pyarrow\r\nimport pyarrow.parquet as arrow_pq\r\nfrom fastparquet import ParquetFile\r\n\r\n# data to generate\r\nROW_LENGTH = 40000 # decreasing below 32750ish eliminates exception\r\nN_ROWS = 10\r\n\r\n# file write params\r\nROW_GROUP_SIZE = 5 # Lower numbers eliminate exception, but strange data is read (e.g. Nones)\r\nFILENAME = 'test.parquet'\r\n\r\ndef write_arrow():\r\n    df = pd.DataFrame({'A': ['A'*ROW_LENGTH for _ in range(N_ROWS)]})\r\n    if os.path.isfile(FILENAME):\r\n        os.remove(FILENAME)\r\n    arrow_table = pyarrow.Table.from_pandas(df)\r\n    arrow_pq.write_table(arrow_table,\r\n    FILENAME,\r\n    use_dictionary=False,\r\n    compression='NONE',\r\n    row_group_size=ROW_GROUP_SIZE)\r\n\r\ndef read_arrow():\r\n    print \"arrow:\"\r\n    table2 = arrow_pq.read_table(FILENAME)\r\n    print table2.to_pandas().head()\r\n\r\n\r\ndef read_fastparquet():\r\n    print \"fastparquet:\"\r\n    pf = ParquetFile(FILENAME)\r\n    dff = pf.to_pandas(['A'])\r\n    print dff.head()\r\n\r\n\r\nwrite_arrow()\r\nread_arrow()\r\nread_fastparquet()\r\n```\r\n\r\nVersions:\r\n```java\n\r\nfastparquet==0.1.6\r\npyarrow==0.10.0\r\npandas==0.22.0\r\nsys.version '2.7.15 |Anaconda custom (64-bit)| (default, May 1 2018, 18:37:05) \\n[GCC 4.2.1 Compatible Clang 4.0.1 (tags/RELEASE_401/final)]'\n```\r\n\r\n\r\n\r\n\r\nAlso opened issue here: https://github.com/dask/fastparquet/issues/375",
+        "created_at": "2018-09-14T22:38:33.000Z",
+        "updated_at": "2019-01-20T01:36:27.000Z",
+        "labels": [
+            "Migrated from Jira",
+            "Component: Python",
+            "Type: bug"
+        ],
+        "closed": true,
+        "closed_at": "2018-11-12T22:20:43.000Z"
+    },
+    "comments": [
+        {
+            "created_at": "2018-09-15T01:13:08.263Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3238?focusedCommentId=16615544) by Wes McKinney (wesm):*\n`[~mdurant]` if I had to guess, the dictionary grew too large during encoding and the Parquet writer switched to using plain encoding part way through the ColumnChunk. Have you implemented support for this case? Both the Java and C++ Parquet libraries have a threshold for switching midstream to plain from dictionary encoding"
+        },
+        {
+            "created_at": "2018-09-15T13:59:33.678Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3238?focusedCommentId=16616303) by Martin Durant (mdurant):*\nDoesn't\u00a0\r\n`use_dictionary=False`\r\n\r\npreclude the use of dictionary encoding at all?"
+        },
+        {
+            "created_at": "2018-09-15T14:01:28.831Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3238?focusedCommentId=16616304) by Wes McKinney (wesm):*\nYes, indeed. Moreover all the strings are the same value on closer inspection. I'll have a look at the generated file when I have a chance"
+        },
+        {
+            "created_at": "2018-09-27T22:17:16.251Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3238?focusedCommentId=16631106) by Wes McKinney (wesm):*\nIt looks like there's an issue reading the last data page in fastparquet. See this gist. I created a file using the minimum value length (32755) which causes the bug to happen:\r\n\r\nhttps://gist.github.com/wesm/56c66524b1237a08a528c6eb8d01e44b\r\n\r\nThe last seek before the exception is to the position 327853, but the file is only 459938 in length. Because 5 \\* 32755 is 163775, there's not enough bytes left in the file to decode the plain value page. It looks like the problem is in the Thrift decoding code which uses internal APIs of Thrift in Python:\r\n\r\n```Java\n\r\n2--> 32     file_obj.seek(starting_pos + blocks * bufsize + buffer_pos)\r\n     33     return obj\r\n     34 \r\n\r\nipdb> p starting_pos\r\n229557\r\nipdb> p blocks\r\n1\r\nipdb> p * bufsize\r\n*** SyntaxError: invalid syntax\r\nipdb> p bufsize\r\n65536\r\nipdb> p buffer_pos\r\n32760\r\nipdb> p starting_pos + blocks * bufsize + buffer_pos\r\n327853\r\nipdb> p starting_pos\r\n229557\r\nipdb> p bufsize\r\n65536\r\nipdb> p bt.cstringio_buf.tell()\r\n32760\r\n```\r\n\r\nWhether the bug is in fastparquet or Thrift-Python is anyone's guess, but it appears the problem is caused by the fact that the metadata structure for the data page is large, because it contains statistics for 2x the size of the value, which is 65510. Including tags in the Thrift protocol, the size of the message is surely exceeding the buffer size of 65536 so I'm guessing that's the problem\r\n\r\nAre other Parquet implementations able to read this file? If they are not I will be happy to keep investigating"
+        },
+        {
+            "created_at": "2018-09-28T00:06:50.439Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3238?focusedCommentId=16631203) by Martin Durant (mdurant):*\nThanks for that detail, Wes. Not sure when I can look into this on my end. I wonder whether thrift in non-cython mode, or pythrift can read the same thing safely."
+        },
+        {
+            "created_at": "2018-11-12T22:20:43.836Z",
+            "body": "***Note**: [Comment](https://issues.apache.org/jira/browse/ARROW-3238?focusedCommentId=16684434) by Wes McKinney (wesm):*\nI don't believe there is anything we can fix here"
+        }
+    ]
+}
