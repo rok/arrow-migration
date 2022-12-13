@@ -180,91 +180,6 @@
             "votes": 0,
             "hasVoted": false
         },
-        "worklog": {
-            "startAt": 0,
-            "maxResults": 20,
-            "total": 2,
-            "worklogs": [
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13412072/worklog/682227",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "comment": "github-actions[bot] commented on pull request #11716:\nURL: https://github.com/apache/arrow/pull/11716#issuecomment-970615094\n\n\n\n\n\n\n-- \nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on to GitHub and use the\nURL above to go to the specific comment.\n\nTo unsubscribe, e-mail: github-unsubscribe@arrow.apache.org\n\nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "created": "2021-11-16T19:38:40.043+0000",
-                    "updated": "2021-11-16T19:38:40.043+0000",
-                    "started": "2021-11-16T19:38:40.043+0000",
-                    "timeSpent": "10m",
-                    "timeSpentSeconds": 600,
-                    "id": "682227",
-                    "issueId": "13412072"
-                },
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13412072/worklog/695311",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "comment": "lidavidm commented on a change in pull request #11716:\nURL: https://github.com/apache/arrow/pull/11716#discussion_r768060513\n\n\n\n##########\nFile path: cpp/src/arrow/compute/exec/expression.h\n##########\n@@ -184,13 +184,51 @@ Result<KnownFieldValues> ExtractKnownFieldValues(\n /// guarantee on a field value, an Expression must be a call to \"equal\" with field_ref LHS\n /// and literal RHS. Flipping the arguments, \"is_in\" with a one-long value_set, ... or\n /// other semantically identical Expressions will not be recognized.\n+///\n+/// For any simplification, if no changes could be made the identical expression will be\n+/// returned (`IsIdentical(old, new)` will be true).\n \n /// Weak canonicalization which establishes guarantees for subsequent passes. Even\n /// equivalent Expressions may result in different canonicalized expressions.\n /// TODO this could be a strong canonicalization\n ARROW_EXPORT\n Result<Expression> Canonicalize(Expression, ExecContext* = NULLPTR);\n \n+/// An extensible registry for simplification passes over Expressions.\n+class ARROW_EXPORT ExpressionSimplificationPassRegistry {\n+ public:\n+  /// A pass which can operate on a bound Expression independently.\n+  /// Independent passes need not recurse into Call::arguments; all independent\n+  /// passes will be applied to each argument before any is applied to the call.\n+  /// Expressions will be canonicalized before each pass is run.\n+  using IndependentPass = std::function<Result<Expression>(Expression, ExecContext*)>;\n+\n+  /// A pass which utilizes a guaranteed true predicate.\n+  /// Guarantee passes are allowed to invalidate independent passes;\n+  /// all independent passes will be applied when any guarantee pass makes a change.\n+  /// Guarantee passes need not decompose conjunctions; they will be run for\n+  /// each member of a guarantee conjunction.\n+  /// Guarantee passes need not recurse into Call::arguments; all guarantee\n+  /// passes will be applied to each argument before any is applied to the call.\n+  /// Expressions will be canonicalized before each pass is run.\n+  using GuaranteePass =\n+      std::function<Result<Expression>(Expression, const Expression&, ExecContext*)>;\n+\n+  virtual ~ExpressionSimplificationPassRegistry() = default;\n+\n+  virtual void Add(IndependentPass) = 0;\n+  virtual void Add(GuaranteePass) = 0;\n+\n+  virtual Result<Expression> RunIndependentPasses(Expression, ExecContext*) = 0;\n+  virtual Result<Expression> RunAllPasses(Expression,\n+                                          const Expression& guaranteed_true_predicate,\n+                                          ExecContext*) = 0;\n+};\n+\n+/// The default registry, which includes built-in simplification passes.\n+ARROW_EXPORT\n+ExpressionSimplificationPassRegistry* default_expression_simplification_registry();\n\nReview comment:\n       nit: DefaultExpressionSimplificationRegistry?\n\n##########\nFile path: cpp/src/arrow/compute/exec/expression.cc\n##########\n@@ -1191,5 +1097,209 @@ Expression or_(const std::vector<Expression>& operands) {\n \n Expression not_(Expression operand) { return call(\"invert\", {std::move(operand)}); }\n \n+ExpressionSimplificationPassRegistry* default_expression_simplification_registry() {\n+  class DefaultRegistry : public ExpressionSimplificationPassRegistry {\n+   public:\n+    DefaultRegistry() {\n\nReview comment:\n       Looks like FoldConstants should be removed above?\n\n##########\nFile path: cpp/src/arrow/compute/exec/expression.h\n##########\n@@ -184,13 +184,51 @@ Result<KnownFieldValues> ExtractKnownFieldValues(\n /// guarantee on a field value, an Expression must be a call to \"equal\" with field_ref LHS\n /// and literal RHS. Flipping the arguments, \"is_in\" with a one-long value_set, ... or\n /// other semantically identical Expressions will not be recognized.\n+///\n+/// For any simplification, if no changes could be made the identical expression will be\n+/// returned (`IsIdentical(old, new)` will be true).\n \n /// Weak canonicalization which establishes guarantees for subsequent passes. Even\n /// equivalent Expressions may result in different canonicalized expressions.\n /// TODO this could be a strong canonicalization\n ARROW_EXPORT\n Result<Expression> Canonicalize(Expression, ExecContext* = NULLPTR);\n \n+/// An extensible registry for simplification passes over Expressions.\n+class ARROW_EXPORT ExpressionSimplificationPassRegistry {\n+ public:\n+  /// A pass which can operate on a bound Expression independently.\n+  /// Independent passes need not recurse into Call::arguments; all independent\n+  /// passes will be applied to each argument before any is applied to the call.\n+  /// Expressions will be canonicalized before each pass is run.\n+  using IndependentPass = std::function<Result<Expression>(Expression, ExecContext*)>;\n+\n+  /// A pass which utilizes a guaranteed true predicate.\n+  /// Guarantee passes are allowed to invalidate independent passes;\n+  /// all independent passes will be applied when any guarantee pass makes a change.\n+  /// Guarantee passes need not decompose conjunctions; they will be run for\n+  /// each member of a guarantee conjunction.\n+  /// Guarantee passes need not recurse into Call::arguments; all guarantee\n+  /// passes will be applied to each argument before any is applied to the call.\n+  /// Expressions will be canonicalized before each pass is run.\n+  using GuaranteePass =\n+      std::function<Result<Expression>(Expression, const Expression&, ExecContext*)>;\n+\n+  virtual ~ExpressionSimplificationPassRegistry() = default;\n+\n+  virtual void Add(IndependentPass) = 0;\n+  virtual void Add(GuaranteePass) = 0;\n+\n+  virtual Result<Expression> RunIndependentPasses(Expression, ExecContext*) = 0;\n+  virtual Result<Expression> RunAllPasses(Expression,\n+                                          const Expression& guaranteed_true_predicate,\n+                                          ExecContext*) = 0;\n+};\n+\n+/// The default registry, which includes built-in simplification passes.\n+ARROW_EXPORT\n+ExpressionSimplificationPassRegistry* default_expression_simplification_registry();\n\nReview comment:\n       Though I see the exec node registry and function registry use different naming schemes (default_exec_factory_registry, GetFunctionRegistry)\n\n##########\nFile path: cpp/src/arrow/compute/exec/expression.cc\n##########\n@@ -1191,5 +1097,209 @@ Expression or_(const std::vector<Expression>& operands) {\n \n Expression not_(Expression operand) { return call(\"invert\", {std::move(operand)}); }\n \n+ExpressionSimplificationPassRegistry* default_expression_simplification_registry() {\n+  class DefaultRegistry : public ExpressionSimplificationPassRegistry {\n+   public:\n+    DefaultRegistry() {\n+      Add([](Expression expr, ExecContext* ctx) -> Result<Expression> {\n+        // if all arguments to a call are literal, we can evaluate this call *now*\n+        auto call = CallNotNull(expr);\n+        if (std::all_of(call->arguments.begin(), call->arguments.end(),\n+                        [](const Expression& argument) { return argument.literal(); })) {\n+          static const ExecBatch ignored_input = ExecBatch{};\n+          ARROW_ASSIGN_OR_RAISE(Datum constant,\n+                                ExecuteScalarExpression(expr, ignored_input));\n+\n+          return literal(std::move(constant));\n+        }\n+        return expr;\n+      });\n+\n+      Add([](Expression expr, ExecContext* ctx) -> Result<Expression> {\n+        // kernels which always produce intersected validity can be resolved\n+        // to null *now* if any of their inputs is a null literal\n+        auto call = CallNotNull(expr);\n+        if (GetNullHandling(*call) == compute::NullHandling::INTERSECTION) {\n+          for (const auto& argument : call->arguments) {\n+            if (argument.IsNullLiteral()) {\n+              return argument;\n+            }\n+          }\n+        }\n+        return expr;\n+      });\n+\n+      Add([](Expression expr, ExecContext* ctx) -> Result<Expression> {\n+        auto call = CallNotNull(expr);\n+        if (call->function_name == \"and_kleene\") {\n+          // false and x == false\n+          if (call->arguments[0] == literal(false)) return literal(false);\n+          if (call->arguments[1] == literal(false)) return literal(false);\n+\n+          // true and x == x\n+          if (call->arguments[0] == literal(true)) return call->arguments[1];\n+          if (call->arguments[1] == literal(true)) return call->arguments[0];\n+\n+          // x and x == x\n+          if (call->arguments[0] == call->arguments[1]) return call->arguments[0];\n+        }\n+        return expr;\n+      });\n+\n+      Add([](Expression expr, ExecContext* ctx) -> Result<Expression> {\n+        auto call = CallNotNull(expr);\n+        if (call->function_name == \"or_kleene\") {\n+          // true or x == true\n+          if (call->arguments[0] == literal(true)) return literal(true);\n+          if (call->arguments[1] == literal(true)) return literal(true);\n+\n+          // false or x == x\n+          if (call->arguments[0] == literal(false)) return call->arguments[1];\n+          if (call->arguments[1] == literal(false)) return call->arguments[0];\n+\n+          // x or x == x\n+          if (call->arguments[0] == call->arguments[1]) return call->arguments[0];\n+        }\n+        return expr;\n+      });\n+\n+      Add([](Expression expr, const Expression& guarantee_expr,\n+             ExecContext* ctx) -> Result<Expression> {\n+        // Ensure both calls are comparisons with equal LHS and scalar RHS\n+        auto cmp = Comparison::Get(expr);\n+        auto cmp_guarantee = Comparison::Get(guarantee_expr);\n+\n+        if (!cmp) return expr;\n+        if (!cmp_guarantee) return expr;\n+\n+        const auto& args = CallNotNull(expr)->arguments;\n+        const auto& guarantee_args = CallNotNull(guarantee_expr)->arguments;\n+\n+        const auto& lhs = Comparison::StripOrderPreservingCasts(args[0]);\n+        const auto& guarantee_lhs = guarantee_args[0];\n+        if (lhs != guarantee_lhs) return expr;\n+\n+        auto rhs = args[1].literal();\n+        auto guarantee_rhs = guarantee_args[1].literal();\n+\n+        if (!rhs) return expr;\n+        if (!rhs->is_scalar()) return expr;\n+\n+        if (!guarantee_rhs) return expr;\n+        if (!guarantee_rhs->is_scalar()) return expr;\n+\n+        ARROW_ASSIGN_OR_RAISE(auto cmp_rhs_guarantee_rhs,\n+                              Comparison::Execute(*rhs, *guarantee_rhs));\n+        DCHECK_NE(cmp_rhs_guarantee_rhs, Comparison::NA);\n+\n+        if (cmp_rhs_guarantee_rhs == Comparison::EQUAL) {\n+          // RHS of filter is equal to RHS of guarantee\n+\n+          if ((*cmp & *cmp_guarantee) == *cmp_guarantee) {\n+            // guarantee is a subset of filter, so all data will be included\n+            // x > 1, x >= 1, x != 1 guaranteed by x > 1\n+            return literal(true);\n+          }\n+\n+          if ((*cmp & *cmp_guarantee) == 0) {\n+            // guarantee disjoint with filter, so all data will be excluded\n+            // x > 1, x >= 1, x != 1 unsatisfiable if x == 1\n+            return literal(false);\n+          }\n+\n+          return expr;\n+        }\n+\n+        if (*cmp_guarantee & cmp_rhs_guarantee_rhs) {\n+          // x > 1, x >= 1, x != 1 cannot use guarantee x >= 3\n+          return expr;\n+        }\n+\n+        if (*cmp & Comparison::GetFlipped(cmp_rhs_guarantee_rhs)) {\n+          // x > 1, x >= 1, x != 1 guaranteed by x >= 3\n+          return literal(true);\n+        } else {\n+          // x < 1, x <= 1, x == 1 unsatisfiable if x >= 3\n+          return literal(false);\n+        }\n+      });\n+    }\n+\n+    void Add(IndependentPass p) override { independent_passes_.push_back(std::move(p)); }\n+\n+    void Add(GuaranteePass p) override { guarantee_passes_.push_back(std::move(p)); }\n+\n+    Result<Expression> RunIndependentPasses(Expression expr, ExecContext* ctx) override {\n+      ARROW_ASSIGN_OR_RAISE(auto canonicalized, Canonicalize(expr, ctx));\n+\n+      ARROW_ASSIGN_OR_RAISE(\n+          auto simplified,\n+          Modify(\n+              canonicalized, [](Expression expr) { return expr; },\n+              [&](Expression expr, ...) -> Result<Expression> {\n+                for (const auto& pass : independent_passes_) {\n+                  ARROW_ASSIGN_OR_RAISE(auto simplified, pass(expr, ctx));\n+                  if (Identical(simplified, expr)) continue;\n+\n+                  ARROW_ASSIGN_OR_RAISE(expr, Canonicalize(std::move(simplified), ctx));\n+                  if (!expr.call()) return expr;\n+                }\n+                return expr;\n+              }));\n+\n+      if (Identical(simplified, canonicalized)) return expr;\n\nReview comment:\n       It also seems we don't need to canonicalize below before calling this.\n\n##########\nFile path: cpp/src/arrow/compute/exec/expression.cc\n##########\n@@ -1191,5 +1097,209 @@ Expression or_(const std::vector<Expression>& operands) {\n \n Expression not_(Expression operand) { return call(\"invert\", {std::move(operand)}); }\n \n+ExpressionSimplificationPassRegistry* default_expression_simplification_registry() {\n+  class DefaultRegistry : public ExpressionSimplificationPassRegistry {\n+   public:\n+    DefaultRegistry() {\n+      Add([](Expression expr, ExecContext* ctx) -> Result<Expression> {\n+        // if all arguments to a call are literal, we can evaluate this call *now*\n+        auto call = CallNotNull(expr);\n+        if (std::all_of(call->arguments.begin(), call->arguments.end(),\n+                        [](const Expression& argument) { return argument.literal(); })) {\n+          static const ExecBatch ignored_input = ExecBatch{};\n+          ARROW_ASSIGN_OR_RAISE(Datum constant,\n+                                ExecuteScalarExpression(expr, ignored_input));\n+\n+          return literal(std::move(constant));\n+        }\n+        return expr;\n+      });\n+\n+      Add([](Expression expr, ExecContext* ctx) -> Result<Expression> {\n+        // kernels which always produce intersected validity can be resolved\n+        // to null *now* if any of their inputs is a null literal\n+        auto call = CallNotNull(expr);\n+        if (GetNullHandling(*call) == compute::NullHandling::INTERSECTION) {\n+          for (const auto& argument : call->arguments) {\n+            if (argument.IsNullLiteral()) {\n+              return argument;\n+            }\n+          }\n+        }\n+        return expr;\n+      });\n+\n+      Add([](Expression expr, ExecContext* ctx) -> Result<Expression> {\n+        auto call = CallNotNull(expr);\n+        if (call->function_name == \"and_kleene\") {\n+          // false and x == false\n+          if (call->arguments[0] == literal(false)) return literal(false);\n+          if (call->arguments[1] == literal(false)) return literal(false);\n+\n+          // true and x == x\n+          if (call->arguments[0] == literal(true)) return call->arguments[1];\n+          if (call->arguments[1] == literal(true)) return call->arguments[0];\n+\n+          // x and x == x\n+          if (call->arguments[0] == call->arguments[1]) return call->arguments[0];\n+        }\n+        return expr;\n+      });\n+\n+      Add([](Expression expr, ExecContext* ctx) -> Result<Expression> {\n+        auto call = CallNotNull(expr);\n+        if (call->function_name == \"or_kleene\") {\n+          // true or x == true\n+          if (call->arguments[0] == literal(true)) return literal(true);\n+          if (call->arguments[1] == literal(true)) return literal(true);\n+\n+          // false or x == x\n+          if (call->arguments[0] == literal(false)) return call->arguments[1];\n+          if (call->arguments[1] == literal(false)) return call->arguments[0];\n+\n+          // x or x == x\n+          if (call->arguments[0] == call->arguments[1]) return call->arguments[0];\n+        }\n+        return expr;\n+      });\n+\n+      Add([](Expression expr, const Expression& guarantee_expr,\n+             ExecContext* ctx) -> Result<Expression> {\n+        // Ensure both calls are comparisons with equal LHS and scalar RHS\n+        auto cmp = Comparison::Get(expr);\n+        auto cmp_guarantee = Comparison::Get(guarantee_expr);\n+\n+        if (!cmp) return expr;\n+        if (!cmp_guarantee) return expr;\n+\n+        const auto& args = CallNotNull(expr)->arguments;\n+        const auto& guarantee_args = CallNotNull(guarantee_expr)->arguments;\n+\n+        const auto& lhs = Comparison::StripOrderPreservingCasts(args[0]);\n+        const auto& guarantee_lhs = guarantee_args[0];\n+        if (lhs != guarantee_lhs) return expr;\n+\n+        auto rhs = args[1].literal();\n+        auto guarantee_rhs = guarantee_args[1].literal();\n+\n+        if (!rhs) return expr;\n+        if (!rhs->is_scalar()) return expr;\n+\n+        if (!guarantee_rhs) return expr;\n+        if (!guarantee_rhs->is_scalar()) return expr;\n+\n+        ARROW_ASSIGN_OR_RAISE(auto cmp_rhs_guarantee_rhs,\n+                              Comparison::Execute(*rhs, *guarantee_rhs));\n+        DCHECK_NE(cmp_rhs_guarantee_rhs, Comparison::NA);\n+\n+        if (cmp_rhs_guarantee_rhs == Comparison::EQUAL) {\n+          // RHS of filter is equal to RHS of guarantee\n+\n+          if ((*cmp & *cmp_guarantee) == *cmp_guarantee) {\n+            // guarantee is a subset of filter, so all data will be included\n+            // x > 1, x >= 1, x != 1 guaranteed by x > 1\n+            return literal(true);\n+          }\n+\n+          if ((*cmp & *cmp_guarantee) == 0) {\n+            // guarantee disjoint with filter, so all data will be excluded\n+            // x > 1, x >= 1, x != 1 unsatisfiable if x == 1\n+            return literal(false);\n+          }\n+\n+          return expr;\n+        }\n+\n+        if (*cmp_guarantee & cmp_rhs_guarantee_rhs) {\n+          // x > 1, x >= 1, x != 1 cannot use guarantee x >= 3\n+          return expr;\n+        }\n+\n+        if (*cmp & Comparison::GetFlipped(cmp_rhs_guarantee_rhs)) {\n+          // x > 1, x >= 1, x != 1 guaranteed by x >= 3\n+          return literal(true);\n+        } else {\n+          // x < 1, x <= 1, x == 1 unsatisfiable if x >= 3\n+          return literal(false);\n+        }\n+      });\n+    }\n+\n+    void Add(IndependentPass p) override { independent_passes_.push_back(std::move(p)); }\n+\n+    void Add(GuaranteePass p) override { guarantee_passes_.push_back(std::move(p)); }\n+\n+    Result<Expression> RunIndependentPasses(Expression expr, ExecContext* ctx) override {\n+      ARROW_ASSIGN_OR_RAISE(auto canonicalized, Canonicalize(expr, ctx));\n+\n+      ARROW_ASSIGN_OR_RAISE(\n+          auto simplified,\n+          Modify(\n+              canonicalized, [](Expression expr) { return expr; },\n+              [&](Expression expr, ...) -> Result<Expression> {\n+                for (const auto& pass : independent_passes_) {\n+                  ARROW_ASSIGN_OR_RAISE(auto simplified, pass(expr, ctx));\n+                  if (Identical(simplified, expr)) continue;\n+\n+                  ARROW_ASSIGN_OR_RAISE(expr, Canonicalize(std::move(simplified), ctx));\n+                  if (!expr.call()) return expr;\n+                }\n+                return expr;\n+              }));\n+\n+      if (Identical(simplified, canonicalized)) return expr;\n\nReview comment:\n       Should this return `canonicalized`?\n\n\n\n\n-- \nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on to GitHub and use the\nURL above to go to the specific comment.\n\nTo unsubscribe, e-mail: github-unsubscribe@arrow.apache.org\n\nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "created": "2021-12-13T19:54:19.322+0000",
-                    "updated": "2021-12-13T19:54:19.322+0000",
-                    "started": "2021-12-13T19:54:19.322+0000",
-                    "timeSpent": "10m",
-                    "timeSpentSeconds": 600,
-                    "id": "695311",
-                    "issueId": "13412072"
-                }
-            ]
-        },
         "customfield_12313920": null,
         "issuetype": {
             "self": "https://issues.apache.org/jira/rest/api/2/issuetype/4",
@@ -276,7 +191,7 @@
             "avatarId": 21140
         },
         "timespent": 1200,
-        "customfield_12314020": "{summaryBean=com.atlassian.jira.plugin.devstatus.rest.SummaryBean@2d9233c7[summary={pullrequest=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@2643fe7d[overall=PullRequestOverallBean{stateCount=0, state='OPEN', details=PullRequestOverallDetails{openCount=0, mergedCount=0, declinedCount=0}},byInstanceType={}], build=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@438ccb06[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BuildOverallBean@7a05751c[failedBuildCount=0,successfulBuildCount=0,unknownBuildCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], review=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@1d3329dd[overall=com.atlassian.jira.plugin.devstatus.summary.beans.ReviewsOverallBean@48fa4fd[stateCount=0,state=<null>,dueDate=<null>,overDue=false,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], deployment-environment=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@21fe9b91[overall=com.atlassian.jira.plugin.devstatus.summary.beans.DeploymentOverallBean@7082a727[topEnvironments=[],showProjects=false,successfulCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], repository=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@747b052b[overall=com.atlassian.jira.plugin.devstatus.summary.beans.CommitOverallBean@d2aef15[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], branch=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@58ddcf32[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BranchOverallBean@3d83e091[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}]},errors=[],configErrors=[]], devSummaryJson={\"cachedValue\":{\"errors\":[],\"configErrors\":[],\"summary\":{\"pullrequest\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":\"OPEN\",\"details\":{\"openCount\":0,\"mergedCount\":0,\"declinedCount\":0,\"total\":0},\"open\":true},\"byInstanceType\":{}},\"build\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"failedBuildCount\":0,\"successfulBuildCount\":0,\"unknownBuildCount\":0},\"byInstanceType\":{}},\"review\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":null,\"dueDate\":null,\"overDue\":false,\"completed\":false},\"byInstanceType\":{}},\"deployment-environment\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"topEnvironments\":[],\"showProjects\":false,\"successfulCount\":0},\"byInstanceType\":{}},\"repository\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}},\"branch\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}}}},\"isStale\":false}}",
+        "customfield_12314020": "{summaryBean=com.atlassian.jira.plugin.devstatus.rest.SummaryBean@58981b61[summary={pullrequest=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@2b64ff63[overall=PullRequestOverallBean{stateCount=0, state='OPEN', details=PullRequestOverallDetails{openCount=0, mergedCount=0, declinedCount=0}},byInstanceType={}], build=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@6e4161e4[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BuildOverallBean@625214a8[failedBuildCount=0,successfulBuildCount=0,unknownBuildCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], review=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@702d101d[overall=com.atlassian.jira.plugin.devstatus.summary.beans.ReviewsOverallBean@57eaf95a[stateCount=0,state=<null>,dueDate=<null>,overDue=false,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], deployment-environment=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@32c1fc02[overall=com.atlassian.jira.plugin.devstatus.summary.beans.DeploymentOverallBean@404459a6[topEnvironments=[],showProjects=false,successfulCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], repository=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@58f1044b[overall=com.atlassian.jira.plugin.devstatus.summary.beans.CommitOverallBean@58d10626[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], branch=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@65cdc0d2[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BranchOverallBean@7262ca4[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}]},errors=[],configErrors=[]], devSummaryJson={\"cachedValue\":{\"errors\":[],\"configErrors\":[],\"summary\":{\"pullrequest\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":\"OPEN\",\"details\":{\"openCount\":0,\"mergedCount\":0,\"declinedCount\":0,\"total\":0},\"open\":true},\"byInstanceType\":{}},\"build\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"failedBuildCount\":0,\"successfulBuildCount\":0,\"unknownBuildCount\":0},\"byInstanceType\":{}},\"review\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":null,\"dueDate\":null,\"overDue\":false,\"completed\":false},\"byInstanceType\":{}},\"deployment-environment\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"topEnvironments\":[],\"showProjects\":false,\"successfulCount\":0},\"byInstanceType\":{}},\"repository\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}},\"branch\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}}}},\"isStale\":false}}",
         "customfield_12314141": null,
         "customfield_12314140": null,
         "project": {
@@ -323,12 +238,6 @@
         "timeoriginalestimate": null,
         "description": "Currenly, SimplifyWithGuarantee makes a hard-coded set of passes over an input expression. This not ideal for maintenance or extension of built-in simplification passes. Furthermore, it renders optimization of non-built-in function calls awkward or impossible.\r\n\r\nInstead it would be preferable to provide an extensible registry of optimization passes to clarify and regularize addition of new passes.\r\n\r\nLLVM's extensive optimization framework can offer inspiration here:\r\nhttps://llvm.org/docs/WritingAnLLVMPass.html#pass-classes-and-requirements\r\nLLVM passes come with several levels of access and can declare invalidation and pre-requirement relationships with other passes.\r\n\r\nin the case of expression optimization in arrow, even a minimal registry of passes will require at least two types of pass: one which operates given a guarantee like a partition expression and one which operates independently.\r\n\r\nI'm not sure if it makes sense to include cost based optimizations in this registry (currently only rule based optimizations are provided), but I think it's worth mentioning them here at least.",
         "customfield_10010": null,
-        "timetracking": {
-            "remainingEstimate": "0h",
-            "timeSpent": "20m",
-            "remainingEstimateSeconds": 0,
-            "timeSpentSeconds": 1200
-        },
         "customfield_12314523": null,
         "customfield_12314127": null,
         "customfield_12314522": null,
@@ -337,7 +246,6 @@
         "customfield_12314125": null,
         "customfield_12314520": null,
         "customfield_12314124": null,
-        "attachment": [],
         "customfield_12312340": null,
         "customfield_12314123": null,
         "customfield_12312341": null,
@@ -362,83 +270,6 @@
         "duedate": null,
         "customfield_12314132": null,
         "customfield_12314131": null,
-        "comment": {
-            "comments": [
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13412072/comment/17476143",
-                    "id": "17476143",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=kszucs",
-                        "name": "kszucs",
-                        "key": "kszucs",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "Krisztian Szucs",
-                        "active": true,
-                        "timeZone": "Europe/Budapest"
-                    },
-                    "body": "Postponing to 8.0 since the PR is still in draft status. Feel free to move back if it is expected to land in 7.0",
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=kszucs",
-                        "name": "kszucs",
-                        "key": "kszucs",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "Krisztian Szucs",
-                        "active": true,
-                        "timeZone": "Europe/Budapest"
-                    },
-                    "created": "2022-01-14T13:30:09.956+0000",
-                    "updated": "2022-01-14T13:30:09.956+0000"
-                },
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13412072/comment/17567294",
-                    "id": "17567294",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=npr",
-                        "name": "npr",
-                        "key": "npr",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=34045",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=34045",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=34045",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=34045"
-                        },
-                        "displayName": "Neal Richardson",
-                        "active": true,
-                        "timeZone": "America/Los_Angeles"
-                    },
-                    "body": "This issue has been inactive for 3 months, so it has been unassigned and marked as unstarted. If you are still working on this, feel free to reassign yourself and resume progress.",
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=npr",
-                        "name": "npr",
-                        "key": "npr",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=34045",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=34045",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=34045",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=34045"
-                        },
-                        "displayName": "Neal Richardson",
-                        "active": true,
-                        "timeZone": "America/Los_Angeles"
-                    },
-                    "created": "2022-07-15T15:32:22.234+0000",
-                    "updated": "2022-07-15T15:32:22.234+0000"
-                }
-            ],
-            "maxResults": 2,
-            "total": 2,
-            "startAt": 0
-        },
         "customfield_12311820": "0|z0wsao:",
         "customfield_12314139": null
     }

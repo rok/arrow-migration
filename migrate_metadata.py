@@ -158,7 +158,7 @@ def clear_labels(prefix=None):
 def main():
     # stage_from_source_files()
     # clear_labels()
-    # add_missing_metadata()
+    add_missing_metadata()
     print_add_metadata()
 
 if __name__ == "__main__":

@@ -158,52 +158,6 @@
             "votes": 0,
             "hasVoted": false
         },
-        "worklog": {
-            "startAt": 0,
-            "maxResults": 20,
-            "total": 1,
-            "worklogs": [
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13154222/worklog/97067",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "comment": "xhochy closed pull request #1918: ARROW-2485: Re-write of run_clang_format.py, such that it outputs the diffs of th\u2026\nURL: https://github.com/apache/arrow/pull/1918\n \n \n   \n\nThis is a PR merged from a forked repository.\nAs GitHub hides the original diff on merge, it is displayed below for\nthe sake of provenance:\n\nAs this is a foreign pull request (from a fork), the diff is supplied\nbelow (as it won't show otherwise due to GitHub magic):\n\ndiff --git a/cpp/CMakeLists.txt b/cpp/CMakeLists.txt\nindex b91368585..be940eaf4 100644\n--- a/cpp/CMakeLists.txt\n+++ b/cpp/CMakeLists.txt\n@@ -488,7 +488,7 @@ endif (UNIX)\n add_custom_target(format ${BUILD_SUPPORT_DIR}/run_clang_format.py\n   ${CLANG_FORMAT_BIN}\n   ${BUILD_SUPPORT_DIR}/clang_format_exclusions.txt\n-  ${CMAKE_CURRENT_SOURCE_DIR}/src)\n+  ${CMAKE_CURRENT_SOURCE_DIR}/src --fix)\n \n # runs clang format and exits with a non-zero exit code if any files need to be reformatted\n \n@@ -496,7 +496,7 @@ add_custom_target(format ${BUILD_SUPPORT_DIR}/run_clang_format.py\n add_custom_target(check-format ${BUILD_SUPPORT_DIR}/run_clang_format.py\n    ${CLANG_FORMAT_BIN}\n    ${BUILD_SUPPORT_DIR}/clang_format_exclusions.txt\n-   ${CMAKE_CURRENT_SOURCE_DIR}/src 1)\n+   ${CMAKE_CURRENT_SOURCE_DIR}/src)\n \n ############################################################\n # \"make clang-tidy\" and \"make check-clang-tidy\" targets\ndiff --git a/cpp/build-support/run_clang_format.py b/cpp/build-support/run_clang_format.py\nindex 6dec34bd0..229fa1eed 100755\n--- a/cpp/build-support/run_clang_format.py\n+++ b/cpp/build-support/run_clang_format.py\n@@ -16,63 +16,94 @@\n # specific language governing permissions and limitations\n # under the License.\n \n+import argparse\n+import codecs\n+import difflib\n import fnmatch\n import os\n import subprocess\n import sys\n \n-if len(sys.argv) < 4:\n-    sys.stderr.write(\"Usage: %s $CLANG_FORMAT_VERSION exclude_globs.txt \"\n-                     \"$source_dir\\n\" %\n-                     sys.argv[0])\n-    sys.exit(1)\n+if __name__ == \"__main__\":\n+    parser = argparse.ArgumentParser(\n+        description=\"Runs clang format on all of the source \"\n+        \"files. If --fix is specified,  and compares the output \"\n+        \"with the existing file, outputting a unifiied diff if \"\n+        \"there are any necessary changes\")\n+    parser.add_argument(\"clang_format_binary\",\n+                        help=\"Path to the clang-format binary\")\n+    parser.add_argument(\"exclude_globs\",\n+                        help=\"Filename containing globs for files \"\n+                        \"that should be excluded from the checks\")\n+    parser.add_argument(\"source_dir\", \n+                        help=\"Root directory of the source code\")\n+    parser.add_argument(\"--fix\", default=False,\n+                        action=\"store_true\",\n+                        help=\"If specified, will re-format the source \"\n+                        \"code instead of comparing the re-formatted \"\n+                        \"output, defaults to %(default)s\")\n \n-CLANG_FORMAT = sys.argv[1]\n-EXCLUDE_GLOBS_FILENAME = sys.argv[2]\n-SOURCE_DIR = sys.argv[3]\n+    arguments = parser.parse_args()\n \n-if len(sys.argv) > 4:\n-    CHECK_FORMAT = int(sys.argv[4]) == 1\n-else:\n-    CHECK_FORMAT = False\n+    formatted_filenames = []\n+    exclude_globs = [line.strip() for line in open(arguments.exclude_globs)]\n+    for directory, subdirs, filenames in os.walk(arguments.source_dir):\n+        fullpaths = (os.path.join(directory, filename) for filename in filenames)\n+        source_files = filter(lambda x: x.endswith(\".h\") or x.endswith(\".cc\"), fullpaths)\n+        formatted_filenames.extend(\n+            # Filter out files that match the globs in the globs file\n+            [filename for filename in source_files\n+             if not any((fnmatch.fnmatch(filename, exclude_glob)\n+                         for exclude_glob in exclude_globs))])\n+        \n+    error = False\n+    if arguments.fix:\n+        # Print out each file on its own line, but run\n+        # clang format once for all of the files\n+        print(\"\\n\".join(map(lambda x: \"Formatting {}\".format(x),\n+                            formatted_filenames)))\n+        subprocess.check_call([arguments.clang_format_binary,\n+                               \"-i\"] + formatted_filenames)\n+    else:\n+        for filename in formatted_filenames:\n+            print(\"Checking {}\".format(filename))\n+            #\n+            # Due to some incompatibilities between Python 2 and\n+            # Python 3, there are some specific actions we take here\n+            # to make sure the difflib.unified_diff call works.\n+            #\n+            # In Python 2, the call to subprocess.check_output return\n+            # a 'str' type. In Python 3, however, the call returns a\n+            # 'bytes' type unless the 'encoding' argument is\n+            # specified. Unfortunately, the 'encoding' argument is not\n+            # in the Python 2 API. We could do an if/else here based\n+            # on the version of Python we are running, but it's more\n+            # straightforward to read the file in binary and do utf-8\n+            # conversion. In Python 2, it's just converting string\n+            # types to unicode types, whereas in Python 3 it's\n+            # converting bytes types to utf-8 encoded str types. This\n+            # approach ensures that the arguments to\n+            # difflib.unified_diff are acceptable string types in both\n+            # Python 2 and Python 3.\n+            with open(filename, \"rb\") as reader:\n+                # Run clang-format and capture its output\n+                formatted = subprocess.check_output(\n+                    [arguments.clang_format_binary,\n+                     filename])\n+                formatted = codecs.decode(formatted, \"utf-8\")\n+                # Read the original file\n+                original = codecs.decode(reader.read(), \"utf-8\")\n+                # Run the equivalent of diff -u\n+                diff = list(difflib.unified_diff(\n+                    original.splitlines(True),\n+                    formatted.splitlines(True),\n+                    fromfile=filename,\n+                    tofile=\"{} (after clang format)\".format(\n+                        filename)))\n+                if diff:\n+                    # Print out the diff to stderr\n+                    error = True\n+                    print(\",\".join(map(str, map(type, diff))))\n+                    sys.stderr.writelines(diff)\n \n-\n-exclude_globs = [line.strip() for line in open(EXCLUDE_GLOBS_FILENAME, \"r\")]\n-\n-files_to_format = []\n-matches = []\n-for directory, subdirs, files in os.walk(SOURCE_DIR):\n-    for name in files:\n-        name = os.path.join(directory, name)\n-        if not (name.endswith('.h') or name.endswith('.cc')):\n-            continue\n-\n-        excluded = False\n-        for g in exclude_globs:\n-            if fnmatch.fnmatch(name, g):\n-                excluded = True\n-                break\n-        if not excluded:\n-            files_to_format.append(name)\n-\n-if CHECK_FORMAT:\n-    output = subprocess.check_output([CLANG_FORMAT, '-output-replacements-xml']\n-                                     + files_to_format,\n-                                     stderr=subprocess.STDOUT).decode('utf8')\n-\n-    to_fix = []\n-    for line in output.split('\\n'):\n-        if 'offset' in line:\n-            to_fix.append(line)\n-\n-    if len(to_fix) > 0:\n-        print(\"clang-format checks failed, run 'make format' to fix\")\n-        sys.exit(-1)\n-else:\n-    try:\n-        cmd = [CLANG_FORMAT, '-i'] + files_to_format\n-        subprocess.check_output(cmd, stderr=subprocess.STDOUT)\n-    except Exception as e:\n-        print(e)\n-        print(' '.join(cmd))\n-        raise\n+    sys.exit(1 if error else 0)\n\n\n \n\n----------------------------------------------------------------\nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on GitHub and use the\nURL above to go to the specific comment.\n \nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "created": "2018-05-01T13:34:33.035+0000",
-                    "updated": "2018-05-01T13:34:33.035+0000",
-                    "started": "2018-05-01T13:34:33.035+0000",
-                    "timeSpent": "10m",
-                    "timeSpentSeconds": 600,
-                    "id": "97067",
-                    "issueId": "13154222"
-                }
-            ]
-        },
         "customfield_12313920": null,
         "issuetype": {
             "self": "https://issues.apache.org/jira/rest/api/2/issuetype/4",
@@ -215,7 +169,7 @@
             "avatarId": 21140
         },
         "timespent": 600,
-        "customfield_12314020": "{summaryBean=com.atlassian.jira.plugin.devstatus.rest.SummaryBean@54d63d3e[summary={pullrequest=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@11c591de[overall=PullRequestOverallBean{stateCount=0, state='OPEN', details=PullRequestOverallDetails{openCount=0, mergedCount=0, declinedCount=0}},byInstanceType={}], build=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@5d566870[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BuildOverallBean@60205965[failedBuildCount=0,successfulBuildCount=0,unknownBuildCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], review=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@973b96d[overall=com.atlassian.jira.plugin.devstatus.summary.beans.ReviewsOverallBean@55cf455c[stateCount=0,state=<null>,dueDate=<null>,overDue=false,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], deployment-environment=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@3bb4a27d[overall=com.atlassian.jira.plugin.devstatus.summary.beans.DeploymentOverallBean@59bd2f1f[topEnvironments=[],showProjects=false,successfulCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], repository=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@4d914d94[overall=com.atlassian.jira.plugin.devstatus.summary.beans.CommitOverallBean@62db14df[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], branch=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@7c62f5b3[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BranchOverallBean@4c17e8f7[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}]},errors=[],configErrors=[]], devSummaryJson={\"cachedValue\":{\"errors\":[],\"configErrors\":[],\"summary\":{\"pullrequest\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":\"OPEN\",\"details\":{\"openCount\":0,\"mergedCount\":0,\"declinedCount\":0,\"total\":0},\"open\":true},\"byInstanceType\":{}},\"build\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"failedBuildCount\":0,\"successfulBuildCount\":0,\"unknownBuildCount\":0},\"byInstanceType\":{}},\"review\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":null,\"dueDate\":null,\"overDue\":false,\"completed\":false},\"byInstanceType\":{}},\"deployment-environment\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"topEnvironments\":[],\"showProjects\":false,\"successfulCount\":0},\"byInstanceType\":{}},\"repository\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}},\"branch\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}}}},\"isStale\":false}}",
+        "customfield_12314020": "{summaryBean=com.atlassian.jira.plugin.devstatus.rest.SummaryBean@5758909f[summary={pullrequest=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@4c821dc[overall=PullRequestOverallBean{stateCount=0, state='OPEN', details=PullRequestOverallDetails{openCount=0, mergedCount=0, declinedCount=0}},byInstanceType={}], build=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@31fb101d[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BuildOverallBean@74f8013f[failedBuildCount=0,successfulBuildCount=0,unknownBuildCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], review=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@66c8302[overall=com.atlassian.jira.plugin.devstatus.summary.beans.ReviewsOverallBean@1daf2b3[stateCount=0,state=<null>,dueDate=<null>,overDue=false,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], deployment-environment=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@68c8616d[overall=com.atlassian.jira.plugin.devstatus.summary.beans.DeploymentOverallBean@5c8d74b2[topEnvironments=[],showProjects=false,successfulCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], repository=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@3e1b98b2[overall=com.atlassian.jira.plugin.devstatus.summary.beans.CommitOverallBean@6802aaa8[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], branch=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@436a7dcc[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BranchOverallBean@7475b9f7[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}]},errors=[],configErrors=[]], devSummaryJson={\"cachedValue\":{\"errors\":[],\"configErrors\":[],\"summary\":{\"pullrequest\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":\"OPEN\",\"details\":{\"openCount\":0,\"mergedCount\":0,\"declinedCount\":0,\"total\":0},\"open\":true},\"byInstanceType\":{}},\"build\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"failedBuildCount\":0,\"successfulBuildCount\":0,\"unknownBuildCount\":0},\"byInstanceType\":{}},\"review\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":null,\"dueDate\":null,\"overDue\":false,\"completed\":false},\"byInstanceType\":{}},\"deployment-environment\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"topEnvironments\":[],\"showProjects\":false,\"successfulCount\":0},\"byInstanceType\":{}},\"repository\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}},\"branch\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}}}},\"isStale\":false}}",
         "customfield_12314141": null,
         "customfield_12314140": null,
         "project": {
@@ -262,12 +216,6 @@
         "timeoriginalestimate": null,
         "description": null,
         "customfield_10010": null,
-        "timetracking": {
-            "remainingEstimate": "0h",
-            "timeSpent": "10m",
-            "remainingEstimateSeconds": 0,
-            "timeSpentSeconds": 600
-        },
         "customfield_12314523": null,
         "customfield_12314127": null,
         "customfield_12314522": null,
@@ -276,7 +224,6 @@
         "customfield_12314125": null,
         "customfield_12314520": null,
         "customfield_12314124": null,
-        "attachment": [],
         "customfield_12312340": null,
         "customfield_12314123": null,
         "customfield_12312341": null,
@@ -301,83 +248,6 @@
         "duedate": null,
         "customfield_12314132": null,
         "customfield_12314131": null,
-        "comment": {
-            "comments": [
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13154222/comment/16446822",
-                    "id": "16446822",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "body": "xhochy commented on issue #1918: ARROW-2485: Re-write of run_clang_format.py, such that it outputs the diffs of th\u2026\nURL: https://github.com/apache/arrow/pull/1918#issuecomment-383300437\n \n \n   @joshuastorck I removed my commit again. Seems like my quickfix was no fix. Sorry for screwing this up. Leaving this branch for you again. \n\n----------------------------------------------------------------\nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on GitHub and use the\nURL above to go to the specific comment.\n \nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "created": "2018-04-21T14:26:17.685+0000",
-                    "updated": "2018-04-21T14:26:17.685+0000"
-                },
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13154222/comment/16459682",
-                    "id": "16459682",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=uwe",
-                        "name": "uwe",
-                        "key": "xhochy",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?ownerId=xhochy&avatarId=30652",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&ownerId=xhochy&avatarId=30652",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&ownerId=xhochy&avatarId=30652",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&ownerId=xhochy&avatarId=30652"
-                        },
-                        "displayName": "Uwe Korn",
-                        "active": true,
-                        "timeZone": "Europe/Berlin"
-                    },
-                    "body": "Issue resolved by pull request 1918\n[https://github.com/apache/arrow/pull/1918]",
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=uwe",
-                        "name": "uwe",
-                        "key": "xhochy",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?ownerId=xhochy&avatarId=30652",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&ownerId=xhochy&avatarId=30652",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&ownerId=xhochy&avatarId=30652",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&ownerId=xhochy&avatarId=30652"
-                        },
-                        "displayName": "Uwe Korn",
-                        "active": true,
-                        "timeZone": "Europe/Berlin"
-                    },
-                    "created": "2018-05-01T13:34:35.697+0000",
-                    "updated": "2018-05-01T13:34:35.697+0000"
-                }
-            ],
-            "maxResults": 2,
-            "total": 2,
-            "startAt": 0
-        },
         "customfield_12311820": "0|i3surj:",
         "customfield_12314139": null
     }

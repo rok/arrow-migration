@@ -1,5 +1,4 @@
 from jira import JIRA
-import asyncio
 import os
 import json
 import csv
@@ -58,102 +57,11 @@ subtask_issues = {}
 related_issues = {}
 related_users = {}
 issue_attachments = {}
-
-class RelatedIssues:
-    def __init__(self, issue_dict):
-        self.referenced_issues = get_related_issues(issue_dict)
-        self.subtasks = get_subtasks(issue_dict)
-
-    def all_imported(self):
-        for issue in self.referenced_issues:
-            if not issue["key"] in mapped_issues:
-                return False
-        for issue["key"] in self.subtasks:
-            if not issue in mapped_issues.keys():
-                return False
-        return True
-
-    def get_referenced_issues_text(self):
-        if len(self.referenced_issues) == 0:
-            return ""
-        text = "\n### Related issues:\n" + "\n".join(
-            [f" - #{mapped_issues[referenced_issue['key']]} ({referenced_issue['relation']})" for referenced_issue in self.referenced_issues]
-        )
-        return text + "\n"
-
-
-    def get_subtask_text(self):
-        if len(self.subtasks) == 0:
-            return ""
-        text = "\n### Subtasks:\n" + "\n".join(
-                [f" - [{'X' if is_status_completed(subtask['status']) else ' '}] #{mapped_issues[subtask['key']]}" for subtask in self.subtasks]
-            )
-        return text + "\n"
-
-class MigratingIssueMetadata:
-     def __init__(self, issue_dict):
-         issue_id = issue_dict["key"]
-         self.source_issue_id = issue_id
-         self.import_url = None
-         self.target_issue_id = None
-         self.related_issues = RelatedIssues(issue_dict)
-         self.related_users = get_related_user_text(issue_dict)
-         self.attachments = get_issue_attachments(issue_dict)
-
-     async def get_staged_issue(self):
-         with open(get_local_file_path(self.source_issue_id)) as fp:
-             return json.load(fp)
-     async def get_source_issue(self):
-         with open(get_local_file_path(self.source_issue_id, dir="source")) as fp:
-             return json.load(fp)
-     async def initiate_import(self):
-         staged_issue = await self.get_staged_issue()
-         self.import_url = await import_issue(staged_issue, self.source_issue_id)
-         logging.info(f"URL for {self.source_issue_id} is {self.import_url}")
-
-     async def stage_in_github_format(self):
-         issue_dict = await self.get_source_issue()
-         github_format = get_github_format_json(issue_dict)
-         filename = get_local_file_path(issue_dict["key"], dir="staged")
-         with open(filename, "w") as fp:
-            fp.write(json.dumps(github_format, indent=4))
-            fp.close()
-
-     async def poll_import_complete(self):
-         if not self.import_url:
-             raise RuntimeError(f"Issue {self.source_issue_id} has no import URL to poll for completion")
-         self.target_issue_id = await get_github_issue_id(self.import_url)
-         mapped_issues[self.source_issue_id] = self.target_issue_id
-         # await issue_post_import_queue.put(self)
-         logging.info(f"Issue {self.source_issue_id} has been successfully imported as GitHub issue {self.target_issue_id}")
-
-     def is_ready_for_post_import_update(self):
-         if not self.source_issue_id:
-             return False
-         if not self.target_issue_id:
-             return False
-         return self.related_issues.all_imported()
-
-     def get_jira_url(self):
-         return f"https://issues.apache.org/jira/browse/{self.source_issue_id}"
-
-     def get_github_issue_url(self):
-         return f"https://api.github.com/repos/{github_user}/{github_target_repo}/issues/{self.target_issue_id}"
-
-     def get_attachment_text(self):
-         if len(self.attachments) == 0:
-             return ""
-         text = "\n### Original Issue Attachments:\n" + "\n".join(
-             [f" - [{attachment['filename']}]({attachment['content']})" for attachment in self.attachments]
-         )
-         return text + "\n"
-
-     def get_post_update_additional_text(self):
-         return (
-            self.related_issues.get_subtask_text() +
-            self.related_issues.get_referenced_issues_text() +
-            self.get_attachment_text() +
-            self.related_users)
+retrieval_process_complete = False
+import_process_complete = False
+post_import_update_complete = False
+issue_mapping_complete = False
+milestones = {}
 
 class MigratedMention(AbstractMarkup):
     def action(self, tokens: ParseResults) -> str:
@@ -201,18 +109,16 @@ def get_jira_connection():
     # return JIRA({"server" : "https://issues.apache.org/jira/"}, basic_auth=("todd@voltrondata.com", jira_token))
     # return JIRA(**conn_opts)
 
-async def collect_jira_issues(queue, filter):
+def collect_jira_issues(filter):
     conn = get_jira_connection()
-    issues = conn.search_issues(filter, maxResults = False)
-    import_tasks = []
-    for issue in issues:
-        issue_metadata = MigratingIssueMetadata(issue.raw)
-        import_tasks.append(asyncio.create_task(issue_metadata.stage_in_github_format(issue.raw)))
-        await queue.put(issue_metadata)
-        logging.info(f"Collected issue {issue.key}")
-    await asyncio.gather(*import_tasks)
+    issues = conn.search_issues(filter, maxResults = False,fields = '*all')
+    [save_related_metadata(issue.raw) for issue in issues]
+    global issues_retrieved_from_jira
+    issues_retrieved_from_jira = [issue.key for issue in issues]
+    global retrieval_process_complete
+    retrieval_process_complete = True
     logging.info(f"Completed Jira issue collection")
-
+    return issues
 
 def save_source_issue(issue_dict):
     filename= get_local_file_path(issue_dict["key"], dir="source")
@@ -220,13 +126,25 @@ def save_source_issue(issue_dict):
         fp.write(json.dumps(issue_dict, indent=4))
         fp.close()
 
-def get_related_metadata(issue_dict):
-    issue_metatdata = MigratingIssueMetadata(issue_dict)
-    return issue_metatdata
+def save_related_metadata(issue_dict):
+    save_related_issues(issue_dict)
+    save_related_users(issue_dict)
+    save_issue_attachments(issue_dict)
+    save_source_issue(issue_dict)
 
-def get_related_issues(issue_dict):
+def save_related_issues(issue_dict):
+    issue_subtasks = issue_dict['fields']['subtasks']
+    if len(issue_subtasks):
+        global subtask_issues
+        subtask_issues[issue_dict['key']] = [
+            {"key" : subtask["key"], "status" : subtask["fields"]["status"]["name"]}
+            for subtask in issue_subtasks
+        ]
+    issue_relations = issue_dict["fields"]["issuelinks"]
+    if len(issue_relations) > 0:
+        global related_issues
         collected_issues = []
-        for related_issue in issue_dict["fields"]["issuelinks"]:
+        for related_issue in issue_relations:
             direction_outward = True
             target_issue = None
             if "inwardIssue" in related_issue.keys():
@@ -239,27 +157,23 @@ def get_related_issues(issue_dict):
                 relationship = related_issue["type"]["inward"]
                 target_issue = related_issue["inwardIssue"]["key"]
             collected_issues.append({"key" : target_issue, "relation" : relationship})
-        return collected_issues
+        related_issues[issue_dict["key"]] = collected_issues
 
-def get_subtasks(issue_dict):
-    return [
-        {"key" : subtask["key"], "status" : subtask["fields"]["status"]["name"]}
-        for subtask in issue_dict["fields"]["subtasks"]
-    ]
-
-def get_related_user_text(issue_dict):
-    return f"""\n### Migrated issue participants:
+def save_related_users(issue_dict):
+    text = f"""\n### Migrated issue participants:
 **Reporter**: {get_user_string_raw(issue_dict["fields"]["creator"])}
 **Assignee**: {get_user_string_raw(issue_dict["fields"]["assignee"])}
 <!--- WATCHERS HERE --->
 """
+    related_users[issue_dict["key"]] = text
 
-def get_issue_attachments(issue_dict):
+def save_issue_attachments(issue_dict):
     if 'attachment' not in issue_dict["fields"].keys():
-        return []
+        return
     if len(issue_dict["fields"]["attachment"]) == 0:
-        return []
-    return issue_dict["fields"]["attachment"]
+        return
+    global issue_attachments
+    issue_attachments[issue_dict["key"]] = issue_dict["fields"]["attachment"]
 
 def collect_jira_issue(key):
     conn = get_jira_connection()
@@ -268,63 +182,87 @@ def collect_jira_issue(key):
 def clean():
     source_dir = os.path.join(os.path.dirname(__file__), "issues", "source")
     for file in os.listdir(source_dir):
-        os.remove(os.path.join(source_dir, file))
+        if file.endswith(".json"):
+            os.remove(os.path.join(source_dir, file))
     staged_dir = os.path.join(os.path.dirname(__file__), "issues", "staged")
     for file in os.listdir(staged_dir):
-        os.remove(os.path.join(staged_dir, file))
-    completed_dir = os.path.join(os.path.dirname(__file__), "issues", "completed")
-    for file in os.listdir(completed_dir):
-        os.remove(os.path.join(completed_dir, file))
-    logs_dir = os.path.join(os.path.dirname(__file__), "logs")
-    for file in os.listdir(logs_dir):
-        os.remove(os.path.join(logs_dir, file))
+        if file.endswith(".json"):
+            os.remove(os.path.join(staged_dir, file))
 
-def get_github_format_json(issue_dict):
-    issue_url = f"https://issues.apache.org/jira/browse/{issue_dict['key']}"
+def get_github_format_json(jira_issue):
+    jira_issue_raw = jira_issue.raw
+    logging.info(f"Getting GitHub formatted issue for {jira_issue.key}")
+    issue_url = f"https://issues.apache.org/jira/browse/{jira_issue.key}"
     labels = ["Migrated from Jira"]
-    closed = issue_dict['fields']['status']['name'] in ["Closed", "Resolved"]
-    labels += get_component_labels(issue_dict)
-    labels.append(get_issue_type_label(issue_dict))
+    closed = jira_issue.fields.status.name in ["Closed", "Resolved"]
+    labels += get_component_labels(jira_issue)
+    labels.append(get_issue_type_label(jira_issue))
     details = {
-        "title": get_summary(issue_dict),
-        "body": get_description(issue_dict),
-        "created_at": fix_timestamp(issue_dict['fields']['created']),
-        "updated_at": fix_timestamp(issue_dict['fields']['updated']),
+        "title": get_summary(jira_issue),
+        "body": get_description(jira_issue.raw),
+        "created_at": fix_timestamp(jira_issue.fields.created),
+        "updated_at": fix_timestamp(jira_issue.fields.updated),
         "labels": labels,
         "closed": closed
     }
     # GitHub throws errors if empty string or None:
-    closed_date = fix_timestamp(issue_dict['fields']['resolutiondate'])
+    closed_date = fix_timestamp(jira_issue.fields.resolutiondate)
     if closed_date:
         details["closed_at"] = closed_date
+    milestone = get_github_milestone(jira_issue.raw)
+    if milestone != None:
+        details["milestone"] = milestone
     comments = []
-    for comment in issue_dict['fields']['comment']['comments']:
+    for comment in jira_issue.fields.comment.comments:
         # Skip ASF GitHub Bot comments per https://github.com/apache/arrow/issues/14648
-        if comment['author']['key'] == "githubbot":
+        if comment.author.key == "githubbot":
             continue
         comments.append({
-            "created_at": fix_timestamp(comment['created']),
-            "body" : f"***Note**: [Comment]({issue_url}?focusedCommentId={comment['id']}) by {get_user_string_raw(comment['author'])}:*\n{translate_markup(comment['body'], attachments=issue_dict['fields']['attachment'])}"
+            "created_at": fix_timestamp(comment.created),
+            "body" : f"***Note**: [Comment]({issue_url}?focusedCommentId={comment.id}) by {get_user_string(comment.author)}:*\n{translate_markup(comment.body, attachments=jira_issue.raw['fields']['attachment'])}"
         })
     return {"issue": details, "comments": comments}
 
+
+def get_github_milestone(jira_issue):
+    fixVersion = None
+    for version in jira_issue['fields']['fixVersions']:
+        versionString = version['name']
+        if (fixVersion == None) or fixVersion > versionString:
+            fixVersion = versionString
+    if fixVersion:
+        return milestones[fixVersion]
+
+
+def get_github_milestone_map():
+    url = f"https://api.github.com/repos/{github_user}/{github_target_repo}/milestones"
+    resp = requests.get(url + "?state=all&per_page=100", headers=get_github_headers())
+    resp.raise_for_status()
+    global milestones
+    for milestone in resp.json():
+        milestones[milestone['title']] = milestone['number']
+
+
 def get_summary(jira_issue):
-    return jira_issue['fields']['summary']
+    return jira_issue.fields.summary
 
 def get_description(jira_issue_dict):
     issue_url = f"https://issues.apache.org/jira/browse/{jira_issue_dict['key']}"
+    attachments = None
+    if "attachment" in jira_issue_dict["fields"].keys():
+        attachments = jira_issue_dict['fields']['attachment']
     return f"""***Note**: This issue was originally created as [{jira_issue_dict['key']}]({issue_url}). Please see the [migration documentation](https://gist.github.com/toddfarmer/12aa88361532d21902818a6044fda4c3) for further details.*
 
 ### Original Issue Description:
-{translate_markup(jira_issue_dict['fields']['description'], attachments=jira_issue_dict['fields']['attachment'])}"""
+{translate_markup(jira_issue_dict['fields']['description'], attachments=attachments)}"""
 
 def save_issue_json(jira_key, issue_dict):
     file_location = get_local_file_path(jira_key, dir="staged")
     with open(file_location, 'w') as fp:
         json.dump(issue_dict, fp, indent=4)
 
-def get_issue_type_label(raw_jira_issue):
-    issue_type = raw_jira_issue['fields']['issuetype']['name']
+def get_issue_type_label(jira_issue):
+    issue_type = jira_issue.fields.issuetype.name
     if issue_type in ["Bug"]:
         return "Type: bug"
     if issue_type in ["Improvement", "Wish", "New Feature"]:
@@ -335,8 +273,8 @@ def get_issue_type_label(raw_jira_issue):
         return "Type: test"
     return None
 
-def get_component_labels(raw_jira_issue):
-    return [f"Component: {component['name']}" for component in raw_jira_issue['fields']['components']]
+def get_component_labels(jira_issue):
+    return [f"Component: {component.name}" for component in jira_issue.fields.components]
 
 def fix_timestamp(jira_ts):
     if not jira_ts:
@@ -371,7 +309,7 @@ def handle_leading_space_before_hash(content):
     lines = content.splitlines(True)
     returned_content = ""
     for line in lines:
-        if re.match(r'\s+#+\s+\S.*', line):
+        if re.match(r'\s#+\s+\S.*', line):
             returned_content += line.lstrip()
         else:
             returned_content += line
@@ -387,7 +325,7 @@ def get_local_file_path(issue, dir="staged"):
     parent_dir = os.path.dirname(__file__)
     return os.path.join(parent_dir, "issues", dir, f"{issue}.json")
 
-async def import_issue(github_issue, jira_issue_id):
+def import_issue(github_issue, jira_issue_id):
     url = f"https://api.github.com/repos/{github_user}/{github_target_repo}/import/issues"
     resp = None
     while True:
@@ -405,7 +343,7 @@ async def import_issue(github_issue, jira_issue_id):
                 logging.error(f"Error importing issue {jira_issue_id} into GitHub. Rrror: {ex}, headers: {resp.headers}")
             return None
 
-async def get_github_issue_id(github_import_url):
+def get_github_issue_id(github_import_url):
     while True:
         resp = requests.get(github_import_url, headers=get_github_headers())
         if resp.ok:
@@ -420,7 +358,7 @@ async def get_github_issue_id(github_import_url):
             else:
                 logging.error(f"Unable to retrieve GitHub issue id from {github_import_url}, retrying.  Response headers: {resp.headers}")
         # Throttle API requests if the issue import is not complete yet:
-        await asyncio.sleep(60)
+        time.sleep(5)
 
 def add_comment_to_migrated_issue(issue_id, comment_text):
     url = f"https://api.github.com/repos/{github_user}/{github_target_repo}/issues/{issue_id}/comments"
@@ -440,7 +378,7 @@ def get_jira_watchers(jira_issue):
     # TODO: Get the real list of Jira issue watchers
     return []
 
-async def get_github_issue(issue_id):
+def get_github_issue(issue_id):
     url = f"https://api.github.com/repos/{github_user}/{github_target_repo}/issues/{issue_id}"
     resp = None
     while True:
@@ -476,82 +414,31 @@ def load_user_mapping_file():
             loaded_mapping[row[1]] = row[2]
     username_mapping = loaded_mapping
 
-async def import_to_github(filter="project = ARROW order by key"):
-    ready_to_import_queue = asyncio.Queue()
-    import_stage_task = asyncio.create_task(stage(ready_to_import_queue, filter=filter))
-    issue_import_poll_queue = asyncio.Queue()
-    issue_check_ready_queue = asyncio.Queue()
-    issue_update_post_import_queue = asyncio.Queue()
-    import_staged_task = asyncio.create_task(import_staged_issues(ready_to_import_queue, issue_import_poll_queue))
-    poll_complete_task = asyncio.create_task(poll_completed_import(issue_import_poll_queue, issue_check_ready_queue))
-    wait_ready_task = asyncio.create_task(await_issue_ready(issue_check_ready_queue, issue_update_post_import_queue))
-    post_import_task = asyncio.create_task(post_import_updates(issue_update_post_import_queue))
-
-    await import_stage_task
-    logging.info("All issues staged for import")
-    await cancel_task_when_queue_empty(import_staged_task, ready_to_import_queue)
-    logging.info("Importing staged issues completed")
-    await cancel_task_when_queue_empty(poll_complete_task, issue_import_poll_queue)
-    logging.info("GitHub issue importing work completed")
-    await cancel_task_when_queue_empty(wait_ready_task, issue_check_ready_queue)
-    logging.info("All issues are now ready for post-import work")
-    await cancel_task_when_queue_empty(post_import_task, issue_update_post_import_queue)
-    logging.info("Post-import updates complete")
-
-async def cancel_task_when_queue_empty(task, queue):
-    await queue.join()
-    task.cancel()
-
-async def import_staged_issues(source_queue, target_queue):
-    while True:
-        # try:
-        issue_metadata = await source_queue.get()
-        jira_issue_id = issue_metadata.source_issue_id
-        logging.info(f"Importing staged issue {jira_issue_id}")
-        await issue_metadata.initiate_import()
-        await target_queue.put(issue_metadata)
-        # await issue_import_poll_queue.put(issue_metadata)
-        source_queue.task_done()
-        # except Exception as ex:
-        #     logging.error(f"Unhandled exception in import_staged_issues(): {ex}")
+def import_staged_issues():
+    global retrieval_process_complete
+    global issues_retrieved_from_jira
+    global issues_imported_to_github
+    global import_process_complete
+    while (not retrieval_process_complete) or len(issues_retrieved_from_jira) > 0:
+        try:
+            jira_issue_id = issues_retrieved_from_jira.pop(0)
+            logging.info(f"Importing staged issue {jira_issue_id}")
+            filename = get_local_file_path(jira_issue_id)
+            with open(filename) as fp:
+                issue_to_import = json.load(fp)
+                import_url = import_issue(issue_to_import, jira_issue_id)
+                # set_external_url_on_source_issue(jira_issue_id, import_url)
+                if import_url:
+                    issues_imported_to_github.append((jira_issue_id, import_url))
+                else:
+                    logging.error(f"Failed to import issue {jira_issue_id}, continuing.")
+                fp.close()
+        except IndexError:
+            time.sleep(1)
+        except Exception as ex:
+            logging.error(f"Unhandled exception in import_staged_issues(): {ex}")
+    import_process_complete = True
     logging.info(f"Completed initial import process")
-
-async def poll_completed_import(source_queue, target_queue):
-    while True:
-        # try:
-        issue_metadata = await source_queue.get()
-        await issue_metadata.poll_import_complete()
-        await target_queue.put(issue_metadata)
-        source_queue.task_done()
-        # except Exception as ex:
-        #     logging.error(f"Unhandled exception while polling for completed import: {ex}")
-    logging.info("Polling for import completion is done")
-
-async def await_issue_ready(source_queue, target_queue):
-    while True:
-        issue_metadata = await source_queue.get()
-        if not issue_metadata.is_ready_for_post_import_update():
-            await source_queue.put(issue_metadata)
-            logging.info()
-        else:
-            await target_queue.put(issue_metadata)
-        source_queue.task_done()
-        await asyncio.sleep(1)
-
-async def post_import_updates(source_queue):
-    jira = None
-    if ALLOW_JIRA_UPDATES:
-        logging.info("creating JIRA connection to update source issue(s)...")
-        jira = get_jira_connection()
-    while True:
-        issue_metadata = await source_queue.get()
-        jira_issue_id = issue_metadata.source_issue_id
-        migrated_gh_issue_url = issue_metadata.get_github_issue_url()
-        await update_source_jira(jira, jira_issue_id, migrated_gh_issue_url)
-        await finalize_migrated_issue(issue_metadata)
-        logging.info(f"Final update completed on {jira_issue_id}")
-        source_queue.task_done()
-    logging.info(f"Completed post import updates")
 
 def set_external_url_on_source_issue(jira_id, url):
     filename = get_local_file_path(jira_id, dir="source")
@@ -568,15 +455,63 @@ def get_external_url_from_source_issue(jira_id):
         fp.close()
         return jira_json['fields']['customfield_12311020']
 
-async def stage(queue, filter="project = ARROW order by key"):
-    await collect_jira_issues(queue, filter)
+def import_to_github():
+    with ThreadPoolExecutor() as e:
+        e.submit(import_staged_issues)
+        e.submit(second_pass)
+        e.submit(post_import_updates)
+
+def stage(filter="project = ARROW order by key"):
+    jira_issues = collect_jira_issues(filter)
+    for jira_issue in jira_issues:
+        github_format_issue = get_github_format_json(jira_issue)
+        save_issue_json(jira_issue, github_format_issue)
+    logging.info("Completed conversion of Jira issues to GitHub format")
 
 def set_issue_mapping(jira_id, github_id):
     global mapped_issues
     mapped_issues[jira_id] = github_id
 
+def second_pass():
+    global issues_imported_to_github
+    global import_process_complete
+    global issues_pending_post_updates
+    global issue_mapping_complete
+    while (not import_process_complete) or len(issues_imported_to_github) > 0:
+        try:
+            next_issue = issues_imported_to_github.pop(0)
+            jira_issue_id = next_issue[0]
+            import_task_url = next_issue[1]
+            logging.info(f"Processing issue {jira_issue_id} in second pass")
+            github_issue_id = get_github_issue_id(import_task_url)
+            set_issue_mapping(jira_issue_id, github_issue_id)
+            github_issue_url = f"https://github.com/{github_user}/{github_target_repo}/issues/{github_issue_id}"
+            # set_external_url_on_source_issue(jira_issue_id, github_issue_url)
+            issues_pending_post_updates.append((jira_issue_id, github_issue_url))
+        except IndexError:
+            time.sleep(1)
+        except Exception as ex:
+            logging.error(f"Unhandled exception in second pass: {ex}")
+    issue_mapping_complete = True
+    logging.info(f"Completed second pass")
 
-async def update_source_jira(jira, jira_issue_id, migrated_gh_issue_url):
+def check_issue_ready(jira_issue_id):
+    global mapped_issues
+    global related_issues
+    global subtask_issues
+    if not jira_issue_id in mapped_issues.keys():
+        return False
+    if jira_issue_id in related_issues.keys():
+        for related_issue in related_issues[jira_issue_id]:
+            if related_issue["key"] not in mapped_issues.keys():
+                return False
+    if jira_issue_id in subtask_issues.keys():
+        for subtask_issue in subtask_issues[jira_issue_id]:
+            if subtask_issue["key"] not in mapped_issues.keys():
+                return False
+    return True
+
+def update_source_jira(jira, jira_issue_id, migrated_gh_issue_url):
     if not ALLOW_JIRA_UPDATES:
         return
     try:
@@ -588,16 +523,53 @@ async def update_source_jira(jira, jira_issue_id, migrated_gh_issue_url):
     except Exception as ex:
         logging.error(f"Failure to update source issue {jira_issue_id} with URL {migrated_gh_issue_url} and added comment {comment}: {ex}")
 
+def post_import_updates():
+    global issues_pending_post_updates
+    global post_import_update_complete
+    jira = None
+    if ALLOW_JIRA_UPDATES:
+        logging.info("creating JIRA connection to update source issue(s)...")
+        jira = get_jira_connection()
+    while (not issue_mapping_complete) or len(issues_pending_post_updates) > 0:
+        try:
+            next_issue = issues_pending_post_updates.pop(0)
+            jira_issue_id = next_issue[0]
+            migrated_gh_issue_url = next_issue[1]
+            if not check_issue_ready(jira_issue_id):
+                issues_pending_post_updates.append(next_issue)
+                continue
+            update_source_jira(jira, jira_issue_id, migrated_gh_issue_url)
+            finalize_migrated_issue(jira_issue_id, migrated_gh_issue_url)
+        except IndexError as ex:
+            time.sleep(5)
+            continue
+        except Exception as ex:
+            logging.error(f"Unhandled exception during post_import_updates(): {ex}")
+            return
+    post_import_update_complete = True
+    logging.info(f"Completed post import updates")
 
-async def finalize_migrated_issue(issue_metadata):
+def finalize_migrated_issue(jira_issue_id, migrated_github_issue_url):
+    global subtask_issues
+    global related_issues
+    global mapped_issues
+    added_description_text = ""
+
     try:
-        added_description_text = issue_metadata.get_post_update_additional_text()
-        migrated_github_issue_url = issue_metadata.get_github_issue_url()
+        if jira_issue_id in subtask_issues.keys():
+            added_description_text += generate_subtask_list_for_description(jira_issue_id)
+        if jira_issue_id in related_issues.keys():
+            added_description_text += generate_related_issue_list_for_description(jira_issue_id)
+        if jira_issue_id in issue_attachments.keys():
+            added_description_text += generate_issue_attachment_list_for_description(jira_issue_id)
+        added_description_text += related_users[jira_issue_id]
+
         github_issue_id = migrated_github_issue_url.split("/")[-1]
-        github_issue = await get_github_issue(github_issue_id)
+        github_issue = get_github_issue(github_issue_id)
         update_github_issue(github_issue_id, {"body" : github_issue["body"] + added_description_text})
+        logging.info(f"Issue {jira_issue_id} import completed: {migrated_github_issue_url}")
     except Exception as ex:
-        logging.error(f"Unhandled exception finalizing migrated issue {issue_metadata.get_github_issue_url()} with URL: {issue_metadata.get_github_issue_url()}: {ex}")
+        logging.error(f"Unhandled exception finalizing migrated issue {jira_issue_id} with URL: {migrated_github_issue_url}")
 
 def generate_related_issue_list_for_description(jira_parent_issue_id):
     text = "\n### Related issues:\n" + "\n".join(
@@ -646,48 +618,18 @@ def github_rate_limit_exceeded(resp):
         wait_time = reset_time - math.ceil(time.time())
         if wait_time > 0:
             logging.info(f"GitHub rate throttling detected, need to wait {wait_time} seconds before retrying.")
-            asyncio.sleep(wait_time)
+            time.sleep(wait_time)
         else:
             # Clock drift may cause rate limit errors even after waiting calculated time. Sleep a few seconds:
             logging.error(f"GitHub rate throttling detected, but no further wait required. Computed wait time is {wait_time}")
-            asyncio.sleep(3)
+            time.sleep(3)
         return True
     except Exception as ex:
         logging.error(f"Failed to sleep: {ex}")
         return False
 
-def queueless_import():
-    parent_dir = os.path.dirname(__file__)
-    source_dir = os.path.join(parent_dir, "issues", "source")
-    tasks = []
-    for file in os.listdir(source_dir):
-        with open(os.path.join(source_dir, file)) as fp:
-            source_json = json.load(fp)
-            metadata = MigratingIssueMetadata(source_json)
-            tasks.append(asyncio.create_task(single_issue_import(metadata)))
-    asyncio.gather(*tasks)
 
-async def single_issue_import(metadata):
-    await metadata.stage_in_github_format()
-    logging.info(f"Staged issue {metadata.source_issue_id} in GitHub format")
-    try:
-        issue_to_import = await metadata.get_staged_issue()
-        metadata.import_url = await import_issue(issue_to_import, metadata.source_issue_id)
-        logging.info(f"Import URL for {metadata.source_issue_id} is {metadata.import_url}")
-
-    except Exception as ex:
-        logging.error(ex)
-        logging.error(metadata.get_source_issue())
-        sys.exit(0)
-    logging.info(f"Imported issue {metadata.source_issue_id} into GitHub")
-    github_issue_id = await get_github_issue_id(metadata.import_url)
-    logging.info(f"Imported {metadata.source_issue_id} as {github_issue_id}")
-
-
-async def main():
-
-    queueless_import()
-    sys.exit(0)
+def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--clean", action=argparse.BooleanOptionalAction, default=False)
@@ -702,35 +644,37 @@ async def main():
     args = parser.parse_args()
 
     init(args)
+    get_github_milestone_map()
 
     if args.stage:
-        stage()
+        stage(filter="project = ARROW and key < ARROW-100")
     elif args.import_staged:
         import_to_github()
     elif args.clean:
         clean()
     elif args.issue:
-            github_format_issue = None
-            if args.skip_jira_fetch:
-                global issues_retrieved_from_jira
-                issues_retrieved_from_jira.append(args.issue)
-                global retrieval_process_complete
-                retrieval_process_complete = True
-                logging.info(f"Skipping fetching from JIRA, using existing file: {get_local_file_path(args.issue)}")
-            else:
-                logging.info(f"Getting details from Jira for issue {args.issue}")
-                stage(filter=f"key = {args.issue}")
-            if not args.skip_github_load:
-                logging.info("Staring import to GitHub...")
-                import_to_github()
+        github_format_issue = None
+        if args.skip_jira_fetch:
+            global issues_retrieved_from_jira
+            issues_retrieved_from_jira.append(args.issue)
+            global retrieval_process_complete
+            retrieval_process_complete = True
+            logging.info(f"Skipping fetching from JIRA, using existing file: {get_local_file_path(args.issue)}")
+        else:
+            logging.info(f"Getting details from Jira for issue {args.issue}")
+            stage(filter=f"key = {args.issue}")
+        if not args.skip_github_load:
+            logging.info("Staring import to GitHub...")
+            import_to_github()
     else:
         # stage(filter="key = ARROW-15635 or parent = ARROW-15635")
         # import_to_github()
         # stage(filter = "key in (ARROW-18308, ARROW-18323)")
         logging.info(f"Starting import")
-        # import_ready_queue = await asyncio.create_task(stage(filter = "key in (ARROW-18308, ARROW-18323)"))
-        await import_to_github()
+        with ThreadPoolExecutor() as e:
+            e.submit(stage, "project = ARROW and key < ARROW-100")
+            e.submit(import_to_github)
         logging.info(f"Completed")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

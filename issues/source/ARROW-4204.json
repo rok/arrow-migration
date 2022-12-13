@@ -158,247 +158,6 @@
             "votes": 0,
             "hasVoted": false
         },
-        "worklog": {
-            "startAt": 0,
-            "maxResults": 20,
-            "total": 6,
-            "worklogs": [
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13208380/worklog/198067",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "comment": "pravindra commented on pull request #3636: ARROW-4204: [Gandiva] add support for decimal subtract\nURL: https://github.com/apache/arrow/pull/3636\n \n \n   \n \n----------------------------------------------------------------\nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on GitHub and use the\nURL above to go to the specific comment.\n \nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "created": "2019-02-13T12:33:37.668+0000",
-                    "updated": "2019-02-13T12:33:37.668+0000",
-                    "started": "2019-02-13T12:33:37.668+0000",
-                    "timeSpent": "10m",
-                    "timeSpentSeconds": 600,
-                    "id": "198067",
-                    "issueId": "13208380"
-                },
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13208380/worklog/198278",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "comment": "pitrou commented on pull request #3636: ARROW-4204: [Gandiva] add support for decimal subtract\nURL: https://github.com/apache/arrow/pull/3636#discussion_r256545982\n \n \n\n ##########\n File path: cpp/src/gandiva/decimal_ir.cc\n ##########\n @@ -307,6 +307,52 @@ Status DecimalIR::BuildAdd() {\n   return Status::OK();\n }\n \n+Status DecimalIR::BuildSubtract() {\n+  // Create fn prototype :\n+  // int128_t\n+  // subtract_decimal128_decimal128(int128_t x_value, int32_t x_precision, int32_t\n+  // x_scale,\n+  //                           int128_t y_value, int32_t y_precision, int32_t y_scale\n+  //                           int32_t out_precision, int32_t out_scale)\n+  auto i32 = types()->i32_type();\n+  auto i128 = types()->i128_type();\n+  auto function = BuildFunction(\"subtract_decimal128_decimal128\", i128,\n+                                {\n+                                    {\"x_value\", i128},\n+                                    {\"x_precision\", i32},\n+                                    {\"x_scale\", i32},\n+                                    {\"y_value\", i128},\n+                                    {\"y_precision\", i32},\n+                                    {\"y_scale\", i32},\n+                                    {\"out_precision\", i32},\n+                                    {\"out_scale\", i32},\n+                                });\n+\n+  auto entry = llvm::BasicBlock::Create(*context(), \"entry\", function);\n+  ir_builder()->SetInsertPoint(entry);\n+\n+  // reuse add function after negating y_value. i.e\n+  //   add(x_value, x_precision, x_scale, -y_value, y_precision, y_scale,\n+  //       out_precision, out_scale)\n+  std::vector<llvm::Value*> args;\n+  int i = 0;\n+  for (auto& in_arg : function->args()) {\n+    if (i == 3) {\n+      auto y_neg_value = ir_builder()->CreateNeg(&in_arg);\n \n Review comment:\n   I was wondering if this could overflow, but the decimal type is limited to 38 decimal digits, which is too small for `2**127`.\r\n   \r\n   As a side note, it seems we don't validate inputs to the `Decimal128` type and happily accept larger numbers:\r\n   ```python\r\n   >>> ty = pa.decimal128(39, 0)                                                                            \r\n   >>> arr = pa.array([(2**127) - 1], type=ty)                                                              \r\n   >>> arr                                                                                                  \r\n   <pyarrow.lib.Decimal128Array object at 0x7f9b89444e08>\r\n   [\r\n     170141183460469231731687303715884105727\r\n   ]\r\n   >>> arr = pa.array([(2**127)], type=ty)                                                                  \r\n   >>> arr                                                                                                  \r\n   <pyarrow.lib.Decimal128Array object at 0x7f9b89444138>\r\n   [\r\n     -170141183460469231731687303715884105728\r\n   ]\r\n   >>> arr = pa.array([-(2**127)], type=ty)                                                                 \r\n   >>> arr                                                                                                  \r\n   <pyarrow.lib.Decimal128Array object at 0x7f9b89432688>\r\n   [\r\n     -170141183460469231731687303715884105728\r\n   ]\r\n   ```\r\n   \n \n----------------------------------------------------------------\nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on GitHub and use the\nURL above to go to the specific comment.\n \nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "created": "2019-02-13T19:15:09.775+0000",
-                    "updated": "2019-02-13T19:15:09.775+0000",
-                    "started": "2019-02-13T19:15:09.774+0000",
-                    "timeSpent": "10m",
-                    "timeSpentSeconds": 600,
-                    "id": "198278",
-                    "issueId": "13208380"
-                },
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13208380/worklog/198541",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "comment": "pravindra commented on pull request #3636: ARROW-4204: [Gandiva] add support for decimal subtract\nURL: https://github.com/apache/arrow/pull/3636#discussion_r256726100\n \n \n\n ##########\n File path: cpp/src/gandiva/decimal_ir.cc\n ##########\n @@ -307,6 +307,52 @@ Status DecimalIR::BuildAdd() {\n   return Status::OK();\n }\n \n+Status DecimalIR::BuildSubtract() {\n+  // Create fn prototype :\n+  // int128_t\n+  // subtract_decimal128_decimal128(int128_t x_value, int32_t x_precision, int32_t\n+  // x_scale,\n+  //                           int128_t y_value, int32_t y_precision, int32_t y_scale\n+  //                           int32_t out_precision, int32_t out_scale)\n+  auto i32 = types()->i32_type();\n+  auto i128 = types()->i128_type();\n+  auto function = BuildFunction(\"subtract_decimal128_decimal128\", i128,\n+                                {\n+                                    {\"x_value\", i128},\n+                                    {\"x_precision\", i32},\n+                                    {\"x_scale\", i32},\n+                                    {\"y_value\", i128},\n+                                    {\"y_precision\", i32},\n+                                    {\"y_scale\", i32},\n+                                    {\"out_precision\", i32},\n+                                    {\"out_scale\", i32},\n+                                });\n+\n+  auto entry = llvm::BasicBlock::Create(*context(), \"entry\", function);\n+  ir_builder()->SetInsertPoint(entry);\n+\n+  // reuse add function after negating y_value. i.e\n+  //   add(x_value, x_precision, x_scale, -y_value, y_precision, y_scale,\n+  //       out_precision, out_scale)\n+  std::vector<llvm::Value*> args;\n+  int i = 0;\n+  for (auto& in_arg : function->args()) {\n+    if (i == 3) {\n+      auto y_neg_value = ir_builder()->CreateNeg(&in_arg);\n \n Review comment:\n   I'll create a jira to ensure gandiva fails when the type has a precision/scale is > 38.\r\n   \r\n   For the actual values itself, I can add a IsValid() api to BasicDecimal (that checks against a min/max value). but, checking this each time will be a perf overhead. maybe, we should have a conf variable to do overflow checks. \n \n----------------------------------------------------------------\nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on GitHub and use the\nURL above to go to the specific comment.\n \nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "created": "2019-02-14T08:11:22.272+0000",
-                    "updated": "2019-02-14T08:11:22.272+0000",
-                    "started": "2019-02-14T08:11:22.272+0000",
-                    "timeSpent": "10m",
-                    "timeSpentSeconds": 600,
-                    "id": "198541",
-                    "issueId": "13208380"
-                },
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13208380/worklog/198581",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "comment": "pitrou commented on pull request #3636: ARROW-4204: [Gandiva] add support for decimal subtract\nURL: https://github.com/apache/arrow/pull/3636#discussion_r256733024\n \n \n\n ##########\n File path: cpp/src/gandiva/decimal_ir.cc\n ##########\n @@ -307,6 +307,52 @@ Status DecimalIR::BuildAdd() {\n   return Status::OK();\n }\n \n+Status DecimalIR::BuildSubtract() {\n+  // Create fn prototype :\n+  // int128_t\n+  // subtract_decimal128_decimal128(int128_t x_value, int32_t x_precision, int32_t\n+  // x_scale,\n+  //                           int128_t y_value, int32_t y_precision, int32_t y_scale\n+  //                           int32_t out_precision, int32_t out_scale)\n+  auto i32 = types()->i32_type();\n+  auto i128 = types()->i128_type();\n+  auto function = BuildFunction(\"subtract_decimal128_decimal128\", i128,\n+                                {\n+                                    {\"x_value\", i128},\n+                                    {\"x_precision\", i32},\n+                                    {\"x_scale\", i32},\n+                                    {\"y_value\", i128},\n+                                    {\"y_precision\", i32},\n+                                    {\"y_scale\", i32},\n+                                    {\"out_precision\", i32},\n+                                    {\"out_scale\", i32},\n+                                });\n+\n+  auto entry = llvm::BasicBlock::Create(*context(), \"entry\", function);\n+  ir_builder()->SetInsertPoint(entry);\n+\n+  // reuse add function after negating y_value. i.e\n+  //   add(x_value, x_precision, x_scale, -y_value, y_precision, y_scale,\n+  //       out_precision, out_scale)\n+  std::vector<llvm::Value*> args;\n+  int i = 0;\n+  for (auto& in_arg : function->args()) {\n+    if (i == 3) {\n+      auto y_neg_value = ir_builder()->CreateNeg(&in_arg);\n \n Review comment:\n   Intuitively, I'd say people who use decimals value correctness. Though it's clear our C++ API currently doesn't check...\n \n----------------------------------------------------------------\nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on GitHub and use the\nURL above to go to the specific comment.\n \nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "created": "2019-02-14T08:36:03.985+0000",
-                    "updated": "2019-02-14T08:36:03.985+0000",
-                    "started": "2019-02-14T08:36:03.984+0000",
-                    "timeSpent": "10m",
-                    "timeSpentSeconds": 600,
-                    "id": "198581",
-                    "issueId": "13208380"
-                },
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13208380/worklog/198634",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "comment": "pravindra commented on pull request #3636: ARROW-4204: [Gandiva] add support for decimal subtract\nURL: https://github.com/apache/arrow/pull/3636#discussion_r256797745\n \n \n\n ##########\n File path: cpp/src/gandiva/decimal_ir.cc\n ##########\n @@ -307,6 +307,52 @@ Status DecimalIR::BuildAdd() {\n   return Status::OK();\n }\n \n+Status DecimalIR::BuildSubtract() {\n+  // Create fn prototype :\n+  // int128_t\n+  // subtract_decimal128_decimal128(int128_t x_value, int32_t x_precision, int32_t\n+  // x_scale,\n+  //                           int128_t y_value, int32_t y_precision, int32_t y_scale\n+  //                           int32_t out_precision, int32_t out_scale)\n+  auto i32 = types()->i32_type();\n+  auto i128 = types()->i128_type();\n+  auto function = BuildFunction(\"subtract_decimal128_decimal128\", i128,\n+                                {\n+                                    {\"x_value\", i128},\n+                                    {\"x_precision\", i32},\n+                                    {\"x_scale\", i32},\n+                                    {\"y_value\", i128},\n+                                    {\"y_precision\", i32},\n+                                    {\"y_scale\", i32},\n+                                    {\"out_precision\", i32},\n+                                    {\"out_scale\", i32},\n+                                });\n+\n+  auto entry = llvm::BasicBlock::Create(*context(), \"entry\", function);\n+  ir_builder()->SetInsertPoint(entry);\n+\n+  // reuse add function after negating y_value. i.e\n+  //   add(x_value, x_precision, x_scale, -y_value, y_precision, y_scale,\n+  //       out_precision, out_scale)\n+  std::vector<llvm::Value*> args;\n+  int i = 0;\n+  for (auto& in_arg : function->args()) {\n+    if (i == 3) {\n+      auto y_neg_value = ir_builder()->CreateNeg(&in_arg);\n \n Review comment:\n   I've created ARROW-4569 and ARROW-4570 to follow up on these.\n \n----------------------------------------------------------------\nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on GitHub and use the\nURL above to go to the specific comment.\n \nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "created": "2019-02-14T11:43:21.458+0000",
-                    "updated": "2019-02-14T11:43:21.458+0000",
-                    "started": "2019-02-14T11:43:21.458+0000",
-                    "timeSpent": "10m",
-                    "timeSpentSeconds": 600,
-                    "id": "198634",
-                    "issueId": "13208380"
-                },
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13208380/worklog/198764",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "comment": "pitrou commented on pull request #3636: ARROW-4204: [Gandiva] add support for decimal subtract\nURL: https://github.com/apache/arrow/pull/3636\n \n \n   \n \n----------------------------------------------------------------\nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on GitHub and use the\nURL above to go to the specific comment.\n \nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "created": "2019-02-14T16:28:09.197+0000",
-                    "updated": "2019-02-14T16:28:09.197+0000",
-                    "started": "2019-02-14T16:28:09.196+0000",
-                    "timeSpent": "10m",
-                    "timeSpentSeconds": 600,
-                    "id": "198764",
-                    "issueId": "13208380"
-                }
-            ]
-        },
         "customfield_12313920": null,
         "issuetype": {
             "self": "https://issues.apache.org/jira/rest/api/2/issuetype/3",
@@ -410,7 +169,7 @@
             "avatarId": 21148
         },
         "timespent": 3600,
-        "customfield_12314020": "{summaryBean=com.atlassian.jira.plugin.devstatus.rest.SummaryBean@4a48fbfe[summary={pullrequest=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@166c44dd[overall=PullRequestOverallBean{stateCount=0, state='OPEN', details=PullRequestOverallDetails{openCount=0, mergedCount=0, declinedCount=0}},byInstanceType={}], build=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@15a19d38[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BuildOverallBean@611f79fd[failedBuildCount=0,successfulBuildCount=0,unknownBuildCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], review=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@22a847b9[overall=com.atlassian.jira.plugin.devstatus.summary.beans.ReviewsOverallBean@62452c74[stateCount=0,state=<null>,dueDate=<null>,overDue=false,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], deployment-environment=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@7b143559[overall=com.atlassian.jira.plugin.devstatus.summary.beans.DeploymentOverallBean@61de7b57[topEnvironments=[],showProjects=false,successfulCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], repository=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@1ab6d5a[overall=com.atlassian.jira.plugin.devstatus.summary.beans.CommitOverallBean@4ac6d797[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], branch=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@10a28d6b[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BranchOverallBean@23448eb[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}]},errors=[],configErrors=[]], devSummaryJson={\"cachedValue\":{\"errors\":[],\"configErrors\":[],\"summary\":{\"pullrequest\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":\"OPEN\",\"details\":{\"openCount\":0,\"mergedCount\":0,\"declinedCount\":0,\"total\":0},\"open\":true},\"byInstanceType\":{}},\"build\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"failedBuildCount\":0,\"successfulBuildCount\":0,\"unknownBuildCount\":0},\"byInstanceType\":{}},\"review\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":null,\"dueDate\":null,\"overDue\":false,\"completed\":false},\"byInstanceType\":{}},\"deployment-environment\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"topEnvironments\":[],\"showProjects\":false,\"successfulCount\":0},\"byInstanceType\":{}},\"repository\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}},\"branch\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}}}},\"isStale\":false}}",
+        "customfield_12314020": "{summaryBean=com.atlassian.jira.plugin.devstatus.rest.SummaryBean@666fd602[summary={pullrequest=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@4c658931[overall=PullRequestOverallBean{stateCount=0, state='OPEN', details=PullRequestOverallDetails{openCount=0, mergedCount=0, declinedCount=0}},byInstanceType={}], build=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@183d2c0d[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BuildOverallBean@78f1123a[failedBuildCount=0,successfulBuildCount=0,unknownBuildCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], review=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@2deaaa7[overall=com.atlassian.jira.plugin.devstatus.summary.beans.ReviewsOverallBean@53db6b3f[stateCount=0,state=<null>,dueDate=<null>,overDue=false,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], deployment-environment=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@22f7780d[overall=com.atlassian.jira.plugin.devstatus.summary.beans.DeploymentOverallBean@5267deab[topEnvironments=[],showProjects=false,successfulCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], repository=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@259bddd2[overall=com.atlassian.jira.plugin.devstatus.summary.beans.CommitOverallBean@2d91d8cd[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], branch=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@343ffa62[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BranchOverallBean@5841f8c8[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}]},errors=[],configErrors=[]], devSummaryJson={\"cachedValue\":{\"errors\":[],\"configErrors\":[],\"summary\":{\"pullrequest\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":\"OPEN\",\"details\":{\"openCount\":0,\"mergedCount\":0,\"declinedCount\":0,\"total\":0},\"open\":true},\"byInstanceType\":{}},\"build\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"failedBuildCount\":0,\"successfulBuildCount\":0,\"unknownBuildCount\":0},\"byInstanceType\":{}},\"review\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":null,\"dueDate\":null,\"overDue\":false,\"completed\":false},\"byInstanceType\":{}},\"deployment-environment\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"topEnvironments\":[],\"showProjects\":false,\"successfulCount\":0},\"byInstanceType\":{}},\"repository\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}},\"branch\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}}}},\"isStale\":false}}",
         "customfield_12314141": null,
         "customfield_12314140": null,
         "project": {
@@ -457,12 +216,6 @@
         "timeoriginalestimate": null,
         "description": null,
         "customfield_10010": null,
-        "timetracking": {
-            "remainingEstimate": "0h",
-            "timeSpent": "1h",
-            "remainingEstimateSeconds": 0,
-            "timeSpentSeconds": 3600
-        },
         "customfield_12314523": null,
         "customfield_12314127": null,
         "customfield_12314522": null,
@@ -471,7 +224,6 @@
         "customfield_12314125": null,
         "customfield_12314520": null,
         "customfield_12314124": null,
-        "attachment": [],
         "customfield_12312340": null,
         "customfield_12314123": null,
         "customfield_12312341": null,
@@ -496,48 +248,6 @@
         "duedate": null,
         "customfield_12314132": null,
         "customfield_12314131": null,
-        "comment": {
-            "comments": [
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13208380/comment/16768489",
-                    "id": "16768489",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=apitrou",
-                        "name": "apitrou",
-                        "key": "pitrou",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?ownerId=pitrou&avatarId=35049",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&ownerId=pitrou&avatarId=35049",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&ownerId=pitrou&avatarId=35049",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&ownerId=pitrou&avatarId=35049"
-                        },
-                        "displayName": "Antoine Pitrou",
-                        "active": true,
-                        "timeZone": "Europe/Paris"
-                    },
-                    "body": "Issue resolved by pull request 3636\n[https://github.com/apache/arrow/pull/3636]",
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=apitrou",
-                        "name": "apitrou",
-                        "key": "pitrou",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?ownerId=pitrou&avatarId=35049",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&ownerId=pitrou&avatarId=35049",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&ownerId=pitrou&avatarId=35049",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&ownerId=pitrou&avatarId=35049"
-                        },
-                        "displayName": "Antoine Pitrou",
-                        "active": true,
-                        "timeZone": "Europe/Paris"
-                    },
-                    "created": "2019-02-14T16:28:00.614+0000",
-                    "updated": "2019-02-14T16:28:00.614+0000"
-                }
-            ],
-            "maxResults": 1,
-            "total": 1,
-            "startAt": 0
-        },
         "customfield_12311820": "0|u00n14:",
         "customfield_12314139": null
     }

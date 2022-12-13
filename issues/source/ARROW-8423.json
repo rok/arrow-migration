@@ -205,169 +205,6 @@
             "votes": 0,
             "hasVoted": false
         },
-        "worklog": {
-            "startAt": 0,
-            "maxResults": 20,
-            "total": 4,
-            "worklogs": [
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13298044/worklog/471921",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "comment": "github-actions[bot] commented on pull request #7917:\nURL: https://github.com/apache/arrow/pull/7917#issuecomment-675430328\n\n\n   https://issues.apache.org/jira/browse/ARROW-8423\n\n\n----------------------------------------------------------------\nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on to GitHub and use the\nURL above to go to the specific comment.\n\nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "created": "2020-08-18T11:46:44.967+0000",
-                    "updated": "2020-08-18T11:46:44.967+0000",
-                    "started": "2020-08-18T11:46:44.966+0000",
-                    "timeSpent": "10m",
-                    "timeSpentSeconds": 600,
-                    "id": "471921",
-                    "issueId": "13298044"
-                },
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13298044/worklog/472012",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "comment": "sunchao commented on a change in pull request #7917:\nURL: https://github.com/apache/arrow/pull/7917#discussion_r472294646\n\n\n\n##########\nFile path: rust/parquet/src/arrow/schema.rs\n##########\n@@ -83,12 +90,77 @@ where\n         .map(|fields| Schema::new_with_metadata(fields, metadata))\n }\n \n+/// Try to convert Arrow schema metadata into a schema\n+fn get_arrow_schema_from_metadata(encoded_meta: &str) -> Option<Schema> {\n+    let decoded = base64::decode(encoded_meta);\n+    match decoded {\n+        Ok(bytes) => {\n+            let slice = if bytes[0..4] == [255u8; 4] {\n+                &bytes[8..]\n+            } else {\n+                bytes.as_slice()\n+            };\n+            let message = arrow::ipc::get_root_as_message(slice);\n+            message\n+                .header_as_schema()\n+                .map(arrow::ipc::convert::fb_to_schema)\n+        }\n+        Err(err) => {\n+            // The C++ implementation returns an error if the schema can't be parsed.\n+            // To prevent this, we explicitly log this, then compute the schema without the metadata\n+            eprintln!(\n+                \"Unable to decode the encoded schema stored in {}, {:?}\",\n+                super::ARROW_SCHEMA_META_KEY,\n+                err\n+            );\n+            None\n+        }\n+    }\n+}\n+\n+/// Mutates writer metadata by encoding the Arrow schema and storing it in the metadata.\n+/// If there is an existing Arrow schema metadata, it is replaced.\n+pub fn add_encoded_arrow_schema_to_metadata(\n\nReview comment:\n       np - my comments are mostly cosmetic - it will be good to change the visibility though.\n\n\n\n\n----------------------------------------------------------------\nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on to GitHub and use the\nURL above to go to the specific comment.\n\nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "created": "2020-08-18T15:42:20.137+0000",
-                    "updated": "2020-08-18T15:42:20.137+0000",
-                    "started": "2020-08-18T15:42:20.137+0000",
-                    "timeSpent": "10m",
-                    "timeSpentSeconds": 600,
-                    "id": "472012",
-                    "issueId": "13298044"
-                },
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13298044/worklog/472046",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "comment": "nevi-me closed pull request #7917:\nURL: https://github.com/apache/arrow/pull/7917\n\n\n   \n\n\n----------------------------------------------------------------\nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on to GitHub and use the\nURL above to go to the specific comment.\n\nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "created": "2020-08-18T16:55:18.525+0000",
-                    "updated": "2020-08-18T16:55:18.525+0000",
-                    "started": "2020-08-18T16:55:18.525+0000",
-                    "timeSpent": "10m",
-                    "timeSpentSeconds": 600,
-                    "id": "472046",
-                    "issueId": "13298044"
-                },
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13298044/worklog/472047",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "comment": "nevi-me commented on pull request #7917:\nURL: https://github.com/apache/arrow/pull/7917#issuecomment-675595547\n\n\n   merged in the parquet branch\n\n\n----------------------------------------------------------------\nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on to GitHub and use the\nURL above to go to the specific comment.\n\nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "created": "2020-08-18T16:55:21.629+0000",
-                    "updated": "2020-08-18T16:55:21.629+0000",
-                    "started": "2020-08-18T16:55:21.629+0000",
-                    "timeSpent": "10m",
-                    "timeSpentSeconds": 600,
-                    "id": "472047",
-                    "issueId": "13298044"
-                }
-            ]
-        },
         "customfield_12313920": null,
         "issuetype": {
             "self": "https://issues.apache.org/jira/rest/api/2/issuetype/7",
@@ -379,7 +216,7 @@
             "avatarId": 21146
         },
         "timespent": 2400,
-        "customfield_12314020": "{summaryBean=com.atlassian.jira.plugin.devstatus.rest.SummaryBean@23df2986[summary={pullrequest=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@3b0b9f2c[overall=PullRequestOverallBean{stateCount=0, state='OPEN', details=PullRequestOverallDetails{openCount=0, mergedCount=0, declinedCount=0}},byInstanceType={}], build=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@72910b3c[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BuildOverallBean@150408bd[failedBuildCount=0,successfulBuildCount=0,unknownBuildCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], review=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@2ff702dd[overall=com.atlassian.jira.plugin.devstatus.summary.beans.ReviewsOverallBean@4366ae4f[stateCount=0,state=<null>,dueDate=<null>,overDue=false,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], deployment-environment=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@395485f4[overall=com.atlassian.jira.plugin.devstatus.summary.beans.DeploymentOverallBean@c203383[topEnvironments=[],showProjects=false,successfulCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], repository=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@1bd62930[overall=com.atlassian.jira.plugin.devstatus.summary.beans.CommitOverallBean@6db4f8d3[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], branch=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@70d2bbb4[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BranchOverallBean@7de33206[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}]},errors=[],configErrors=[]], devSummaryJson={\"cachedValue\":{\"errors\":[],\"configErrors\":[],\"summary\":{\"pullrequest\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":\"OPEN\",\"details\":{\"openCount\":0,\"mergedCount\":0,\"declinedCount\":0,\"total\":0},\"open\":true},\"byInstanceType\":{}},\"build\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"failedBuildCount\":0,\"successfulBuildCount\":0,\"unknownBuildCount\":0},\"byInstanceType\":{}},\"review\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":null,\"dueDate\":null,\"overDue\":false,\"completed\":false},\"byInstanceType\":{}},\"deployment-environment\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"topEnvironments\":[],\"showProjects\":false,\"successfulCount\":0},\"byInstanceType\":{}},\"repository\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}},\"branch\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}}}},\"isStale\":false}}",
+        "customfield_12314020": "{summaryBean=com.atlassian.jira.plugin.devstatus.rest.SummaryBean@756eadc4[summary={pullrequest=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@7ba132c3[overall=PullRequestOverallBean{stateCount=0, state='OPEN', details=PullRequestOverallDetails{openCount=0, mergedCount=0, declinedCount=0}},byInstanceType={}], build=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@1c3a50bc[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BuildOverallBean@6e7f4ed2[failedBuildCount=0,successfulBuildCount=0,unknownBuildCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], review=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@5350dbf1[overall=com.atlassian.jira.plugin.devstatus.summary.beans.ReviewsOverallBean@195346a7[stateCount=0,state=<null>,dueDate=<null>,overDue=false,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], deployment-environment=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@57224a81[overall=com.atlassian.jira.plugin.devstatus.summary.beans.DeploymentOverallBean@43bf8769[topEnvironments=[],showProjects=false,successfulCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], repository=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@166553bc[overall=com.atlassian.jira.plugin.devstatus.summary.beans.CommitOverallBean@158049a9[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], branch=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@50336fda[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BranchOverallBean@6f082e7a[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}]},errors=[],configErrors=[]], devSummaryJson={\"cachedValue\":{\"errors\":[],\"configErrors\":[],\"summary\":{\"pullrequest\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":\"OPEN\",\"details\":{\"openCount\":0,\"mergedCount\":0,\"declinedCount\":0,\"total\":0},\"open\":true},\"byInstanceType\":{}},\"build\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"failedBuildCount\":0,\"successfulBuildCount\":0,\"unknownBuildCount\":0},\"byInstanceType\":{}},\"review\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":null,\"dueDate\":null,\"overDue\":false,\"completed\":false},\"byInstanceType\":{}},\"deployment-environment\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"topEnvironments\":[],\"showProjects\":false,\"successfulCount\":0},\"byInstanceType\":{}},\"repository\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}},\"branch\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}}}},\"isStale\":false}}",
         "customfield_12314141": null,
         "customfield_12314140": null,
         "project": {
@@ -426,12 +263,6 @@
         "timeoriginalestimate": null,
         "description": "The C++ implementation uses\u00a0\u00a0\"ARROW:schema\" as a value to store the arrow schema as metadata. Implement same for compatibility.\r\n\r\nHaving the original Arrow schema is useful for readers as it preserves some properties like dictionary encoding.",
         "customfield_10010": null,
-        "timetracking": {
-            "remainingEstimate": "0h",
-            "timeSpent": "40m",
-            "remainingEstimateSeconds": 0,
-            "timeSpentSeconds": 2400
-        },
         "customfield_12314523": null,
         "customfield_12314127": null,
         "customfield_12314522": null,
@@ -440,7 +271,6 @@
         "customfield_12314125": null,
         "customfield_12314520": null,
         "customfield_12314124": null,
-        "attachment": [],
         "customfield_12312340": null,
         "customfield_12314123": null,
         "customfield_12312341": null,
@@ -465,48 +295,6 @@
         "duedate": null,
         "customfield_12314132": null,
         "customfield_12314131": null,
-        "comment": {
-            "comments": [
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13298044/comment/17179736",
-                    "id": "17179736",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=nevi_me",
-                        "name": "nevi_me",
-                        "key": "nevi_me",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?ownerId=nevi_me&avatarId=24271",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&ownerId=nevi_me&avatarId=24271",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&ownerId=nevi_me&avatarId=24271",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&ownerId=nevi_me&avatarId=24271"
-                        },
-                        "displayName": "Neville Dipale",
-                        "active": true,
-                        "timeZone": "Africa/Johannesburg"
-                    },
-                    "body": "Issue resolved by pull request 7917\n[https://github.com/apache/arrow/pull/7917]",
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=nevi_me",
-                        "name": "nevi_me",
-                        "key": "nevi_me",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?ownerId=nevi_me&avatarId=24271",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&ownerId=nevi_me&avatarId=24271",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&ownerId=nevi_me&avatarId=24271",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&ownerId=nevi_me&avatarId=24271"
-                        },
-                        "displayName": "Neville Dipale",
-                        "active": true,
-                        "timeZone": "Africa/Johannesburg"
-                    },
-                    "created": "2020-08-18T16:40:04.764+0000",
-                    "updated": "2020-08-18T16:40:04.764+0000"
-                }
-            ],
-            "maxResults": 1,
-            "total": 1,
-            "startAt": 0
-        },
         "customfield_12311820": "0|z0dkq0:",
         "customfield_12314139": null
     }

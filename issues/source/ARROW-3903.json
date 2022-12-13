@@ -158,208 +158,6 @@
             "votes": 0,
             "hasVoted": false
         },
-        "worklog": {
-            "startAt": 0,
-            "maxResults": 20,
-            "total": 5,
-            "worklogs": [
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13201320/worklog/180805",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "comment": "kszucs commented on pull request #3301: ARROW-3903: [Python] Random array generator for Arrow conversion and Parquet testing\nURL: https://github.com/apache/arrow/pull/3301\n \n \n   \n \n----------------------------------------------------------------\nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on GitHub and use the\nURL above to go to the specific comment.\n \nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "created": "2019-01-03T17:48:18.001+0000",
-                    "updated": "2019-01-03T17:48:18.001+0000",
-                    "started": "2019-01-03T17:48:18.001+0000",
-                    "timeSpent": "10m",
-                    "timeSpentSeconds": 600,
-                    "id": "180805",
-                    "issueId": "13201320"
-                },
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13201320/worklog/192482",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "comment": "kszucs commented on pull request #3301: ARROW-3903: [Python] Random array generator for Arrow conversion and Parquet testing\nURL: https://github.com/apache/arrow/pull/3301#discussion_r252422678\n \n \n\n ##########\n File path: python/pyarrow/tests/strategies.py\n ##########\n @@ -128,3 +134,125 @@ def schemas(type_strategy=primitive_types):\n all_types = st.one_of(primitive_types, complex_types(), nested_complex_types())\n all_fields = fields(all_types)\n all_schemas = schemas(all_types)\n+\n+\n+_default_array_sizes = st.integers(min_value=0, max_value=20)\n+\n+\n+@st.composite\n+def arrays(draw, type, size=None):\n+    if isinstance(type, st.SearchStrategy):\n+        type = draw(type)\n+    elif not isinstance(type, pa.DataType):\n+        raise TypeError('Type must be a pyarrow DataType')\n+\n+    if isinstance(size, st.SearchStrategy):\n+        size = draw(size)\n+    elif size is None:\n+        size = draw(_default_array_sizes)\n+    elif not isinstance(size, int):\n+        raise TypeError('Size must be an integer')\n+\n+    shape = (size,)\n+\n+    if pa.types.is_list(type):\n+        offsets = draw(npst.arrays(np.uint8(), shape=shape)).cumsum() // 20\n+        offsets = np.insert(offsets, 0, 0, axis=0)  # prepend with zero\n+        values = draw(arrays(type.value_type, size=int(offsets.sum())))\n+        return pa.ListArray.from_arrays(offsets, values)\n+\n+    if pa.types.is_struct(type):\n+        h.assume(len(type) > 0)\n+        names, child_arrays = [], []\n+        for field in type:\n+            names.append(field.name)\n+            child_arrays.append(draw(arrays(field.type, size=size)))\n+        # fields' metadata are lost here, because from_arrays doesn't accept\n+        # a fields argumentum, only names\n+        return pa.StructArray.from_arrays(child_arrays, names=names)\n+\n+    if (pa.types.is_boolean(type) or pa.types.is_integer(type) or\n+            pa.types.is_floating(type)):\n+        values = npst.arrays(type.to_pandas_dtype(), shape=(size,))\n+        return pa.array(draw(values), type=type)\n+\n+    if pa.types.is_null(type):\n+        value = st.none()\n+    elif pa.types.is_time(type):\n+        value = st.times()\n+    elif pa.types.is_date(type):\n+        value = st.dates()\n+    elif pa.types.is_timestamp(type):\n+        tz = pytz.timezone(type.tz) if type.tz is not None else None\n+        value = st.datetimes(timezones=st.just(tz))\n+    elif pa.types.is_binary(type):\n+        value = st.binary()\n+    elif pa.types.is_string(type):\n+        value = st.text()\n+    elif pa.types.is_decimal(type):\n+        # TODO(kszucs): properly limit the precision\n+        # value = st.decimals(places=type.scale, allow_infinity=False)\n+        h.reject()\n+    else:\n+        raise NotImplementedError(type)\n+\n+    values = st.lists(value, min_size=size, max_size=size)\n+    return pa.array(draw(values), type=type)\n+\n+\n+@st.composite\n+def chunked_arrays(draw, type, min_chunks=0, max_chunks=None, chunk_size=None):\n+    if isinstance(type, st.SearchStrategy):\n+        type = draw(type)\n+\n+    # TODO(kszucs): remove it, field metadata is not kept\n \n Review comment:\n   The type equality check fails at https://github.com/apache/arrow/blob/master/python/pyarrow/table.pxi#L297\r\n   We should probably use `.equals(check_metadata=False)` and find out why the two metadata are different. \r\n   \r\n   I didn't file a jira issue because I couldn't create a reproducible example - the metadata is not displayed. However commenting out the assume line reproduces the issue.\n \n----------------------------------------------------------------\nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on GitHub and use the\nURL above to go to the specific comment.\n \nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "created": "2019-01-30T20:20:20.776+0000",
-                    "updated": "2019-01-30T20:20:20.776+0000",
-                    "started": "2019-01-30T20:20:20.776+0000",
-                    "timeSpent": "10m",
-                    "timeSpentSeconds": 600,
-                    "id": "192482",
-                    "issueId": "13201320"
-                },
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13201320/worklog/193236",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "comment": "xhochy commented on pull request #3301: ARROW-3903: [Python] Random array generator for Arrow conversion and Parquet testing\nURL: https://github.com/apache/arrow/pull/3301#discussion_r252948887\n \n \n\n ##########\n File path: python/pyarrow/table.pxi\n ##########\n @@ -1155,9 +1155,9 @@ cdef class Table(_PandasConvertible):\n \n         Parameters\n         ----------\n-        arrays: list of pyarrow.Array or pyarrow.Column\n+        arrays : list of pyarrow.Array or pyarrow.Column\n \n Review comment:\n   This is actually not needed in the latest numpydoc spec. But for docs improvement, we could probably build one day on pandas' work: https://github.com/pandas-dev/pandas/pull/22408\n \n----------------------------------------------------------------\nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on GitHub and use the\nURL above to go to the specific comment.\n \nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "created": "2019-02-01T06:56:11.753+0000",
-                    "updated": "2019-02-01T06:56:11.753+0000",
-                    "started": "2019-02-01T06:56:11.752+0000",
-                    "timeSpent": "10m",
-                    "timeSpentSeconds": 600,
-                    "id": "193236",
-                    "issueId": "13201320"
-                },
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13201320/worklog/193237",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "comment": "xhochy commented on pull request #3301: ARROW-3903: [Python] Random array generator for Arrow conversion and Parquet testing\nURL: https://github.com/apache/arrow/pull/3301#discussion_r252949122\n \n \n\n ##########\n File path: python/pyarrow/tests/test_array.py\n ##########\n @@ -32,6 +34,7 @@\n     pickle5 = None\n \n import pyarrow as pa\n+import pyarrow.tests.strategies as past\n \n Review comment:\n   Nice word pun \ud83d\ude02 \r\n   \n \n----------------------------------------------------------------\nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on GitHub and use the\nURL above to go to the specific comment.\n \nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "created": "2019-02-01T06:56:11.754+0000",
-                    "updated": "2019-02-01T06:56:11.754+0000",
-                    "started": "2019-02-01T06:56:11.753+0000",
-                    "timeSpent": "10m",
-                    "timeSpentSeconds": 600,
-                    "id": "193237",
-                    "issueId": "13201320"
-                },
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13201320/worklog/195635",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=githubbot",
-                        "name": "githubbot",
-                        "key": "githubbot",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "ASF GitHub Bot",
-                        "active": true,
-                        "timeZone": "Etc/UTC"
-                    },
-                    "comment": "kszucs commented on pull request #3301: ARROW-3903: [Python] Random array generator for Arrow conversion and Parquet testing\nURL: https://github.com/apache/arrow/pull/3301\n \n \n   \n \n----------------------------------------------------------------\nThis is an automated message from the Apache Git Service.\nTo respond to the message, please log on GitHub and use the\nURL above to go to the specific comment.\n \nFor queries about this service, please contact Infrastructure at:\nusers@infra.apache.org\n",
-                    "created": "2019-02-07T12:36:29.473+0000",
-                    "updated": "2019-02-07T12:36:29.473+0000",
-                    "started": "2019-02-07T12:36:29.472+0000",
-                    "timeSpent": "10m",
-                    "timeSpentSeconds": 600,
-                    "id": "195635",
-                    "issueId": "13201320"
-                }
-            ]
-        },
         "customfield_12313920": null,
         "issuetype": {
             "self": "https://issues.apache.org/jira/rest/api/2/issuetype/4",
@@ -371,7 +169,7 @@
             "avatarId": 21140
         },
         "timespent": 2400,
-        "customfield_12314020": "{summaryBean=com.atlassian.jira.plugin.devstatus.rest.SummaryBean@64335ef6[summary={pullrequest=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@1cf2027b[overall=PullRequestOverallBean{stateCount=0, state='OPEN', details=PullRequestOverallDetails{openCount=0, mergedCount=0, declinedCount=0}},byInstanceType={}], build=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@7b772a[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BuildOverallBean@c964c84[failedBuildCount=0,successfulBuildCount=0,unknownBuildCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], review=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@3494ddad[overall=com.atlassian.jira.plugin.devstatus.summary.beans.ReviewsOverallBean@40b69fd7[stateCount=0,state=<null>,dueDate=<null>,overDue=false,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], deployment-environment=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@1baf62cc[overall=com.atlassian.jira.plugin.devstatus.summary.beans.DeploymentOverallBean@25e3ff51[topEnvironments=[],showProjects=false,successfulCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], repository=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@378827f5[overall=com.atlassian.jira.plugin.devstatus.summary.beans.CommitOverallBean@43b45ef4[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], branch=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@236dfd4c[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BranchOverallBean@19ce8707[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}]},errors=[],configErrors=[]], devSummaryJson={\"cachedValue\":{\"errors\":[],\"configErrors\":[],\"summary\":{\"pullrequest\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":\"OPEN\",\"details\":{\"openCount\":0,\"mergedCount\":0,\"declinedCount\":0,\"total\":0},\"open\":true},\"byInstanceType\":{}},\"build\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"failedBuildCount\":0,\"successfulBuildCount\":0,\"unknownBuildCount\":0},\"byInstanceType\":{}},\"review\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":null,\"dueDate\":null,\"overDue\":false,\"completed\":false},\"byInstanceType\":{}},\"deployment-environment\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"topEnvironments\":[],\"showProjects\":false,\"successfulCount\":0},\"byInstanceType\":{}},\"repository\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}},\"branch\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}}}},\"isStale\":false}}",
+        "customfield_12314020": "{summaryBean=com.atlassian.jira.plugin.devstatus.rest.SummaryBean@4209f71b[summary={pullrequest=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@7036fb76[overall=PullRequestOverallBean{stateCount=0, state='OPEN', details=PullRequestOverallDetails{openCount=0, mergedCount=0, declinedCount=0}},byInstanceType={}], build=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@5550fb43[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BuildOverallBean@12fa57d4[failedBuildCount=0,successfulBuildCount=0,unknownBuildCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], review=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@206c6b7e[overall=com.atlassian.jira.plugin.devstatus.summary.beans.ReviewsOverallBean@1b484ea7[stateCount=0,state=<null>,dueDate=<null>,overDue=false,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], deployment-environment=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@4910246e[overall=com.atlassian.jira.plugin.devstatus.summary.beans.DeploymentOverallBean@9948e6f[topEnvironments=[],showProjects=false,successfulCount=0,count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], repository=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@4a6023b8[overall=com.atlassian.jira.plugin.devstatus.summary.beans.CommitOverallBean@13047125[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}], branch=com.atlassian.jira.plugin.devstatus.rest.SummaryItemBean@5b7f047f[overall=com.atlassian.jira.plugin.devstatus.summary.beans.BranchOverallBean@76350e89[count=0,lastUpdated=<null>,lastUpdatedTimestamp=<null>],byInstanceType={}]},errors=[],configErrors=[]], devSummaryJson={\"cachedValue\":{\"errors\":[],\"configErrors\":[],\"summary\":{\"pullrequest\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":\"OPEN\",\"details\":{\"openCount\":0,\"mergedCount\":0,\"declinedCount\":0,\"total\":0},\"open\":true},\"byInstanceType\":{}},\"build\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"failedBuildCount\":0,\"successfulBuildCount\":0,\"unknownBuildCount\":0},\"byInstanceType\":{}},\"review\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"stateCount\":0,\"state\":null,\"dueDate\":null,\"overDue\":false,\"completed\":false},\"byInstanceType\":{}},\"deployment-environment\":{\"overall\":{\"count\":0,\"lastUpdated\":null,\"topEnvironments\":[],\"showProjects\":false,\"successfulCount\":0},\"byInstanceType\":{}},\"repository\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}},\"branch\":{\"overall\":{\"count\":0,\"lastUpdated\":null},\"byInstanceType\":{}}}},\"isStale\":false}}",
         "customfield_12314141": null,
         "customfield_12314140": null,
         "project": {
@@ -418,12 +216,6 @@
         "timeoriginalestimate": null,
         "description": null,
         "customfield_10010": null,
-        "timetracking": {
-            "remainingEstimate": "0h",
-            "timeSpent": "40m",
-            "remainingEstimateSeconds": 0,
-            "timeSpentSeconds": 2400
-        },
         "customfield_12314523": null,
         "customfield_12314127": null,
         "customfield_12314522": null,
@@ -432,7 +224,6 @@
         "customfield_12314125": null,
         "customfield_12314520": null,
         "customfield_12314124": null,
-        "attachment": [],
         "customfield_12312340": null,
         "customfield_12314123": null,
         "customfield_12312341": null,
@@ -457,48 +248,6 @@
         "duedate": null,
         "customfield_12314132": null,
         "customfield_12314131": null,
-        "comment": {
-            "comments": [
-                {
-                    "self": "https://issues.apache.org/jira/rest/api/2/issue/13201320/comment/16762621",
-                    "id": "16762621",
-                    "author": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=kszucs",
-                        "name": "kszucs",
-                        "key": "kszucs",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "Krisztian Szucs",
-                        "active": true,
-                        "timeZone": "Europe/Budapest"
-                    },
-                    "body": "Issue resolved by pull request 3301\n[https://github.com/apache/arrow/pull/3301]",
-                    "updateAuthor": {
-                        "self": "https://issues.apache.org/jira/rest/api/2/user?username=kszucs",
-                        "name": "kszucs",
-                        "key": "kszucs",
-                        "avatarUrls": {
-                            "48x48": "https://issues.apache.org/jira/secure/useravatar?avatarId=10452",
-                            "24x24": "https://issues.apache.org/jira/secure/useravatar?size=small&avatarId=10452",
-                            "16x16": "https://issues.apache.org/jira/secure/useravatar?size=xsmall&avatarId=10452",
-                            "32x32": "https://issues.apache.org/jira/secure/useravatar?size=medium&avatarId=10452"
-                        },
-                        "displayName": "Krisztian Szucs",
-                        "active": true,
-                        "timeZone": "Europe/Budapest"
-                    },
-                    "created": "2019-02-07T12:36:21.092+0000",
-                    "updated": "2019-02-07T12:36:21.092+0000"
-                }
-            ],
-            "maxResults": 1,
-            "total": 1,
-            "startAt": 0
-        },
         "customfield_12311820": "0|s00zog:",
         "customfield_12314139": null
     }
